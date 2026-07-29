@@ -12,7 +12,8 @@ import { Toaster } from '@/components/ui/sonner'
 import "sonner/dist/styles.css"
 import { useState, useEffect, useCallback } from 'react'
 import { listen, UnlistenFn } from '@tauri-apps/api/event'
-import { invoke } from '@tauri-apps/api/core'
+import { invoke, isTauri } from '@tauri-apps/api/core'
+import { getCurrentWindow } from '@tauri-apps/api/window'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { RecordingStateProvider } from '@/contexts/RecordingStateContext'
 import { OllamaDownloadProvider } from '@/contexts/OllamaDownloadContext'
@@ -28,7 +29,21 @@ import { ImportDialogProvider } from '@/contexts/ImportDialogContext'
 import { isAudioExtension, getAudioFormatsDisplayList } from '@/constants/audioFormats'
 import { ManagedDefaultsMigrationDialog } from '@/components/ManagedDefaultsMigrationDialog'
 import { AutoMeetingDetection } from '@/components/AutoMeetingDetection'
-import { ThemeProvider } from 'next-themes'
+import { ThemeProvider, useTheme } from 'next-themes'
+
+function NativeWindowThemeSync() {
+  const { resolvedTheme } = useTheme()
+
+  useEffect(() => {
+    if (!isTauri() || (resolvedTheme !== 'light' && resolvedTheme !== 'dark')) return
+
+    getCurrentWindow().setTheme(resolvedTheme).catch((error) => {
+      console.warn('[Layout] Failed to sync native window theme', error)
+    })
+  }, [resolvedTheme])
+
+  return null
+}
 
 // Module-level component — stable reference across RootLayout re-renders.
 // Defined here (not inside RootLayout) so React never sees a new function type
@@ -67,6 +82,17 @@ export default function RootLayout({
 }) {
   // Managed cloud providers make model-download onboarding unnecessary.
   const showOnboarding = false
+
+  // Tauri's native macOS material lives behind the webview. Keep the regular
+  // opaque canvas in browsers and on other desktop platforms.
+  useEffect(() => {
+    const usesNativeVibrancy = isTauri() && /Macintosh|Mac OS X/i.test(navigator.userAgent)
+    document.documentElement.classList.toggle('native-macos-vibrancy', usesNativeVibrancy)
+
+    return () => {
+      document.documentElement.classList.remove('native-macos-vibrancy')
+    }
+  }, [])
 
   // Import audio state
   const [showDropOverlay, setShowDropOverlay] = useState(false)
@@ -207,6 +233,7 @@ export default function RootLayout({
           disableTransitionOnChange
           storageKey="memento-theme"
         >
+          <NativeWindowThemeSync />
           <LanguageProvider>
             <AnalyticsProvider>
               <RecordingStateProvider>

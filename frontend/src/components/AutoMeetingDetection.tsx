@@ -11,7 +11,6 @@ import { useT } from '@/lib/i18n';
 type MeetingApp =
   | 'zoom'
   | 'microsoft_teams'
-  | 'telegram'
   | 'yandex_telemost'
   | 'salute_jazz'
   | 'browser_call';
@@ -67,7 +66,6 @@ export function AutoMeetingDetection() {
       switch (app) {
         case 'zoom': return 'Zoom';
         case 'microsoft_teams': return 'Microsoft Teams';
-        case 'telegram': return 'Telegram';
         case 'yandex_telemost': return t('Yandex Telemost');
         case 'salute_jazz': return 'SaluteJazz';
         case 'browser_call': return t('browser call');

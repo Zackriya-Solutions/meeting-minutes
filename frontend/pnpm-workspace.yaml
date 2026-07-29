@@ -1,6 +1,10 @@
 packages:
   - "."
 
+allowBuilds:
+  core-js-pure: true
+  esbuild: true
+
 overrides:
   prosemirror-model: 1.25.3
   prosemirror-state: 1.4.3

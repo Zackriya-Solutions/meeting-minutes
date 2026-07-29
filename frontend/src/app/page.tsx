@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
-import { usePermissionCheck } from '@/hooks/usePermissionCheck';
 import { useRecordingState, RecordingStatus } from '@/contexts/RecordingStateContext';
 import { useTranscripts } from '@/contexts/TranscriptContext';
 import { useConfig } from '@/contexts/ConfigContext';
@@ -18,7 +17,6 @@ import { toast } from 'sonner';
 import { listen } from '@tauri-apps/api/event';
 import { RecordOverlay } from '@/components/memento/RecordOverlay';
 import { Icon } from '@/components/memento/Icon';
-import { Button } from '@/components/ui/button';
 import { useT } from '@/lib/i18n';
 
 export default function Home() {
@@ -26,8 +24,8 @@ export default function Home() {
   const [isRecording, setIsRecordingState] = useState(false);
 
   // Use contexts for state management
-  const { meetingTitle, currentMeetingId } = useTranscripts();
-  const { transcriptModelConfig, selectedDevices } = useConfig();
+  const { meetingTitle, currentMeetingId, transcripts } = useTranscripts();
+  const { transcriptModelConfig } = useConfig();
   const recordingState = useRecordingState();
 
   // Extract status from global state
@@ -35,7 +33,6 @@ export default function Home() {
 
   // Hooks
   const t = useT();
-  const { hasMicrophone } = usePermissionCheck();
   const { setIsMeetingActive } = useSidebar();
   const { modals, messages, showModal, hideModal } = useModalState(transcriptModelConfig);
   const { isRecordingDisabled, setIsRecordingDisabled } = useRecordingStateSync(isRecording, setIsRecordingState, setIsMeetingActive);
@@ -183,6 +180,7 @@ export default function Home() {
 
         {/* Start-recording button — bottom center of the content area when idle */}
         {!recordingState.isRecording &&
+          transcripts.length > 0 &&
           status !== RecordingStatus.STARTING &&
           status !== RecordingStatus.PROCESSING_TRANSCRIPTS &&
           status !== RecordingStatus.SAVING && (
@@ -190,16 +188,15 @@ export default function Home() {
               className="pointer-events-none fixed bottom-8 right-0 z-10 flex items-center justify-center transition-[left] duration-300"
               style={{ left: 0 }}
             >
-              <Button
+              <button
                 onClick={() => handleRecordingStart()}
                 disabled={isRecordingDisabled}
                 aria-label={t('Record meeting')}
-                size="lg"
-                className="pointer-events-auto rounded-full"
+                className="memento-primary-action pointer-events-auto inline-flex items-center gap-2 px-6 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <Icon name="mic" size={18} />
                 {t('Record meeting')}
-              </Button>
+              </button>
             </div>
           )}
 

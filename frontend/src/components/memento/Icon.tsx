@@ -14,6 +14,7 @@ import {
   Copy,
   Database,
   Download,
+  Event,
   ExternalLink,
   Eye,
   EyeOff,
@@ -53,7 +54,7 @@ import {
 } from '@/components/deslop-icons';
 
 export type MementoIconName =
-  | 'wave' | 'mic' | 'stop' | 'play' | 'pause' | 'transcript' | 'library'
+  | 'wave' | 'mic' | 'stop' | 'play' | 'pause' | 'meeting' | 'transcript' | 'library'
   | 'search' | 'spark' | 'tag' | 'clock' | 'calendar' | 'users' | 'plus'
   | 'minus' | 'check' | 'check-circle' | 'chevron-right' | 'chevron-down'
   | 'chevron-up' | 'back' | 'close' | 'close-circle' | 'settings' | 'chat'
@@ -68,6 +69,7 @@ const icons: Record<MementoIconName, LucideIcon> = {
   stop: Square,
   play: Play,
   pause: Pause,
+  meeting: Event,
   transcript: List,
   library: Layers3,
   search: Search,

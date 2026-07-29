@@ -4,7 +4,7 @@ import React, { useEffect, ReactNode, useRef, useState, createContext } from 're
 import Analytics from '@/lib/analytics';
 import { load } from '@tauri-apps/plugin-store';
 
-const ANALYTICS_DEFAULT_OFF_MIGRATION_KEY = 'analyticsDefaultOffMigrationV1';
+const ANALYTICS_DEFAULT_ON_MIGRATION_KEY = 'analyticsDefaultOnMigrationV2';
 
 interface AnalyticsProviderProps {
   children: ReactNode;
@@ -16,12 +16,12 @@ interface AnalyticsContextType {
 }
 
 export const AnalyticsContext = createContext<AnalyticsContextType>({
-  isAnalyticsOptedIn: false,
+  isAnalyticsOptedIn: true,
   setIsAnalyticsOptedIn: () => { },
 });
 
 export default function AnalyticsProvider({ children }: AnalyticsProviderProps) {
-  const [isAnalyticsOptedIn, setIsAnalyticsOptedIn] = useState(false);
+  const [isAnalyticsOptedIn, setIsAnalyticsOptedIn] = useState(true);
   const initialized = useRef(false);
 
   useEffect(() => {
@@ -34,22 +34,20 @@ export default function AnalyticsProvider({ children }: AnalyticsProviderProps) 
       const store = await load('analytics.json', {
         autoSave: false,
         defaults: {
-          analyticsOptedIn: false
+          analyticsOptedIn: true
         }
       });
 
       if (!(await store.has('analyticsOptedIn'))) {
-        await store.set('analyticsOptedIn', false);
+        await store.set('analyticsOptedIn', true);
       }
 
       let analyticsOptedIn = await store.get<boolean>('analyticsOptedIn');
-      if (!(await store.has(ANALYTICS_DEFAULT_OFF_MIGRATION_KEY))) {
-        analyticsOptedIn = false;
-        await store.set('analyticsOptedIn', false);
-        await store.set(ANALYTICS_DEFAULT_OFF_MIGRATION_KEY, true);
+      if (!(await store.has(ANALYTICS_DEFAULT_ON_MIGRATION_KEY))) {
+        analyticsOptedIn = true;
+        await store.set('analyticsOptedIn', true);
+        await store.set(ANALYTICS_DEFAULT_ON_MIGRATION_KEY, true);
         await store.save();
-      } else if (analyticsOptedIn !== true) {
-        analyticsOptedIn = false;
       }
 
       setIsAnalyticsOptedIn(analyticsOptedIn as boolean);
@@ -77,7 +75,7 @@ export default function AnalyticsProvider({ children }: AnalyticsProviderProps) 
       const store = await load('analytics.json', {
         autoSave: false,
         defaults: {
-          analyticsOptedIn: false
+          analyticsOptedIn: true
         }
       });
       await store.set('platform', deviceInfo.platform);

@@ -7,7 +7,6 @@ import { EditableTitle } from '@/components/EditableTitle';
 import { SummaryPanel } from '@/components/MeetingDetails/SummaryPanel';
 import { useMeetingChat, type Citation } from '@/hooks/useMeetingChat';
 import { MessageBubble, TypingIndicator } from '@/components/chat/MessageBubble';
-import { Icon } from '@/components/memento/Icon';
 import { useT } from '@/lib/i18n';
 import Analytics from '@/lib/analytics';
 import { TranscriptCard } from './TranscriptCard';
@@ -15,6 +14,14 @@ import { SummaryMessage } from './SummaryMessage';
 import { MeetingComposer } from './MeetingComposer';
 import { MeetingOverflowMenu } from './MeetingOverflowMenu';
 import { AnalyticsReportButton } from './AnalyticsReportButton';
+import {
+  MessageScroller,
+  MessageScrollerButton,
+  MessageScrollerContent,
+  MessageScrollerItem,
+  MessageScrollerProvider,
+  MessageScrollerViewport,
+} from '@/components/ui/message-scroller';
 
 /**
  * Variant 2a — the meeting screen as a single vertical conversation.
@@ -37,17 +44,6 @@ const MEETING_SUGGESTIONS = [
   'What are the risks to the deadlines?',
   'Make a list of action items.',
 ];
-
-const transcriptExpandedKey = (meetingId: string) => `memento:conversation:transcript-expanded:${meetingId}`;
-
-function readStoredExpanded(meetingId: string): boolean {
-  if (typeof window === 'undefined') return false;
-  try {
-    return window.localStorage.getItem(transcriptExpandedKey(meetingId)) === '1';
-  } catch {
-    return false;
-  }
-}
 
 interface MeetingConversationProps {
   meetingId: string;
@@ -136,14 +132,12 @@ export function MeetingConversation({
 }: MeetingConversationProps) {
   const t = useT();
   const chat = useMeetingChat({ scope: 'meeting', collectionId: null, meetingId, enabled: true });
-  const { messages, input, setInput, sending, loadingHistory, send, onKeyDown, scrollRef, inputRef } = chat;
+  const { messages, input, setInput, sending, loadingHistory, send, onKeyDown, inputRef } = chat;
 
-  const [transcriptExpanded, setTranscriptExpanded] = useState(() => readStoredExpanded(meetingId));
   const [seekTarget, setSeekTarget] = useState<number | null>(seekToSeconds);
 
-  // Re-read the persisted expand state (and drop a stale seek) when the meeting changes.
+  // Drop a stale seek when the meeting changes.
   useEffect(() => {
-    setTranscriptExpanded(readStoredExpanded(meetingId));
     setSeekTarget(null);
   }, [meetingId]);
 
@@ -151,39 +145,23 @@ export function MeetingConversation({
   useEffect(() => {
     if (seekToSeconds == null) return;
     setSeekTarget(seekToSeconds);
-    setTranscriptExpanded(true);
   }, [seekToSeconds]);
 
   // A speaker-identity review sample (bounded excerpt) opens and scrolls the pin
   // to the sample start; TranscriptPanel handles the bounded playback itself.
   useEffect(() => {
     if (!playbackRequest) return;
-    setTranscriptExpanded(true);
     setSeekTarget(playbackRequest.startSeconds + Math.random() * 0.02);
   }, [playbackRequest?.requestId]);
-
-  const setExpandedPersisted = useCallback(
-    (next: boolean) => {
-      setTranscriptExpanded(next);
-      try {
-        window.localStorage.setItem(transcriptExpandedKey(meetingId), next ? '1' : '0');
-      } catch {
-        /* ignore */
-      }
-      if (next) Analytics.trackFeatureUsed('conversation_transcript_expand');
-    },
-    [meetingId],
-  );
 
   // A citation inside the meeting chat opens the transcript pin and scrolls to the
   // cited moment in place (a tiny jitter re-triggers the scroll for repeat clicks).
   const handleCite = useCallback(
     (c: Citation) => {
       Analytics.trackFeatureUsed('conversation_citation_click');
-      setExpandedPersisted(true);
       setSeekTarget(c.start_ms / 1000 + Math.random() * 0.02);
     },
-    [setExpandedPersisted],
+    [],
   );
 
   // Marked-moment chips inside the transcript pin scroll the pin to that point.
@@ -226,7 +204,7 @@ export function MeetingConversation({
   }, [meeting.created_at, segments, transcripts, speakerCount, t]);
 
   return (
-    <div className="flex h-screen flex-col bg-background">
+    <div className="flex h-full flex-col bg-[var(--elevation-1)]">
       {/* Top bar */}
       <div className="flex items-center gap-3 border-b border-border px-[22px] py-4">
         <div className="min-w-0 flex-1">
@@ -257,72 +235,99 @@ export function MeetingConversation({
 
       {reviewSlot && <div className="shrink-0">{reviewSlot}</div>}
 
-      {/* Thread */}
-      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-[26px] pb-2 pt-1.5">
-        <div className="mx-auto flex max-w-[720px] flex-col gap-6">
-          {/* Pin #1 — transcript */}
-          <TranscriptCard
-            meetingId={meetingId}
-            meetingFolderPath={meetingFolderPath}
-            transcripts={transcripts}
-            segments={segments}
-            hasMore={hasMore}
-            isLoadingMore={isLoadingMore}
-            totalCount={totalCount}
-            loadedCount={loadedCount}
-            onLoadMore={onLoadMore}
-            onRefetchTranscripts={onRefetchTranscripts}
-            onOpenMeetingFolder={onOpenMeetingFolder}
-            scrollToTimestamp={seekTarget}
-            playbackRequest={playbackRequest}
-            markedMoments={markedMoments}
-            onSeekToMoment={handleSeekToMoment}
-            speakersById={speakersById}
-            speakerCount={speakerCount}
-            onRenameSpeaker={onRenameSpeaker}
-            onSpeakersDetected={onSpeakersDetected}
-            expanded={transcriptExpanded}
-            onToggle={setExpandedPersisted}
+      <MessageScrollerProvider
+        key={`${meetingId}-${loadingHistory ? 'loading' : 'ready'}`}
+        autoScroll
+        defaultScrollPosition="last-anchor"
+        scrollPreviousItemPeek={48}
+      >
+        <div className="flex min-h-0 flex-1 flex-col">
+          {/* Thread */}
+          <MessageScroller className="min-h-0 flex-1">
+            <MessageScrollerViewport className="px-[26px] pb-2 pt-1.5">
+              <MessageScrollerContent className="mx-auto max-w-[720px] gap-6">
+                {/* Pin #1 — transcript */}
+                <MessageScrollerItem messageId={`${meetingId}-transcript`}>
+                  <TranscriptCard
+                    meetingId={meetingId}
+                    meetingFolderPath={meetingFolderPath}
+                    transcripts={transcripts}
+                    segments={segments}
+                    hasMore={hasMore}
+                    isLoadingMore={isLoadingMore}
+                    totalCount={totalCount}
+                    loadedCount={loadedCount}
+                    onLoadMore={onLoadMore}
+                    onRefetchTranscripts={onRefetchTranscripts}
+                    onOpenMeetingFolder={onOpenMeetingFolder}
+                    scrollToTimestamp={seekTarget}
+                    playbackRequest={playbackRequest}
+                    markedMoments={markedMoments}
+                    onSeekToMoment={handleSeekToMoment}
+                    speakersById={speakersById}
+                    speakerCount={speakerCount}
+                    onRenameSpeaker={onRenameSpeaker}
+                    onSpeakersDetected={onSpeakersDetected}
+                  />
+                </MessageScrollerItem>
+
+                {/* Pin #2 — summary as the first assistant message */}
+                <MessageScrollerItem messageId={`${meetingId}-summary`}>
+                  <SummaryMessage summaryPanelProps={summaryProps} />
+                </MessageScrollerItem>
+
+                {/* Divider before the chat thread */}
+                <MessageScrollerItem aria-hidden="true">
+                  <div className="h-px bg-border" />
+                </MessageScrollerItem>
+
+                {/* Chat thread (meeting-scoped RAG session) */}
+                {loadingHistory ? (
+                  <MessageScrollerItem>
+                    <div className="flex items-center justify-center py-6 text-muted-foreground">
+                      <Loader2 className="h-5 w-5 animate-spin" />
+                    </div>
+                  </MessageScrollerItem>
+                ) : (
+                  <>
+                    {messages.map((msg, i) => (
+                      <MessageScrollerItem
+                        key={`${msg.role}-${i}`}
+                        messageId={`${meetingId}-chat-${i}`}
+                        scrollAnchor={msg.role === 'user'}
+                      >
+                        <MessageBubble
+                          msg={msg}
+                          meetingTitle={meetingTitleFor}
+                          onCite={handleCite}
+                          showMeetingLabel={false}
+                        />
+                      </MessageScrollerItem>
+                    ))}
+                    {sending && (
+                      <MessageScrollerItem messageId={`${meetingId}-chat-typing`}>
+                        <TypingIndicator />
+                      </MessageScrollerItem>
+                    )}
+                  </>
+                )}
+              </MessageScrollerContent>
+            </MessageScrollerViewport>
+            <MessageScrollerButton />
+          </MessageScroller>
+
+          {/* Composer */}
+          <MeetingComposer
+            input={input}
+            onInputChange={setInput}
+            onKeyDown={onKeyDown}
+            onSend={send}
+            sending={sending}
+            disabled={loadingHistory}
+            inputRef={inputRef}
           />
-
-          {/* Pin #2 — summary as the first assistant message */}
-          <SummaryMessage summaryPanelProps={summaryProps} />
-
-          {/* Divider before the chat thread */}
-          <div className="h-px bg-border" />
-
-          {/* Chat thread (meeting-scoped RAG session) */}
-          {loadingHistory ? (
-            <div className="flex items-center justify-center py-6 text-muted-foreground">
-              <Loader2 className="h-5 w-5 animate-spin" />
-            </div>
-          ) : (
-            <>
-              {messages.map((msg, i) => (
-                <MessageBubble
-                  key={i}
-                  msg={msg}
-                  meetingTitle={meetingTitleFor}
-                  onCite={handleCite}
-                  showMeetingLabel={false}
-                />
-              ))}
-              {sending && <TypingIndicator />}
-            </>
-          )}
         </div>
-      </div>
-
-      {/* Composer */}
-      <MeetingComposer
-        input={input}
-        onInputChange={setInput}
-        onKeyDown={onKeyDown}
-        onSend={send}
-        sending={sending}
-        disabled={loadingHistory}
-        inputRef={inputRef}
-      />
+      </MessageScrollerProvider>
     </div>
   );
 }

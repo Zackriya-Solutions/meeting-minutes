@@ -168,6 +168,8 @@ pub struct MeetingMetadata {
     pub created_at: String,
     pub updated_at: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub occurred_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub folder_path: Option<String>,
 }
 
@@ -1036,6 +1038,7 @@ pub async fn api_get_meeting_metadata<R: Runtime>(
                 title: meeting.title,
                 created_at: meeting.created_at.0.to_rfc3339(),
                 updated_at: meeting.updated_at.0.to_rfc3339(),
+                occurred_at: meeting.occurred_at,
                 folder_path: meeting.folder_path,
             })
         }

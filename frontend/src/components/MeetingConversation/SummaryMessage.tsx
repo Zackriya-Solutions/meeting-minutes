@@ -3,7 +3,13 @@
 import { type ComponentProps, useEffect, useMemo, useRef, useState } from 'react';
 import { SummaryPanel } from '@/components/MeetingDetails/SummaryPanel';
 import { EmptyStateSummary } from '@/components/EmptyStateSummary';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Check, ChevronDown, ChevronUp, Copy, Loader2, RefreshCw, Save } from '@/components/deslop-icons';
 import { ChatMarkdown } from '@/components/chat/ChatMarkdown';
 import { summaryToMarkdown, splitSummaryLead } from '@/lib/summaryToMarkdown';
@@ -66,8 +72,8 @@ export function SummaryMessage({ summaryPanelProps: p }: SummaryMessageProps) {
       <div className="mb-3 flex items-center gap-2.5">
         <span className="text-[11px] font-bold uppercase tracking-[0.14em] text-muted-foreground">{t('Summary')}</span>
         <div className="flex-1" />
-        <Popover open={typeOpen} onOpenChange={setTypeOpen}>
-          <PopoverTrigger asChild>
+        <DropdownMenu open={typeOpen} onOpenChange={setTypeOpen}>
+          <DropdownMenuTrigger asChild>
             <button
               type="button"
               disabled={isGenerating}
@@ -77,17 +83,21 @@ export function SummaryMessage({ summaryPanelProps: p }: SummaryMessageProps) {
               <span className="max-w-[200px] truncate">{selectedName}</span>
               <ChevronDown size={14} />
             </button>
-          </PopoverTrigger>
-          <PopoverContent align="end" className="w-[300px] p-1.5">
-            <div className="px-2.5 pb-1 pt-2 text-[10px] font-bold uppercase tracking-[0.14em] text-muted-foreground">
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            align="end"
+            sideOffset={6}
+            collisionPadding={12}
+            className="w-[300px] rounded-xl p-1.5"
+          >
+            <DropdownMenuLabel className="px-2.5 pb-1 pt-2 text-[10px] font-bold uppercase tracking-[0.14em] text-muted-foreground">
               {t('Summary type · rebuilds the message')}
-            </div>
+            </DropdownMenuLabel>
             {p.availableTemplates.map((tp) => (
-              <button
+              <DropdownMenuItem
                 key={tp.id}
-                type="button"
-                onClick={() => pickTemplate(tp.id, tp.name)}
-                className="flex w-full items-start gap-2.5 rounded-[10px] px-2.5 py-2 text-left transition-colors hover:bg-accent"
+                onSelect={() => pickTemplate(tp.id, tp.name)}
+                className="items-start gap-2.5 rounded-[10px] px-2.5 py-2"
               >
                 <span className="min-w-0 flex-1">
                   <span className="block text-[13px] font-semibold text-foreground">{tp.name}</span>
@@ -96,10 +106,10 @@ export function SummaryMessage({ summaryPanelProps: p }: SummaryMessageProps) {
                 {tp.id === p.selectedTemplate && (
                   <Check size={16} className="mt-0.5 shrink-0 text-success" />
                 )}
-              </button>
+              </DropdownMenuItem>
             ))}
-          </PopoverContent>
-        </Popover>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
 
       {/* Body */}

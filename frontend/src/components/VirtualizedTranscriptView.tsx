@@ -12,6 +12,9 @@ import { TranscriptSegmentData, localizeSpeakerLabel, resolveSpeakerLabel } from
 import { SpeakerRenameDialog } from "./MeetingDetails/SpeakerRenameDialog";
 import { useT } from "@/lib/i18n";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "./ui/dialog";
+import { Bubble, BubbleContent } from "./ui/bubble";
+import { Message, MessageContent, MessageFooter, MessageHeader } from "./ui/message";
+import { cn } from "@/lib/utils";
 
 export interface VirtualizedTranscriptViewProps {
     /** Transcript segments to display */
@@ -112,6 +115,7 @@ const TranscriptSegment = memo(function TranscriptSegment({
     onPlayTimestamp,
     playbackActive = false,
     onEdit,
+    isOwn = false,
 }: {
     id: string;
     timestamp: number;
@@ -127,30 +131,38 @@ const TranscriptSegment = memo(function TranscriptSegment({
     onPlayTimestamp?: (timestamp: number) => void;
     playbackActive?: boolean;
     onEdit?: () => void;
+    isOwn?: boolean;
 }) {
     const t = useT();
     const displayText = cleanStopWords(text) || (text.trim() === '' ? t('[Silence]') : text);
 
+    const align = isOwn ? 'end' : 'start';
+
     return (
-        <div
+        <Message
             id={`segment-${id}`}
-            className={`mb-3 rounded-lg border-l-2 transition-colors duration-300 ${
-                highlight
-                    ? 'border-primary bg-primary/10 ring-2 ring-ring -mx-2 px-2 py-1'
-                    : playbackActive
-                      ? 'border-primary bg-primary/10 -mx-2 px-2 py-1'
-                      : 'border-transparent'
-            }`}
+            align={align}
+            role="listitem"
+            className={cn(
+                'mb-3 rounded-lg px-1 py-0.5 transition-colors duration-300',
+                highlight && 'bg-primary/10 ring-2 ring-ring',
+                playbackActive && !highlight && 'bg-primary/10',
+            )}
         >
-            <div className="flex items-start gap-2">
-                <div className="flex flex-col items-start flex-shrink-0 min-w-[50px] mt-1">
+            <MessageContent className={cn('gap-1', isOwn ? 'items-end' : 'items-start')}>
+                <MessageHeader
+                    className={cn(
+                        'gap-2 px-1 text-muted-foreground',
+                        isOwn && 'flex-row-reverse',
+                    )}
+                >
                     {speakerLabel && (
                         speakerRenamable && speakerId != null && onSpeakerClick ? (
                             <button
                                 type="button"
                                 onClick={() => onSpeakerClick(speakerId)}
                                 title={t('Rename speaker')}
-                                className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground hover:text-primary leading-tight text-left focus:outline-none"
+                                className="text-[10px] font-medium uppercase leading-tight tracking-wide text-muted-foreground hover:text-primary focus:outline-none"
                             >
                                 {speakerLabel}
                             </button>
@@ -161,7 +173,7 @@ const TranscriptSegment = memo(function TranscriptSegment({
                         )
                     )}
                     <Tooltip>
-                        <TooltipTrigger>
+                        <TooltipTrigger asChild>
                             <button
                                 type="button"
                                 onClick={() => onPlayTimestamp?.(timestamp)}
@@ -179,27 +191,36 @@ const TranscriptSegment = memo(function TranscriptSegment({
                             )}
                         </TooltipContent>
                     </Tooltip>
-                </div>
-                <div className="group/text flex-1">
-                    {isStreaming ? (
-                        <div className="bg-muted border border-border rounded-lg px-3 py-2">
-                            <p className="text-base text-foreground leading-relaxed">{displayText}</p>
-                        </div>
-                    ) : (
-                        <p className="text-base text-foreground leading-relaxed">{displayText}</p>
+                </MessageHeader>
+
+                <Bubble
+                    align={align}
+                    variant={isStreaming ? 'muted' : isOwn ? 'default' : 'secondary'}
+                    className={cn(
+                        'max-w-[82%]',
+                        isOwn
+                            ? 'rounded-[16px_16px_4px_16px]'
+                            : 'rounded-[16px_16px_16px_4px]',
                     )}
-                    {onEdit && !isStreaming && (
+                >
+                    <BubbleContent className="whitespace-pre-wrap px-[15px] py-[11px] text-base leading-relaxed">
+                        {displayText}
+                    </BubbleContent>
+                </Bubble>
+
+                {onEdit && !isStreaming && (
+                    <MessageFooter>
                         <button
                             type="button"
                             onClick={onEdit}
-                            className="mt-1 text-[10px] text-muted-foreground opacity-0 transition-opacity hover:text-primary group-hover/text:opacity-100 focus:opacity-100"
+                            className="px-1 text-[10px] text-muted-foreground opacity-0 transition-opacity hover:text-primary group-hover/message:opacity-100 focus:opacity-100"
                         >
                             {t('Correct transcript')}
                         </button>
-                    )}
-                </div>
-            </div>
-        </div>
+                    </MessageFooter>
+                )}
+            </MessageContent>
+        </Message>
     );
 });
 
@@ -450,6 +471,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                         onPlayTimestamp={onPlayTimestamp}
                                         playbackActive={isPlaybackSegmentActive(segment, playbackTime)}
                                         onEdit={onCorrectTranscript ? () => setEditingSegment({ id: segment.id, text: segment.text }) : undefined}
+                                        isOwn={segment.speaker === 'mic'}
                                     />
                                 </div>
                             );
@@ -518,6 +540,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                         onPlayTimestamp={onPlayTimestamp}
                                         playbackActive={isPlaybackSegmentActive(segment, playbackTime)}
                                         onEdit={onCorrectTranscript ? () => setEditingSegment({ id: segment.id, text: segment.text }) : undefined}
+                                        isOwn={segment.speaker === 'mic'}
                                     />
                                 </motion.div>
                             );

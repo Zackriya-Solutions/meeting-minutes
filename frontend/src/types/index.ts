@@ -168,6 +168,7 @@ export interface MeetingMetadata {
   title: string;
   created_at: string;
   updated_at: string;
+  occurred_at?: string | null;
   folder_path?: string;
 }
 

@@ -24,9 +24,11 @@ whisper-server-package/
 # testing
 /coverage
 /dist
+/storybook-static/
 
 # next.js
 /.next/
+/.next-dev/
 /out/
 
 # production

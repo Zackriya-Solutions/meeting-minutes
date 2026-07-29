@@ -4,7 +4,8 @@ import { BlockNoteSummaryViewRef } from '@/components/AISummary/BlockNoteSummary
 import { CurrentMeeting, useSidebar } from '@/components/Sidebar/SidebarProvider';
 import { invoke as invokeTauri } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
-import { useT } from '@/lib/i18n';
+import { useLanguage } from '@/lib/i18n';
+import { getMeetingDisplayInfo } from '@/lib/meetingDisplay';
 
 interface UseMeetingDataProps {
   meeting: any;
@@ -13,11 +14,17 @@ interface UseMeetingDataProps {
 }
 
 export function useMeetingData({ meeting, summaryData, onMeetingUpdated }: UseMeetingDataProps) {
-  const t = useT();
+  const { t, lang } = useLanguage();
+  const initialMeetingTitle = getMeetingDisplayInfo({
+    title: meeting.title,
+    createdAt: meeting.created_at,
+    occurredAt: meeting.occurred_at,
+    folderPath: meeting.folder_path,
+  }, lang).title;
   // State
   // Use prop directly since summary generation fetches transcripts independently
   const transcripts = meeting.transcripts;
-  const [meetingTitle, setMeetingTitle] = useState(meeting.title || t('+ New Call'));
+  const [meetingTitle, setMeetingTitle] = useState(initialMeetingTitle);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [isTitleDirty, setIsTitleDirty] = useState(false);
   const [aiSummary, setAiSummary] = useState<Summary | null>(summaryData);

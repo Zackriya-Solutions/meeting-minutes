@@ -302,7 +302,7 @@ export default function SearchPage() {
                       <div className="mb-1 flex items-center gap-1.5 text-xs text-muted-foreground">
                         <Icon name="clock" size={13} />
                         {fmtTime(h.start_ms)}
-                        <Icon name="transcript" size={13} className="ml-1 opacity-0 transition-opacity group-hover:opacity-100" />
+                        <Icon name="meeting" size={13} className="ml-1 opacity-0 transition-opacity group-hover:opacity-100" />
                         <span className="opacity-0 transition-opacity group-hover:opacity-100">{t('open')}</span>
                       </div>
                       <p className="line-clamp-3 text-sm leading-relaxed text-muted-foreground">

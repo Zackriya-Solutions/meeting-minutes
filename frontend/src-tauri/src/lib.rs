@@ -128,21 +128,6 @@ async fn start_recording<R: Runtime>(
 
             log_info!("Recording started successfully");
 
-            // Show recording started notification through NotificationManager
-            // This respects user's notification preferences
-            let notification_manager_state = app.state::<NotificationManagerState<R>>();
-            if let Err(e) = notifications::commands::show_recording_started_notification(
-                &app,
-                &notification_manager_state,
-                meeting_name.clone(),
-            )
-            .await
-            {
-                log_error!("Failed to show recording started notification: {}", e);
-            } else {
-                log_info!("Successfully showed recording started notification");
-            }
-
             Ok(())
         }
         Err(e) => {
@@ -185,20 +170,6 @@ async fn stop_recording<R: Runtime>(app: AppHandle<R>, args: RecordingArgs) -> R
                         return Err(err_msg);
                     }
                 }
-            }
-
-            // Show recording stopped notification through NotificationManager
-            // This respects user's notification preferences
-            let notification_manager_state = app.state::<NotificationManagerState<R>>();
-            if let Err(e) = notifications::commands::show_recording_stopped_notification(
-                &app,
-                &notification_manager_state,
-            )
-            .await
-            {
-                log_error!("Failed to show recording stopped notification: {}", e);
-            } else {
-                log_info!("Successfully showed recording stopped notification");
             }
 
             Ok(())
@@ -313,9 +284,6 @@ async fn start_recording_with_devices_and_meeting<R: Runtime>(
     log_info!("🚀 CALLED start_recording_with_devices_and_meeting - Mic: {:?}, System: {:?}, Meeting: {:?}",
              mic_device_name, system_device_name, meeting_name);
 
-    // Clone meeting_name for notification use later
-    let meeting_name_for_notification = meeting_name.clone();
-
     // Call the recording module functions that support meeting names
     let recording_result = match (mic_device_name.clone(), system_device_name.clone()) {
         (None, None) => {
@@ -346,19 +314,6 @@ async fn start_recording_with_devices_and_meeting<R: Runtime>(
     match recording_result {
         Ok(_) => {
             log_info!("Recording started successfully via tauri command");
-
-            // Show recording started notification through NotificationManager
-            // This respects user's notification preferences
-            let notification_manager_state = app.state::<NotificationManagerState<R>>();
-            if let Err(e) = notifications::commands::show_recording_started_notification(
-                &app,
-                &notification_manager_state,
-                meeting_name_for_notification.clone(),
-            )
-            .await
-            {
-                log_error!("Failed to show recording started notification: {}", e);
-            }
 
             Ok(())
         }
@@ -467,7 +422,7 @@ pub fn run() {
 
                 // Start the privacy-preserving process/microphone signal detector. On platforms
                 // with a strong microphone-session signal it can request the normal recording
-                // lifecycle when auto-listening is enabled.
+                // lifecycle for supported native meeting clients.
                 _app
                     .state::<meeting_detection::AutoMeetingDetectionState>()
                     .start(_app.handle().clone());

@@ -23,6 +23,35 @@ const WEEKDAYS: Record<string, string> = {
   sun: 'Вс',
 };
 
+const FALLBACK_MEETING_TITLES = [
+  'Планёрка',
+  'Летучка',
+  'Синк',
+  'Созвон',
+  'Совещание',
+  'Встреча',
+] as const;
+
+type FallbackMeetingTitle = typeof FALLBACK_MEETING_TITLES[number];
+type GrammaticalGender = 'masculine' | 'feminine' | 'neuter';
+type MeetingPeriod = 'morning' | 'day' | 'evening' | 'night';
+
+const TIMED_TITLE_GENDERS: Record<FallbackMeetingTitle, GrammaticalGender> = {
+  Планёрка: 'feminine',
+  Летучка: 'feminine',
+  Синк: 'masculine',
+  Созвон: 'masculine',
+  Совещание: 'neuter',
+  Встреча: 'feminine',
+};
+
+const PERIOD_ADJECTIVES: Record<MeetingPeriod, Record<GrammaticalGender, string>> = {
+  morning: { masculine: 'Утренний', feminine: 'Утренняя', neuter: 'Утреннее' },
+  day: { masculine: 'Дневной', feminine: 'Дневная', neuter: 'Дневное' },
+  evening: { masculine: 'Вечерний', feminine: 'Вечерняя', neuter: 'Вечернее' },
+  night: { masculine: 'Ночной', feminine: 'Ночная', neuter: 'Ночное' },
+};
+
 function basename(path: string | null | undefined): string {
   if (!path) return '';
   return path.split(/[\\/]/).filter(Boolean).at(-1) ?? '';
@@ -103,8 +132,71 @@ function humanizeDescriptor(descriptor: string): string {
     .replace(/\bmeeting\b/gi, 'встреча')
     .replace(/\bstandup\b/gi, 'стендап')
     .trim();
-  if (!words) return 'Без названия';
+  if (!words) return '';
   return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+function resolveMeetingHour(
+  meeting: MeetingDisplaySource,
+  defaultMeetingDate: Date | null,
+  unknownHint: { weekday?: string; time?: string } | null,
+): number | null {
+  const explicitDateValue = meeting.occurredAt || defaultMeetingDate;
+  if (explicitDateValue) {
+    const date = explicitDateValue instanceof Date
+      ? explicitDateValue
+      : new Date(explicitDateValue);
+    if (!Number.isNaN(date.getTime())) return date.getHours();
+  }
+
+  if (unknownHint?.time) {
+    const hour = Number(unknownHint.time.split(':')[0]);
+    if (Number.isInteger(hour) && hour >= 0 && hour <= 23) return hour;
+  }
+
+  if (meeting.createdAt) {
+    const createdAt = new Date(meeting.createdAt);
+    if (!Number.isNaN(createdAt.getTime())) return createdAt.getHours();
+  }
+
+  return null;
+}
+
+function meetingPeriod(hour: number): MeetingPeriod {
+  if (hour >= 5 && hour < 12) return 'morning';
+  if (hour >= 12 && hour < 17) return 'day';
+  if (hour >= 17 && hour < 23) return 'evening';
+  return 'night';
+}
+
+function fallbackMeetingTitle(
+  meeting: MeetingDisplaySource,
+  defaultMeetingDate: Date | null,
+  unknownHint: { weekday?: string; time?: string } | null,
+): string {
+  const seed = [
+    meeting.title,
+    meeting.occurredAt,
+    meeting.createdAt,
+    basename(meeting.folderPath),
+  ].filter(Boolean).join('|');
+
+  if (!seed) return 'Встреча';
+
+  let hash = 0;
+  for (let index = 0; index < seed.length; index += 1) {
+    hash = Math.imul(hash, 31) + seed.charCodeAt(index);
+    hash |= 0;
+  }
+
+  const title = FALLBACK_MEETING_TITLES[Math.abs(hash) % FALLBACK_MEETING_TITLES.length];
+  const gender = TIMED_TITLE_GENDERS[title];
+  const hour = resolveMeetingHour(meeting, defaultMeetingDate, unknownHint);
+
+  if (!gender || hour === null) return title;
+
+  const adjective = PERIOD_ADJECTIVES[meetingPeriod(hour)][gender];
+  return `${adjective} ${title.toLocaleLowerCase('ru-RU')}`;
 }
 
 function formatKnownDate(date: Date): string {
@@ -133,11 +225,12 @@ export function getMeetingDisplayInfo(
 ): MeetingDisplayInfo {
   const unknownHint = parseUnknownDateHint(meeting);
   const defaultMeetingDate = parseDefaultMeetingDate(meeting.title);
+  const fallbackTitle = fallbackMeetingTitle(meeting, defaultMeetingDate, unknownHint);
   const displayTitle = defaultMeetingDate
-    ? 'Без названия'
+    ? fallbackTitle
     : isMachineTitle(meeting.title)
-      ? humanizeDescriptor(descriptorFromMachineTitle(meeting.title))
-      : meeting.title || 'Без названия';
+      ? humanizeDescriptor(descriptorFromMachineTitle(meeting.title)) || fallbackTitle
+      : meeting.title || fallbackTitle;
 
   if (unknownHint) {
     const weekday = unknownHint.weekday ? WEEKDAYS[unknownHint.weekday] : undefined;

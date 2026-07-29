@@ -5,8 +5,6 @@ import { invoke } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
 import { ModelConfig, ModelSettingsModal } from '@/components/ModelSettingsModal';
 import { SummaryLanguageSettings } from '@/components/SummaryLanguageSettings';
-import { Switch } from './ui/switch';
-import { useConfig } from '@/contexts/ConfigContext';
 import { useT } from '@/lib/i18n';
 
 interface SummaryModelSettingsProps {
@@ -22,7 +20,6 @@ export function SummaryModelSettings({ refetchTrigger }: SummaryModelSettingsPro
     ollamaEndpoint: null
   });
 
-  const { isAutoSummary, toggleIsAutoSummary } = useConfig();
   const t = useT();
 
   // Reusable fetch function
@@ -132,16 +129,6 @@ export function SummaryModelSettings({ refetchTrigger }: SummaryModelSettingsPro
 
   return (
     <div className='flex flex-col gap-4'>
-      <div className="bg-background rounded-lg border border-border p-6 shadow-none">
-        <div className="flex items-center justify-between">
-          <div>
-            <h3 className="text-lg font-semibold text-foreground mb-2">{t('Auto Summary')}</h3>
-            <p className="text-sm text-muted-foreground">{t('Auto Generating summary after meeting completion(Stopping)')}</p>
-          </div>
-          <Switch checked={isAutoSummary} onCheckedChange={toggleIsAutoSummary} />
-        </div>
-      </div>
-
       <SummaryLanguageSettings />
 
       <div className="bg-background rounded-lg border border-border p-6 shadow-none" data-summary-model-config>

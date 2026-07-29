@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { Switch } from '@/components/ui/switch';
-import { FolderOpen } from '@/components/deslop-icons';
 import { invoke } from '@tauri-apps/api/core';
 import { DeviceSelection, SelectedDevices } from '@/components/DeviceSelection';
 import Analytics from '@/lib/analytics';
@@ -30,7 +29,6 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [showRecordingNotification, setShowRecordingNotification] = useState(true);
 
   // Load recording preferences on component mount
   useEffect(() => {
@@ -53,21 +51,6 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
     };
 
     loadPreferences();
-  }, []);
-
-  // Load recording notification preference
-  useEffect(() => {
-    const loadNotificationPref = async () => {
-      try {
-        const { Store } = await import('@tauri-apps/plugin-store');
-        const store = await Store.load('preferences.json');
-        const show = await store.get<boolean>('show_recording_notification') ?? true;
-        setShowRecordingNotification(show);
-      } catch (error) {
-        console.error('Failed to load notification preference:', error);
-      }
-    };
-    loadNotificationPref();
   }, []);
 
   const handleAutoSaveToggle = async (enabled: boolean) => {
@@ -96,31 +79,6 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
       has_preferred_microphone: (!!devices.micDevice).toString(),
       has_preferred_system_audio: (!!devices.systemDevice).toString()
     });
-  };
-
-  const handleOpenFolder = async () => {
-    try {
-      await invoke('open_recordings_folder');
-    } catch (error) {
-      console.error('Failed to open recordings folder:', error);
-    }
-  };
-
-  const handleNotificationToggle = async (enabled: boolean) => {
-    try {
-      setShowRecordingNotification(enabled);
-      const { Store } = await import('@tauri-apps/plugin-store');
-      const store = await Store.load('preferences.json');
-      await store.set('show_recording_notification', enabled);
-      await store.save();
-      toast.success(t('Preference saved'));
-      await Analytics.track('recording_notification_preference_changed', {
-        enabled: enabled.toString()
-      });
-    } catch (error) {
-      console.error('Failed to save notification preference:', error);
-      toast.error(t('Failed to save preference'));
-    }
   };
 
   const savePreferences = async (prefs: RecordingPreferences) => {
@@ -156,13 +114,6 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h3 className="text-lg font-semibold mb-4">{t('Recording Settings')}</h3>
-        <p className="text-sm text-muted-foreground mb-6">
-          {t('Configure how your audio recordings are saved during meetings.')}
-        </p>
-      </div>
-
       {/* Auto Save Toggle */}
       <div className="flex items-center justify-between p-4 border rounded-lg">
         <div className="flex-1">
@@ -178,40 +129,6 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
         />
       </div>
 
-      {/* Folder Location - Only shown when auto_save is enabled */}
-      {preferences.auto_save && (
-        <div className="space-y-4">
-          <div className="p-4 border rounded-lg bg-background">
-            <div className="font-medium mb-2">{t('Save Location')}</div>
-            <div className="text-sm text-muted-foreground mb-3 break-all">
-              {preferences.save_folder || t('Default folder')}
-            </div>
-            <button
-              onClick={handleOpenFolder}
-              className="flex items-center gap-2 px-3 py-2 text-sm border border-border rounded-md hover:bg-background transition-colors"
-            >
-              <FolderOpen className="w-4 h-4" />
-              {t('Open Folder')}
-            </button>
-          </div>
-
-          <div className="rounded-lg border border-border bg-background p-4">
-            <div className="text-sm font-medium text-foreground">
-              {t('Audio recording format')}
-            </div>
-            <div className="mt-2 grid gap-1 text-xs leading-relaxed text-muted-foreground">
-              <p>{t('Audio: AAC-LC, 192 kbps, mono')}</p>
-              <p>{t('Container: MP4 (.mp4)')}</p>
-              <p>{t('This is an audio-only file. Memento does not record video.')}</p>
-              <p>{t('MP4 is used for reliable checkpoint saving and recovery if recording is interrupted.')}</p>
-            </div>
-            <div className="mt-3 text-xs text-muted-foreground">
-              {t('File name example: recording_YYYYMMDD_HHMMSS.mp4')}
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Info when auto_save is disabled */}
       {!preferences.auto_save && (
         <div className="p-4 border rounded-lg bg-primary/10">
@@ -220,20 +137,6 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
           </div>
         </div>
       )}
-
-      {/* Recording Notification Toggle */}
-      <div className="flex items-center justify-between p-4 border rounded-lg">
-        <div className="flex-1">
-          <div className="font-medium">{t('Recording Start Notification')}</div>
-          <div className="text-sm text-muted-foreground">
-            {t('Show reminder to inform participants when recording starts')}
-          </div>
-        </div>
-        <Switch
-          checked={showRecordingNotification}
-          onCheckedChange={handleNotificationToggle}
-        />
-      </div>
 
       {/* Device Настройки */}
       <div className="space-y-4">

@@ -1005,7 +1005,7 @@ export default function CollectionsPage() {
                           className="flex min-w-0 flex-1 items-center gap-3 text-left"
                         >
                           <span className="flex h-10 w-10 flex-none items-center justify-center rounded-xl bg-muted text-primary">
-                            <Icon name="transcript" size={18} />
+                            <Icon name="meeting" size={18} />
                           </span>
                           <span className="min-w-0 flex-1">
                             <span className="block truncate text-sm font-medium text-foreground">{display.title}</span>

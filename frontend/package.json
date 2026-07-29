@@ -9,6 +9,8 @@
         "build": "next build",
         "export": "next export",
         "start": "next start -p 3118",
+        "storybook": "storybook dev -p 6006",
+        "build-storybook": "storybook build",
         "tauri": "tauri",
         "tauri:dev": "node scripts/tauri-auto.js dev",
         "tauri:build": "node scripts/tauri-auto.js build",
@@ -36,6 +38,7 @@
         "quality:gate": "node evals/quality-gate.mjs --mode release --thresholds evals/thresholds.release.json"
     },
     "dependencies": {
+        "@base-ui/react": "^1.6.0",
         "@blocknote/core": "0.36.0",
         "@blocknote/react": "0.36.0",
         "@blocknote/shadcn": "0.36.0",
@@ -65,6 +68,7 @@
         "@remirror/extension-underline": "^3.0.1",
         "@remirror/pm": "^3.0.0",
         "@remirror/react": "^3.0.1",
+        "@shadcn/react": "0.2.1",
         "@tanstack/react-virtual": "^3.13.13",
         "@tauri-apps/api": "^2.6.0",
         "@tauri-apps/plugin-fs": "^2.4.0",
@@ -100,6 +104,7 @@
         "zod": "^3.25.71"
     },
     "devDependencies": {
+        "@storybook/nextjs": "10.5.5",
         "@tailwindcss/typography": "^0.5.15",
         "@tauri-apps/cli": "^2.1.0",
         "@tauri-apps/plugin-fs": "~2.4.0",
@@ -109,6 +114,7 @@
         "autoprefixer": "^10.0.1",
         "concurrently": "^8.2.2",
         "postcss": "^8",
+        "storybook": "10.5.5",
         "tailwindcss": "^3.4.1",
         "typescript": "^5.7.2",
         "wait-on": "^7.2.0"

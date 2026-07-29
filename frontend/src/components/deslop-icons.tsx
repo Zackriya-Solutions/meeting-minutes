@@ -79,6 +79,7 @@ export const Copy = createIcon('content_copy', 'Copy');
 export const Cpu = createIcon('terminal', 'Cpu');
 export const Database = createIcon('database', 'Database');
 export const Download = createIcon('download', 'Download');
+export const Event = createIcon('event', 'Event');
 export const ExternalLink = createIcon('open_in_new', 'ExternalLink');
 export const Eye = createIcon('visibility', 'Eye');
 export const EyeOff = createIcon('visibility_off', 'EyeOff');

@@ -30,7 +30,7 @@ interface TranscriptPanelProps {
 export function TranscriptPanel({
   isProcessingStop,
   isStopping,
-  showModal
+  showModal,
 }: TranscriptPanelProps) {
   const t = useT();
   // Contexts
@@ -55,7 +55,11 @@ export function TranscriptPanel({
   );
 
   return (
-    <div ref={transcriptContainerRef} className="w-full border-r border-border bg-background flex flex-col overflow-y-auto">
+    <div
+      ref={transcriptContainerRef}
+      data-home-scroll-container
+      className="flex w-full flex-col overflow-y-auto bg-background"
+    >
       {/* Actions only exist once they have something useful to control. */}
       {showTranscriptActions && <div className="sticky top-0 z-10 border-border bg-background p-4">
         <div className="flex flex-col space-y-3">
@@ -95,7 +99,10 @@ export function TranscriptPanel({
       </div>}
 
       {/* Permission Warning - Not needed on Linux */}
-      {!isRecording && !isChecking && !isLinux && (
+      {!isRecording &&
+        !isChecking &&
+        !isLinux &&
+        (!hasMicrophone || !hasSystemAudio) && (
         <div className="flex justify-center px-4 pt-4">
           <PermissionWarning
             hasMicrophone={hasMicrophone}
@@ -107,9 +114,9 @@ export function TranscriptPanel({
       )}
 
       {/* Transcript content */}
-      <div className="pb-20">
+      <div className={segments.length === 0 && !isRecording ? 'min-h-full' : 'pb-20'}>
         {segments.length === 0 && !isRecording ? (
-          <HomeMeetingList />
+          <HomeMeetingList animateOnMount={false} />
         ) : (
           <div className="flex justify-center">
             <div className="w-2/3 max-w-[750px]">

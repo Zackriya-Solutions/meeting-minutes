@@ -1,10 +1,12 @@
 const path = require('path');
+const { PHASE_DEVELOPMENT_SERVER } = require('next/constants');
 const tiptapPmResolveBase = path.dirname(require.resolve('@tiptap/pm/model'));
 const resolveFromTiptapPm = (pkg) =>
   require.resolve(pkg, { paths: [tiptapPmResolveBase] });
 
-/** @type {import('next').NextConfig} */
-const nextConfig = {
+/** @param {string} phase */
+module.exports = (phase) => ({
+  distDir: phase === PHASE_DEVELOPMENT_SERVER ? '.next-dev' : '.next',
   reactStrictMode: false, // Disabled for BlockNote compatibility
   output: 'export',
   images: {
@@ -46,6 +48,4 @@ const nextConfig = {
     }
     return config;
   },
-}
-
-module.exports = nextConfig
+});

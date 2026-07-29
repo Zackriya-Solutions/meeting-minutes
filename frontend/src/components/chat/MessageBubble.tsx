@@ -4,6 +4,8 @@ import { motion } from 'framer-motion';
 import { Icon } from '@/components/memento/Icon';
 import { cn } from '@/lib/utils';
 import { useT } from '@/lib/i18n';
+import { Bubble, BubbleContent } from '@/components/ui/bubble';
+import { Message, MessageContent } from '@/components/ui/message';
 import { ChatMarkdown } from './ChatMarkdown';
 import type { ChatMessage, Citation, RetrievalDiagnostics } from '@/hooks/useMeetingChat';
 
@@ -37,9 +39,17 @@ export function MessageBubble({
         initial={{ opacity: 0, y: 6 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.18 }}
-        className="max-w-[78%] self-end whitespace-pre-wrap rounded-[16px_16px_4px_16px] bg-primary px-[15px] py-[11px] text-[14px] leading-[1.5] text-primary-foreground"
+        className="w-full"
       >
-        {msg.content}
+        <Message align="end">
+          <MessageContent className="items-end">
+            <Bubble align="end" className="max-w-[78%] rounded-[16px_16px_4px_16px]">
+              <BubbleContent className="whitespace-pre-wrap px-[15px] py-[11px] text-[14px] leading-[1.5]">
+                {msg.content}
+              </BubbleContent>
+            </Bubble>
+          </MessageContent>
+        </Message>
       </motion.div>
     );
   }
@@ -49,41 +59,57 @@ export function MessageBubble({
       initial={{ opacity: 0, y: 6 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.18 }}
-      className={cn('text-[14.5px] leading-[1.65]', msg.error ? 'text-destructive' : 'text-foreground')}
+      className="w-full"
     >
-      {notFound && (
-        <div className="mb-1 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-          <Icon name="search" size={14} />
-          {t('Not found in your meetings')}
-        </div>
-      )}
-
-      {msg.error ? <div className="whitespace-pre-wrap">{msg.content}</div> : <ChatMarkdown content={msg.content} />}
-
-      {notFound && msg.diagnostics && <RetrievalExplanation diagnostics={msg.diagnostics} />}
-
-      {msg.warning && (
-        <div className="mt-2 flex items-center gap-1.5 text-xs text-primary">
-          <Icon name="alert" size={14} />
-          {msg.warning}
-        </div>
-      )}
-
-      {!!msg.citations?.length && (
-        <div className="mt-2.5 flex flex-wrap gap-1.5">
-          {msg.citations.map((c) => (
-            <button
-              key={c.index}
-              onClick={() => onCite(c)}
-              title={t('Open the meeting at this moment')}
-              className="mm-numeric inline-flex items-center gap-1 rounded-md bg-muted px-2 py-0.5 text-[11px] font-semibold text-muted-foreground transition-colors hover:text-foreground"
+      <Message align="start">
+        <MessageContent>
+          <Bubble
+            variant={msg.error ? 'destructive' : 'ghost'}
+            className="w-full max-w-full"
+          >
+            <BubbleContent
+              className={cn(
+                'w-full text-[14.5px] leading-[1.65]',
+                msg.error ? 'px-3 py-2' : 'text-foreground',
+              )}
             >
-              <span>[{c.index}]</span>
-              {showMeetingLabel && <span className="max-w-[160px] truncate font-normal">{meetingTitle(c.meeting_id)}</span>}
-            </button>
-          ))}
-        </div>
-      )}
+              {notFound && (
+                <div className="mb-1 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                  <Icon name="search" size={14} />
+                  {t('Not found in your meetings')}
+                </div>
+              )}
+
+              {msg.error ? <div className="whitespace-pre-wrap">{msg.content}</div> : <ChatMarkdown content={msg.content} />}
+
+              {notFound && msg.diagnostics && <RetrievalExplanation diagnostics={msg.diagnostics} />}
+
+              {msg.warning && (
+                <div className="mt-2 flex items-center gap-1.5 text-xs text-primary">
+                  <Icon name="alert" size={14} />
+                  {msg.warning}
+                </div>
+              )}
+
+              {!!msg.citations?.length && (
+                <div className="mt-2.5 flex flex-wrap gap-1.5">
+                  {msg.citations.map((c) => (
+                    <button
+                      key={c.index}
+                      onClick={() => onCite(c)}
+                      title={t('Open the meeting at this moment')}
+                      className="mm-numeric inline-flex items-center gap-1 rounded-md bg-muted px-2 py-0.5 text-[11px] font-semibold text-muted-foreground transition-colors hover:text-foreground"
+                    >
+                      <span>[{c.index}]</span>
+                      {showMeetingLabel && <span className="max-w-[160px] truncate font-normal">{meetingTitle(c.meeting_id)}</span>}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </BubbleContent>
+          </Bubble>
+        </MessageContent>
+      </Message>
     </motion.div>
   );
 }
@@ -119,17 +145,23 @@ export function RetrievalExplanation({ diagnostics }: { diagnostics: RetrievalDi
 }
 
 export function TypingIndicator() {
+  const t = useT();
+
   return (
-    <div className="self-start">
-      <div className="flex items-center gap-1">
-        {[0, 1, 2].map((i) => (
-          <span
-            key={i}
-            className="h-2 w-2 animate-bounce rounded-full bg-muted-foreground"
-            style={{ animationDelay: `${i * 0.15}s` }}
-          />
-        ))}
-      </div>
-    </div>
+    <Message align="start" role="status" aria-label={t('Assistant is typing')}>
+      <MessageContent>
+        <Bubble variant="muted" className="rounded-full">
+          <BubbleContent className="flex items-center gap-1 px-3 py-2">
+            {[0, 1, 2].map((i) => (
+              <span
+                key={i}
+                className="h-2 w-2 animate-bounce rounded-full bg-muted-foreground"
+                style={{ animationDelay: `${i * 0.15}s` }}
+              />
+            ))}
+          </BubbleContent>
+        </Bubble>
+      </MessageContent>
+    </Message>
   );
 }

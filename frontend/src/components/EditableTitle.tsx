@@ -54,7 +54,7 @@ export const EditableTitle: React.FC<EditableTitleProps> = ({
             onFinishEditing();
           }
         }}
-        className="w-full resize-none overflow-hidden text-2xl font-bold"
+        className="memento-serif-title w-full resize-none overflow-hidden text-2xl font-normal leading-tight"
         style={{ minWidth: '300px', minHeight: '40px' }}
         autoFocus
         rows={1}
@@ -63,7 +63,7 @@ export const EditableTitle: React.FC<EditableTitleProps> = ({
   ) : (
     <div className="group flex items-center space-x-2 flex-1">
       <h1
-        className="text-2xl font-bold cursor-pointer hover:bg-background rounded px-1 flex-1 whitespace-pre-wrap"
+        className="memento-serif-title flex-1 cursor-pointer whitespace-pre-wrap rounded px-1 text-2xl font-normal leading-tight hover:bg-background"
         onClick={onStartEditing}
       >
         {title}

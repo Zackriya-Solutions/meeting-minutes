@@ -162,9 +162,34 @@ export default function PageContent({
     Analytics.trackPageView('meeting_details');
   }, []);
 
-  // Variant 2a: summarization is user-initiated (pick a template in the summary
-  // message), so there is no auto-generation on entry — the `shouldAutoGenerate`
-  // flag from the recording flow is intentionally ignored here.
+  // Generate a missing summary automatically once per meeting. The route layer
+  // only raises this flag after it has confirmed that a transcript exists and
+  // no persisted summary is available.
+  const autoGenerationMeetingRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (
+      !shouldAutoGenerate ||
+      summaryLoadStatus !== 'absent' ||
+      meetingData.aiSummary ||
+      summaryGeneration.summaryStatus !== 'idle' ||
+      autoGenerationMeetingRef.current === meeting.id
+    ) {
+      return;
+    }
+
+    autoGenerationMeetingRef.current = meeting.id;
+    void summaryGeneration.handleGenerateSummary().finally(() => {
+      onAutoGenerateComplete?.();
+    });
+  }, [
+    meeting.id,
+    meetingData.aiSummary,
+    onAutoGenerateComplete,
+    shouldAutoGenerate,
+    summaryGeneration.handleGenerateSummary,
+    summaryGeneration.summaryStatus,
+    summaryLoadStatus,
+  ]);
 
   const summaryResponse: SummaryResponse | null = null;
   const isSummaryDirty = meetingData.isTitleDirty || (meetingData.blockNoteSummaryRef.current?.isDirty || false);

@@ -25,6 +25,22 @@
 }
 
 @font-face {
+  font-family: "SB Serif Text";
+  src: url("./fonts/SBSerifText-Regular.otf") format("opentype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "SB Serif Text";
+  src: url("./fonts/SBSerifText-Bold.otf") format("opentype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
   font-family: "SB Sans Text Mono";
   src: url("./fonts/SBSansTextMono-Regular.otf") format("opentype");
   font-weight: 400;
@@ -49,8 +65,37 @@
 }
 
 :root {
-  --ui-font-interface: "SB Sans Interface", system-ui, sans-serif;
-  --ui-font-mono: "SB Sans Text Mono", ui-monospace, monospace;
+  --ui-font-interface: "SB Sans Interface";
+  --ui-font-serif: "SB Serif Text";
+  --ui-font-mono: "SB Sans Text Mono";
+  --ui-body-font-size: 16px;
+  --ui-body-line-height: 20px;
+  --ui-body-letter-spacing: 0;
+  --ui-subtitle-font-size: 13px;
+  --ui-subtitle-line-height: 18px;
+  --ui-subtitle-font-weight: 400;
+  --ui-subtitle-letter-spacing: 0;
+  --ui-space-8: 8px;
+  --ui-space-9: 9px;
+  --ui-space-12: 12px;
+  --ui-layout-content-inset: 16px;
+  --elevation-1: #ffffff;
+  --deslop-primary: #111111;
+  --deslop-primary-60: #11111199;
+  --deslop-primary-20: #11111133;
+  --primary-40: #11111166;
+  --primary-5: #1111110d;
+  --primary-10: #1111111a;
+}
+
+.dark {
+  --elevation-1: #1d1d1d;
+  --deslop-primary: #ffffff;
+  --deslop-primary-60: #ffffff99;
+  --deslop-primary-20: #ffffff33;
+  --primary-40: #ffffff66;
+  --primary-5: #ffffff0d;
+  --primary-10: #ffffff1a;
 }
 
 .deslop-material-symbol {

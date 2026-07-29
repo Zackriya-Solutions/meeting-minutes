@@ -3,25 +3,73 @@ import { useSidebar } from "@/components/Sidebar/SidebarProvider";
 import { useState, useEffect, useCallback, useRef, Suspense } from "react";
 import { Transcript, Summary } from "@/types";
 import PageContent from "./page-content";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import Analytics from "@/lib/analytics";
 import { invoke } from "@tauri-apps/api/core";
 import { LoaderIcon } from '@/components/deslop-icons';
 import { useConfig } from "@/contexts/ConfigContext";
 import { usePaginatedTranscripts } from "@/hooks/usePaginatedTranscripts";
 import { useMeetingSpeakers } from "@/hooks/useMeetingSpeakers";
-import { useT } from "@/lib/i18n";
+import { useLanguage, useT } from "@/lib/i18n";
+import { useMeetingDrawer } from "@/contexts/MeetingDrawerContext";
+import { MeetingDrawerShell } from "./meeting-drawer-shell";
 
 interface MeetingDetailsResponse {
   id: string;
   title: string;
   created_at: string;
   updated_at: string;
+  occurred_at?: string | null;
   transcripts: Transcript[];
   folder_path?: string;
 }
 
 type SummaryLoadStatus = 'loading' | 'loaded' | 'absent' | 'error';
+
+function UpcomingMeetingPreview() {
+  const searchParams = useSearchParams();
+  const { t, lang } = useLanguage();
+  const title = searchParams.get('title') || t('Upcoming meeting');
+  const start = new Date(searchParams.get('start') || '');
+  const end = new Date(searchParams.get('end') || '');
+  const hasStart = !Number.isNaN(start.getTime());
+  const hasEnd = !Number.isNaN(end.getTime());
+  const locale = lang === 'ru' ? 'ru-RU' : 'en-US';
+  const dateLabel = hasStart
+    ? new Intl.DateTimeFormat(locale, {
+        weekday: 'long',
+        day: 'numeric',
+        month: 'long',
+      }).format(start)
+    : '';
+  const timeFormatter = new Intl.DateTimeFormat(locale, { hour: '2-digit', minute: '2-digit' });
+  const timeLabel = hasStart
+    ? `${timeFormatter.format(start)}${hasEnd ? `\u00a0–\u00a0${timeFormatter.format(end)}` : ''}`
+    : '';
+
+  return (
+    <div className="flex h-full flex-col bg-[var(--elevation-1)]">
+      <div className="flex items-center gap-3 border-b border-border px-[22px] py-4">
+        <div className="min-w-0 flex-1">
+          <h1 className="memento-serif-title truncate text-2xl leading-tight text-foreground">{title}</h1>
+          {(dateLabel || timeLabel) && (
+            <p className="mm-numeric mt-0.5 truncate text-xs text-muted-foreground">
+              {[dateLabel, timeLabel].filter(Boolean).join(' · ')}
+            </p>
+          )}
+        </div>
+      </div>
+      <main className="flex min-h-0 flex-1 items-center justify-center px-6 py-12">
+        <div className="max-w-md text-center">
+          <p className="text-base font-medium text-foreground">{t('This meeting has not started yet')}</p>
+          <p className="mt-2 text-sm leading-relaxed text-[var(--primary-40)]">
+            {t('The transcript and summary will appear here after the meeting is recorded.')}
+          </p>
+        </div>
+      </main>
+    </div>
+  );
+}
 
 function parsePersistedSummary(rawData: unknown): Summary | null {
   let parsedData: any = rawData;
@@ -66,14 +114,13 @@ function parsePersistedSummary(rawData: unknown): Summary | null {
 function MeetingDetailsContent() {
   const searchParams = useSearchParams();
   const meetingId = searchParams.get('id');
-  const source = searchParams.get('source'); // Check if navigated from recording
   // Optional jump-to-timestamp deep link (?t=<seconds>) from search results / RAG citations.
   const seekParam = searchParams.get('t');
   const seekToSeconds =
     seekParam != null && seekParam !== '' && Number.isFinite(Number(seekParam)) ? Number(seekParam) : null;
   const { setCurrentMeeting, refetchMeetings, stopSummaryPolling } = useSidebar();
   const { isAutoSummary } = useConfig(); // Get auto-summary toggle state
-  const router = useRouter();
+  const meetingDrawer = useMeetingDrawer();
   const t = useT();
   const [meetingDetails, setMeetingDetails] = useState<MeetingDetailsResponse | null>(null);
   const [meetingSummary, setMeetingSummary] = useState<Summary | null>(null);
@@ -160,13 +207,6 @@ function MeetingDetailsContent() {
   const setupAutoGeneration = useCallback(async () => {
     if (hasCheckedAutoGen) return; // Only check once
 
-    // Only auto-generate if navigated from recording
-    if (source !== 'recording') {
-      console.log('Not from recording navigation, skipping auto-generation');
-      setHasCheckedAutoGen(true);
-      return;
-    }
-
     // Respect user's auto-summary toggle preference
     if (!isAutoSummary) {
       console.log('Auto-summary is disabled in settings');
@@ -209,7 +249,7 @@ function MeetingDetailsContent() {
     }
 
     setHasCheckedAutoGen(true);
-  }, [hasCheckedAutoGen, checkForGemmaModel, source, isAutoSummary]);
+  }, [hasCheckedAutoGen, checkForGemmaModel, isAutoSummary]);
 
   // Sync meeting metadata from pagination hook to meeting details state
   useEffect(() => {
@@ -227,12 +267,19 @@ function MeetingDetailsContent() {
         title: metadata.title,
         created_at: metadata.created_at,
         updated_at: metadata.updated_at,
+        occurred_at: metadata.occurred_at,
         transcripts: transcripts, // Paginated transcripts from hook
         folder_path: metadata.folder_path, // For retranscription feature
       });
 
       // Sync with sidebar context
-      setCurrentMeeting({ id: metadata.id, title: metadata.title });
+      setCurrentMeeting({
+        id: metadata.id,
+        title: metadata.title,
+        createdAt: metadata.created_at,
+        occurredAt: metadata.occurred_at,
+        folderPath: metadata.folder_path,
+      });
     }
   }, [metadata, transcripts, meetingId, setCurrentMeeting]);
 
@@ -388,11 +435,11 @@ function MeetingDetailsContent() {
 
   if (error) {
     return (
-      <div className="flex items-center justify-center h-screen">
+      <div className="flex h-full items-center justify-center">
         <div className="text-center">
           <p className="text-destructive mb-4">{error}</p>
           <button
-            onClick={() => router.push('/')}
+            onClick={() => meetingDrawer?.close()}
             className="px-4 py-2 bg-primary text-primary-foreground rounded hover:bg-primary/90"
           >
             {t('Go Back')}
@@ -404,7 +451,7 @@ function MeetingDetailsContent() {
 
   // Show loading spinner while initial data loads
   if ((isLoading || isLoadingTranscripts) || !meetingDetails) {
-    return <div className="flex items-center justify-center h-screen">
+    return <div className="flex h-full items-center justify-center">
       <LoaderIcon className="animate-spin size-6 " />
     </div>;
   }
@@ -443,12 +490,21 @@ function MeetingDetailsContent() {
 
 export default function MeetingDetails() {
   return (
-    <Suspense fallback={
-      <div className="flex items-center justify-center h-screen">
-        <LoaderIcon className="animate-spin size-6" />
-      </div>
-    }>
-      <MeetingDetailsContent />
-    </Suspense>
+    <MeetingDrawerShell>
+      <Suspense fallback={
+        <div className="flex h-full items-center justify-center">
+          <LoaderIcon className="animate-spin size-6" />
+        </div>
+      }>
+        <MeetingDetailsRoute />
+      </Suspense>
+    </MeetingDrawerShell>
   );
+}
+
+function MeetingDetailsRoute() {
+  const searchParams = useSearchParams();
+  return searchParams.get('upcoming') === '1'
+    ? <UpcomingMeetingPreview />
+    : <MeetingDetailsContent />;
 }

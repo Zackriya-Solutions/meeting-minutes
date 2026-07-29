@@ -2,23 +2,32 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { Copy, Languages, Loader2, MoreHorizontal, Save, Settings, Trash2 } from '@/components/deslop-icons';
+import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuShortcut,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { ModelSettingsModal, type ModelConfig } from '@/components/ModelSettingsModal';
 import { LanguagePickerPopover } from '@/components/LanguagePickerPopover';
 import { readMeetingSummaryLanguage, saveMeetingSummaryLanguage } from '@/lib/summary-language-preferences';
 import { labelForCode } from '@/lib/summary-languages';
 import { useT } from '@/lib/i18n';
-import { cn } from '@/lib/utils';
+import { useMeetingDrawer } from '@/contexts/MeetingDrawerContext';
 
 /**
- * The "⋯" menu for the meeting conversation (variant 2a), matching the delivery
- * prototype: Копировать саммари · Сохранить в заметку · Язык саммари · AI-модель ·
- * — · Удалить встречу (danger). Built as a plain anchored dropdown with a click-away
- * overlay (as in the prototype), not a component library menu, so the language
- * picker and model dialog compose cleanly.
+ * The "⋯" menu for the meeting conversation. Composed from shadcn DropdownMenu
+ * primitives so focus management, keyboard navigation, positioning, and dismissal
+ * follow the same accessible interaction model as the rest of the application.
  */
 
 interface MeetingOverflowMenuProps {
@@ -31,40 +40,6 @@ interface MeetingOverflowMenuProps {
   onSaveModelConfig: (config?: ModelConfig) => Promise<void>;
 }
 
-function MenuRow({
-  icon,
-  label,
-  right,
-  onClick,
-  disabled = false,
-  danger = false,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  right?: React.ReactNode;
-  onClick: () => void;
-  disabled?: boolean;
-  danger?: boolean;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      className={cn(
-        'flex w-full items-center gap-2.5 rounded-[9px] px-2.5 py-[9px] text-left text-[13px] transition-colors disabled:opacity-40',
-        danger
-          ? 'text-destructive hover:bg-destructive/10'
-          : 'text-foreground hover:bg-accent',
-      )}
-    >
-      <span className={cn('shrink-0', danger ? 'text-destructive' : 'text-muted-foreground')}>{icon}</span>
-      <span className="flex-1">{label}</span>
-      {right && <span className="text-[11px] text-muted-foreground">{right}</span>}
-    </button>
-  );
-}
-
 export function MeetingOverflowMenu({
   meetingId,
   hasSummary,
@@ -75,9 +50,8 @@ export function MeetingOverflowMenu({
   onSaveModelConfig,
 }: MeetingOverflowMenuProps) {
   const t = useT();
-  const router = useRouter();
+  const meetingDrawer = useMeetingDrawer();
   const [open, setOpen] = useState(false);
-  const [view, setView] = useState<'menu' | 'language'>('menu');
   const [modelOpen, setModelOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [language, setLanguage] = useState<string | null>(null);
@@ -91,7 +65,7 @@ export function MeetingOverflowMenu({
     return () => { active = false; };
   }, [open, meetingId]);
 
-  const closeMenu = () => { setOpen(false); setView('menu'); };
+  const closeMenu = () => setOpen(false);
 
   const handleLanguageChange = useCallback(async (code: string | null) => {
     setLanguage(code);
@@ -101,7 +75,6 @@ export function MeetingOverflowMenu({
     } catch (e) {
       toast.error(t('Failed to save summary language'));
     }
-    setView('menu');
     setOpen(false);
   }, [meetingId, t]);
 
@@ -114,65 +87,97 @@ export function MeetingOverflowMenu({
       await invoke('api_delete_meeting', { meetingId, deleteRecordingFiles: false });
       toast.success(t('Meeting deleted'));
       closeMenu();
-      router.push('/');
+      meetingDrawer?.close();
     } catch (e) {
       console.error('Failed to delete meeting:', e);
       toast.error(`${t('Failed to delete meeting')}: ${String(e)}`);
     } finally {
       setDeleting(false);
     }
-  }, [deleting, meetingId, router, t]);
+  }, [deleting, meetingDrawer, meetingId, t]);
 
   const languageLabel = language ? labelForCode(language) : t('Auto');
   const modelLabel = modelConfig.model || modelConfig.provider || '—';
 
   return (
-    <div className="relative">
-      <button
-        type="button"
-        onClick={() => (open ? closeMenu() : setOpen(true))}
-        aria-label={t('More actions')}
-        title={t('More actions')}
-        className="inline-flex h-[38px] w-[38px] items-center justify-center rounded-full border border-border bg-transparent text-foreground transition-colors hover:bg-accent"
-      >
-        <MoreHorizontal size={18} />
-      </button>
-
-      {open && (
-        <>
-          <div className="fixed inset-0 z-30" onClick={closeMenu} />
-          <div
-            className={cn(
-              'absolute right-0 top-[44px] z-40 rounded-[14px] border border-border bg-muted p-1.5 shadow-[0_18px_44px_rgba(0,0,0,0.55)]',
-              view === 'language' ? 'w-[300px]' : 'w-[248px]',
-            )}
+    <div>
+      <DropdownMenu open={open} onOpenChange={setOpen}>
+        <DropdownMenuTrigger asChild>
+          <Button
+            type="button"
+            variant="outline"
+            size="icon"
+            aria-label={t('More actions')}
+            title={t('More actions')}
+            className="h-[38px] w-[38px] rounded-full bg-transparent shadow-none"
           >
-            {view === 'menu' ? (
-              <div className="flex flex-col gap-0.5">
-                <MenuRow icon={<Copy size={16} />} label={t('Copy summary')} disabled={!hasSummary} onClick={() => { void onCopySummary(); closeMenu(); }} />
-                <MenuRow icon={<Save size={16} />} label={t('Save to note')} disabled={!hasSummary} onClick={() => { void onSaveSummary(); closeMenu(); }} />
-                <MenuRow icon={<Languages size={16} />} label={t('Summary language')} right={languageLabel} onClick={() => setView('language')} />
-                <MenuRow icon={<Settings size={16} />} label={t('AI Model')} right={modelLabel} onClick={() => { setModelOpen(true); closeMenu(); }} />
-                <div className="mx-1.5 my-1 h-px bg-border" />
-                <MenuRow
-                  icon={deleting ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
-                  label={t('Delete meeting')}
-                  danger
-                  disabled={deleting}
-                  onClick={() => void handleDelete()}
-                />
-              </div>
-            ) : (
+            <MoreHorizontal size={18} />
+          </Button>
+        </DropdownMenuTrigger>
+
+        <DropdownMenuContent
+          align="end"
+          sideOffset={6}
+          className="w-[248px] rounded-[14px] p-1.5"
+        >
+          <DropdownMenuItem
+            disabled={!hasSummary}
+            onSelect={() => void onCopySummary()}
+            className="rounded-[9px] px-2.5 py-[9px]"
+          >
+            <Copy size={16} />
+            <span>{t('Copy summary')}</span>
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            disabled={!hasSummary}
+            onSelect={() => void onSaveSummary()}
+            className="rounded-[9px] px-2.5 py-[9px]"
+          >
+            <Save size={16} />
+            <span>{t('Save to note')}</span>
+          </DropdownMenuItem>
+
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger className="rounded-[9px] px-2.5 py-[9px]">
+              <Languages size={16} />
+              <span>{t('Summary language')}</span>
+              <DropdownMenuShortcut className="tracking-normal">
+                {languageLabel}
+              </DropdownMenuShortcut>
+            </DropdownMenuSubTrigger>
+            <DropdownMenuSubContent className="rounded-lg border-0 bg-transparent p-0 shadow-none">
               <LanguagePickerPopover
                 value={language}
                 onChange={handleLanguageChange}
-                onClose={() => setView('menu')}
+                onClose={closeMenu}
                 autoSubtitle={t('Uses dominant transcript language')}
               />
-            )}
-          </div>
-        </>
-      )}
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
+
+          <DropdownMenuItem
+            onSelect={() => setModelOpen(true)}
+            className="rounded-[9px] px-2.5 py-[9px]"
+          >
+            <Settings size={16} />
+            <span>{t('AI Model')}</span>
+            <DropdownMenuShortcut className="max-w-[96px] truncate tracking-normal">
+              {modelLabel}
+            </DropdownMenuShortcut>
+          </DropdownMenuItem>
+
+          <DropdownMenuSeparator className="mx-1.5 my-1" />
+
+          <DropdownMenuItem
+            disabled={deleting}
+            onSelect={() => void handleDelete()}
+            className="rounded-[9px] px-2.5 py-[9px] text-destructive focus:bg-destructive/10 focus:text-destructive"
+          >
+            {deleting ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
+            <span>{t('Delete meeting')}</span>
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
 
       <Dialog open={modelOpen} onOpenChange={setModelOpen}>
         <DialogContent className="max-w-lg">

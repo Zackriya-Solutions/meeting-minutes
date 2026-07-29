@@ -1,0 +1,9 @@
+html,
+body,
+#storybook-root {
+  min-height: 100%;
+}
+
+body {
+  overflow: auto;
+}

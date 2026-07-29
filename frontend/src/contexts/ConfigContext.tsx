@@ -23,7 +23,6 @@ export interface StorageLocations {
 
 export interface NotificationSettings {
   auto_meeting_detection: boolean;
-  auto_listening: boolean;
   recording_notifications: boolean;
   time_based_reminders: boolean;
   meeting_reminders: boolean;
@@ -76,7 +75,6 @@ interface ConfigContextType {
 
   // Summary configuration
   isAutoSummary: boolean;
-  toggleIsAutoSummary: (checked: boolean) => void;
 
   // Provider-specific API keys
   providerApiKeys: {
@@ -158,13 +156,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
   });
 
   // Summary configs
-  const [isAutoSummary, setisAutoSummary] = useState<boolean>(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('isAutoSummary');
-      return saved !== null ? saved === 'true' : false
-    }
-    return false;
-  });
+  const isAutoSummary = true;
 
   // Beta features state (localStorage)
   const [betaFeatures, setBetaFeatures] = useState<BetaFeatures>(() => {
@@ -387,13 +379,6 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     window.dispatchEvent(new CustomEvent('confidenceIndicatorChanged', { detail: checked }));
   }, []);
 
-  const toggleIsAutoSummary = useCallback((checked: boolean) => {
-    setisAutoSummary(checked);
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('isAutoSummary', checked.toString());
-    }
-  }, [])
-
   // Toggle beta feature with localStorage persistence and analytics
   const toggleBetaFeature = useCallback((featureKey: BetaFeatureKey, enabled: boolean) => {
     setBetaFeatures(prev => {
@@ -491,7 +476,6 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     modelConfig,
     setModelConfig,
     isAutoSummary,
-    toggleIsAutoSummary,
     providerApiKeys,
     updateProviderApiKey,
     transcriptModelConfig,
@@ -515,7 +499,6 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
   }), [
     modelConfig,
     isAutoSummary,
-    toggleIsAutoSummary,
     providerApiKeys,
     updateProviderApiKey,
     transcriptModelConfig,

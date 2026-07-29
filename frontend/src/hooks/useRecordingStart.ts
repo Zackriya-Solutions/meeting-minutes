@@ -6,7 +6,6 @@ import { useConfig } from '@/contexts/ConfigContext';
 import { useRecordingState, RecordingStatus } from '@/contexts/RecordingStateContext';
 import { recordingService } from '@/services/recordingService';
 import Analytics from '@/lib/analytics';
-import { showRecordingNotification } from '@/lib/recordingNotification';
 import {
   getConfiguredTranscriptionReadiness,
   type TranscriptionReadiness,
@@ -172,8 +171,6 @@ export function useRecordingStart(
       setIsMeetingActive(true);
       Analytics.trackButtonClick('start_recording', 'home_page');
 
-      // Show recording notification if enabled
-      await showRecordingNotification();
     } catch (error) {
       console.error('Failed to start recording:', error);
       setStatus(RecordingStatus.ERROR, error instanceof Error ? error.message : 'Failed to start recording');
@@ -228,8 +225,6 @@ export function useRecordingStart(
             setIsMeetingActive(true);
             Analytics.trackButtonClick('start_recording', 'sidebar_auto');
 
-            // Show recording notification if enabled
-            await showRecordingNotification();
             sessionStorage.removeItem('autoListeningStart');
           } catch (error) {
             console.error('Failed to auto-start recording:', error);
@@ -304,8 +299,6 @@ export function useRecordingStart(
         setIsMeetingActive(true);
         Analytics.trackButtonClick('start_recording', 'sidebar_direct');
 
-        // Show recording notification if enabled
-        await showRecordingNotification();
         sessionStorage.removeItem('autoListeningStart');
       } catch (error) {
         console.error('Failed to start recording from sidebar:', error);
