@@ -7,6 +7,21 @@ use tracing::info;
 
 const REQUEST_TIMEOUT_DURATION: Duration = Duration::from_secs(300);
 
+/// MiniMax OpenAI-compatible base URLs by region.
+const MINIMAX_GLOBAL_BASE_URL: &str = "https://api.minimax.io/v1";
+const MINIMAX_CN_BASE_URL: &str = "https://api.minimaxi.com/v1";
+/// Region used for MiniMax summary dispatch by default.
+const MINIMAX_DEFAULT_REGION: &str = "global";
+
+/// Resolve the MiniMax OpenAI-compatible base URL for a region.
+/// Any unrecognized region falls back to the global endpoint.
+fn minimax_base_url(region: &str) -> &'static str {
+    match region.to_lowercase().as_str() {
+        "cn" | "cn_zh" | "china" => MINIMAX_CN_BASE_URL,
+        _ => MINIMAX_GLOBAL_BASE_URL,
+    }
+}
+
 // Generic structure for OpenAI-compatible API chat messages
 #[derive(Debug, Serialize)]
 pub struct ChatMessage {
@@ -71,6 +86,7 @@ pub enum LLMProvider {
     Groq,
     Ollama,
     OpenRouter,
+    MiniMax,
     BuiltInAI,
     CustomOpenAI,
 }
@@ -84,6 +100,7 @@ impl LLMProvider {
             "groq" => Ok(Self::Groq),
             "ollama" => Ok(Self::Ollama),
             "openrouter" => Ok(Self::OpenRouter),
+            "minimax" => Ok(Self::MiniMax),
             "builtin-ai" | "local-llama" | "localllama" => Ok(Self::BuiltInAI),
             "custom-openai" => Ok(Self::CustomOpenAI),
             _ => Err(format!("Unsupported LLM provider: {}", s)),
@@ -159,6 +176,10 @@ pub async fn generate_summary(
         ),
         LLMProvider::OpenRouter => (
             "https://openrouter.ai/api/v1/chat/completions".to_string(),
+            header::HeaderMap::new(),
+        ),
+        LLMProvider::MiniMax => (
+            format!("{}/chat/completions", minimax_base_url(MINIMAX_DEFAULT_REGION)),
             header::HeaderMap::new(),
         ),
         LLMProvider::Ollama => {
@@ -341,6 +362,32 @@ fn provider_name(provider: &LLMProvider) -> &str {
         LLMProvider::Ollama => "Ollama",
         LLMProvider::BuiltInAI => "Built-in AI",
         LLMProvider::OpenRouter => "OpenRouter",
+        LLMProvider::MiniMax => "MiniMax",
         LLMProvider::CustomOpenAI => "Custom OpenAI",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{minimax_base_url, provider_name, LLMProvider};
+
+    #[test]
+    fn parses_minimax_provider() {
+        assert_eq!(LLMProvider::from_str("minimax"), Ok(LLMProvider::MiniMax));
+        assert_eq!(LLMProvider::from_str("MiniMax"), Ok(LLMProvider::MiniMax));
+    }
+
+    #[test]
+    fn exposes_minimax_provider_name() {
+        assert_eq!(provider_name(&LLMProvider::MiniMax), "MiniMax");
+    }
+
+    #[test]
+    fn resolves_minimax_regional_base_urls() {
+        assert_eq!(minimax_base_url("global"), "https://api.minimax.io/v1");
+        assert_eq!(minimax_base_url("cn_zh"), "https://api.minimaxi.com/v1");
+        assert_eq!(minimax_base_url("cn"), "https://api.minimaxi.com/v1");
+        // Unknown regions fall back to the global endpoint.
+        assert_eq!(minimax_base_url("unknown"), "https://api.minimax.io/v1");
     }
 }

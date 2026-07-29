@@ -89,6 +89,9 @@ pub struct Setting {
     #[sqlx(rename = "openRouterApiKey")]
     #[serde(rename = "openRouterApiKey")]
     pub open_router_api_key: Option<String>,
+    #[sqlx(rename = "minimaxApiKey")]
+    #[serde(rename = "minimaxApiKey")]
+    pub minimax_api_key: Option<String>,
     #[sqlx(rename = "ollamaEndpoint")]
     #[serde(rename = "ollamaEndpoint")]
     pub ollama_endpoint: Option<String>,
