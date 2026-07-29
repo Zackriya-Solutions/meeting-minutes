@@ -3386,6 +3386,7 @@ mod tests {
         // Same fragment-rejoin pass as production refinement.
         let transcripts = crate::audio::refinement::rejoin_sentence_fragments(
             transcripts,
+            &turns,
             crate::audio::refinement::FRAGMENT_JOIN_MAX_GAP_MS,
         );
         let rows: Vec<serde_json::Value> = transcripts

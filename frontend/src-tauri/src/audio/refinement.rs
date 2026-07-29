@@ -461,7 +461,8 @@ async fn turn_aligned_retranscribe<R: Runtime>(
         anyhow::bail!("turn-aligned transcription produced no text");
     }
     // Rejoin sentences that phantom boundary micro-spans split across rows.
-    let transcripts = rejoin_sentence_fragments(transcripts, FRAGMENT_JOIN_MAX_GAP_MS);
+    let transcripts =
+        rejoin_sentence_fragments(transcripts, &plan.turns, FRAGMENT_JOIN_MAX_GAP_MS);
 
     // 4) Replace the meeting's rows atomically.
     let segments = crate::audio::common::create_transcript_segments(&transcripts);
@@ -604,19 +605,50 @@ pub(crate) async fn transcribe_short_span_with_context(
 /// Maximum silence between two rows for them to still be one split sentence.
 pub(crate) const FRAGMENT_JOIN_MAX_GAP_MS: f64 = 2_500.0;
 
+/// The diarization cluster owning most of `[start_ms, end_ms]`, by summed turn overlap.
+/// `None` when no turn overlaps the range at all.
+pub(crate) fn majority_cluster(
+    start_ms: i64,
+    end_ms: i64,
+    turns: &[crate::pipeline::diarization::SpeakerTurn],
+) -> Option<i64> {
+    let mut overlap: std::collections::HashMap<i64, i64> = std::collections::HashMap::new();
+    for t in turns {
+        let ov = (end_ms.min(t.end_ms) - start_ms.max(t.start_ms)).max(0);
+        if ov > 0 {
+            *overlap.entry(t.cluster_id).or_insert(0) += ov;
+        }
+    }
+    overlap
+        .into_iter()
+        .max_by(|a, b| a.1.cmp(&b.1).then(b.0.cmp(&a.0)))
+        .map(|(c, _)| c)
+}
+
 /// Rejoin sentence fragments that phantom boundary micro-spans split across rows.
 ///
 /// The two segmentation grids disagree by a few hundred ms about where a speaker change
 /// happens; the disagreement sliver becomes a micro-span whose cluster attachment is a
 /// coin flip, splitting the first word(s) of a reply onto a phantom speaker (observed:
 /// «Понять,» / «Нужно ли мне здесь ставить…» as two rows, «Он ещё» / «не готов.»).
-/// GigaAM's punctuation+capitalization marks the seam: a row that ends without
-/// sentence-final punctuation continues into the next row when either (a) it is a ≤2-word
-/// fragment, or (b) the next row starts lowercase. Merged rows span both time ranges, so
-/// speaker attribution resolves to whoever dominates the combined audio — the real
-/// speaker, since the phantom sliver is the smaller piece.
+/// GigaAM's punctuation+capitalization marks the seam. A row ending without
+/// sentence-final punctuation merges into the next row when:
+/// - both rows belong to the SAME diarization cluster (per `turns` majority overlap):
+///   it is a ≤2-word fragment, or the next row starts lowercase — same voice, so the
+///   merge can never re-fuse two speakers;
+/// - the rows belong to DIFFERENT (or unknown) clusters: only on explicit mid-sentence
+///   evidence — the row ends with a comma, or the next row starts lowercase. A bare
+///   unpunctuated fragment before a capitalized row does NOT merge across clusters:
+///   that is the shape of a genuine short reply («Да» that the model left unpunctuated)
+///   followed by another speaker's new sentence, and merging it would re-fuse two
+///   speakers into one row — the defect this PR exists to fix.
+///
+/// Merged rows span both time ranges, so speaker attribution resolves to whoever
+/// dominates the combined audio — the real speaker, since the phantom sliver is the
+/// smaller piece.
 pub(crate) fn rejoin_sentence_fragments(
     rows: Vec<(String, f64, f64)>,
+    turns: &[crate::pipeline::diarization::SpeakerTurn],
     max_gap_ms: f64,
 ) -> Vec<(String, f64, f64)> {
     fn ends_terminal(text: &str) -> bool {
@@ -625,30 +657,41 @@ pub(crate) fn rejoin_sentence_fragments(
             Some('.' | '!' | '?' | '…') | None
         )
     }
+    fn ends_mid_sentence(text: &str) -> bool {
+        matches!(text.trim_end().chars().last(), Some(',' | ':' | ';'))
+    }
     fn starts_lowercase(text: &str) -> bool {
         text.trim_start()
             .chars()
             .next()
             .is_some_and(|c| c.is_lowercase())
     }
-    let mut out: Vec<(String, f64, f64)> = Vec::new();
+    // (text, start_ms, end_ms, majority cluster)
+    let mut out: Vec<(String, f64, f64, Option<i64>)> = Vec::new();
     for (text, start_ms, end_ms) in rows {
+        let cluster = majority_cluster(start_ms as i64, end_ms as i64, turns);
         if let Some(last) = out.last_mut() {
             let unterminated = !ends_terminal(&last.0);
-            let last_is_fragment =
-                unterminated && last.0.split_whitespace().count() <= 2;
+            let last_is_fragment = unterminated && last.0.split_whitespace().count() <= 2;
             let next_continues = starts_lowercase(&text);
-            if start_ms - last.2 <= max_gap_ms
-                && (last_is_fragment || (unterminated && next_continues))
-            {
+            let same_cluster = last.3.is_some() && last.3 == cluster;
+            let should_merge = if same_cluster {
+                last_is_fragment || (unterminated && next_continues)
+            } else {
+                unterminated && (ends_mid_sentence(&last.0) || next_continues)
+            };
+            if start_ms - last.2 <= max_gap_ms && should_merge {
                 last.0 = format!("{} {}", last.0.trim_end(), text.trim_start());
                 last.2 = last.2.max(end_ms);
+                // The merged row's voice is whichever cluster dominates the combined
+                // span — recompute so chained merges keep comparing against reality.
+                last.3 = majority_cluster(last.1 as i64, last.2 as i64, turns);
                 continue;
             }
         }
-        out.push((text, start_ms, end_ms));
+        out.push((text, start_ms, end_ms, cluster));
     }
-    out
+    out.into_iter().map(|(t, s, e, _)| (t, s, e)).collect()
 }
 
 /// One transcript row as needed for turn assembly.
@@ -931,7 +974,7 @@ mod tests {
             ("не готов.".to_string(), 1_810_200.0, 1_811_000.0),
             ("Всё понял.".to_string(), 1_812_000.0, 1_813_000.0),
         ];
-        let out = rejoin_sentence_fragments(rows, FRAGMENT_JOIN_MAX_GAP_MS);
+        let out = rejoin_sentence_fragments(rows, &[], FRAGMENT_JOIN_MAX_GAP_MS);
         let texts: Vec<&str> = out.iter().map(|r| r.0.as_str()).collect();
         assert_eq!(
             texts,
@@ -954,7 +997,7 @@ mod tests {
             ("важно разделять".to_string(), 4_200.0, 5_000.0),
             ("Прототип готов, NVP не готов.".to_string(), 5_500.0, 9_000.0),
         ];
-        let out = rejoin_sentence_fragments(rows, FRAGMENT_JOIN_MAX_GAP_MS);
+        let out = rejoin_sentence_fragments(rows, &[], FRAGMENT_JOIN_MAX_GAP_MS);
         let texts: Vec<&str> = out.iter().map(|r| r.0.as_str()).collect();
         // The lowercase chain merges; the capitalized full sentence stays its own row.
         assert_eq!(
@@ -970,15 +1013,46 @@ mod tests {
             ("Готовы к MVP?".to_string(), 0.0, 1_000.0),
             ("Нет, нет.".to_string(), 1_100.0, 2_000.0),
         ];
-        let out = rejoin_sentence_fragments(rows, FRAGMENT_JOIN_MAX_GAP_MS);
+        let out = rejoin_sentence_fragments(rows, &[], FRAGMENT_JOIN_MAX_GAP_MS);
         assert_eq!(out.len(), 2);
         // A long pause blocks merging even mid-sentence.
         let rows = vec![
             ("Осталось".to_string(), 0.0, 800.0),
             ("совсем немного.".to_string(), 10_000.0, 12_000.0),
         ];
-        let out = rejoin_sentence_fragments(rows, FRAGMENT_JOIN_MAX_GAP_MS);
+        let out = rejoin_sentence_fragments(rows, &[], FRAGMENT_JOIN_MAX_GAP_MS);
         assert_eq!(out.len(), 2);
+    }
+
+    #[test]
+    fn genuine_unpunctuated_reply_never_merges_across_speakers() {
+        // A real short reply the model left unpunctuated («Да»), followed by ANOTHER
+        // speaker's new capitalized sentence. Bare-fragment merging is same-cluster
+        // only, so the two speakers' rows must stay separate.
+        let rows = vec![
+            ("Да".to_string(), 0.0, 500.0),
+            ("Давайте начнём со статусов.".to_string(), 700.0, 4_000.0),
+        ];
+        let cross_cluster = vec![turn(0, 500, 2), turn(700, 4_000, 0)];
+        let out = rejoin_sentence_fragments(rows.clone(), &cross_cluster, FRAGMENT_JOIN_MAX_GAP_MS);
+        assert_eq!(out.len(), 2, "different speakers must not re-fuse");
+
+        // The same shape within ONE speaker's own turn is a split utterance — merge.
+        let same_cluster = vec![turn(0, 4_000, 2)];
+        let out = rejoin_sentence_fragments(rows, &same_cluster, FRAGMENT_JOIN_MAX_GAP_MS);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].0, "Да Давайте начнём со статусов.");
+
+        // Cross-cluster merging still happens on explicit mid-sentence evidence: a
+        // comma ending («Понять,») or a lowercase continuation («не готов.») — that is
+        // the phantom-micro-span shape this pass exists to repair.
+        let rows = vec![
+            ("Понять,".to_string(), 0.0, 1_500.0),
+            ("Нужно ли мне здесь ставить жёлтый?".to_string(), 2_000.0, 8_000.0),
+        ];
+        let cross = vec![turn(0, 1_500, 4), turn(2_000, 8_000, 1)];
+        let out = rejoin_sentence_fragments(rows, &cross, FRAGMENT_JOIN_MAX_GAP_MS);
+        assert_eq!(out.len(), 1);
     }
 
     #[test]
