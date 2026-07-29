@@ -82,6 +82,7 @@ interface ConfigContextType {
     groq: string | null;
     openai: string | null;
     openrouter: string | null;
+    minimax: string | null;
   };
   updateProviderApiKey: (provider: string, apiKey: string | null) => void;
 
@@ -119,11 +120,13 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     groq: string | null;
     openai: string | null;
     openrouter: string | null;
+    minimax: string | null;
   }>({
     claude: null,
     groq: null,
     openai: null,
     openrouter: null,
+    minimax: null,
   });
 
   // Ollama models list and error state
@@ -295,7 +298,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const loadAllApiKeys = async () => {
       try {
-        const providers = ['claude', 'groq', 'openai', 'openrouter'];
+        const providers = ['claude', 'groq', 'openai', 'openrouter', 'minimax'];
         const keys = await Promise.all(
           providers.map(p =>
             invoke<string>('api_get_api_key', { provider: p })
@@ -308,6 +311,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
           groq: keys[1],
           openai: keys[2],
           openrouter: keys[3],
+          minimax: keys[4],
         });
         console.log('[ConfigContext] Loaded provider API keys');
       } catch (error) {
@@ -367,6 +371,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     claude: ['claude-3-5-sonnet-latest'],
     groq: ['llama-3.3-70b-versatile'],
     openrouter: [],
+    minimax: ['MiniMax-M3', 'MiniMax-M2.7'],
     openai: ['gpt-4', 'gpt-4-turbo', 'gpt-3.5-turbo'],
     'builtin-ai': [],
     'custom-openai': [],
