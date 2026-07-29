@@ -65,6 +65,7 @@ export const RefreshCw = makeIcon('refresh');
 export const RotateCw = makeIcon('refresh');
 export const Save = makeIcon('save');
 export const Search = makeIcon('search');
+export const Send = makeIcon('send');
 export const SearchIcon = makeIcon('search');
 export const Settings = makeIcon('settings');
 export const Shield = makeIcon('lock');

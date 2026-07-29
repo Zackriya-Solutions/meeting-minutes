@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
-import { Copy, Languages, Loader2, Save, Settings, Trash2 } from '@/components/memento/LucideCompat';
+import { Copy, Languages, Loader2, Save, Send, Settings, Trash2 } from '@/components/memento/LucideCompat';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { ModelSettingsModal, type ModelConfig } from '@/components/ModelSettingsModal';
 import { LanguagePickerPopover } from '@/components/LanguagePickerPopover';
@@ -26,6 +26,9 @@ interface MeetingOverflowMenuProps {
   hasSummary: boolean;
   onCopySummary: () => Promise<void> | void;
   onSaveSummary: () => Promise<void> | void;
+  /** Omitted (along with `canShareToTelegram`) when Telegram sharing is unavailable. */
+  onShareSummaryToTelegram?: () => Promise<void> | void;
+  canShareToTelegram?: boolean;
   modelConfig: ModelConfig;
   setModelConfig: (config: ModelConfig | ((prev: ModelConfig) => ModelConfig)) => void;
   onSaveModelConfig: (config?: ModelConfig) => Promise<void>;
@@ -70,6 +73,8 @@ export function MeetingOverflowMenu({
   hasSummary,
   onCopySummary,
   onSaveSummary,
+  onShareSummaryToTelegram,
+  canShareToTelegram = false,
   modelConfig,
   setModelConfig,
   onSaveModelConfig,
@@ -155,6 +160,14 @@ export function MeetingOverflowMenu({
               <div className="flex flex-col gap-0.5">
                 <MenuRow icon={<Copy size={16} />} label={t('Copy summary')} disabled={!hasSummary} onClick={() => { void onCopySummary(); closeMenu(); }} />
                 <MenuRow icon={<Save size={16} />} label={t('Save to note')} disabled={!hasSummary} onClick={() => { void onSaveSummary(); closeMenu(); }} />
+                {canShareToTelegram && onShareSummaryToTelegram && (
+                  <MenuRow
+                    icon={<Send size={16} />}
+                    label={t('Send to Telegram')}
+                    disabled={!hasSummary}
+                    onClick={() => { void onShareSummaryToTelegram(); closeMenu(); }}
+                  />
+                )}
                 <MenuRow icon={<Languages size={16} />} label={t('Summary language')} right={languageLabel} onClick={() => setView('language')} />
                 <MenuRow icon={<Settings size={16} />} label={t('AI Model')} right={modelLabel} onClick={() => { setModelOpen(true); closeMenu(); }} />
                 <div className="mx-1.5 my-1 h-px bg-[var(--border-subtle)]" />

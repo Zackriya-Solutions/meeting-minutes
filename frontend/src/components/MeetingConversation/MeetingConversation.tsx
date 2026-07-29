@@ -249,6 +249,8 @@ export function MeetingConversation({
           hasSummary={hasSummary}
           onCopySummary={onCopySummary}
           onSaveSummary={onSaveSummary}
+          onShareSummaryToTelegram={summaryPanelProps.onShareSummaryToTelegram}
+          canShareToTelegram={summaryPanelProps.canShareToTelegram}
           modelConfig={summaryPanelProps.modelConfig}
           setModelConfig={summaryPanelProps.setModelConfig}
           onSaveModelConfig={summaryPanelProps.onSaveModelConfig}

@@ -64,6 +64,7 @@ pub mod salutespeech;
 pub mod search;
 pub mod state;
 pub mod summary;
+pub mod telegram;
 pub mod tray;
 pub mod utils;
 pub mod vector;
@@ -914,6 +915,9 @@ pub fn run() {
             report::commands::submit_analytics_answers,
             report::commands::submit_analytics_speakers,
             report::commands::reveal_report_in_folder,
+            // Telegram sharing
+            telegram::commands::telegram_share_text,
+            telegram::commands::save_summary_markdown_file,
             summary::content_window::get_meeting_content_window_suggestion,
             summary::content_window::set_meeting_content_window_preference,
             summary::standup_workflow::list_standup_records,
