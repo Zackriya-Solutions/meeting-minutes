@@ -117,7 +117,7 @@ export default function ChatPage() {
   const meetingTitle = (id: string) => meetings.find((m) => m.id === id)?.title ?? id.slice(0, 8);
   return (
     <ChatDrawerShell>
-    <div className="mm-page !h-full">
+    <div className="mm-page drawer-elevation-surface !h-full">
       {/* Header */}
       <div className="mm-page-header">
         <h1 className="memento-serif-title truncate text-2xl leading-tight text-foreground">

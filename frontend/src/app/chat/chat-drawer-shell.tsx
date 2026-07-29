@@ -57,6 +57,7 @@ export function ChatDrawerShell({ children }: { children: ReactNode }) {
         open={open}
         onOpenChange={setOpen}
         onOpenChangeComplete={handleOpenChangeComplete}
+        modal={false}
         swipeDirection="right"
         showSwipeHandle
       >

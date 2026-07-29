@@ -64,6 +64,7 @@ export function RecordingDrawerShell({
         open={open}
         onOpenChange={handleOpenChange}
         onOpenChangeComplete={handleOpenChangeComplete}
+        modal={false}
         swipeDirection="right"
         showSwipeHandle
       >

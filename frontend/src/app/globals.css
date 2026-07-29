@@ -417,6 +417,9 @@
     --drawer-max-height: calc(100dvh - 24px);
     border-radius: 22px;
   }
+  .drawer-elevation-surface {
+    background: var(--elevation-1) !important;
+  }
   .recording-route-drawer .mm-record-overlay {
     width: 100%;
     box-shadow: none;
