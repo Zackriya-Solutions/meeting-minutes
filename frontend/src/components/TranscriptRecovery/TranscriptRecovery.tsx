@@ -7,7 +7,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { formatDistanceToNow } from 'date-fns';
-import { AlertCircle, CheckCircle2, Clock, FileText, Trash2, XCircle } from '@/components/memento/LucideCompat';
+import { AlertCircle, CheckCircle2, Clock, FileText, Trash2, XCircle } from '@/components/deslop-icons';
 import {
   Dialog,
   DialogContent,
@@ -159,11 +159,11 @@ export function TranscriptRecovery({
                       </div>
                       {meeting.folderPath ? (
                         <span title={t('Audio available')}>
-                          <CheckCircle2 className="w-4 h-4 text-[var(--success)] flex-shrink-0" />
+                          <CheckCircle2 className="w-4 h-4 text-success flex-shrink-0" />
                         </span>
                       ) : (
                         <span title={t('No audio')}>
-                          <AlertCircle className="w-4 h-4 text-[var(--gold)] flex-shrink-0" />
+                          <AlertCircle className="w-4 h-4 text-primary flex-shrink-0" />
                         </span>
                       )}
                     </div>
@@ -191,12 +191,12 @@ export function TranscriptRecovery({
                         {selectedMeeting.transcriptCount} {t('transcripts')}
                       </span>
                       {selectedMeeting.folderPath ? (
-                        <span className="flex items-center gap-1 text-[var(--success)]">
+                        <span className="flex items-center gap-1 text-success">
                           <CheckCircle2 className="w-4 h-4" />
                           {t('Audio available')}
                         </span>
                       ) : (
-                        <span className="flex items-center gap-1 text-[var(--gold)]">
+                        <span className="flex items-center gap-1 text-primary">
                           <AlertCircle className="w-4 h-4" />
                           {t('No audio')}
                         </span>

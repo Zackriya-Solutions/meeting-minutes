@@ -19,24 +19,24 @@ export function ModelDownloadProgress({ status, modelName, onCancel }: ModelDown
   const isCompleted = progress >= 100;
 
   return (
-    <div className="bg-[var(--gold-soft)] border border-[var(--gold-border)] rounded-lg p-4">
+    <div className="bg-primary/10 border border-primary/40 rounded-lg p-4">
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center space-x-2">
-          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-[var(--gold-border)]"></div>
-          <span className="text-sm font-medium text-[var(--gold)]">
+          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary/40"></div>
+          <span className="text-sm font-medium text-primary">
             {isCompleted ? t('Finalizing...') : `${t('Downloading')} ${modelName}`}
           </span>
         </div>
       </div>
       
       <div className="relative">
-        <div className="w-full bg-[var(--gold-soft)] rounded-full h-2">
+        <div className="w-full bg-primary/10 rounded-full h-2">
           <div 
-            className="bg-[var(--gold)] h-2 rounded-full transition-all duration-300 ease-out"
+            className="bg-primary h-2 rounded-full transition-all duration-300 ease-out"
             style={{ width: `${Math.min(progress, 100)}%` }}
           />
         </div>
-        <div className="flex justify-between text-xs text-[var(--gold)] mt-1">
+        <div className="flex justify-between text-xs text-primary mt-1">
           <span>{Math.round(progress)}% {t('complete')}</span>
           {!isCompleted && (
             <span className="animate-pulse">{t('Downloading...')}</span>
@@ -45,7 +45,7 @@ export function ModelDownloadProgress({ status, modelName, onCancel }: ModelDown
       </div>
       
       {isCompleted && (
-        <div className="mt-2 text-xs text-[var(--success)]">
+        <div className="mt-2 text-xs text-success">
           {t('✓ Download completed, loading model...')}
         </div>
       )}
@@ -76,7 +76,7 @@ export function ProgressRing({ progress, size = 40, strokeWidth = 3 }: ProgressR
           cx={size / 2}
           cy={size / 2}
           r={radius}
-          stroke="#e5e7eb"
+          className="stroke-muted"
           strokeWidth={strokeWidth}
           fill="transparent"
         />
@@ -84,16 +84,15 @@ export function ProgressRing({ progress, size = 40, strokeWidth = 3 }: ProgressR
           cx={size / 2}
           cy={size / 2}
           r={radius}
-          stroke="#3b82f6"
+          className="stroke-primary transition-all duration-300 ease-in-out"
           strokeWidth={strokeWidth}
           strokeDasharray={strokeDasharray}
           strokeDashoffset={strokeDashoffset}
           strokeLinecap="round"
           fill="transparent"
-          className="transition-all duration-300 ease-in-out"
         />
       </svg>
-      <span className="absolute text-xs font-medium text-[var(--gold)]">
+      <span className="absolute text-xs font-medium text-primary">
         {Math.round(progress)}%
       </span>
     </div>
@@ -114,17 +113,17 @@ export function DownloadSummary({ totalModels, downloadedModels, totalSizeMb }: 
   };
 
   return (
-    <div className="bg-[var(--bg-sheet)] rounded-lg p-3 text-sm">
+    <div className="bg-background rounded-lg p-3 text-sm">
       <div className="flex items-center justify-between">
-        <span className="text-[var(--fg2)]">
+        <span className="text-muted-foreground">
           {t('Models available:')} {downloadedModels} {t('of')} {totalModels}
         </span>
-        <span className="text-[var(--fg2)]">
+        <span className="text-muted-foreground">
           {t('Total')} {formatSize(totalSizeMb)}
         </span>
       </div>
       {downloadedModels > 0 && (
-        <div className="mt-1 text-xs text-[var(--success)]">
+        <div className="mt-1 text-xs text-success">
           {t('✓ Models run locally - no internet required for transcription')}
         </div>
       )}

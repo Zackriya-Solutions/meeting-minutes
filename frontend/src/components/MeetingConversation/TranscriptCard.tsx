@@ -6,6 +6,7 @@ import { Transcript, TranscriptSegmentData } from '@/types';
 import { TranscriptPanel } from '@/components/MeetingDetails/TranscriptPanel';
 import { DetectSpeakersButton } from '@/components/MeetingDetails/DetectSpeakersButton';
 import { useT } from '@/lib/i18n';
+import { ChevronDown, ChevronUp, List } from '@/components/deslop-icons';
 
 /**
  * Transcript pin for the meeting conversation (variant 3a): a minimal rounded chip
@@ -94,16 +95,12 @@ export function TranscriptCard({
           onClick={() => onToggle(!expanded)}
           aria-expanded={expanded}
           aria-controls={panelId}
-          className="inline-flex items-center gap-[9px] rounded-full bg-[var(--bg-elevated)] py-2 pl-3 pr-3.5 text-[var(--fg2)] transition-colors hover:text-[var(--fg1)]"
+          className="inline-flex items-center gap-[9px] rounded-full bg-muted py-2 pl-3 pr-3.5 text-muted-foreground transition-colors hover:text-foreground"
         >
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M5 7h14M5 12h14M5 17h8" />
-          </svg>
+          <List size={15} />
           <span className="text-[13px] font-semibold">{t('Transcript')}</span>
-          {meta && <span className="mm-numeric text-[11.5px] text-[var(--fg3)]">{meta}</span>}
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--fg3)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d={expanded ? 'm6 15 6-6 6 6' : 'm6 9 6 6 6-6'} />
-          </svg>
+          {meta && <span className="mm-numeric text-[11.5px] text-muted-foreground">{meta}</span>}
+          {expanded ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
         </button>
 
         {/* Run speaker diarization on this meeting's transcript. */}

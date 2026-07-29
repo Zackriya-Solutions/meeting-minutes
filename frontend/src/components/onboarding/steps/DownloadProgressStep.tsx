@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { Mic, Sparkles, Check, Loader2, Download } from '@/components/memento/LucideCompat';
+import { Mic, Sparkles, Check, Loader2, Download, RefreshCw } from '@/components/deslop-icons';
 import { Button } from '@/components/ui/button';
 import { OnboardingContainer } from '../OnboardingContainer';
 import { useOnboarding } from '@/contexts/OnboardingContext';
@@ -378,16 +378,16 @@ export function DownloadProgressStep() {
     onDownload?: () => void,
     hint?: string
   ) => (
-    <div className="bg-[var(--bg-canvas)] rounded-xl border border-[var(--border-subtle)] p-5">
+    <div className="bg-background rounded-xl border border-border p-5">
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-full bg-[var(--bg-elevated)] flex items-center justify-center">
+          <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center">
             {icon}
           </div>
           <div>
-            <h3 className="font-medium text-[var(--fg1)]">{title}</h3>
-            <p className="text-sm text-[var(--fg2)]">{modelSize}</p>
-            {hint && <p className="text-xs text-[var(--fg3)] mt-0.5">{hint}</p>}
+            <h3 className="font-medium text-foreground">{title}</h3>
+            <p className="text-sm text-muted-foreground">{modelSize}</p>
+            {hint && <p className="text-xs text-muted-foreground mt-0.5">{hint}</p>}
           </div>
         </div>
         <div>
@@ -395,25 +395,25 @@ export function DownloadProgressStep() {
             onDownload ? (
               <button
                 onClick={onDownload}
-                className="flex items-center gap-1.5 h-8 px-3 rounded-md border border-[var(--border-subtle)] text-sm text-[var(--fg2)] hover:bg-[var(--bg-elevated)] transition-colors"
+                className="flex items-center gap-1.5 h-8 px-3 rounded-md border border-border text-sm text-muted-foreground hover:bg-muted transition-colors"
               >
                 <Download className="w-4 h-4" />
                 {t('Download')}
               </button>
             ) : (
-              <span className="text-xs text-[var(--fg3)]">{t('Optional')}</span>
+              <span className="text-xs text-muted-foreground">{t('Optional')}</span>
             )
           )}
           {state.status === 'downloading' && (
-            <Loader2 className="w-5 h-5 text-[var(--fg2)] animate-spin" />
+            <Loader2 className="w-5 h-5 text-muted-foreground animate-spin" />
           )}
           {state.status === 'completed' && (
-            <div className="w-6 h-6 rounded-full bg-[color-mix(in_srgb,var(--success)_12%,transparent)] flex items-center justify-center">
-              <Check className="w-4 h-4 text-[var(--success)]" />
+            <div className="w-6 h-6 rounded-full bg-success/10 flex items-center justify-center">
+              <Check className="w-4 h-4 text-success" />
             </div>
           )}
           {state.status === 'error' && (
-            <span className="text-sm text-[var(--danger)]">{t('Failed')}</span>
+            <span className="text-sm text-destructive">{t('Failed')}</span>
           )}
         </div>
       </div>
@@ -421,23 +421,23 @@ export function DownloadProgressStep() {
       {/* Progress Bar */}
       {(state.status === 'downloading' || state.status === 'completed') && (
         <div className="space-y-2">
-          <div className="w-full h-2 bg-[var(--bg-elevated)] rounded-full overflow-hidden">
+          <div className="w-full h-2 bg-muted rounded-full overflow-hidden">
             <div
-              className="h-full rounded-full bg-[var(--fg2)] transition-all duration-300"
+              className="h-full rounded-full bg-muted-foreground transition-all duration-300"
               style={{ width: `${state.progress}%` }}
             />
           </div>
           <div className="flex items-center justify-between text-sm">
-            <span className="text-[var(--fg2)]">
+            <span className="text-muted-foreground">
               {state.downloadedMb.toFixed(1)} {sizeUnit} / {state.totalMb.toFixed(1)} {sizeUnit}
             </span>
             <div className="flex items-center gap-2">
               {state.speedMbps > 0 && (
-                <span className="text-[var(--fg2)]">
+                <span className="text-muted-foreground">
                   {state.speedMbps.toFixed(1)} {sizeUnit}/s
                 </span>
               )}
-              <span className="font-semibold text-[var(--fg1)]">
+              <span className="font-semibold text-foreground">
                 {Math.round(state.progress)}%
               </span>
             </div>
@@ -446,18 +446,15 @@ export function DownloadProgressStep() {
       )}
 
       {state.status === 'error' && state.error && (
-        <div className="mt-2 p-3 bg-[color-mix(in_srgb,var(--danger)_12%,transparent)] border border-[color-mix(in_srgb,var(--danger)_42%,transparent)] rounded-md">
-          <p className="text-sm text-[var(--danger)] font-medium">{t('Download Error')}</p>
-          <p className="text-xs text-[var(--danger)] mt-1">{state.error}</p>
+        <div className="mt-2 p-3 bg-destructive/10 border border-destructive/40 rounded-md">
+          <p className="text-sm text-destructive font-medium">{t('Download Error')}</p>
+          <p className="text-xs text-destructive mt-1">{state.error}</p>
           {(type === 'transcription' || type === 'summary') && (
             <button
               onClick={type === 'transcription' ? handleRetryDownload : handleRetrySummaryDownload}
-              className="mt-3 flex h-9 w-full items-center justify-center gap-2 rounded-full bg-[var(--gold)] px-4 text-sm font-medium text-[var(--fg-inverse)] transition-colors hover:bg-[var(--gold-active)]"
+              className="mt-3 flex h-9 w-full items-center justify-center gap-2 rounded-full bg-primary px-4 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
             >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                      d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-              </svg>
+              <RefreshCw size={16} />
               {t('Try Again')}
             </button>
           )}
@@ -479,7 +476,7 @@ export function DownloadProgressStep() {
           {renderDownloadCard(
             'transcription',
             t('Transcription Engine'),
-            <Mic className="w-5 h-5 text-[var(--fg2)]" />,
+            <Mic className="w-5 h-5 text-muted-foreground" />,
             parakeetState,
             'Parakeet · ~670 MB',
             'MB',
@@ -490,7 +487,7 @@ export function DownloadProgressStep() {
           {renderDownloadCard(
             'summary',
             t('Summary Engine'),
-            <Sparkles className="w-5 h-5 text-[var(--fg2)]" />,
+            <Sparkles className="w-5 h-5 text-muted-foreground" />,
             summaryState,
             getSummaryModelSizeLabel(selectedSummaryModel || recommendedSummaryModel),
             'MiB',
@@ -507,13 +504,13 @@ export function DownloadProgressStep() {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -10 }}
               transition={{ duration: 0.3, ease: 'easeOut' }}
-              className="w-full max-w-lg bg-[var(--bg-elevated)] rounded-lg p-4 text-sm text-[var(--fg1)]"
+              className="w-full max-w-lg bg-muted rounded-lg p-4 text-sm text-foreground"
             >
               <div className="flex items-start gap-3">
-                <Download className="w-5 h-5 text-[var(--fg2)] flex-shrink-0 mt-0.5" />
+                <Download className="w-5 h-5 text-muted-foreground flex-shrink-0 mt-0.5" />
                 <div>
                   <p className="font-medium">{t('You can continue while this finishes')}</p>
-                  <p className="text-[var(--fg2)] mt-1">{t('Downloads continue in the background.')}</p>
+                  <p className="text-muted-foreground mt-1">{t('Downloads continue in the background.')}</p>
                 </div>
               </div>
             </motion.div>
@@ -525,7 +522,7 @@ export function DownloadProgressStep() {
           <Button
             onClick={handleContinue}
             disabled={isCompleting}
-            className="h-11 w-full rounded-full bg-[var(--gold)] text-[var(--fg-inverse)] hover:bg-[var(--gold-active)] disabled:cursor-not-allowed disabled:opacity-50"
+            className="h-11 w-full rounded-full bg-primary text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {isCompleting ? (
               <Loader2 className="w-4 h-4 mr-2 animate-spin" />

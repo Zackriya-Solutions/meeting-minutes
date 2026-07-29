@@ -132,11 +132,11 @@ export function SummaryModelSettings({ refetchTrigger }: SummaryModelSettingsPro
 
   return (
     <div className='flex flex-col gap-4'>
-      <div className="bg-[var(--bg-canvas)] rounded-lg border border-[var(--border-subtle)] p-6 shadow-none">
+      <div className="bg-background rounded-lg border border-border p-6 shadow-none">
         <div className="flex items-center justify-between">
           <div>
-            <h3 className="text-lg font-semibold text-[var(--fg1)] mb-2">{t('Auto Summary')}</h3>
-            <p className="text-sm text-[var(--fg2)]">{t('Auto Generating summary after meeting completion(Stopping)')}</p>
+            <h3 className="text-lg font-semibold text-foreground mb-2">{t('Auto Summary')}</h3>
+            <p className="text-sm text-muted-foreground">{t('Auto Generating summary after meeting completion(Stopping)')}</p>
           </div>
           <Switch checked={isAutoSummary} onCheckedChange={toggleIsAutoSummary} />
         </div>
@@ -144,9 +144,9 @@ export function SummaryModelSettings({ refetchTrigger }: SummaryModelSettingsPro
 
       <SummaryLanguageSettings />
 
-      <div className="bg-[var(--bg-canvas)] rounded-lg border border-[var(--border-subtle)] p-6 shadow-none" data-summary-model-config>
+      <div className="bg-background rounded-lg border border-border p-6 shadow-none" data-summary-model-config>
         <h3 className="text-lg font-semibold mb-4">{t('Summary Model Configuration')}</h3>
-        <p className="text-sm text-[var(--fg2)] mb-6">
+        <p className="text-sm text-muted-foreground mb-6">
           {t('Configure the AI model used for generating meeting summaries.')}
         </p>
 
@@ -208,23 +208,23 @@ function DeepSeekModelPicker({
             key={opt.id}
             type="button"
             onClick={() => onSelect(opt.id)}
-            className={`mm-press flex items-start gap-3 rounded-[var(--radius-16)] border p-4 text-left transition-colors ${
+            className={`mm-press flex items-start gap-3 rounded-lg border p-4 text-left transition-colors ${
               isActive
-                ? 'border-[var(--gold-border)] bg-[var(--gold-soft)]'
-                : 'border-[var(--border-subtle)] bg-[var(--bg-surface)] hover:border-[var(--border-strong)] hover:bg-[var(--state-hover-bg)]'
+                ? 'border-primary/40 bg-primary/10'
+                : 'border-border bg-card hover:border-border hover:bg-accent'
             }`}
           >
-            <span className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border ${isActive ? 'border-[var(--gold)]' : 'border-[var(--border-strong)]'}`}>
-              {isActive && <span className="h-2 w-2 rounded-full bg-[var(--gold)]" />}
+            <span className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border ${isActive ? 'border-primary' : 'border-border'}`}>
+              {isActive && <span className="h-2 w-2 rounded-full bg-primary" />}
             </span>
             <span>
-              <span className="block text-sm font-medium text-[var(--fg1)]">{opt.title}</span>
-              <span className="mt-0.5 block text-xs text-[var(--fg2)]">{opt.subtitle}</span>
+              <span className="block text-sm font-medium text-foreground">{opt.title}</span>
+              <span className="mt-0.5 block text-xs text-muted-foreground">{opt.subtitle}</span>
             </span>
           </button>
         );
       })}
-      <p className="mt-1 text-xs text-[var(--fg3)]">
+      <p className="mt-1 text-xs text-muted-foreground">
         {t('Runs in the cloud through the Memento gateway. No API key required.')}
       </p>
     </div>

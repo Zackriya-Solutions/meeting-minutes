@@ -1,5 +1,5 @@
 import React from 'react';
-import { Button } from '@/components/memento/Button';
+import { Button } from '@/components/ui/button';
 import { Icon, MementoIconName } from '@/components/memento/Icon';
 import { OnboardingContainer } from '../OnboardingContainer';
 import { useOnboarding } from '@/contexts/OnboardingContext';
@@ -33,7 +33,7 @@ export function WelcomeStep() {
     >
       <div className="flex flex-col items-center space-y-10">
         {/* Divider */}
-        <div className="h-px w-16 bg-[var(--border-strong)]" />
+        <div className="h-px w-16 bg-border" />
 
         {/* Features Card */}
         <div className="mm-card w-full max-w-md space-y-4 p-6">
@@ -41,11 +41,11 @@ export function WelcomeStep() {
             return (
               <div key={index} className="flex items-start gap-3">
                 <div className="flex-shrink-0 mt-0.5">
-                  <div className="flex h-6 w-6 items-center justify-center rounded-full bg-[var(--gold-soft)] text-[var(--gold)]">
+                  <div className="flex h-6 w-6 items-center justify-center rounded-full bg-primary/10 text-primary">
                     <Icon name={feature.icon} size={14} />
                   </div>
                 </div>
-                <p className="text-sm text-[var(--fg2)] leading-relaxed">{t(feature.title)}</p>
+                <p className="text-sm text-muted-foreground leading-relaxed">{t(feature.title)}</p>
               </div>
             );
           })}
@@ -59,7 +59,7 @@ export function WelcomeStep() {
           >
             {t('Get Started')}
           </Button>
-          <p className="text-center text-xs text-[var(--fg2)]">{t('Takes less than 3 minutes')}</p>
+          <p className="text-center text-xs text-muted-foreground">{t('Takes less than 3 minutes')}</p>
         </div>
       </div>
     </OnboardingContainer>

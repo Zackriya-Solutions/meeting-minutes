@@ -1,5 +1,5 @@
 import React from 'react';
-import { Check, Lock, Download, CheckCircle2, BrainCircuit } from '@/components/memento/LucideCompat';
+import { Check, Lock, Download, CheckCircle2, BrainCircuit } from '@/components/deslop-icons';
 
 interface ProgressIndicatorProps {
   current: number;
@@ -34,18 +34,18 @@ export function ProgressIndicator({ current, total, onStepClick }: ProgressIndic
                 disabled={!isClickable}
                 className={`relative flex items-center justify-center transition-all duration-300 ${
                   isCompleted
-                    ? 'w-7 h-7 bg-[var(--success)] rounded-full'
+                    ? 'w-7 h-7 bg-success rounded-full'
                     : isActive
-                      ? 'w-8 h-8 bg-[var(--fg3)] rounded-full'
-                      : 'w-6 h-6 bg-[var(--bg-elevated)] rounded-full'
+                      ? 'w-8 h-8 bg-muted-foreground rounded-full'
+                      : 'w-6 h-6 bg-muted rounded-full'
                 } ${isClickable ? 'cursor-pointer hover:scale-110 hover:shadow-none' : 'cursor-default'}`}
               >
                 {isCompleted ? (
-                  <Check className="w-4 h-4 text-[var(--fg-inverse)]" />
+                  <Check className="w-4 h-4 text-primary-foreground" />
                 ) : (
                   <StepIcon
                     className={`transition-all duration-300 ${
-                      isActive ? 'w-4 h-4 text-[var(--fg-inverse)]' : 'w-3 h-3 text-[var(--fg2)]'
+                      isActive ? 'w-4 h-4 text-primary-foreground' : 'w-3 h-3 text-muted-foreground'
                     }`}
                   />
                 )}
@@ -55,7 +55,7 @@ export function ProgressIndicator({ current, total, onStepClick }: ProgressIndic
               {index < visibleSteps.length - 1 && (
                 <div
                   className={`h-0.5 w-6 transition-all duration-300 ${
-                    isCompleted ? 'bg-[var(--success)]' : 'bg-[var(--bg-elevated)]'
+                    isCompleted ? 'bg-success' : 'bg-muted'
                   }`}
                 />
               )}

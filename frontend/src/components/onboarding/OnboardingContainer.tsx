@@ -44,7 +44,7 @@ export function OnboardingContainer({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center overflow-hidden bg-[var(--bg-canvas)]">
+    <div className="fixed inset-0 z-50 flex items-center justify-center overflow-hidden bg-background">
       <div className={cn('flex h-full max-h-screen w-full max-w-2xl flex-col px-6 py-6', className)}>
         <div className="mb-5 flex items-center justify-center gap-3 text-xl font-semibold tracking-[-.04em]">
           <Image src="/memento-mark.svg" alt="" width={30} height={30} />
@@ -60,9 +60,9 @@ export function OnboardingContainer({
                   onClick={handlePrevious}
                   disabled={!canGoPrevious || step === 1}
                   className={cn(
-                    'pointer-events-auto w-8 h-8 rounded-full bg-[var(--bg-canvas)] border border-[var(--border-subtle)] shadow-none flex items-center justify-center transition-all duration-200',
+                    'pointer-events-auto w-8 h-8 rounded-full bg-background border border-border shadow-none flex items-center justify-center transition-all duration-200',
                     canGoPrevious && step !== 1
-                      ? 'hover:bg-[var(--bg-sheet)] hover:shadow-none hover:scale-110 text-[var(--fg2)]'
+                      ? 'hover:bg-background hover:shadow-none hover:scale-110 text-muted-foreground'
                       : 'opacity-0 cursor-not-allowed'
                   )}
                 >
@@ -73,9 +73,9 @@ export function OnboardingContainer({
                   onClick={handleNext}
                   disabled={!canGoNext || step === totalSteps}
                   className={cn(
-                    'pointer-events-auto w-8 h-8 rounded-full bg-[var(--bg-canvas)] border border-[var(--border-subtle)] shadow-none flex items-center justify-center transition-all duration-200',
+                    'pointer-events-auto w-8 h-8 rounded-full bg-background border border-border shadow-none flex items-center justify-center transition-all duration-200',
                     canGoNext && step !== totalSteps
-                      ? 'hover:bg-[var(--bg-sheet)] hover:shadow-none hover:scale-110 text-[var(--fg2)]'
+                      ? 'hover:bg-background hover:shadow-none hover:scale-110 text-muted-foreground'
                       : 'opacity-0 cursor-not-allowed'
                   )}
                 >
@@ -91,9 +91,9 @@ export function OnboardingContainer({
 
         {/* Header - Fixed */}
         <div className="mb-4 text-center space-y-3 flex-shrink-0">
-          <h1 className="animate-fade-in-up text-[31px] font-semibold leading-[.96] tracking-[-.04em] text-[var(--fg1)]">{title}</h1>
+          <h1 className="animate-fade-in-up text-[31px] font-semibold leading-[.96] tracking-[-.04em] text-foreground">{title}</h1>
           {description && (
-            <p className="text-base text-[var(--fg2)] max-w-md mx-auto animate-fade-in-up delay-75">
+            <p className="text-base text-muted-foreground max-w-md mx-auto animate-fade-in-up delay-75">
               {description}
             </p>
           )}

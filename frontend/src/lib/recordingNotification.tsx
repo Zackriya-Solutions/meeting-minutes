@@ -23,18 +23,18 @@ export async function showRecordingNotification(): Promise<void> {
       const toastId = toast.info(translate('🔴 Recording Started'), {
         description: (
           <div className="space-y-3 min-w-[280px]">
-            <p className="text-sm font-medium text-[var(--fg1)]">
+            <p className="text-sm font-medium text-foreground">
               {translate('Inform all participants this meeting is being recorded.')}
             </p>
-            <label className="flex items-center gap-2 text-xs cursor-pointer hover:bg-[var(--gold-soft)] p-2 rounded transition-colors">
+            <label className="flex items-center gap-2 text-xs cursor-pointer hover:bg-primary/10 p-2 rounded transition-colors">
               <input
                 type="checkbox"
                 onChange={(e) => {
                   dontShowAgain = e.target.checked;
                 }}
-                className="rounded border-[var(--border-strong)] text-[var(--gold)] ring-[var(--gold-ring)] focus:ring-2"
+                className="rounded border-border text-primary ring-ring focus:ring-2"
               />
-              <span className="select-none text-[var(--fg2)]">{translate("Don't show this again")}</span>
+              <span className="select-none text-muted-foreground">{translate("Don't show this again")}</span>
             </label>
             <button
               onClick={async () => {
@@ -47,7 +47,7 @@ export async function showRecordingNotification(): Promise<void> {
                 Analytics.trackButtonClick('recording_notification_acknowledged', 'toast');
                 toast.dismiss(toastId);
               }}
-              className="w-full rounded-full bg-[var(--gold)] px-3 py-1.5 text-xs font-medium text-[var(--fg-inverse)] transition-colors hover:bg-[var(--gold-active)]"
+              className="w-full rounded-full bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90"
             >
               {translate("I've Notified Participants")}
             </button>

@@ -14,7 +14,7 @@ import { PrivacySettings } from '@/components/PrivacySettings';
 import { useConfig } from '@/contexts/ConfigContext';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Icon, MementoIconName } from '@/components/memento/Icon';
-import { useLanguage, type Lang } from '@/lib/i18n';
+import { useLanguage } from '@/lib/i18n';
 
 // Tabs configuration (constant). `label` is the English key; it is translated at
 // render time via `t()`.
@@ -86,7 +86,7 @@ const TABS = [
 export default function SettingsPage() {
   const router = useRouter();
   const { transcriptModelConfig, setTranscriptModelConfig } = useConfig();
-  const { t, lang, setLang } = useLanguage();
+  const { t } = useLanguage();
 
   // Animation state for tabs
   const [activeTab, setActiveTab] = useState('general');
@@ -119,13 +119,11 @@ export default function SettingsPage() {
     loadTranscriptConfig();
   }, [setTranscriptModelConfig]);
 
-  const normalizedSettingsSearch = settingsSearch.trim().toLocaleLowerCase(
-    lang === 'ru' ? 'ru-RU' : 'en-US',
-  );
+  const normalizedSettingsSearch = settingsSearch.trim().toLocaleLowerCase('ru-RU');
   const settingsMatches = normalizedSettingsSearch
     ? TABS.filter((tab) =>
         `${t(tab.label)} ${t(tab.description)} ${tab.label} ${tab.description} ${tab.keywords}`
-          .toLocaleLowerCase(lang === 'ru' ? 'ru-RU' : 'en-US')
+          .toLocaleLowerCase('ru-RU')
           .includes(normalizedSettingsSearch),
       )
     : [];
@@ -133,11 +131,11 @@ export default function SettingsPage() {
   return (
     <div className="mm-page min-w-0 overflow-hidden !p-0">
       {/* Fixed Header */}
-      <div className="sticky top-0 z-10 border-b border-[var(--border-subtle)] bg-[var(--bg-canvas)]">
+      <div className="sticky top-0 z-10 border-b border-border bg-background">
         <div className="mx-auto w-full max-w-6xl px-4 py-5 sm:px-8 sm:py-6">
           <div className="flex min-w-0 flex-wrap items-center gap-3 sm:gap-4">
             <button
-              onClick={() => router.back()}
+              onClick={() => router.push('/')}
               className="mm-icon-button mm-hover"
               aria-label={t('Back')}
             >
@@ -145,32 +143,11 @@ export default function SettingsPage() {
             </button>
             <h1 className="mm-page-title">{t('Settings')}</h1>
 
-            {/* Interface language toggle */}
-            <div
-              className="ml-auto flex items-center gap-1 rounded-full border border-[var(--border-subtle)] bg-[var(--bg-sheet)] p-1"
-              role="group"
-              aria-label={t('Interface language')}
-            >
-              {(['ru', 'en'] as const).map((l: Lang) => (
-                <button
-                  key={l}
-                  onClick={() => setLang(l)}
-                  aria-pressed={lang === l}
-                  className={`rounded-full px-3 py-1 text-xs font-semibold transition-colors ${
-                    lang === l
-                      ? 'bg-[var(--gold)] text-[var(--fg-inverse)]'
-                      : 'text-[var(--fg2)] hover:text-[var(--fg1)]'
-                  }`}
-                >
-                  {l === 'ru' ? 'Рус' : 'Eng'}
-                </button>
-              ))}
-            </div>
           </div>
 
           <div className="relative mt-4 max-w-2xl">
             <label className="mm-field h-11 min-h-11 w-full">
-              <Icon name="search" size={17} className="shrink-0 text-[var(--fg3)]" />
+              <Icon name="search" size={17} className="shrink-0 text-muted-foreground" />
               <input
                 data-slot="input-group-control"
                 value={settingsSearch}
@@ -182,7 +159,7 @@ export default function SettingsPage() {
                 <button
                   type="button"
                   onClick={() => setSettingsSearch('')}
-                  className="text-[var(--fg3)] hover:text-[var(--fg1)]"
+                  className="text-muted-foreground hover:text-foreground"
                   aria-label={t('Clear')}
                 >
                   <Icon name="close" size={16} />
@@ -191,9 +168,9 @@ export default function SettingsPage() {
             </label>
 
             {normalizedSettingsSearch && (
-              <div className="absolute left-0 right-0 top-[calc(100%+8px)] z-30 overflow-hidden rounded-2xl border border-[var(--border-strong)] bg-[var(--bg-elevated)] p-2">
+              <div className="absolute left-0 right-0 top-[calc(100%+8px)] z-30 overflow-hidden rounded-2xl border border-border bg-muted p-2">
                 {settingsMatches.length === 0 ? (
-                  <p className="px-3 py-4 text-sm text-[var(--fg3)]">{t('No settings found')}</p>
+                  <p className="px-3 py-4 text-sm text-muted-foreground">{t('No settings found')}</p>
                 ) : (
                   settingsMatches.map((tab) => (
                     <button
@@ -203,14 +180,14 @@ export default function SettingsPage() {
                         setActiveTab(tab.value);
                         setSettingsSearch('');
                       }}
-                      className="flex w-full items-start gap-3 rounded-xl px-3 py-3 text-left hover:bg-[var(--state-hover-bg)]"
+                      className="flex w-full items-start gap-3 rounded-xl px-3 py-3 text-left hover:bg-accent"
                     >
-                      <Icon name={tab.icon} size={17} className="mt-0.5 shrink-0 text-[var(--gold)]" />
+                      <Icon name={tab.icon} size={17} className="mt-0.5 shrink-0 text-primary" />
                       <span className="min-w-0">
-                        <span className="block text-sm font-semibold text-[var(--fg1)]">
+                        <span className="block text-sm font-semibold text-foreground">
                           {t(tab.label)}
                         </span>
-                        <span className="mt-0.5 block text-xs leading-relaxed text-[var(--fg3)]">
+                        <span className="mt-0.5 block text-xs leading-relaxed text-muted-foreground">
                           {t(tab.description)}
                         </span>
                       </span>

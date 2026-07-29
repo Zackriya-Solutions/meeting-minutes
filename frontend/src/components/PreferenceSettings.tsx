@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef } from "react"
 import { Switch } from "./ui/switch"
-import { FolderOpen } from '@/components/memento/LucideCompat'
+import { FolderOpen } from '@/components/deslop-icons'
 import { invoke } from "@tauri-apps/api/core"
 import Analytics from "@/lib/analytics"
 import AnalyticsConsentSwitch from "./AnalyticsConsentSwitch"
@@ -235,22 +235,22 @@ export function PreferenceSettings() {
   return (
     <div className="space-y-6">
       {/* Уведомления Section */}
-      <div className="bg-[var(--bg-canvas)] rounded-lg border border-[var(--border-subtle)] p-6 shadow-none">
+      <div className="bg-background rounded-lg border border-border p-6 shadow-none">
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
-            <h3 className="text-lg font-semibold text-[var(--fg1)] mb-2">{t('Notifications')}</h3>
-            <p className="text-sm text-[var(--fg2)]">{t('Enable or disable notifications of start and end of meeting')}</p>
+            <h3 className="text-lg font-semibold text-foreground mb-2">{t('Notifications')}</h3>
+            <p className="text-sm text-muted-foreground">{t('Enable or disable notifications of start and end of meeting')}</p>
           </div>
           <Switch className="shrink-0" checked={notificationsEnabledValue} onCheckedChange={setNotificationsEnabled} />
         </div>
       </div>
 
       {/* Detection evidence remains in memory; only normalized auto-listening lifecycle is stored. */}
-      <div className="bg-[var(--bg-canvas)] rounded-lg border border-[var(--border-subtle)] p-6 shadow-none">
+      <div className="bg-background rounded-lg border border-border p-6 shadow-none">
         <div className="flex items-start justify-between gap-4 sm:gap-6">
           <div className="min-w-0">
-            <h3 className="text-lg font-semibold text-[var(--fg1)] mb-2">{t('Automatic meeting detection')}</h3>
-            <p className="text-sm text-[var(--fg2)]">
+            <h3 className="text-lg font-semibold text-foreground mb-2">{t('Automatic meeting detection')}</h3>
+            <p className="text-sm text-muted-foreground">
               {t('Detect supported meeting apps and browser calls locally. Raw process names, window titles, and URLs are not stored.')}
             </p>
           </div>
@@ -263,11 +263,11 @@ export function PreferenceSettings() {
         </div>
       </div>
 
-      <div className="bg-[var(--bg-canvas)] rounded-lg border border-[var(--border-subtle)] p-6 shadow-none">
+      <div className="bg-background rounded-lg border border-border p-6 shadow-none">
         <div className="flex items-start justify-between gap-4 sm:gap-6">
           <div className="min-w-0">
-            <h3 className="text-lg font-semibold text-[var(--fg1)] mb-2">{t('Auto-listening')}</h3>
-            <p className="text-sm text-[var(--fg2)]">
+            <h3 className="text-lg font-semibold text-foreground mb-2">{t('Auto-listening')}</h3>
+            <p className="text-sm text-muted-foreground">
               {t('Start a normal local recording when a supported native meeting client begins using the microphone, then stop and save it after the signal has been absent for about 45 seconds. Browser, Telegram, and process-only signals still require confirmation.')}
             </p>
           </div>
@@ -280,21 +280,21 @@ export function PreferenceSettings() {
         </div>
       </div>
 
-      <div className="bg-[var(--bg-canvas)] rounded-lg border border-[var(--border-subtle)] p-6 shadow-none">
-        <h3 className="text-lg font-semibold text-[var(--fg1)] mb-2">{t('Local learning and retention')}</h3>
-        <p className="text-sm text-[var(--fg2)]">
+      <div className="bg-background rounded-lg border border-border p-6 shadow-none">
+        <h3 className="text-lg font-semibold text-foreground mb-2">{t('Local learning and retention')}</h3>
+        <p className="text-sm text-muted-foreground">
           {t('Voice profiles, corrections, and capture evidence stay local. Predictions never become training examples without an explicit confirmation.')}
         </p>
-        <div className="mt-4 flex items-start justify-between gap-6 border-t border-[var(--border-subtle)] pt-4">
+        <div className="mt-4 flex items-start justify-between gap-6 border-t border-border pt-4">
           <div>
-            <div className="text-sm font-medium text-[var(--fg1)]">{t('Automatic assignment for very high-confidence known voices')}</div>
-            <p className="mt-1 text-xs text-[var(--fg3)]">{t('Off by default. Voice floor and top-two margin still apply; uncertain voices remain Unknown.')}</p>
+            <div className="text-sm font-medium text-foreground">{t('Automatic assignment for very high-confidence known voices')}</div>
+            <p className="mt-1 text-xs text-muted-foreground">{t('Off by default. Voice floor and top-two margin still apply; uncertain voices remain Unknown.')}</p>
           </div>
           <Switch checked={identityAutoAssign} onCheckedChange={handleIdentityAutoAssign} />
         </div>
         {capturePolicy && (
-          <div className="mt-4 grid gap-3 border-t border-[var(--border-subtle)] pt-4 sm:grid-cols-2">
-            <label className="text-xs text-[var(--fg2)]">
+          <div className="mt-4 grid gap-3 border-t border-border pt-4 sm:grid-cols-2">
+            <label className="text-xs text-muted-foreground">
               {t('Unpromoted capture metadata, minutes')}
               <input
                 type="number"
@@ -302,10 +302,10 @@ export function PreferenceSettings() {
                 max={1440}
                 value={capturePolicy.unpromoted_retention_minutes}
                 onChange={(event) => setCapturePolicy({ ...capturePolicy, unpromoted_retention_minutes: Number(event.target.value) })}
-                className="mt-1 w-full rounded-md border border-[var(--border-strong)] bg-[var(--bg-sheet)] px-3 py-2 text-sm"
+                className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
               />
             </label>
-            <label className="text-xs text-[var(--fg2)]">
+            <label className="text-xs text-muted-foreground">
               {t('Saved audio retention, days (blank keeps it)')}
               <input
                 type="number"
@@ -313,16 +313,16 @@ export function PreferenceSettings() {
                 max={3650}
                 value={capturePolicy.saved_audio_retention_days ?? ''}
                 onChange={(event) => setCapturePolicy({ ...capturePolicy, saved_audio_retention_days: event.target.value ? Number(event.target.value) : null })}
-                className="mt-1 w-full rounded-md border border-[var(--border-strong)] bg-[var(--bg-sheet)] px-3 py-2 text-sm"
+                className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
               />
             </label>
             <div className="sm:col-span-2 flex items-center justify-between gap-3">
-              <span className="text-xs text-[var(--fg3)]">{t('Local-only is enforced for capture evidence and learning profiles.')}</span>
+              <span className="text-xs text-muted-foreground">{t('Local-only is enforced for capture evidence and learning profiles.')}</span>
               <button
                 type="button"
                 disabled={isSavingLearningPolicy}
                 onClick={() => void saveLearningPolicy()}
-                className="rounded-md bg-[var(--gold)] px-3 py-2 text-xs text-[var(--fg-inverse)] disabled:opacity-50"
+                className="rounded-md bg-primary px-3 py-2 text-xs text-primary-foreground disabled:opacity-50"
               >
                 {isSavingLearningPolicy ? t('Saving...') : t('Save policy')}
               </button>
@@ -332,22 +332,22 @@ export function PreferenceSettings() {
       </div>
 
       {/* Хранение данных Section */}
-      <div className="bg-[var(--bg-canvas)] rounded-lg border border-[var(--border-subtle)] p-6 shadow-none">
-        <h3 className="text-lg font-semibold text-[var(--fg1)] mb-4">{t('Data Storage Locations')}</h3>
-        <p className="text-sm text-[var(--fg2)] mb-6">
+      <div className="bg-background rounded-lg border border-border p-6 shadow-none">
+        <h3 className="text-lg font-semibold text-foreground mb-4">{t('Data Storage Locations')}</h3>
+        <p className="text-sm text-muted-foreground mb-6">
           {t('View and access where Memento stores your data')}
         </p>
 
         <div className="space-y-4">
           {/* Database Location */}
-          {/* <div className="p-4 border rounded-lg bg-[var(--bg-sheet)]">
+          {/* <div className="p-4 border rounded-lg bg-background">
             <div className="font-medium mb-2">База данных</div>
-            <div className="text-sm text-[var(--fg2)] mb-3 break-all font-mono text-xs">
+            <div className="text-sm text-muted-foreground mb-3 break-all font-mono text-xs">
               {storageLocations?.database || 'Loading...'}
             </div>
             <button
               onClick={() => handleOpenFolder('database')}
-              className="flex items-center gap-2 px-3 py-2 text-sm border border-[var(--border-strong)] rounded-md hover:bg-[var(--bg-elevated)] transition-colors"
+              className="flex items-center gap-2 px-3 py-2 text-sm border border-border rounded-md hover:bg-muted transition-colors"
             >
               <FolderOpen className="w-4 h-4" />
               Open Folder
@@ -355,14 +355,14 @@ export function PreferenceSettings() {
           </div> */}
 
           {/* Models Location */}
-          {/* <div className="p-4 border rounded-lg bg-[var(--bg-sheet)]">
+          {/* <div className="p-4 border rounded-lg bg-background">
             <div className="font-medium mb-2">Модели Whisper</div>
-            <div className="text-sm text-[var(--fg2)] mb-3 break-all font-mono text-xs">
+            <div className="text-sm text-muted-foreground mb-3 break-all font-mono text-xs">
               {storageLocations?.models || 'Loading...'}
             </div>
             <button
               onClick={() => handleOpenFolder('models')}
-              className="flex items-center gap-2 px-3 py-2 text-sm border border-[var(--border-strong)] rounded-md hover:bg-[var(--bg-elevated)] transition-colors"
+              className="flex items-center gap-2 px-3 py-2 text-sm border border-border rounded-md hover:bg-muted transition-colors"
             >
               <FolderOpen className="w-4 h-4" />
               Open Folder
@@ -370,14 +370,14 @@ export function PreferenceSettings() {
           </div> */}
 
           {/* Recordings Location */}
-          <div className="p-4 border rounded-lg bg-[var(--bg-sheet)]">
+          <div className="p-4 border rounded-lg bg-background">
             <div className="font-medium mb-2">{t('Meeting Recordings')}</div>
-            <div className="text-sm text-[var(--fg2)] mb-3 break-all font-mono text-xs">
+            <div className="text-sm text-muted-foreground mb-3 break-all font-mono text-xs">
               {storageLocations?.recordings || t('Loading...')}
             </div>
             <button
               onClick={() => handleOpenFolder('recordings')}
-              className="flex items-center gap-2 px-3 py-2 text-sm border border-[var(--border-strong)] rounded-md hover:bg-[var(--bg-elevated)] transition-colors"
+              className="flex items-center gap-2 px-3 py-2 text-sm border border-border rounded-md hover:bg-muted transition-colors"
             >
               <FolderOpen className="w-4 h-4" />
               {t('Open Folder')}
@@ -385,15 +385,15 @@ export function PreferenceSettings() {
           </div>
         </div>
 
-        <div className="mt-4 p-3 bg-[var(--gold-soft)] rounded-md">
-          <p className="text-xs text-[var(--gold)]">
+        <div className="mt-4 p-3 bg-primary/10 rounded-md">
+          <p className="text-xs text-primary">
             <strong>{t('Note:')}</strong> {t('Database and models are stored together in your application data directory for unified management.')}
           </p>
         </div>
       </div>
 
       {/* Analytics Section */}
-      <div className="bg-[var(--bg-canvas)] rounded-lg border border-[var(--border-subtle)] p-6 shadow-none">
+      <div className="bg-background rounded-lg border border-border p-6 shadow-none">
         <AnalyticsConsentSwitch />
       </div>
     </div>

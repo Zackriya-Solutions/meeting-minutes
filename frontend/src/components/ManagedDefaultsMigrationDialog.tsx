@@ -89,8 +89,7 @@ export function ManagedDefaultsMigrationDialog() {
   return (
     <Dialog open={open} onOpenChange={() => {}}>
       <DialogContent
-        hideClose
-        className="max-h-[calc(100vh-32px)] max-w-2xl overflow-y-auto"
+        className="max-h-[calc(100vh-32px)] max-w-2xl overflow-y-auto [&>button]:hidden"
         onEscapeKeyDown={(event) => event.preventDefault()}
         onInteractOutside={(event) => event.preventDefault()}
       >
@@ -101,12 +100,12 @@ export function ManagedDefaultsMigrationDialog() {
               {t('Memento found local processing settings created by a previous version. You can keep them or migrate to the managed cloud services now used by default. Nothing changes until you confirm.')}
             </span>
             {pending?.transcription && (
-              <span className="block font-medium text-[var(--fg1)]">
+              <span className="block font-medium text-foreground">
                 {t('Transcription: GigaAM or Parakeet will change to SaluteSpeech. Meeting audio will be sent to Sber for transcription.')}
               </span>
             )}
             {pending?.summary && (
-              <span className="block font-medium text-[var(--fg1)]">
+              <span className="block font-medium text-foreground">
                 {t('Summaries: the local model will change to DeepSeek. Transcript text will be sent to the managed summary service.')}
               </span>
             )}
@@ -116,7 +115,7 @@ export function ManagedDefaultsMigrationDialog() {
           </DialogDescription>
         </DialogHeader>
         {error && (
-          <p role="alert" className="rounded-2xl border border-[var(--danger)]/40 bg-[var(--danger)]/10 px-4 py-3 text-sm leading-relaxed text-[var(--danger)]">
+          <p role="alert" className="rounded-2xl border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm leading-relaxed text-destructive">
             {error}
           </p>
         )}

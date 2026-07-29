@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
-import { Copy, Languages, Loader2, Save, Settings, Trash2 } from '@/components/memento/LucideCompat';
+import { Copy, Languages, Loader2, MoreHorizontal, Save, Settings, Trash2 } from '@/components/deslop-icons';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { ModelSettingsModal, type ModelConfig } from '@/components/ModelSettingsModal';
 import { LanguagePickerPopover } from '@/components/LanguagePickerPopover';
@@ -54,13 +54,13 @@ function MenuRow({
       className={cn(
         'flex w-full items-center gap-2.5 rounded-[9px] px-2.5 py-[9px] text-left text-[13px] transition-colors disabled:opacity-40',
         danger
-          ? 'text-[var(--danger)] hover:bg-[color-mix(in_srgb,var(--danger)_12%,transparent)]'
-          : 'text-[var(--fg1)] hover:bg-[var(--state-hover-bg)]',
+          ? 'text-destructive hover:bg-destructive/10'
+          : 'text-foreground hover:bg-accent',
       )}
     >
-      <span className={cn('shrink-0', danger ? 'text-[var(--danger)]' : 'text-[var(--fg2)]')}>{icon}</span>
+      <span className={cn('shrink-0', danger ? 'text-destructive' : 'text-muted-foreground')}>{icon}</span>
       <span className="flex-1">{label}</span>
-      {right && <span className="text-[11px] text-[var(--fg3)]">{right}</span>}
+      {right && <span className="text-[11px] text-muted-foreground">{right}</span>}
     </button>
   );
 }
@@ -133,13 +133,9 @@ export function MeetingOverflowMenu({
         onClick={() => (open ? closeMenu() : setOpen(true))}
         aria-label={t('More actions')}
         title={t('More actions')}
-        className="inline-flex h-[38px] w-[38px] items-center justify-center rounded-full border border-[var(--border-strong)] bg-transparent text-[var(--fg1)] transition-colors hover:bg-[var(--state-hover-bg)]"
+        className="inline-flex h-[38px] w-[38px] items-center justify-center rounded-full border border-border bg-transparent text-foreground transition-colors hover:bg-accent"
       >
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-          <circle cx="5" cy="12" r="1.7" />
-          <circle cx="12" cy="12" r="1.7" />
-          <circle cx="19" cy="12" r="1.7" />
-        </svg>
+        <MoreHorizontal size={18} />
       </button>
 
       {open && (
@@ -147,7 +143,7 @@ export function MeetingOverflowMenu({
           <div className="fixed inset-0 z-30" onClick={closeMenu} />
           <div
             className={cn(
-              'absolute right-0 top-[44px] z-40 rounded-[14px] border border-[var(--border-strong)] bg-[var(--bg-elevated)] p-1.5 shadow-[0_18px_44px_rgba(0,0,0,0.55)]',
+              'absolute right-0 top-[44px] z-40 rounded-[14px] border border-border bg-muted p-1.5 shadow-[0_18px_44px_rgba(0,0,0,0.55)]',
               view === 'language' ? 'w-[300px]' : 'w-[248px]',
             )}
           >
@@ -157,7 +153,7 @@ export function MeetingOverflowMenu({
                 <MenuRow icon={<Save size={16} />} label={t('Save to note')} disabled={!hasSummary} onClick={() => { void onSaveSummary(); closeMenu(); }} />
                 <MenuRow icon={<Languages size={16} />} label={t('Summary language')} right={languageLabel} onClick={() => setView('language')} />
                 <MenuRow icon={<Settings size={16} />} label={t('AI Model')} right={modelLabel} onClick={() => { setModelOpen(true); closeMenu(); }} />
-                <div className="mx-1.5 my-1 h-px bg-[var(--border-subtle)]" />
+                <div className="mx-1.5 my-1 h-px bg-border" />
                 <MenuRow
                   icon={deleting ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
                   label={t('Delete meeting')}

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Switch } from '@/components/ui/switch';
-import { FolderOpen } from '@/components/memento/LucideCompat';
+import { FolderOpen } from '@/components/deslop-icons';
 import { invoke } from '@tauri-apps/api/core';
 import { DeviceSelection, SelectedDevices } from '@/components/DeviceSelection';
 import Analytics from '@/lib/analytics';
@@ -148,8 +148,8 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
   if (loading) {
     return (
       <div className="animate-pulse">
-        <div className="h-4 bg-[var(--bg-elevated)] rounded w-1/4 mb-4"></div>
-        <div className="h-8 bg-[var(--bg-elevated)] rounded mb-4"></div>
+        <div className="h-4 bg-muted rounded w-1/4 mb-4"></div>
+        <div className="h-8 bg-muted rounded mb-4"></div>
       </div>
     );
   }
@@ -158,7 +158,7 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
     <div className="space-y-6">
       <div>
         <h3 className="text-lg font-semibold mb-4">{t('Recording Settings')}</h3>
-        <p className="text-sm text-[var(--fg2)] mb-6">
+        <p className="text-sm text-muted-foreground mb-6">
           {t('Configure how your audio recordings are saved during meetings.')}
         </p>
       </div>
@@ -167,7 +167,7 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
       <div className="flex items-center justify-between p-4 border rounded-lg">
         <div className="flex-1">
           <div className="font-medium">{t('Save Audio Recordings')}</div>
-          <div className="text-sm text-[var(--fg2)]">
+          <div className="text-sm text-muted-foreground">
             {t('Automatically save audio files when recording stops')}
           </div>
         </div>
@@ -181,31 +181,31 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
       {/* Folder Location - Only shown when auto_save is enabled */}
       {preferences.auto_save && (
         <div className="space-y-4">
-          <div className="p-4 border rounded-lg bg-[var(--bg-sheet)]">
+          <div className="p-4 border rounded-lg bg-background">
             <div className="font-medium mb-2">{t('Save Location')}</div>
-            <div className="text-sm text-[var(--fg2)] mb-3 break-all">
+            <div className="text-sm text-muted-foreground mb-3 break-all">
               {preferences.save_folder || t('Default folder')}
             </div>
             <button
               onClick={handleOpenFolder}
-              className="flex items-center gap-2 px-3 py-2 text-sm border border-[var(--border-strong)] rounded-md hover:bg-[var(--bg-sheet)] transition-colors"
+              className="flex items-center gap-2 px-3 py-2 text-sm border border-border rounded-md hover:bg-background transition-colors"
             >
               <FolderOpen className="w-4 h-4" />
               {t('Open Folder')}
             </button>
           </div>
 
-          <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-sheet)] p-4">
-            <div className="text-sm font-medium text-[var(--fg1)]">
+          <div className="rounded-lg border border-border bg-background p-4">
+            <div className="text-sm font-medium text-foreground">
               {t('Audio recording format')}
             </div>
-            <div className="mt-2 grid gap-1 text-xs leading-relaxed text-[var(--fg2)]">
+            <div className="mt-2 grid gap-1 text-xs leading-relaxed text-muted-foreground">
               <p>{t('Audio: AAC-LC, 192 kbps, mono')}</p>
               <p>{t('Container: MP4 (.mp4)')}</p>
               <p>{t('This is an audio-only file. Memento does not record video.')}</p>
               <p>{t('MP4 is used for reliable checkpoint saving and recovery if recording is interrupted.')}</p>
             </div>
-            <div className="mt-3 text-xs text-[var(--fg3)]">
+            <div className="mt-3 text-xs text-muted-foreground">
               {t('File name example: recording_YYYYMMDD_HHMMSS.mp4')}
             </div>
           </div>
@@ -214,8 +214,8 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
 
       {/* Info when auto_save is disabled */}
       {!preferences.auto_save && (
-        <div className="p-4 border rounded-lg bg-[var(--gold-soft)]">
-          <div className="text-sm text-[var(--gold)]">
+        <div className="p-4 border rounded-lg bg-primary/10">
+          <div className="text-sm text-primary">
             {t('Audio recording is disabled. Enable "Save Audio Recordings" to automatically save your meeting audio.')}
           </div>
         </div>
@@ -225,7 +225,7 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
       <div className="flex items-center justify-between p-4 border rounded-lg">
         <div className="flex-1">
           <div className="font-medium">{t('Recording Start Notification')}</div>
-          <div className="text-sm text-[var(--fg2)]">
+          <div className="text-sm text-muted-foreground">
             {t('Show reminder to inform participants when recording starts')}
           </div>
         </div>
@@ -238,12 +238,12 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
       {/* Device Настройки */}
       <div className="space-y-4">
         <div className="border-t pt-6">
-          <h4 className="text-base font-medium text-[var(--fg1)] mb-4">{t('Default Audio Devices')}</h4>
-          <p className="text-sm text-[var(--fg2)] mb-4">
+          <h4 className="text-base font-medium text-foreground mb-4">{t('Default Audio Devices')}</h4>
+          <p className="text-sm text-muted-foreground mb-4">
             {t('Set your preferred microphone and system audio devices for recording. These will be automatically selected when starting new recordings.')}
           </p>
 
-          <div className="border rounded-lg p-4 bg-[var(--bg-sheet)]">
+          <div className="border rounded-lg p-4 bg-background">
             <DeviceSelection
               selectedDevices={{
                 micDevice: preferences.preferred_mic_device,

@@ -129,35 +129,32 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
 
   // Extract fetchMeetings as a reusable function
   const fetchMeetings = React.useCallback(async () => {
-    if (serverAddress) {
-      try {
-        const meetings = await invoke('api_get_meetings') as Array<{
-          id: string;
-          title: string;
-          created_at: string;
-          occurred_at?: string | null;
-          folder_path?: string | null;
-        }>;
-        const transformedMeetings = meetings.map((meeting: any) => ({
-          id: meeting.id,
-          title: meeting.title,
-          createdAt: meeting.created_at,
-          occurredAt: meeting.occurred_at ?? null,
-          folderPath: meeting.folder_path ?? null,
-        }));
-        setMeetings(transformedMeetings);
-        Analytics.trackBackendConnection(true);
-      } catch (error) {
-        console.error('Error fetching meetings:', error);
-        setMeetings([]);
-        Analytics.trackBackendConnection(false, error instanceof Error ? error.message : 'Unknown error');
-      }
+    try {
+      const meetings = await invoke('api_get_meetings') as Array<{
+        id: string;
+        title: string;
+        created_at: string;
+        occurred_at?: string | null;
+        folder_path?: string | null;
+      }>;
+      const transformedMeetings = meetings.map((meeting) => ({
+        id: meeting.id,
+        title: meeting.title,
+        createdAt: meeting.created_at,
+        occurredAt: meeting.occurred_at ?? null,
+        folderPath: meeting.folder_path ?? null,
+      }));
+      setMeetings(transformedMeetings);
+      Analytics.trackBackendConnection(true);
+    } catch (error) {
+      console.error('Error fetching meetings:', error);
+      Analytics.trackBackendConnection(false, error instanceof Error ? error.message : 'Unknown error');
     }
-  }, [serverAddress]);
+  }, []);
 
   useEffect(() => {
-    fetchMeetings();
-  }, [serverAddress, fetchMeetings]);
+    void fetchMeetings();
+  }, [fetchMeetings]);
 
   useEffect(() => {
     const fetchSettings = async () => {

@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Summary, Block } from '@/types';
 import { Section } from './Section';
 import { EditableTitle } from '../EditableTitle';
-import { AlertTriangle, Copy, Trash2 } from '@/components/memento/LucideCompat';
+import { AlertTriangle, Copy, Trash2 } from '@/components/deslop-icons';
 import { useT } from '@/lib/i18n';
 
 interface Props {
@@ -608,25 +608,25 @@ export const AISummary = ({ summary, status, error, onSummaryChange, onRegenerat
   };
 
   const renderErrorState = () => (
-    <div className="w-full p-4 bg-[color-mix(in_srgb,var(--danger)_12%,transparent)] border border-[color-mix(in_srgb,var(--danger)_42%,transparent)] rounded-lg">
+    <div className="w-full p-4 bg-destructive/10 border border-destructive/40 rounded-lg">
       <div className="flex items-center mb-2">
-        <AlertTriangle className="mr-2 h-5 w-5 text-[var(--danger)]" />
-        <h3 className="text-[var(--danger)] font-medium">{t('Error Generating Summary')}</h3>
+        <AlertTriangle className="mr-2 h-5 w-5 text-destructive" />
+        <h3 className="text-destructive font-medium">{t('Error Generating Summary')}</h3>
       </div>
-      <p className="text-[var(--danger)] text-sm">{error}</p>
-      <p className="text-[var(--danger)] text-xs mt-2">{t('Please check your model configuration and API keys, or try again.')}</p>
+      <p className="text-destructive text-sm">{error}</p>
+      <p className="text-destructive text-xs mt-2">{t('Please check your model configuration and API keys, or try again.')}</p>
     </div>
   );
 
   const renderLoadingState = () => (
-    <div className="w-full p-4 bg-[var(--gold-soft)] border border-[var(--gold-border)] rounded-lg">
+    <div className="w-full p-4 bg-primary/10 border border-primary/40 rounded-lg">
       <div className="flex items-center space-x-3">
-        <div className="animate-spin rounded-full h-5 w-5 border-2 border-[var(--gold-border)] border-t-transparent"></div>
+        <div className="animate-spin rounded-full h-5 w-5 border-2 border-primary/40 border-t-transparent"></div>
         <div>
-          <h3 className="text-[var(--gold)] font-medium">
+          <h3 className="text-primary font-medium">
             {status === 'processing' ? t('Processing Transcript') : t('Generating Summary')}
           </h3>
-          <p className="text-[var(--gold)] text-sm">
+          <p className="text-primary text-sm">
             {status === 'processing'
               ? t('Analyzing your transcript...')
               : t('Creating a detailed summary of your meeting...')}
@@ -650,9 +650,9 @@ export const AISummary = ({ summary, status, error, onSummaryChange, onRegenerat
 
   if (!hasContent && status === 'completed') {
     return (
-      <div className="w-full p-4 bg-[var(--bg-sheet)] border border-[var(--border-subtle)] rounded-lg text-center">
-        <p className="text-[var(--fg2)]">{t('No summary content available.')}</p>
-        <p className="text-[var(--fg2)] text-sm mt-1">{t('Try generating a new summary.')}</p>
+      <div className="w-full p-4 bg-background border border-border rounded-lg text-center">
+        <p className="text-muted-foreground">{t('No summary content available.')}</p>
+        <p className="text-muted-foreground text-sm mt-1">{t('Try generating a new summary.')}</p>
       </div>
     );
   }
@@ -674,7 +674,7 @@ export const AISummary = ({ summary, status, error, onSummaryChange, onRegenerat
       {/* Context Menu */}
       {contextMenu.visible && selectedBlocks.length > 0 && (
         <div
-          className="fixed z-50 bg-[var(--bg-canvas)] shadow-none rounded-lg py-1 min-w-[160px] border border-[var(--border-subtle)]
+          className="fixed z-50 bg-background shadow-none rounded-lg py-1 min-w-[160px] border border-border
                      animate-in fade-in zoom-in-95 duration-150"
           style={{ 
             left: contextMenu.x, 
@@ -683,14 +683,14 @@ export const AISummary = ({ summary, status, error, onSummaryChange, onRegenerat
           onClick={e => e.stopPropagation()}
         >
           <button
-            className="w-full px-4 py-2 text-left hover:bg-[var(--bg-elevated)] flex items-center space-x-2"
+            className="w-full px-4 py-2 text-left hover:bg-muted flex items-center space-x-2"
             onClick={handleCopyBlocks}
           >
-            <Copy size={16} className="text-[var(--fg2)]" />
+            <Copy size={16} className="text-muted-foreground" />
             <span>{t('Copy')} {selectedBlocks.length > 1 ? `${selectedBlocks.length} ${t('blocks')}` : t('block')}</span>
           </button>
           <button
-            className="w-full px-4 py-2 text-left hover:bg-[var(--bg-elevated)] text-[var(--danger)] flex items-center space-x-2"
+            className="w-full px-4 py-2 text-left hover:bg-muted text-destructive flex items-center space-x-2"
             onClick={handleDeleteBlocks}
           >
             <Trash2 size={16} />
@@ -702,7 +702,7 @@ export const AISummary = ({ summary, status, error, onSummaryChange, onRegenerat
       {/* <div className="flex items-center justify-between mb-4">
         <div className="flex items-center space-x-2">
           <span className="text-2xl">✨</span>
-          <h2 className="text-2xl font-semibold text-[var(--fg1)]">
+          <h2 className="text-2xl font-semibold text-foreground">
             AI Enhanced Summary
           </h2>
         </div>
@@ -710,7 +710,7 @@ export const AISummary = ({ summary, status, error, onSummaryChange, onRegenerat
           <button
             onClick={handleUndo}
             disabled={currentHistoryIndex === 0}
-            className="p-2 hover:bg-[var(--bg-elevated)] rounded disabled:opacity-50"
+            className="p-2 hover:bg-muted rounded disabled:opacity-50"
             title="Отменить"
           >
             <svg
@@ -731,7 +731,7 @@ export const AISummary = ({ summary, status, error, onSummaryChange, onRegenerat
           <button
             onClick={handleRedo}
             disabled={currentHistoryIndex === history.length - 1}
-            className="p-2 hover:bg-[var(--bg-elevated)] rounded disabled:opacity-50"
+            className="p-2 hover:bg-muted rounded disabled:opacity-50"
             title="Повторить"
           >
             <svg
@@ -751,7 +751,7 @@ export const AISummary = ({ summary, status, error, onSummaryChange, onRegenerat
           </button>
           <button
             onClick={handleAddSection}
-            className="p-2 hover:bg-[var(--bg-elevated)] rounded"
+            className="p-2 hover:bg-muted rounded"
             title="Добавить раздел"
           >
             <svg
@@ -774,14 +774,14 @@ export const AISummary = ({ summary, status, error, onSummaryChange, onRegenerat
               const markdown = convertToMarkdown();
               navigator.clipboard.writeText(markdown);
             }}
-            className="px-2 py-1 text-sm bg-[var(--bg-elevated)] hover:brightness-125 rounded-md flex items-center space-x-1"
+            className="px-2 py-1 text-sm bg-muted hover:brightness-125 rounded-md flex items-center space-x-1"
           >
             <Copy className="h-4 w-4" />
             <span>Скопировать</span>
           </button>
           <button
             onClick={onRegenerateSummary}
-            className="px-2 py-1 text-sm bg-[var(--bg-elevated)] hover:brightness-125 rounded-md flex items-center space-x-1"
+            className="px-2 py-1 text-sm bg-muted hover:brightness-125 rounded-md flex items-center space-x-1"
             title="Создать суть заново"
           >
             <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">

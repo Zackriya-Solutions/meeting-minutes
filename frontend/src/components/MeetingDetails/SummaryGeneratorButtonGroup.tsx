@@ -19,7 +19,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Sparkles, Settings, Loader2, FileText, Check, Square } from '@/components/memento/LucideCompat';
+import { Sparkles, Settings, Loader2, FileText, Check, Square } from '@/components/deslop-icons';
 import Analytics from '@/lib/analytics';
 import { invoke } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
@@ -290,7 +290,7 @@ export function SummaryGeneratorButtonGroup({
         <Button
           variant="outline"
           size="sm"
-          className="border-[color-mix(in_srgb,var(--danger)_42%,transparent)] bg-[var(--gold-soft)] hover:bg-[var(--state-hover-bg)] xl:px-4"
+          className="border-destructive/40 bg-primary/10 hover:bg-accent xl:px-4"
           onClick={() => {
             Analytics.trackButtonClick('stop_summary_generation', 'meeting_details');
             onStopGeneration();
@@ -304,7 +304,7 @@ export function SummaryGeneratorButtonGroup({
         <Button
           variant="outline"
           size="sm"
-          className="border-[var(--gold-border)] bg-[var(--gold)] hover:bg-[var(--gold-active)] xl:px-4"
+          className="border-primary/40 bg-primary hover:bg-primary/90 xl:px-4"
           onClick={() => {
             Analytics.trackButtonClick('generate_summary', 'meeting_details');
             checkOllamaModelsAndGenerate();
@@ -384,7 +384,7 @@ export function SummaryGeneratorButtonGroup({
             {templateGroups.map((group, groupIndex) => (
               <DropdownMenuGroup key={group.label}>
                 {groupIndex > 0 && <DropdownMenuSeparator />}
-                <DropdownMenuLabel className="px-2 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wider text-[var(--fg3)]">
+                <DropdownMenuLabel className="px-2 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                   {t(group.label)}
                 </DropdownMenuLabel>
                 {group.templates.map((template) => (
@@ -394,13 +394,13 @@ export function SummaryGeneratorButtonGroup({
                     className="items-start gap-3 px-2 py-2.5"
                   >
                     <span className="min-w-0 flex-1">
-                      <span className="block font-medium text-[var(--fg1)]">{t(template.name)}</span>
-                      <span className="mt-0.5 block text-xs leading-snug text-[var(--fg3)]">
+                      <span className="block font-medium text-foreground">{t(template.name)}</span>
+                      <span className="mt-0.5 block text-xs leading-snug text-muted-foreground">
                         {t(template.description)}
                       </span>
                     </span>
                     {selectedTemplate === template.id && (
-                      <Check className="mt-0.5 h-4 w-4 shrink-0 text-[var(--success)]" />
+                      <Check className="mt-0.5 h-4 w-4 shrink-0 text-success" />
                     )}
                   </DropdownMenuItem>
                 ))}

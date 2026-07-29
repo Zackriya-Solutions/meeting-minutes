@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { Button } from '@/components/memento/Button';
+import { Button } from '@/components/ui/button';
 import { Icon } from '@/components/memento/Icon';
 import { OnboardingContainer } from '../OnboardingContainer';
 import { PermissionRow } from '../shared';
@@ -154,7 +154,7 @@ export function PermissionsStep() {
 
           <button
             onClick={handleSkip}
-            className="text-sm text-[var(--fg2)] transition-colors hover:text-[var(--fg1)]"
+            className="text-sm text-muted-foreground transition-colors hover:text-foreground"
           >
             {t("I'll do this later")}
           </button>

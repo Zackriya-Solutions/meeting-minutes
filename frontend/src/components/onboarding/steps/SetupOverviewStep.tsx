@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Info } from '@/components/memento/LucideCompat';
+import { Info } from '@/components/deslop-icons';
 import { Button } from '@/components/ui/button';
 import { OnboardingContainer } from '../OnboardingContainer';
 import { useOnboarding } from '@/contexts/OnboardingContext';
@@ -54,7 +54,7 @@ export function SetupOverviewStep() {
     >
       <div className="flex flex-col items-center space-y-10">
         {/* Steps Card */}
-        <div className="w-full max-w-md bg-[var(--bg-canvas)] rounded-lg border border-[var(--border-subtle)] p-4">
+        <div className="w-full max-w-md bg-background rounded-lg border border-border p-4">
           <div className="space-y-4">
             {steps.map((step, idx) => {
               return (
@@ -63,16 +63,16 @@ export function SetupOverviewStep() {
                   className={`flex items-start gap-4 p-1`}
                 >
                   <div className="flex-1 ml-1">
-                    <h3 className="font-medium text-[var(--fg1)] flex items-center gap-2">
+                    <h3 className="font-medium text-foreground flex items-center gap-2">
                         {t('Step')} {step.number} · {t(step.title)}
 
                         {step.type === "summarization" && (
                             <TooltipProvider>
                             <Tooltip>
                                 <TooltipTrigger asChild>
-                                <button className="text-[var(--fg3)] hover:text-[var(--fg2)]">
+                                <Button variant="ghost" size="sm">
                                     <Info className="w-4 h-4" />
-                                </button>
+                                </Button>
                                 </TooltipTrigger>
                                 <TooltipContent className="max-w-xs text-sm">
                                 {t('You can also select external AI providers like OpenAI, Claude, or Ollama for summary generation in settings.')}
@@ -93,7 +93,7 @@ export function SetupOverviewStep() {
         <div className="w-full max-w-xs space-y-4">
           <Button
             onClick={handleContinue}
-            className="h-11 w-full rounded-full bg-[var(--gold)] text-[var(--fg-inverse)] hover:bg-[var(--gold-active)]"
+            className="h-11 w-full rounded-full bg-primary text-primary-foreground hover:bg-primary/90"
           >
             {t("Let's Go")}
           </Button>
@@ -102,7 +102,7 @@ export function SetupOverviewStep() {
               href="https://github.com/andyzt/meet_at_giga/issues"
               target="_blank"
               rel="noopener noreferrer"
-              className="text-xs text-[var(--fg2)] hover:underline"
+              className="text-xs text-muted-foreground hover:underline"
             >
               {t('Report issues on GitHub')}
             </a>

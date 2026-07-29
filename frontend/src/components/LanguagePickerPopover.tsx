@@ -84,26 +84,26 @@ export function LanguagePickerPopover({
   return (
     <div
       ref={containerRef}
-      className="w-72 rounded-lg bg-[var(--bg-canvas)] border border-[var(--border-subtle)] shadow-none overflow-hidden"
+      className="w-72 rounded-lg bg-background border border-border shadow-none overflow-hidden"
       role="dialog"
       aria-label={t('Pick summary language')}
     >
-      <div className="flex items-center gap-2 px-3 py-2.5 border-b border-[var(--border-subtle)]">
-        <Icon name="search" size={16} className="text-[var(--fg3)]" />
+      <div className="flex items-center gap-2 px-3 py-2.5 border-b border-border">
+        <Icon name="search" size={16} className="text-muted-foreground" />
         <input
           ref={inputRef}
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder={t('Search language...')}
-          className="flex-1 text-sm text-[var(--fg1)] bg-transparent border-none outline-none placeholder:text-[var(--fg3)]"
+          className="flex-1 text-sm text-foreground bg-transparent border-none outline-none placeholder:text-muted-foreground"
         />
       </div>
 
       <div className="max-h-80 overflow-y-auto py-1">
         {showRecents && (
           <>
-            <div className="px-3 pt-1 pb-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--fg3)]">
+            <div className="px-3 pt-1 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
               {t('Recently Used')}
             </div>
             {recentsResolved.map((opt) => (
@@ -112,18 +112,18 @@ export function LanguagePickerPopover({
                 type="button"
                 aria-pressed={value === opt.code}
                 onClick={() => onChange(opt.code)}
-                className={`flex w-full items-center justify-between px-3 py-1.5 text-sm hover:bg-[var(--bg-sheet)] text-left ${
-                  value === opt.code ? "text-[var(--gold)] font-medium" : "text-[var(--fg1)]"
+                className={`flex w-full items-center justify-between px-3 py-1.5 text-sm hover:bg-background text-left ${
+                  value === opt.code ? "text-primary font-medium" : "text-foreground"
                 }`}
               >
                 <span>
                   {opt.label}{" "}
-                  <span className="text-xs text-[var(--fg3)]">({opt.code})</span>
+                  <span className="text-xs text-muted-foreground">({opt.code})</span>
                 </span>
-                {value === opt.code && <span className="text-[var(--gold)]" aria-hidden="true">✓</span>}
+                {value === opt.code && <span className="text-primary" aria-hidden="true">✓</span>}
               </button>
             ))}
-            <div className="my-1 h-px bg-[var(--bg-elevated)]" />
+            <div className="my-1 h-px bg-muted" />
           </>
         )}
 
@@ -132,22 +132,22 @@ export function LanguagePickerPopover({
             type="button"
             aria-pressed={value === null}
             onClick={() => onChange(null)}
-            className={`flex w-full items-center justify-between px-3 py-1.5 text-sm hover:bg-[var(--bg-sheet)] text-left ${
-              value === null ? "text-[var(--gold)] font-medium" : "text-[var(--fg1)]"
+            className={`flex w-full items-center justify-between px-3 py-1.5 text-sm hover:bg-background text-left ${
+              value === null ? "text-primary font-medium" : "text-foreground"
             }`}
           >
             <span className="flex flex-col">
               <span>{t('Auto')}</span>
               {autoSubtitle && (
-                <span className="text-xs font-normal text-[var(--fg3)]">{autoSubtitle}</span>
+                <span className="text-xs font-normal text-muted-foreground">{autoSubtitle}</span>
               )}
             </span>
-            {value === null && <span className="text-[var(--gold)]" aria-hidden="true">✓</span>}
+            {value === null && <span className="text-primary" aria-hidden="true">✓</span>}
           </button>
         )}
 
         {filteredAll.length > 0 && (
-          <div className="px-3 pt-1 pb-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--fg3)]">
+          <div className="px-3 pt-1 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
             {mode === "meeting" ? t("Other Languages") : t("All Languages")}
           </div>
         )}
@@ -158,20 +158,20 @@ export function LanguagePickerPopover({
             type="button"
             aria-pressed={value === opt.code}
             onClick={() => onChange(opt.code)}
-            className={`flex w-full items-center justify-between px-3 py-1.5 text-sm hover:bg-[var(--bg-sheet)] text-left ${
-              value === opt.code ? "text-[var(--gold)] font-medium" : "text-[var(--fg1)]"
+            className={`flex w-full items-center justify-between px-3 py-1.5 text-sm hover:bg-background text-left ${
+              value === opt.code ? "text-primary font-medium" : "text-foreground"
             }`}
           >
             <span>
               {opt.label}{" "}
-              <span className="text-xs text-[var(--fg3)]">({opt.code})</span>
+              <span className="text-xs text-muted-foreground">({opt.code})</span>
             </span>
-            {value === opt.code && <span className="text-[var(--gold)]" aria-hidden="true">✓</span>}
+            {value === opt.code && <span className="text-primary" aria-hidden="true">✓</span>}
           </button>
         ))}
 
         {hasNoResults && (
-          <div className="px-3 py-2 text-sm text-[var(--fg3)]">{t('No matches')}</div>
+          <div className="px-3 py-2 text-sm text-muted-foreground">{t('No matches')}</div>
         )}
       </div>
     </div>

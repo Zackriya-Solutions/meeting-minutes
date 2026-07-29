@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { invoke } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
-import { Tag, Loader2, Check, X } from '@/components/memento/LucideCompat';
+import { Tag, Loader2, Check, X } from '@/components/deslop-icons';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -125,28 +125,28 @@ export function SpeakerNameCandidatesButton({
           </DialogHeader>
 
           {loading ? (
-            <div className="flex items-center justify-center gap-2 py-8 text-sm text-[var(--fg3)]">
+            <div className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground">
               <Loader2 className="animate-spin" size={18} /> {t('Scanning transcript...')}
             </div>
           ) : candidates.length === 0 ? (
-            <p className="py-6 text-center text-sm text-[var(--fg3)]">{t('No safe name candidates found')}</p>
+            <p className="py-6 text-center text-sm text-muted-foreground">{t('No safe name candidates found')}</p>
           ) : (
             <div className="space-y-3">
               {candidates.map((candidate) => {
                 const seconds = Math.floor((candidate.evidence_start_ms ?? 0) / 1000);
                 return (
-                  <div key={candidate.id} className="rounded-lg border border-[var(--border-subtle)] p-3">
+                  <div key={candidate.id} className="rounded-lg border border-border p-3">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <div>
                         <strong>{candidate.candidate_text}</strong>
-                        <span className="ml-2 text-xs text-[var(--fg3)]">
+                        <span className="ml-2 text-xs text-muted-foreground">
                           {t(EVIDENCE_LABELS[candidate.evidence_kind] ?? 'Name evidence')} · {Math.round(candidate.confidence * 100)}%
                           {candidate.occurrence_count > 1 ? ` · ×${candidate.occurrence_count}` : ''}
                         </span>
                       </div>
                       <button
                         type="button"
-                        className="text-xs text-[var(--gold)] hover:underline"
+                        className="text-xs text-primary hover:underline"
                         onClick={() => {
                           setOpen(false);
                           router.push(`/meeting-details?id=${encodeURIComponent(meetingId)}&t=${seconds}`);
@@ -156,7 +156,7 @@ export function SpeakerNameCandidatesButton({
                       </button>
                     </div>
                     {candidate.evidence_quote && (
-                      <p className="mt-2 line-clamp-3 text-sm text-[var(--fg2)]">{candidate.evidence_quote}</p>
+                      <p className="mt-2 line-clamp-3 text-sm text-muted-foreground">{candidate.evidence_quote}</p>
                     )}
                     <div className="mt-3 flex flex-wrap items-center gap-2">
                       <select
@@ -174,7 +174,7 @@ export function SpeakerNameCandidatesButton({
                           </option>
                         ))}
                       </select>
-                      <label className="flex items-center gap-2 text-xs text-[var(--fg2)]">
+                      <label className="flex items-center gap-2 text-xs text-muted-foreground">
                         <input
                           type="checkbox"
                           checked={Boolean(rename[candidate.id])}

@@ -6,7 +6,7 @@ import PageContent from "./page-content";
 import { useRouter, useSearchParams } from "next/navigation";
 import Analytics from "@/lib/analytics";
 import { invoke } from "@tauri-apps/api/core";
-import { LoaderIcon } from '@/components/memento/LucideCompat';
+import { LoaderIcon } from '@/components/deslop-icons';
 import { useConfig } from "@/contexts/ConfigContext";
 import { usePaginatedTranscripts } from "@/hooks/usePaginatedTranscripts";
 import { useMeetingSpeakers } from "@/hooks/useMeetingSpeakers";
@@ -390,10 +390,10 @@ function MeetingDetailsContent() {
     return (
       <div className="flex items-center justify-center h-screen">
         <div className="text-center">
-          <p className="text-[var(--danger)] mb-4">{error}</p>
+          <p className="text-destructive mb-4">{error}</p>
           <button
             onClick={() => router.push('/')}
-            className="px-4 py-2 bg-[var(--gold)] text-[var(--fg-inverse)] rounded hover:bg-[var(--gold-active)]"
+            className="px-4 py-2 bg-primary text-primary-foreground rounded hover:bg-primary/90"
           >
             {t('Go Back')}
           </button>

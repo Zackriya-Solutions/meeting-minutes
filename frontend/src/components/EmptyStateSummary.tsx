@@ -1,7 +1,7 @@
 'use client';
 
 import { motion } from 'framer-motion';
-import { FileQuestion, Sparkles } from '@/components/memento/LucideCompat';
+import { FileQuestion, Sparkles } from '@/components/deslop-icons';
 import { Button } from '@/components/ui/button';
 import {
   Tooltip,
@@ -26,11 +26,11 @@ export function EmptyStateSummary({ onGenerate, hasModel, isGenerating = false }
       transition={{ duration: 0.3, ease: 'easeOut' }}
       className="flex flex-col items-center justify-center h-full p-8 text-center"
     >
-      <FileQuestion className="w-16 h-16 text-[var(--fg3)] mb-4" />
-      <h3 className="text-lg font-semibold text-[var(--fg1)] mb-2">
+      <FileQuestion className="w-16 h-16 text-muted-foreground mb-4" />
+      <h3 className="text-lg font-semibold text-foreground mb-2">
         {t('No Summary Generated Yet')}
       </h3>
-      <p className="text-sm text-[var(--fg2)] mb-6 max-w-md">
+      <p className="text-sm text-muted-foreground mb-6 max-w-md">
         {t('Generate an AI-powered summary of your meeting transcript to get key points, action items, and decisions.')}
       </p>
 
@@ -57,7 +57,7 @@ export function EmptyStateSummary({ onGenerate, hasModel, isGenerating = false }
       </TooltipProvider>
 
       {!hasModel && (
-        <p className="mt-3 text-xs text-[var(--gold)]">
+        <p className="mt-3 text-xs text-primary">
           {t('Please select a model in Settings first')}
         </p>
       )}

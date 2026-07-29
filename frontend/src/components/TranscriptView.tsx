@@ -256,7 +256,7 @@ export const TranscriptView: React.FC<TranscriptViewProps> = ({ transcripts, isR
       {/* Recording Status Bar - Sticky at top, always visible when recording */}
       <AnimatePresence>
         {isRecording && (
-          <div className="sticky top-4 z-10 bg-[var(--bg-canvas)] pb-2">
+          <div className="sticky top-4 z-10 bg-background pb-2">
             <RecordingStatusBar isPaused={isPaused} />
           </div>
         )}
@@ -289,13 +289,13 @@ export const TranscriptView: React.FC<TranscriptViewProps> = ({ transcripts, isR
             <div className="flex items-start gap-2">
               <div className="flex flex-col items-start flex-shrink-0 min-w-[50px] mt-1">
                 {speakerLabel && (
-                  <span className="text-[10px] font-medium uppercase tracking-wide text-[var(--fg3)] leading-tight">
+                  <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground leading-tight">
                     {speakerLabel}
                   </span>
                 )}
                 <Tooltip>
                   <TooltipTrigger>
-                    <span className="text-xs text-[var(--fg3)]">
+                    <span className="text-xs text-muted-foreground">
                       {transcript.audio_start_time !== undefined
                         ? formatRecordingTime(transcript.audio_start_time)
                         : transcript.timestamp}
@@ -303,7 +303,7 @@ export const TranscriptView: React.FC<TranscriptViewProps> = ({ transcripts, isR
                   </TooltipTrigger>
                   <TooltipContent>
                     {transcript.duration !== undefined && (
-                      <span className="text-xs text-[var(--fg3)]">
+                      <span className="text-xs text-muted-foreground">
                         {transcript.duration.toFixed(1)}s
                         {transcript.confidence !== undefined && (
                           <ConfidenceIndicator
@@ -319,12 +319,12 @@ export const TranscriptView: React.FC<TranscriptViewProps> = ({ transcripts, isR
               <div className="flex-1">
                 {isStreaming ? (
                   // Streaming transcript - show in bubble (full width)
-                  <div className="bg-[var(--bg-elevated)] border border-[var(--border-subtle)] rounded-lg px-3 py-2">
+                  <div className="bg-muted border border-border rounded-lg px-3 py-2">
                     <div className="relative">
-                      <p className="text-base text-[var(--fg1)] leading-relaxed" style={{ visibility: 'hidden' }}>
+                      <p className="text-base text-foreground leading-relaxed" style={{ visibility: 'hidden' }}>
                         {sizerText}
                       </p>
-                      <p className="text-base text-[var(--fg1)] leading-relaxed absolute top-0 left-0">
+                      <p className="text-base text-foreground leading-relaxed absolute top-0 left-0">
                         {displayText}
                       </p>
                     </div>
@@ -332,10 +332,10 @@ export const TranscriptView: React.FC<TranscriptViewProps> = ({ transcripts, isR
                 ) : (
                   // Regular transcript - simple text
                   <div className="relative">
-                    <p className="text-base text-[var(--fg1)] leading-relaxed" style={{ visibility: 'hidden' }}>
+                    <p className="text-base text-foreground leading-relaxed" style={{ visibility: 'hidden' }}>
                       {sizerText}
                     </p>
-                    <p className="text-base text-[var(--fg1)] leading-relaxed absolute top-0 left-0">
+                    <p className="text-base text-foreground leading-relaxed absolute top-0 left-0">
                       {displayText}
                     </p>
                   </div>
@@ -352,43 +352,31 @@ export const TranscriptView: React.FC<TranscriptViewProps> = ({ transcripts, isR
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="flex items-center gap-2 mt-4 text-[var(--fg2)]"
+          className="flex items-center gap-2 mt-4 text-muted-foreground"
         >
-          <div className="w-2 h-2 bg-[var(--gold)] rounded-full animate-pulse"></div>
+          <div className="w-2 h-2 bg-primary rounded-full animate-pulse"></div>
           <span className="text-sm">{t('Listening...')}</span>
         </motion.div>
       )}
 
       {/* Empty state when no transcripts */}
-      {transcripts.length === 0 && (
+      {transcripts.length === 0 && isRecording && (
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-          className="text-center text-[var(--fg2)] mt-8"
+          className="text-center text-muted-foreground mt-8"
         >
-          {isRecording ? (
-            <>
-              <div className="flex items-center justify-center mb-3">
-                <div className={`w-3 h-3 rounded-full ${isPaused ? 'bg-[var(--gold)]' : 'bg-[var(--gold)] animate-pulse'}`}></div>
-              </div>
-              <p className="text-sm text-[var(--fg2)]">
-                {isPaused ? t('Recording paused') : t('Listening for speech...')}
-              </p>
-              <p className="text-xs mt-1 text-[var(--fg3)]">
-                {isPaused
-                  ? t('Click resume to continue recording')
-                  : t('Speak to see live transcription')}
-              </p>
-            </>
-          ) : (
-            <>
-              <p className="text-lg font-semibold">{t('Welcome to Memento')}</p>
-              <p className="mt-1 text-xs">{t('Select a meeting in the sidebar or start a new recording')}</p>
-              <p className="mx-auto mt-2 max-w-md text-xs text-[var(--fg3)]">
-                {t('For a standup summary: open a meeting, choose Improve → Template → Daily Standup, then generate the summary.')}
-              </p>
-            </>
-          )}
+          <div className="flex items-center justify-center mb-3">
+            <div className={`w-3 h-3 rounded-full ${isPaused ? 'bg-primary' : 'bg-primary animate-pulse'}`}></div>
+          </div>
+          <p className="text-sm text-muted-foreground">
+            {isPaused ? t('Recording paused') : t('Listening for speech...')}
+          </p>
+          <p className="text-xs mt-1 text-muted-foreground">
+            {isPaused
+              ? t('Click resume to continue recording')
+              : t('Speak to see live transcription')}
+          </p>
         </motion.div>
       )}
     </div>

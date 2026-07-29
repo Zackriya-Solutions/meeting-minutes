@@ -3,10 +3,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useRouter } from 'next/navigation';
-import { Loader2 } from '@/components/memento/LucideCompat';
+import { Loader2 } from '@/components/deslop-icons';
 import { cn } from '@/lib/utils';
 import { Icon } from '@/components/memento/Icon';
-import { Button } from '@/components/memento/Button';
+import { Button } from '@/components/ui/button';
 import { getCollectionDisplayText } from '@/lib/collectionDisplay';
 import { useT } from '@/lib/i18n';
 import { KnowledgeReadinessCard } from '@/components/KnowledgeReadinessCard';
@@ -152,13 +152,13 @@ export default function ChatPage() {
         >
           <Icon name="back" />
         </button>
-        <Icon name="library" size={24} className="text-[var(--gold)]" />
+        <Icon name="library" size={24} className="text-primary" />
         <div className="min-w-0">
           <h1 className="mm-page-title">
             {scopeKind === 'collection' ? t('Chat with collection') : t('Chat with archive')}
           </h1>
           {scopeKind === 'collection' && selectedCollectionName && (
-            <p className="mt-0.5 truncate text-xs text-[var(--fg3)]">{selectedCollectionName}</p>
+            <p className="mt-0.5 truncate text-xs text-muted-foreground">{selectedCollectionName}</p>
           )}
         </div>
 
@@ -209,8 +209,8 @@ export default function ChatPage() {
             disabled={loadingHistory}
             variant="secondary"
             size="sm"
-            icon={<Icon name="plus" size={16} />}
           >
+            <Icon name="plus" size={16} />
             {t('New chat')}
           </Button>
         </div>
@@ -220,7 +220,7 @@ export default function ChatPage() {
       <div ref={scrollRef} className="flex-1 overflow-y-auto py-6">
         {!loadingHistory && messages.length === 0 && <KnowledgeReadinessCard mode="chat" />}
         {loadingHistory ? (
-          <div className="flex h-full items-center justify-center text-[var(--fg3)]">
+          <div className="flex h-full items-center justify-center text-muted-foreground">
             <Loader2 className="h-5 w-5 animate-spin" />
           </div>
         ) : messages.length === 0 ? (
@@ -236,7 +236,7 @@ export default function ChatPage() {
       </div>
 
       {/* Composer */}
-      <div className="border-t border-[var(--border-subtle)] py-4">
+      <div className="border-t border-border py-4">
         <div className="mx-auto flex max-w-3xl items-end gap-2">
           <textarea
             ref={inputRef}
@@ -252,15 +252,15 @@ export default function ChatPage() {
             onClick={() => send(input)}
             disabled={loadingHistory || sending || !input.trim()}
             className={cn(
-              'flex h-11 w-11 items-center justify-center rounded-xl text-[var(--fg-inverse)] transition-colors',
-              loadingHistory || sending || !input.trim() ? 'cursor-not-allowed bg-[var(--bg-elevated)]' : 'bg-[var(--gold)] hover:bg-[var(--gold-active)]',
+              'flex h-11 w-11 items-center justify-center rounded-xl text-primary-foreground transition-colors',
+              loadingHistory || sending || !input.trim() ? 'cursor-not-allowed bg-muted' : 'bg-primary hover:bg-primary/90',
             )}
             aria-label={t('Send')}
           >
             {sending ? <Loader2 className="h-5 w-5 animate-spin" /> : <Icon name="send" />}
           </button>
         </div>
-        <p className="mx-auto mt-2 max-w-3xl text-center text-xs text-[var(--fg3)]">
+        <p className="mx-auto mt-2 max-w-3xl text-center text-xs text-muted-foreground">
           {t('Answers are drawn only from your recordings, with links to the sources.')}
         </p>
       </div>
@@ -275,8 +275,8 @@ function EmptyState({ onPick, disabled }: { onPick: (s: string) => void; disable
       <div className="mm-empty-icon mb-4">
         <Icon name="library" size={28} />
       </div>
-      <h2 className="text-xl font-semibold text-[var(--fg1)]">{t('Ask your meeting archive')}</h2>
-      <p className="mt-2 text-sm text-[var(--fg2)]">
+      <h2 className="text-xl font-semibold text-foreground">{t('Ask your meeting archive')}</h2>
+      <p className="mt-2 text-sm text-muted-foreground">
         {t('Ask questions in natural language — answers come with links to specific moments in your recordings.')}
       </p>
       <div className="mt-8 flex w-full flex-col gap-2">
@@ -285,7 +285,7 @@ function EmptyState({ onPick, disabled }: { onPick: (s: string) => void; disable
             key={s}
             disabled={disabled}
             onClick={() => onPick(t(s))}
-            className="rounded-xl border border-[var(--border-subtle)] px-4 py-3 text-left text-sm text-[var(--fg2)] transition-colors hover:border-[var(--gold-border)] hover:bg-[var(--gold-soft)] disabled:opacity-50"
+            className="rounded-xl border border-border px-4 py-3 text-left text-sm text-muted-foreground transition-colors hover:border-primary/40 hover:bg-primary/10 disabled:opacity-50"
           >
             {t(s)}
           </button>

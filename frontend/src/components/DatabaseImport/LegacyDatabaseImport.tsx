@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
-import { Loader2, FolderOpen, Database, CheckCircle2, XCircle } from '@/components/memento/LucideCompat';
+import { Loader2, FolderOpen, Database, CheckCircle2, XCircle } from '@/components/deslop-icons';
 import { HomebrewDatabaseDetector } from './HomebrewDatabaseDetector';
 import { useT } from '@/lib/i18n';
 
@@ -136,14 +136,14 @@ export function LegacyDatabaseImport({ isOpen, onComplete }: LegacyDatabaseImpor
 
           {/* Browse Section */}
           <div className="space-y-3">
-            <p className="text-sm text-[var(--fg2)]">
+            <p className="text-sm text-muted-foreground">
               {t('Select your previous Meetily folder, backend directory, or database file:')}
             </p>
 
             <button
               onClick={handleBrowse}
               disabled={isLoading}
-              className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-[var(--gold)] text-[var(--fg-inverse)] rounded-lg hover:bg-[var(--gold-active)] disabled:bg-[var(--fg3)] disabled:cursor-not-allowed transition-colors"
+              className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 disabled:bg-muted-foreground disabled:cursor-not-allowed transition-colors"
             >
               {importState === 'selecting' || importState === 'detecting' ? (
                 <>
@@ -161,12 +161,12 @@ export function LegacyDatabaseImport({ isOpen, onComplete }: LegacyDatabaseImpor
 
           {/* Detection Result */}
           {detectedPath && (
-            <div className="p-3 bg-[color-mix(in_srgb,var(--success)_12%,transparent)] border border-[color-mix(in_srgb,var(--success)_42%,transparent)] rounded-lg">
+            <div className="p-3 bg-success/10 border border-success/40 rounded-lg">
               <div className="flex items-start gap-2">
-                <CheckCircle2 className="h-5 w-5 text-[var(--success)] mt-0.5 flex-shrink-0" />
+                <CheckCircle2 className="h-5 w-5 text-success mt-0.5 flex-shrink-0" />
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-[var(--success)]">{t('Database found!')}</p>
-                  <p className="text-xs text-[var(--success)] mt-1 break-all">{detectedPath}</p>
+                  <p className="text-sm font-medium text-success">{t('Database found!')}</p>
+                  <p className="text-xs text-success mt-1 break-all">{detectedPath}</p>
                 </div>
               </div>
             </div>
@@ -174,11 +174,11 @@ export function LegacyDatabaseImport({ isOpen, onComplete }: LegacyDatabaseImpor
 
           {/* Error Message */}
           {importState === 'error' && errorMessage && (
-            <div className="p-3 bg-[color-mix(in_srgb,var(--danger)_12%,transparent)] border border-[color-mix(in_srgb,var(--danger)_42%,transparent)] rounded-lg">
+            <div className="p-3 bg-destructive/10 border border-destructive/40 rounded-lg">
               <div className="flex items-start gap-2">
-                <XCircle className="h-5 w-5 text-[var(--danger)] mt-0.5 flex-shrink-0" />
+                <XCircle className="h-5 w-5 text-destructive mt-0.5 flex-shrink-0" />
                 <div className="flex-1">
-                  <p className="text-sm text-[var(--danger)]">{errorMessage}</p>
+                  <p className="text-sm text-destructive">{errorMessage}</p>
                 </div>
               </div>
             </div>
@@ -189,7 +189,7 @@ export function LegacyDatabaseImport({ isOpen, onComplete }: LegacyDatabaseImpor
             <button
               onClick={handleImport}
               disabled={!canImport || isLoading}
-              className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-[var(--success)] text-[var(--fg-inverse)] rounded-lg hover:brightness-110 disabled:bg-[var(--bg-elevated)] disabled:cursor-not-allowed transition-colors"
+              className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-success text-primary-foreground rounded-lg hover:brightness-110 disabled:bg-muted disabled:cursor-not-allowed transition-colors"
             >
               {importState === 'importing' ? (
                 <>
@@ -211,17 +211,17 @@ export function LegacyDatabaseImport({ isOpen, onComplete }: LegacyDatabaseImpor
 
             <div className="relative">
               <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t border-[var(--border-strong)]"></div>
+                <div className="w-full border-t border-border"></div>
               </div>
               <div className="relative flex justify-center text-sm">
-                <span className="bg-[var(--bg-canvas)] px-2 text-[var(--fg2)]">{t('or')}</span>
+                <span className="bg-background px-2 text-muted-foreground">{t('or')}</span>
               </div>
             </div>
 
             <button
               onClick={handleStartFresh}
               disabled={isLoading}
-              className="w-full px-4 py-3 border-2 border-[var(--border-strong)] text-[var(--fg2)] rounded-lg hover:bg-[var(--bg-sheet)] disabled:bg-[var(--bg-elevated)] disabled:cursor-not-allowed transition-colors"
+              className="w-full px-4 py-3 border-2 border-border text-muted-foreground rounded-lg hover:bg-background disabled:bg-muted disabled:cursor-not-allowed transition-colors"
             >
               {t('Start Fresh (No Import)')}
             </button>

@@ -12,7 +12,8 @@ import { useT } from '@/lib/i18n';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Button } from '@/components/ui/button';
-import { Eye, Pencil } from '@/components/memento/LucideCompat';
+import { Eye, Pencil } from '@/components/deslop-icons';
+import { useTheme } from 'next-themes';
 import "@blocknote/shadcn/style.css";
 
 // Dynamically import BlockNote Editor to avoid SSR issues
@@ -81,6 +82,7 @@ export const BlockNoteSummaryView = forwardRef<BlockNoteSummaryViewRef, BlockNot
   onDirtyChange
 }, ref) => {
   const t = useT();
+  const { resolvedTheme } = useTheme();
   const { format, data } = detectSummaryFormat(summaryData);
   const [isDirty, setIsDirty] = useState(false);
   const [currentBlocks, setCurrentBlocks] = useState<Block[]>([]);
@@ -302,22 +304,22 @@ export const BlockNoteSummaryView = forwardRef<BlockNoteSummaryViewRef, BlockNot
                   handleEditorChange(editor.document);
                 }
               }}
-              theme="dark"
+              theme={resolvedTheme === 'light' ? 'light' : 'dark'}
             />
           </div>
         ) : (
-          <div className="summary-markdown prose prose-invert max-w-none break-words text-[var(--fg1)] prose-headings:text-[var(--fg1)] prose-p:text-[var(--fg1)] prose-strong:text-[var(--fg1)] prose-li:text-[var(--fg1)] prose-th:text-[var(--fg1)] prose-td:text-[var(--fg2)]">
+          <div className="summary-markdown prose max-w-none break-words text-foreground dark:prose-invert prose-headings:text-foreground prose-p:text-foreground prose-strong:text-foreground prose-li:text-foreground prose-th:text-foreground prose-td:text-muted-foreground">
             <ReactMarkdown remarkPlugins={[remarkGfm]}>{data.markdown}</ReactMarkdown>
           </div>
         )}
 
         {markdownParseStatus === 'error' && (
-          <p className="mt-4 rounded-lg border border-[var(--danger)]/30 bg-[var(--danger)]/10 p-3 text-sm text-[var(--danger)]">
+          <p className="mt-4 rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
             {t('The summary is shown in read-only mode because the editor could not parse its formatting.')}
           </p>
         )}
         {markdownParseStatus === 'loading' && (
-          <p className="mt-3 text-xs text-[var(--fg3)]">{t('Preparing summary editor...')}</p>
+          <p className="mt-3 text-xs text-muted-foreground">{t('Preparing summary editor...')}</p>
         )}
       </div>
     );

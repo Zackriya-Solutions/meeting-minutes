@@ -2,6 +2,9 @@
 
 import { useRef, useEffect } from 'react';
 import { useT } from '@/lib/i18n';
+import { Pencil, Trash2 } from '@/components/deslop-icons';
+import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
 
 interface EditableTitleProps {
   title: string;
@@ -39,7 +42,7 @@ export const EditableTitle: React.FC<EditableTitleProps> = ({
 
   return isEditing ? (
     <div className="flex-1">
-      <textarea
+      <Textarea
         ref={titleInputRef}
         value={title}
         onChange={(e) => onChange(e.target.value)}
@@ -51,7 +54,7 @@ export const EditableTitle: React.FC<EditableTitleProps> = ({
             onFinishEditing();
           }
         }}
-        className="text-2xl font-bold bg-[var(--bg-sheet)] border border-[var(--border-subtle)] focus:outline-none focus:ring-2 ring-[var(--gold-ring)] rounded px-3 py-1 w-full resize-none overflow-hidden"
+        className="w-full resize-none overflow-hidden text-2xl font-bold"
         style={{ minWidth: '300px', minHeight: '40px' }}
         autoFocus
         rows={1}
@@ -60,53 +63,33 @@ export const EditableTitle: React.FC<EditableTitleProps> = ({
   ) : (
     <div className="group flex items-center space-x-2 flex-1">
       <h1
-        className="text-2xl font-bold cursor-pointer hover:bg-[var(--bg-sheet)] rounded px-1 flex-1 whitespace-pre-wrap"
+        className="text-2xl font-bold cursor-pointer hover:bg-background rounded px-1 flex-1 whitespace-pre-wrap"
         onClick={onStartEditing}
       >
         {title}
       </h1>
       <div className="flex space-x-1">
-        <button 
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
           onClick={onStartEditing}
-          className="opacity-0 group-hover:opacity-100 transition-opacity duration-200 p-1 hover:bg-[var(--bg-elevated)] rounded"
+          className="opacity-0 transition-opacity duration-200 group-hover:opacity-100"
           title={t('Edit section title')}
         >
-          <svg 
-            xmlns="http://www.w3.org/2000/svg" 
-            width="16" 
-            height="16" 
-            viewBox="0 0 24 24" 
-            fill="none" 
-            stroke="currentColor" 
-            strokeWidth="2" 
-            strokeLinecap="round" 
-            strokeLinejoin="round"
-          >
-            <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
-          </svg>
-        </button>
+          <Pencil />
+        </Button>
         {onDelete && (
-          <button 
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
             onClick={onDelete}
-            className="opacity-0 group-hover:opacity-100 transition-opacity duration-200 p-1 hover:bg-[var(--bg-elevated)] rounded text-[var(--danger)]"
+            className="text-destructive opacity-0 transition-opacity duration-200 group-hover:opacity-100"
             title={t('Delete section')}
           >
-            <svg 
-              xmlns="http://www.w3.org/2000/svg" 
-              width="16" 
-              height="16" 
-              viewBox="0 0 24 24" 
-              fill="none" 
-              stroke="currentColor" 
-              strokeWidth="2" 
-              strokeLinecap="round" 
-              strokeLinejoin="round"
-            >
-              <path d="M3 6h18" />
-              <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
-              <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
-            </svg>
-          </button>
+            <Trash2 />
+          </Button>
         )}
       </div>
     </div>

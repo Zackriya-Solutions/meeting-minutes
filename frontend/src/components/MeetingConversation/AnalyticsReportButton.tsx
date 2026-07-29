@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { AlertCircle, FileText, FolderOpen, Loader2, RefreshCw } from '@/components/memento/LucideCompat';
+import { AlertCircle, FileText, FolderOpen, Loader2, RefreshCw } from '@/components/deslop-icons';
 import { useT } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { useAnalyticsReport } from '@/hooks/meeting-details/useAnalyticsReport';
@@ -69,7 +69,7 @@ export function AnalyticsReportButton({ meetingId, disabled = false, disabledTit
       <Button
         variant="outline"
         size="sm"
-        className="shrink-0 animate-pulse border-[var(--gold-border)] bg-[var(--gold-soft)] text-[var(--fg1)] hover:bg-[var(--gold)]"
+        className="shrink-0 animate-pulse border-primary/40 bg-primary/10 text-foreground hover:bg-primary"
         onClick={() => setDialogOpen(true)}
         title={t('Questions — tap to answer')}
       >
@@ -96,7 +96,7 @@ export function AnalyticsReportButton({ meetingId, disabled = false, disabledTit
       <Button
         variant="outline"
         size="sm"
-        className="shrink-0 border-[color-mix(in_srgb,var(--danger)_42%,transparent)] text-[var(--danger)] hover:bg-[color-mix(in_srgb,var(--danger)_12%,transparent)] hover:text-[var(--danger)]"
+        className="shrink-0 border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
         onClick={() => setDialogOpen(true)}
         title={error ? `${t('Report failed')}: ${error}` : t('Report failed')}
       >

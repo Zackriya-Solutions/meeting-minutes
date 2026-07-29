@@ -38,3 +38,12 @@ export const LANGUAGES = [
   { code: 'bg', name: 'Bulgarian' },
   { code: 'lt', name: 'Lithuanian' },
 ];
+
+const RU_LANGUAGE_NAMES = new Intl.DisplayNames(['ru'], { type: 'language' });
+
+/** Russian display label for a transcription/summary language code. */
+export function getLanguageDisplayName(code: string): string {
+  if (code === 'auto') return 'Определять автоматически';
+  if (code === 'auto-translate') return 'Определять и переводить на английский';
+  return RU_LANGUAGE_NAMES.of(code) ?? 'Неизвестный язык';
+}

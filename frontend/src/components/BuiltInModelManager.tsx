@@ -6,7 +6,7 @@ import { listen } from '@tauri-apps/api/event';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { cn } from '@/lib/utils';
-import { Download, RefreshCw, BadgeAlert, Trash2 } from '@/components/memento/LucideCompat';
+import { Download, RefreshCw, BadgeAlert, Trash2 } from '@/components/deslop-icons';
 import { toast } from 'sonner';
 import { formatSummaryModelSizeLabelFromMb } from '@/lib/onboarding-summary-model';
 import { useT } from '@/lib/i18n';
@@ -304,11 +304,11 @@ export function BuiltInModelManager({
               className={cn(
                 'p-4 rounded-lg border transition-colors',
                 modelIsDownloading
-                  ? 'bg-[var(--bg-canvas)] border-[var(--border-subtle)]'
+                  ? 'bg-background border-border'
                   : 'bg-card',
                 selectedModel === model.name
-                  ? 'ring-2 ring-[var(--border-strong)] border-[var(--border-strong)]'
-                  : 'border-[var(--border-subtle)] hover:border-[var(--border-strong)]',
+                  ? 'border-border ring-2 ring-border'
+                  : 'border-border hover:border-border',
                 isAvailable && !modelIsDownloading && 'cursor-pointer'
               )}
               onClick={() => {
@@ -321,28 +321,28 @@ export function BuiltInModelManager({
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div className="min-w-0 flex-1">
                   <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-                    <span className="min-w-0 break-words text-base font-bold leading-snug text-[var(--fg1)]">{model.display_name || model.name}</span>
+                    <span className="min-w-0 break-words text-base font-bold leading-snug text-foreground">{model.display_name || model.name}</span>
                     {isAvailable && (
                       <>
-                        <span className="flex shrink-0 items-center gap-1 text-xs font-medium text-[var(--success)]">
-                          <span className="h-2 w-2 rounded-full bg-[var(--success)]"></span>
+                        <span className="flex shrink-0 items-center gap-1 text-xs font-medium text-success">
+                          <span className="h-2 w-2 rounded-full bg-success"></span>
                           {t('Ready')}
                         </span>
                         {selectedModel === model.name && (
-                          <span className="shrink-0 rounded bg-[var(--gold-soft)] px-2 py-0.5 text-xs font-medium text-[var(--gold)]">
+                          <span className="shrink-0 rounded bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
                             {t('Selected')}
                           </span>
                         )}
                       </>
                     )}
                     {isCorrupted && (
-                      <span className="flex shrink-0 items-center gap-1 rounded bg-[color-mix(in_srgb,var(--danger)_12%,transparent)] px-2 py-0.5 text-xs font-medium text-[var(--danger)]">
+                      <span className="flex shrink-0 items-center gap-1 rounded bg-destructive/10 px-2 py-0.5 text-xs font-medium text-destructive">
                         <BadgeAlert className="h-3 w-3" />
                         {t('Corrupted')}
                       </span>
                     )}
                     {isError && (
-                      <span className="shrink-0 rounded bg-[color-mix(in_srgb,var(--danger)_12%,transparent)] px-2 py-0.5 text-xs font-medium text-[var(--danger)]">
+                      <span className="shrink-0 rounded bg-destructive/10 px-2 py-0.5 text-xs font-medium text-destructive">
                         {t('Error')}
                       </span>
                     )}
@@ -423,7 +423,7 @@ export function BuiltInModelManager({
                   {/* Available - Show small trash icon (only if not currently selected) */}
                   {isAvailable && !modelIsDownloading && selectedModel !== model.name && (
                     <button
-                      className="p-2 rounded hover:bg-[var(--bg-elevated)] transition-colors text-[var(--fg2)] hover:text-[var(--danger)]"
+                      className="p-2 rounded hover:bg-muted transition-colors text-muted-foreground hover:text-destructive"
                       onClick={(e) => {
                         e.stopPropagation();
                         deleteModel(model.name);
@@ -435,12 +435,12 @@ export function BuiltInModelManager({
                   )}
                 </div>
               </div>
-              <div className="text-sm text-[var(--fg2)]">
+              <div className="text-sm text-muted-foreground">
                 {model.description && (
                   <p className="mb-1">{model.description}</p>
                 )}
                 {(isError || isCorrupted) && (
-                  <p className="mb-1 text-xs text-[var(--danger)]">
+                  <p className="mb-1 text-xs text-destructive">
                     {isError && typeof model.status === 'object' && 'Error' in model.status
                       ? (model.status as any).Error
                       : isCorrupted
@@ -448,7 +448,7 @@ export function BuiltInModelManager({
                       : t('An error occurred')}
                   </p>
                 )}
-                <div className="text-xs text-[var(--fg2)]">
+                <div className="text-xs text-muted-foreground">
                   <span>{formatSummaryModelSizeLabelFromMb(model.size_mb)} · {model.context_size} {t('tokens')}</span>
                 </div>
                 </div>
@@ -456,19 +456,19 @@ export function BuiltInModelManager({
 
               {/* Download progress bar */}
               {modelIsDownloading && progress !== undefined && (
-                <div className="mt-3 pt-3 border-t border-[var(--border-subtle)]">
+                <div className="mt-3 pt-3 border-t border-border">
                   <div className="flex items-center justify-between mb-1">
-                    <span className="text-sm font-medium text-[var(--fg1)]">{t('Downloading...')}</span>
-                    <span className="text-sm font-semibold text-[var(--fg1)]">
+                    <span className="text-sm font-medium text-foreground">{t('Downloading...')}</span>
+                    <span className="text-sm font-semibold text-foreground">
                       {Math.round(progress)}%
                     </span>
                   </div>
-                  <div className="text-sm text-[var(--fg2)] mb-2">
+                  <div className="text-sm text-muted-foreground mb-2">
                     {progressInfo?.totalMb > 0 ? (
                       <>
                         {progressInfo.downloadedMb.toFixed(1)} MiB / {progressInfo.totalMb.toFixed(1)} MiB
                         {progressInfo.speedMbps > 0 && (
-                          <span className="ml-2 text-[var(--fg2)]">
+                          <span className="ml-2 text-muted-foreground">
                             ({progressInfo.speedMbps.toFixed(1)} MiB/s)
                           </span>
                         )}
@@ -477,9 +477,9 @@ export function BuiltInModelManager({
                       <span>{formatSummaryModelSizeLabelFromMb(model.size_mb)}</span>
                     )}
                   </div>
-                  <div className="w-full h-2.5 bg-[var(--bg-elevated)] rounded-full overflow-hidden">
+                  <div className="w-full h-2.5 bg-muted rounded-full overflow-hidden">
                     <div
-                      className="h-full rounded-full bg-[var(--fg2)] transition-all duration-300"
+                      className="h-full rounded-full bg-muted-foreground transition-all duration-300"
                       style={{ width: `${progress}%` }}
                     />
                   </div>

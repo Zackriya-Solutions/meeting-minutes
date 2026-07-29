@@ -1,7 +1,7 @@
 import React, { useContext, useState, useEffect } from 'react';
 import { Switch } from '@/components/ui/switch';
 import { Button } from '@/components/ui/button';
-import { Info, Loader2, Copy, Check } from '@/components/memento/LucideCompat';
+import { Info, Loader2, Copy, Check } from '@/components/deslop-icons';
 import { AnalyticsContext } from './AnalyticsProvider';
 import { load } from '@tauri-apps/plugin-store';
 import { invoke } from '@tauri-apps/api/core';
@@ -152,16 +152,16 @@ export default function AnalyticsConsentSwitch() {
     <>
       <div className="space-y-4">
         <div>
-          <h3 className="text-base font-semibold text-[var(--fg1)] mb-2">{t('Usage Analytics')}</h3>
-          <p className="text-sm text-[var(--fg2)] mb-4">
+          <h3 className="text-base font-semibold text-foreground mb-2">{t('Usage Analytics')}</h3>
+          <p className="text-sm text-muted-foreground mb-4">
             {t('Usage analytics is off by default. You can turn it on to share anonymous product and performance data; no personal content is collected.')}
           </p>
         </div>
 
-        <div className="flex items-center justify-between p-3 bg-[var(--bg-sheet)] rounded-lg border border-[var(--border-subtle)]">
+        <div className="flex items-center justify-between p-3 bg-background rounded-lg border border-border">
           <div>
-            <h4 className="font-semibold text-[var(--fg1)]">{t('Enable Analytics')}</h4>
-            <p className="text-sm text-[var(--fg2)]">
+            <h4 className="font-semibold text-foreground">{t('Enable Analytics')}</h4>
+            <p className="text-sm text-muted-foreground">
               {isProcessing
                 ? t('Updating...')
                 : isAnalyticsOptedIn && runtimeEnabled
@@ -173,7 +173,7 @@ export default function AnalyticsConsentSwitch() {
           </div>
           <div className="flex items-center gap-2 ml-4">
             {isProcessing && (
-              <Loader2 className="w-4 h-4 animate-spin text-[var(--fg2)]" />
+              <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
             )}
             <Switch
               checked={isAnalyticsOptedIn}
@@ -190,15 +190,15 @@ export default function AnalyticsConsentSwitch() {
 
         {/* User ID Display */}
         {isAnalyticsOptedIn && userId && (
-          <div className="p-4 border rounded-lg bg-[var(--bg-sheet)]">
+          <div className="p-4 border rounded-lg bg-background">
             <div className="flex items-start justify-between gap-4">
               <div className="flex-1 min-w-0">
-                <div className="font-medium text-[var(--fg1)] mb-1">{t('Your User ID')}</div>
-                <p className="text-xs text-[var(--fg2)] mb-2">
+                <div className="font-medium text-foreground mb-1">{t('Your User ID')}</div>
+                <p className="text-xs text-muted-foreground mb-2">
                   {t('Share this ID when reporting issues to help us investigate your issue logs')}
                 </p>
                 <div className="flex items-center gap-2">
-                  <code className="text-xs text-[var(--fg2)] bg-[var(--bg-canvas)] px-2 py-1 rounded border border-[var(--border-strong)] font-mono flex-1 truncate">
+                  <code className="text-xs text-muted-foreground bg-background px-2 py-1 rounded border border-border font-mono flex-1 truncate">
                     {userId}
                   </code>
                   <Button
@@ -210,8 +210,8 @@ export default function AnalyticsConsentSwitch() {
                   >
                     {isCopied ? (
                       <>
-                        <Check className="w-3.5 h-3.5 text-[var(--success)]" />
-                        <span className="text-[var(--success)]">{t('Copied!')}</span>
+                        <Check className="w-3.5 h-3.5 text-success" />
+                        <span className="text-success">{t('Copied!')}</span>
                       </>
                     ) : (
                       <>
@@ -226,15 +226,15 @@ export default function AnalyticsConsentSwitch() {
           </div>
         )}
 
-        <div className="flex items-start gap-2 p-2 bg-[var(--gold-soft)] rounded border border-[var(--gold-border)]">
-          <Info className="w-4 h-4 text-[var(--gold)] mt-0.5 flex-shrink-0" />
-          <div className="text-xs text-[var(--gold)]">
+        <div className="flex items-start gap-2 p-2 bg-primary/10 rounded border border-primary/40">
+          <Info className="w-4 h-4 text-primary mt-0.5 flex-shrink-0" />
+          <div className="text-xs text-primary">
             <p className="mb-1">
               {t('Your meetings, transcripts, and recordings remain completely private and local.')}
             </p>
             <button
               onClick={handlePrivacyPolicyClick}
-              className="text-[var(--gold)] hover:text-[var(--gold-active)] underline hover:no-underline"
+              className="text-primary hover:text-primary/90 underline hover:no-underline"
             >
               {t('View Privacy Policy')}
             </button>

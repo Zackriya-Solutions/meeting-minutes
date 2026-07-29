@@ -223,7 +223,7 @@ export const BlockComponent: React.FC<BlockProps> = ({
   return (
     <div 
       className={`group relative min-h-[24px] flex items-start rounded transition-all duration-150 ease-in-out
-        ${isSelected ? 'bg-[var(--gold-soft)] ring-1 ring-[var(--gold-ring)] shadow-none' : 'hover:bg-[var(--bg-sheet)]'}`}
+        ${isSelected ? 'bg-primary/10 ring-1 ring-ring shadow-none' : 'hover:bg-background'}`}
       onMouseDown={onMouseDown}
       onMouseEnter={onMouseEnter}
       onMouseUp={onMouseUp}
@@ -248,7 +248,7 @@ export const BlockComponent: React.FC<BlockProps> = ({
           className={`
             w-full resize-none overflow-hidden bg-transparent border-none p-0 focus:outline-none focus:ring-0
             transition-all duration-150 ease-in-out
-            ${block.color === 'gray' ? 'text-[var(--fg2)]' : ''}
+            ${block.color === 'gray' ? 'text-muted-foreground' : ''}
             ${block.type === 'heading1' ? 'text-xl font-bold' : ''}
             ${block.type === 'heading2' ? 'text-lg font-semibold' : ''}
           `}
@@ -258,25 +258,25 @@ export const BlockComponent: React.FC<BlockProps> = ({
         {showCommands && (
           <div 
             ref={commandsRef}
-            className="absolute left-0 top-full mt-1 w-64 bg-[var(--bg-canvas)] rounded-lg shadow-none border border-[var(--border-subtle)] py-2 z-50
+            className="absolute left-0 top-full mt-1 w-64 bg-background rounded-lg shadow-none border border-border py-2 z-50
                        animate-in fade-in slide-in-from-top-2 duration-150"
           >
             {filteredCommands.map((cmd, index) => (
               <button
                 key={cmd.id}
                 className={`
-                  w-full text-left px-3 py-2 flex items-center space-x-3 hover:bg-[var(--bg-sheet)]
-                  ${index === selectedCommandIndex ? 'bg-[var(--bg-sheet)]' : ''}
+                  w-full text-left px-3 py-2 flex items-center space-x-3 hover:bg-background
+                  ${index === selectedCommandIndex ? 'bg-background' : ''}
                 `}
                 onClick={() => handleCommandSelect(cmd)}
                 onMouseEnter={() => setSelectedCommandIndex(index)}
               >
-                <span className="flex-shrink-0 w-6 h-6 flex items-center justify-center bg-[var(--bg-elevated)] rounded text-[var(--fg2)]">
+                <span className="flex-shrink-0 w-6 h-6 flex items-center justify-center bg-muted rounded text-muted-foreground">
                   {cmd.icon}
                 </span>
                 <div className="flex-1">
                   <div className="font-medium">{t(cmd.label)}</div>
-                  <div className="text-sm text-[var(--fg2)]">{t(cmd.description)}</div>
+                  <div className="text-sm text-muted-foreground">{t(cmd.description)}</div>
                 </div>
               </button>
             ))}

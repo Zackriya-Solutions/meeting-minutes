@@ -1,7 +1,7 @@
 "use client";
 
 import { type RefObject } from 'react';
-import { Loader2 } from '@/components/memento/LucideCompat';
+import { Loader2 } from '@/components/deslop-icons';
 import { Icon } from '@/components/memento/Icon';
 import { cn } from '@/lib/utils';
 import { useT } from '@/lib/i18n';
@@ -38,7 +38,7 @@ export function MeetingComposer({
   return (
     <div className="px-[26px] pb-[18px] pt-3">
       <div className="mx-auto max-w-[720px]">
-        <div className="mm-composer flex items-end gap-2.5 rounded-[999px] border border-[var(--border-strong)] bg-[var(--bg-sheet)] py-1.5 pl-[18px] pr-2 transition-colors focus-within:border-[var(--gold-border)]">
+        <div className="mm-composer flex items-end gap-2.5 rounded-[999px] border border-border bg-background py-1.5 pl-[18px] pr-2 transition-colors focus-within:border-primary/40">
           <textarea
             ref={inputRef}
             value={input}
@@ -47,7 +47,7 @@ export function MeetingComposer({
             onKeyDown={onKeyDown}
             rows={1}
             placeholder={t('Ask about this meeting…')}
-            className="max-h-40 min-h-[36px] flex-1 resize-none self-center bg-transparent py-2 text-[13.5px] leading-relaxed text-[var(--fg1)] outline-none placeholder:text-[var(--fg3)]"
+            className="max-h-40 min-h-[36px] flex-1 resize-none self-center bg-transparent py-2 text-[13.5px] leading-relaxed text-foreground outline-none placeholder:text-muted-foreground"
           />
           <button
             type="button"
@@ -57,8 +57,8 @@ export function MeetingComposer({
             className={cn(
               'flex h-9 w-9 shrink-0 items-center justify-center self-end rounded-full transition-colors',
               canSend
-                ? 'bg-[var(--bg-elevated)] text-[var(--fg2)] hover:bg-[var(--gold)] hover:text-[var(--fg-inverse)]'
-                : 'cursor-not-allowed bg-[var(--bg-elevated)] text-[var(--fg3)]',
+                ? 'bg-muted text-muted-foreground hover:bg-primary hover:text-primary-foreground'
+                : 'cursor-not-allowed bg-muted text-muted-foreground',
             )}
           >
             {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Icon name="send" size={17} />}

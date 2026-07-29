@@ -8,11 +8,10 @@ module.exports = {
   ],
   theme: {
   	extend: {
-  		fontFamily: {
-  			sans: [
-  				'var(--font-source-sans-3)'
-  			]
-  		},
+		fontFamily: {
+			sans: ['SB Sans Interface', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+			mono: ['SB Sans Text Mono', 'ui-monospace', 'monospace']
+		},
   		colors: {
   			background: 'hsl(var(--background))',
   			foreground: 'hsl(var(--foreground))',
@@ -27,7 +26,7 @@ module.exports = {
   				DEFAULT: 'hsl(var(--secondary))',
   				foreground: 'hsl(var(--secondary-foreground))'
   			},
-  			tertiary: '#64748b',
+			success: 'hsl(var(--success))',
   			card: {
   				DEFAULT: 'hsl(var(--card))',
   				foreground: 'hsl(var(--card-foreground))'

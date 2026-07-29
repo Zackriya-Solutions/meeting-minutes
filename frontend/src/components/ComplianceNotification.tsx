@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { Button } from './ui/button';
-import { AlertTriangle, CheckCircle, X } from '@/components/memento/LucideCompat';
+import { AlertTriangle, CheckCircle, X } from '@/components/deslop-icons';
 import { useT } from '@/lib/i18n';
 
 interface ComplianceNotificationProps {
@@ -73,18 +73,18 @@ export const ComplianceNotification: React.FC<ComplianceNotificationProps> = ({
         width: `${position.width}px`,
       }}
     >
-      <div className="bg-[var(--bg-canvas)] border border-[var(--border-subtle)] rounded-lg shadow-none p-3">
+      <div className="bg-background border border-border rounded-lg shadow-none p-3">
         {/* Header with close button */}
         <div className="flex items-start justify-between mb-2">
           <div className="flex items-center gap-1">
-            <AlertTriangle className="h-3 w-3 flex-shrink-0 text-[var(--gold)]" />
-            <h3 className="text-xs font-semibold text-[var(--fg1)]">
+            <AlertTriangle className="h-3 w-3 flex-shrink-0 text-primary" />
+            <h3 className="text-xs font-semibold text-foreground">
               {t('Recording Notice')}
             </h3>
           </div>
           <button
             onClick={handleClose}
-            className="text-[var(--fg3)] hover:text-[var(--fg2)] transition-colors p-0.5 rounded hover:bg-[var(--bg-elevated)]"
+            className="text-muted-foreground hover:text-muted-foreground transition-colors p-0.5 rounded hover:bg-muted"
           >
             <X className="h-3 w-3" />
           </button>
@@ -92,11 +92,11 @@ export const ComplianceNotification: React.FC<ComplianceNotificationProps> = ({
 
         {/* Content */}
         <div className="mb-2">
-          <p className="text-xs text-[var(--fg2)] mb-1">
+          <p className="text-xs text-muted-foreground mb-1">
             {t('Inform participants about recording.')}
           </p>
-          <div className="rounded border border-[var(--gold-border)] bg-[var(--gold-soft)] p-1">
-            <p className="text-xs font-medium text-[var(--gold)]">
+          <div className="rounded border border-primary/40 bg-primary/10 p-1">
+            <p className="text-xs font-medium text-primary">
               {t('US compliance required')}
             </p>
           </div>
@@ -115,7 +115,7 @@ export const ComplianceNotification: React.FC<ComplianceNotificationProps> = ({
           <Button
             size="sm"
             onClick={handleAcknowledge}
-            className="text-xs px-2 py-0.5 h-6 bg-[var(--success)] hover:brightness-110 flex-1"
+            className="text-xs px-2 py-0.5 h-6 bg-success hover:brightness-110 flex-1"
           >
             <CheckCircle className="h-2 w-2 mr-1" />
             {t('Done')}

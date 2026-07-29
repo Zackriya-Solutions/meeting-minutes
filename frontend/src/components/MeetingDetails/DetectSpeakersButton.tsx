@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
-import { Users, Loader2, Download } from '@/components/memento/LucideCompat';
+import { Users, Loader2, Download } from '@/components/deslop-icons';
 import { Button } from "../ui/button";
 import {
     Dialog,
@@ -156,14 +156,14 @@ export function DetectSpeakersButton({ meetingId, speakerCount = 0, onDetected, 
                 <DialogContent className="sm:max-w-[460px]">
                     <DialogHeader>
                         <DialogTitle className="flex items-center gap-2">
-                            <Users className="h-5 w-5 text-[var(--gold)]" />
+                            <Users className="h-5 w-5 text-primary" />
                             {t('Run speaker detection again?')}
                         </DialogTitle>
                         <DialogDescription>
                             {t('This meeting already has detected speakers. Running detection again replaces the current automatic speaker assignments and may produce a different count. User-confirmed speaker names are preserved.')}
                         </DialogDescription>
                     </DialogHeader>
-                    <p className="text-sm text-[var(--fg2)]">
+                    <p className="text-sm text-muted-foreground">
                         {t('Currently detected')}: {existingSpeakerCount}
                     </p>
                     <DialogFooter>
@@ -175,7 +175,7 @@ export function DetectSpeakersButton({ meetingId, speakerCount = 0, onDetected, 
                                 setShowRerunConfirmation(false);
                                 await checkModelsAndRun();
                             }}
-                            className="bg-[var(--gold)] hover:bg-[var(--gold-active)]"
+                            className="bg-primary hover:bg-primary/90"
                         >
                             {t('Run again')}
                         </Button>
@@ -190,7 +190,7 @@ export function DetectSpeakersButton({ meetingId, speakerCount = 0, onDetected, 
                 <DialogContent className="w-[calc(100vw-2rem)] sm:max-w-[580px]">
                     <DialogHeader>
                         <DialogTitle className="flex items-center gap-2">
-                            <Users className="h-5 w-5 text-[var(--gold)]" />
+                            <Users className="h-5 w-5 text-primary" />
                             {t('Detect Speakers')}
                         </DialogTitle>
                         <DialogDescription>
@@ -224,7 +224,7 @@ export function DetectSpeakersButton({ meetingId, speakerCount = 0, onDetected, 
                         <Button
                             onClick={handleDownloadAndDetect}
                             disabled={downloading}
-                            className="h-auto min-h-10 whitespace-normal bg-[var(--gold)] px-4 py-2 text-center hover:bg-[var(--gold-active)]"
+                            className="h-auto min-h-10 whitespace-normal bg-primary px-4 py-2 text-center hover:bg-primary/90"
                         >
                             {downloading ? (
                                 <>

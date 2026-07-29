@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { CheckCircle2, KeyRound, Loader2, AlertTriangle, ChevronDown, ChevronRight } from '@/components/memento/LucideCompat';
+import { CheckCircle2, KeyRound, Loader2, AlertTriangle, ChevronDown, ChevronRight } from '@/components/deslop-icons';
 import { useT } from '@/lib/i18n';
 
 type Settings = Record<string, string>;
@@ -12,9 +12,9 @@ const has = (s: Settings, k: string) => !!s[k] && s[k].length > 0;
 export function ProviderSettings() {
   const t = useT();
   return (
-    <div className="mt-6 max-w-2xl rounded-[var(--radius-24)] border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-5">
-      <h3 className="text-sm font-semibold text-[var(--fg1)]">{t('Managed cloud services')}</h3>
-      <p className="mt-1 text-sm text-[var(--fg2)]">
+    <div className="mt-6 max-w-2xl rounded-xl border border-border bg-card p-5">
+      <h3 className="text-sm font-semibold text-foreground">{t('Managed cloud services')}</h3>
+      <p className="mt-1 text-sm text-muted-foreground">
         {t('DeepSeek is used for summaries and the knowledge base. SaluteSpeech is used for transcription and speaker detection. Access is provided through the Memento gateway; no API keys are required.')}
       </p>
     </div>
@@ -101,7 +101,7 @@ function LegacyProviderSettings() {
 
   if (!loaded) {
     return (
-      <div className="mt-6 flex items-center gap-2 text-sm text-[var(--fg3)]">
+      <div className="mt-6 flex items-center gap-2 text-sm text-muted-foreground">
         <Loader2 className="h-4 w-4 animate-spin" /> {t('Loading…')}
       </div>
     );
@@ -109,7 +109,7 @@ function LegacyProviderSettings() {
 
   return (
     <div className="mt-6 max-w-2xl space-y-5">
-      <p className="text-sm text-[var(--fg2)]">
+      <p className="text-sm text-muted-foreground">
         {t('Credentials for the Russian-market LLM providers used by Chat, summaries, and extraction. Stored locally; changes take effect immediately (no restart). Keys are write-only here — a configured provider shows a badge, and you only re-enter a key to change it.')}
       </p>
 
@@ -157,7 +157,7 @@ function LegacyProviderSettings() {
             className={inputCls}
             autoComplete="off"
           />
-          <p className="mt-1 text-xs text-[var(--fg3)]">
+          <p className="mt-1 text-xs text-muted-foreground">
             {t('The Sber “Authorization Key” (base64 of ClientID:ClientSecret) from your GigaChat project.')}
           </p>
         </Field>
@@ -174,13 +174,13 @@ function LegacyProviderSettings() {
         <button
           type="button"
           onClick={() => setShowGcLogin((v) => !v)}
-          className="mt-1 flex items-center gap-1 text-xs text-[var(--fg2)] hover:text-[var(--fg1)]"
+          className="mt-1 flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
         >
           {showGcLogin ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
           {t('Or use login & password instead')}
         </button>
         {showGcLogin && (
-          <div className="mt-2 space-y-3 border-l-2 border-[var(--border-subtle)] pl-3">
+          <div className="mt-2 space-y-3 border-l-2 border-border pl-3">
             <Field label={t('User')}>
               <input
                 type="text"
@@ -208,24 +208,24 @@ function LegacyProviderSettings() {
         <button
           onClick={save}
           disabled={saving}
-          className="flex items-center gap-2 rounded-lg bg-[var(--gold)] px-4 py-2 text-sm font-medium text-[var(--fg-inverse)] transition-colors hover:bg-[var(--gold-active)] disabled:cursor-not-allowed disabled:bg-[var(--bg-elevated)]"
+          className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:bg-muted"
         >
           {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />}
           {t('Save credentials')}
         </button>
         {saved && (
-          <span className="flex items-center gap-1.5 text-sm text-[var(--success)]">
+          <span className="flex items-center gap-1.5 text-sm text-success">
             <CheckCircle2 className="h-4 w-4" /> {t('Saved')}
           </span>
         )}
         {error && (
-          <span className="flex items-center gap-1.5 text-sm text-[var(--danger)]">
+          <span className="flex items-center gap-1.5 text-sm text-destructive">
             <AlertTriangle className="h-4 w-4" /> {error}
           </span>
         )}
       </div>
 
-      <p className="text-xs text-[var(--fg3)]">
+      <p className="text-xs text-muted-foreground">
         {t('Routing: single-meeting / short questions → GigaChat; cross-meeting synthesis & extraction → DeepSeek. If only one provider is configured, it handles everything.')}
       </p>
     </div>
@@ -233,7 +233,7 @@ function LegacyProviderSettings() {
 }
 
 const inputCls =
-  'w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-input)] px-3 py-2 text-sm text-[var(--fg1)] placeholder:text-[var(--fg3)] focus:border-[var(--gold-border)] focus:outline-none';
+  'w-full rounded-lg border border-border bg-muted px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary/40 focus:outline-none';
 
 function ProviderCard({
   title,
@@ -248,18 +248,18 @@ function ProviderCard({
 }) {
   const t = useT();
   return (
-    <div className="rounded-xl border border-[var(--border-subtle)] p-5">
+    <div className="rounded-xl border border-border p-5">
       <div className="mb-4 flex items-center justify-between">
         <div>
-          <h3 className="text-sm font-semibold text-[var(--fg1)]">{title}</h3>
-          <p className="text-xs text-[var(--fg3)]">{subtitle}</p>
+          <h3 className="text-sm font-semibold text-foreground">{title}</h3>
+          <p className="text-xs text-muted-foreground">{subtitle}</p>
         </div>
         {configured ? (
-          <span className="flex items-center gap-1 rounded-full bg-[color-mix(in_srgb,var(--success)_12%,transparent)] px-2 py-0.5 text-xs font-medium text-[var(--success)]">
+          <span className="flex items-center gap-1 rounded-full bg-success/10 px-2 py-0.5 text-xs font-medium text-success">
             <CheckCircle2 className="h-3.5 w-3.5" /> {t('Configured')}
           </span>
         ) : (
-          <span className="rounded-full bg-[var(--bg-elevated)] px-2 py-0.5 text-xs text-[var(--fg2)]">{t('Not set')}</span>
+          <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">{t('Not set')}</span>
         )}
       </div>
       <div className="space-y-3">{children}</div>
@@ -270,7 +270,7 @@ function ProviderCard({
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label className="block">
-      <span className="mb-1 block text-xs font-medium text-[var(--fg2)]">{label}</span>
+      <span className="mb-1 block text-xs font-medium text-muted-foreground">{label}</span>
       {children}
     </label>
   );

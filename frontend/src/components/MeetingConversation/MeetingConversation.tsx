@@ -1,7 +1,7 @@
 "use client";
 
 import { type ComponentProps, useCallback, useEffect, useMemo, useState } from 'react';
-import { Loader2 } from '@/components/memento/LucideCompat';
+import { Loader2 } from '@/components/deslop-icons';
 import { Transcript, TranscriptSegmentData } from '@/types';
 import { EditableTitle } from '@/components/EditableTitle';
 import { SummaryPanel } from '@/components/MeetingDetails/SummaryPanel';
@@ -226,9 +226,9 @@ export function MeetingConversation({
   }, [meeting.created_at, segments, transcripts, speakerCount, t]);
 
   return (
-    <div className="flex h-screen flex-col bg-[var(--bg-canvas)]">
+    <div className="flex h-screen flex-col bg-background">
       {/* Top bar */}
-      <div className="flex items-center gap-3 border-b border-[var(--border-subtle)] px-[22px] py-4">
+      <div className="flex items-center gap-3 border-b border-border px-[22px] py-4">
         <div className="min-w-0 flex-1">
           <EditableTitle
             title={meetingTitle}
@@ -237,7 +237,7 @@ export function MeetingConversation({
             onFinishEditing={onFinishEditTitle}
             onChange={onTitleChange}
           />
-          {metaLine && <p className="mm-numeric mt-0.5 truncate text-xs text-[var(--fg3)]">{metaLine}</p>}
+          {metaLine && <p className="mm-numeric mt-0.5 truncate text-xs text-muted-foreground">{metaLine}</p>}
         </div>
         <AnalyticsReportButton
           meetingId={meetingId}
@@ -289,11 +289,11 @@ export function MeetingConversation({
           <SummaryMessage summaryPanelProps={summaryProps} />
 
           {/* Divider before the chat thread */}
-          <div className="h-px bg-[var(--border-subtle)]" />
+          <div className="h-px bg-border" />
 
           {/* Chat thread (meeting-scoped RAG session) */}
           {loadingHistory ? (
-            <div className="flex items-center justify-center py-6 text-[var(--fg3)]">
+            <div className="flex items-center justify-center py-6 text-muted-foreground">
               <Loader2 className="h-5 w-5 animate-spin" />
             </div>
           ) : (

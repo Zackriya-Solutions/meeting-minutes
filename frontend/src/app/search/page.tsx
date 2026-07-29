@@ -4,10 +4,10 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { invoke } from '@tauri-apps/api/core';
 import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
-import { Loader2 } from '@/components/memento/LucideCompat';
+import { Loader2 } from '@/components/deslop-icons';
 import { cn } from '@/lib/utils';
 import { Icon } from '@/components/memento/Icon';
-import { Button } from '@/components/memento/Button';
+import { Button } from '@/components/ui/button';
 import { useT } from '@/lib/i18n';
 import { KnowledgeReadinessCard } from '@/components/KnowledgeReadinessCard';
 
@@ -140,7 +140,7 @@ export default function SearchPage() {
   return (
     <div className="mm-page">
       {/* Header + search bar */}
-      <div className="border-b border-[var(--border-subtle)] pb-5">
+      <div className="border-b border-border pb-5">
         <div className="flex items-center gap-3">
           <button
             onClick={() => router.push('/')}
@@ -164,9 +164,9 @@ export default function SearchPage() {
               className="h-11 flex-1 border-0 bg-transparent text-sm outline-none"
             />
             {query && (
-              <button onClick={() => setQuery('')} className="text-[var(--fg3)] hover:text-[var(--fg2)]" aria-label={t('Clear')}>
+              <Button variant="ghost" size="icon" onClick={() => setQuery('')} aria-label={t('Clear')}>
                 <Icon name="close" size={16} />
-              </button>
+              </Button>
             )}
           </div>
           <button
@@ -174,14 +174,14 @@ export default function SearchPage() {
             className={cn(
               'mm-button mm-button-secondary relative h-11 px-3 text-sm',
               showFilters || activeFilterCount
-                ? 'border-[var(--gold-border)] bg-[var(--gold-soft)] text-[var(--gold)]'
-                : 'border-[var(--border-subtle)] text-[var(--fg2)] hover:bg-[var(--bg-elevated)]',
+                ? 'border-primary/40 bg-primary/10 text-primary'
+                : 'border-border text-muted-foreground hover:bg-muted',
             )}
           >
             <Icon name="filter" size={17} />
             {t('Filters')}
             {activeFilterCount > 0 && (
-              <span className="ml-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-[var(--gold)] px-1 text-[10px] font-medium text-[var(--fg-inverse)]">
+              <span className="ml-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-medium text-primary-foreground">
                 {activeFilterCount}
               </span>
             )}
@@ -196,8 +196,8 @@ export default function SearchPage() {
         </div>
 
         {showFilters && (
-          <div className="mt-3 flex flex-wrap items-end gap-4 rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-sheet)] p-4">
-            <label className="flex flex-col gap-1 text-xs text-[var(--fg2)]">
+          <div className="mt-3 flex flex-wrap items-end gap-4 rounded-2xl border border-border bg-background p-4">
+            <label className="flex flex-col gap-1 text-xs text-muted-foreground">
               {t('From date')}
               <input
                 type="date"
@@ -206,7 +206,7 @@ export default function SearchPage() {
                 className="mm-select"
               />
             </label>
-            <label className="flex flex-col gap-1 text-xs text-[var(--fg2)]">
+            <label className="flex flex-col gap-1 text-xs text-muted-foreground">
               {t('To date')}
               <input
                 type="date"
@@ -215,7 +215,7 @@ export default function SearchPage() {
                 className="mm-select"
               />
             </label>
-            <label className="flex flex-col gap-1 text-xs text-[var(--fg2)]">
+            <label className="flex flex-col gap-1 text-xs text-muted-foreground">
               {t('Collection')}
               <select
                 value={collectionId ?? ''}
@@ -237,12 +237,12 @@ export default function SearchPage() {
                   setDateTo('');
                   setCollectionId(null);
                 }}
-                className="mb-1 text-xs text-[var(--fg2)] underline hover:text-[var(--fg1)]"
+                className="mb-1 text-xs text-muted-foreground underline hover:text-foreground"
               >
                 {t('Reset')}
               </button>
             )}
-            <span className="mb-1 text-xs text-[var(--fg3)]">
+            <span className="mb-1 text-xs text-muted-foreground">
               {t('Speaker filter will appear after diarization (Phase 2).')}
             </span>
           </div>
@@ -251,7 +251,7 @@ export default function SearchPage() {
           <button
             type="button"
             onClick={() => setShowFilters(true)}
-            className="mt-3 inline-flex items-center gap-2 rounded-full border border-[var(--gold-border)] bg-[var(--gold-soft)] px-3 py-1.5 text-xs text-[var(--gold)]"
+            className="mt-3 inline-flex items-center gap-2 rounded-full border border-primary/40 bg-primary/10 px-3 py-1.5 text-xs text-primary"
           >
             <Icon name="folder" size={14} />
             {collections.find((collection) => collection.id === collectionId)?.name ?? t('Selected collection')}
@@ -266,26 +266,26 @@ export default function SearchPage() {
           <EmptyPrompt />
         ) : searching && results.length === 0 ? (
           <Centered>
-            <Loader2 className="h-6 w-6 animate-spin text-[var(--fg3)]" />
+            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
           </Centered>
         ) : error ? (
           <Centered>
-            <p className="text-sm text-[var(--danger)]">{error}</p>
+            <p className="text-sm text-destructive">{error}</p>
           </Centered>
         ) : groups.length === 0 ? (
           <Centered>
-            <p className="text-sm text-[var(--fg2)]">{t('Nothing found. Try different words or loosen the filters.')}</p>
+            <p className="text-sm text-muted-foreground">{t('Nothing found. Try different words or loosen the filters.')}</p>
           </Centered>
         ) : (
           <div className="mx-auto flex max-w-3xl flex-col gap-6">
-            <p className="text-xs text-[var(--fg3)]">
+            <p className="text-xs text-muted-foreground">
               {results.length} {t('matches')}{plural(results.length)} {t('in')} {groups.length} {t('meetings')}{pluralMeet(groups.length)}
             </p>
             {groups.map((g) => (
               <div key={g.meeting_id}>
                 <button
                   onClick={() => router.push(`/meeting-details?id=${encodeURIComponent(g.meeting_id)}`)}
-                  className="mb-2 text-left text-sm font-semibold text-[var(--fg1)] hover:text-[var(--gold)]"
+                  className="mb-2 text-left text-sm font-semibold text-foreground hover:text-primary"
                 >
                   {g.title || t('Untitled')}
                 </button>
@@ -299,13 +299,13 @@ export default function SearchPage() {
                       onClick={() => openHit(h)}
                       className="mm-result-card group text-left"
                     >
-                      <div className="mb-1 flex items-center gap-1.5 text-xs text-[var(--fg3)]">
+                      <div className="mb-1 flex items-center gap-1.5 text-xs text-muted-foreground">
                         <Icon name="clock" size={13} />
                         {fmtTime(h.start_ms)}
                         <Icon name="transcript" size={13} className="ml-1 opacity-0 transition-opacity group-hover:opacity-100" />
                         <span className="opacity-0 transition-opacity group-hover:opacity-100">{t('open')}</span>
                       </div>
-                      <p className="line-clamp-3 text-sm leading-relaxed text-[var(--fg2)]">
+                      <p className="line-clamp-3 text-sm leading-relaxed text-muted-foreground">
                         <Highlighted text={h.text} terms={h.matched_terms} />
                       </p>
                     </motion.button>
@@ -333,7 +333,7 @@ function Highlighted({ text, terms }: { text: string; terms: string[] }) {
     <>
       {parts.map((p, i) =>
         termSet.has(p.toLowerCase()) ? (
-          <mark key={i} className="rounded bg-[var(--gold-soft)] px-0.5 text-[var(--fg1)]">
+          <mark key={i} className="rounded bg-primary/10 px-0.5 text-foreground">
             {p}
           </mark>
         ) : (
@@ -355,8 +355,8 @@ function EmptyPrompt() {
       <div className="mm-empty-icon mb-4">
         <Icon name="search" size={28} />
       </div>
-      <h2 className="text-xl font-semibold text-[var(--fg1)]">{t('Search across all meetings')}</h2>
-      <p className="mt-2 text-sm text-[var(--fg2)]">
+      <h2 className="text-xl font-semibold text-foreground">{t('Search across all meetings')}</h2>
+      <p className="mt-2 text-sm text-muted-foreground">
         {t('Hybrid search (keyword and semantic) finds the right moment in any recording. Click a result to open the meeting at that point.')}
       </p>
     </div>

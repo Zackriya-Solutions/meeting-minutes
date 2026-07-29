@@ -4,6 +4,7 @@ import { Dialog, DialogContent, DialogTitle, DialogTrigger } from "./ui/dialog";
 import { VisuallyHidden } from "./ui/visually-hidden";
 import { About } from "./About";
 import { useT } from '@/lib/i18n';
+import { Button } from './ui/button';
 
 interface LogoProps {
     isCollapsed: boolean;
@@ -15,9 +16,9 @@ const Logo = React.forwardRef<HTMLButtonElement, LogoProps>(({ isCollapsed }, re
     <Dialog aria-describedby={undefined}>
       {isCollapsed ? (
         <DialogTrigger asChild>
-          <button ref={ref} className="flex items-center justify-start mb-2 cursor-pointer bg-transparent border-none p-0 hover:opacity-80 transition-opacity">
+          <Button ref={ref} type="button" variant="ghost" size="icon" className="mb-2">
             <Image src="/memento-mark.svg" alt="Memento" width={32} height={32} />
-          </button>
+          </Button>
         </DialogTrigger>
       ) : (
         <DialogTrigger asChild>

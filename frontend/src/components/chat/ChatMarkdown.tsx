@@ -18,7 +18,7 @@ export function ChatMarkdown({ content, className }: { content: string; classNam
     <div className={cn('mm-md', className)}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkMath]}
-        rehypePlugins={[[rehypeKatex, { errorColor: '#ff6b6b', strict: 'ignore' }]]}
+        rehypePlugins={[[rehypeKatex, { errorColor: 'hsl(var(--destructive))', strict: 'ignore' }]]}
       >
         {content}
       </ReactMarkdown>

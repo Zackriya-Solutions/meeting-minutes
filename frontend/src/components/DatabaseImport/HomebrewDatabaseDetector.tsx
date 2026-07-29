@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
-import { Database, AlertCircle, Loader2, CheckCircle2 } from '@/components/memento/LucideCompat';
+import { Database, AlertCircle, Loader2, CheckCircle2 } from '@/components/deslop-icons';
 import { useT } from '@/lib/i18n';
 
 interface HomebrewDatabaseDetectorProps {
@@ -92,28 +92,28 @@ export function HomebrewDatabaseDetector({ onImportSuccess, onDecline }: Homebre
   };
 
   return (
-    <div className="mb-4 p-4 bg-[var(--gold-soft)] border-2 border-[var(--gold-border)] rounded-lg">
+    <div className="mb-4 p-4 bg-primary/10 border-2 border-primary/40 rounded-lg">
       <div className="flex items-start gap-3">
-        <Database className="h-6 w-6 text-[var(--gold)] mt-0.5 flex-shrink-0" />
+        <Database className="h-6 w-6 text-primary mt-0.5 flex-shrink-0" />
         <div className="flex-1">
           <div className="flex items-center gap-2 mb-1">
-            <AlertCircle className="h-4 w-4 text-[var(--gold)]" />
-            <h3 className="text-sm font-semibold text-[var(--gold)]">
+            <AlertCircle className="h-4 w-4 text-primary" />
+            <h3 className="text-sm font-semibold text-primary">
               {t('Previous Meetily Installation Detected!')}
             </h3>
           </div>
-          <p className="text-sm text-[var(--gold)] mb-2">
+          <p className="text-sm text-primary mb-2">
             {t('We found an existing database from your previous Meetily installation (Python backend version).')}
           </p>
-          <div className="bg-[var(--bg-canvas)]/50 rounded p-2 mb-3">
-            <p className="text-xs text-[var(--gold)] font-mono break-all">
+          <div className="bg-background/50 rounded p-2 mb-3">
+            <p className="text-xs text-primary font-mono break-all">
               {detectedPath}
             </p>
-            <p className="text-xs text-[var(--gold)] mt-1">
+            <p className="text-xs text-primary mt-1">
               {t('Size:')} {formatFileSize(dbSize)}
             </p>
           </div>
-          <p className="text-sm text-[var(--gold)] mb-3">
+          <p className="text-sm text-primary mb-3">
             {t('Would you like to import your previous meetings, transcripts, and summaries?')}
           </p>
           
@@ -122,7 +122,7 @@ export function HomebrewDatabaseDetector({ onImportSuccess, onDecline }: Homebre
             <button
               onClick={handleYes}
               disabled={isImporting}
-              className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-[var(--success)] text-[var(--fg-inverse)] rounded-lg hover:brightness-110 disabled:bg-[var(--fg3)] disabled:cursor-not-allowed transition-colors"
+              className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-success text-primary-foreground rounded-lg hover:brightness-110 disabled:bg-muted-foreground disabled:cursor-not-allowed transition-colors"
             >
               {isImporting ? (
                 <>
@@ -140,7 +140,7 @@ export function HomebrewDatabaseDetector({ onImportSuccess, onDecline }: Homebre
             <button
               onClick={handleNo}
               disabled={isImporting}
-              className="flex-1 px-4 py-2 border-2 border-[var(--gold-border)] text-[var(--gold)] rounded-lg hover:bg-[var(--gold-soft)] disabled:bg-[var(--bg-elevated)] disabled:cursor-not-allowed transition-colors"
+              className="flex-1 px-4 py-2 border-2 border-primary/40 text-primary rounded-lg hover:bg-primary/10 disabled:bg-muted disabled:cursor-not-allowed transition-colors"
             >
               {t('No, Browse Manually')}
             </button>

@@ -37,7 +37,7 @@ export function MessageBubble({
         initial={{ opacity: 0, y: 6 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.18 }}
-        className="max-w-[78%] self-end whitespace-pre-wrap rounded-[16px_16px_4px_16px] bg-[var(--gold)] px-[15px] py-[11px] text-[14px] leading-[1.5] text-[var(--fg-inverse)]"
+        className="max-w-[78%] self-end whitespace-pre-wrap rounded-[16px_16px_4px_16px] bg-primary px-[15px] py-[11px] text-[14px] leading-[1.5] text-primary-foreground"
       >
         {msg.content}
       </motion.div>
@@ -49,10 +49,10 @@ export function MessageBubble({
       initial={{ opacity: 0, y: 6 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.18 }}
-      className={cn('text-[14.5px] leading-[1.65]', msg.error ? 'text-[var(--danger)]' : 'text-[var(--fg1)]')}
+      className={cn('text-[14.5px] leading-[1.65]', msg.error ? 'text-destructive' : 'text-foreground')}
     >
       {notFound && (
-        <div className="mb-1 flex items-center gap-1.5 text-xs font-medium text-[var(--fg2)]">
+        <div className="mb-1 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
           <Icon name="search" size={14} />
           {t('Not found in your meetings')}
         </div>
@@ -63,7 +63,7 @@ export function MessageBubble({
       {notFound && msg.diagnostics && <RetrievalExplanation diagnostics={msg.diagnostics} />}
 
       {msg.warning && (
-        <div className="mt-2 flex items-center gap-1.5 text-xs text-[var(--gold)]">
+        <div className="mt-2 flex items-center gap-1.5 text-xs text-primary">
           <Icon name="alert" size={14} />
           {msg.warning}
         </div>
@@ -76,7 +76,7 @@ export function MessageBubble({
               key={c.index}
               onClick={() => onCite(c)}
               title={t('Open the meeting at this moment')}
-              className="mm-numeric inline-flex items-center gap-1 rounded-md bg-[var(--bg-elevated)] px-2 py-0.5 text-[11px] font-semibold text-[var(--fg2)] transition-colors hover:text-[var(--fg1)]"
+              className="mm-numeric inline-flex items-center gap-1 rounded-md bg-muted px-2 py-0.5 text-[11px] font-semibold text-muted-foreground transition-colors hover:text-foreground"
             >
               <span>[{c.index}]</span>
               {showMeetingLabel && <span className="max-w-[160px] truncate font-normal">{meetingTitle(c.meeting_id)}</span>}
@@ -106,7 +106,7 @@ export function RetrievalExplanation({ diagnostics }: { diagnostics: RetrievalDi
   }
 
   return (
-    <div className="mt-2 rounded-lg bg-[var(--bg-elevated)] px-3 py-2 text-xs leading-relaxed text-[var(--fg3)]">
+    <div className="mt-2 rounded-lg bg-muted px-3 py-2 text-xs leading-relaxed text-muted-foreground">
       <p>{explanation}</p>
       {!diagnostics.semantic_available && diagnostics.indexable_meetings > 0 && (
         <p className="mt-1">{t('Semantic search was unavailable; keyword and typo-tolerant search were used.')}</p>
@@ -125,7 +125,7 @@ export function TypingIndicator() {
         {[0, 1, 2].map((i) => (
           <span
             key={i}
-            className="h-2 w-2 animate-bounce rounded-full bg-[var(--fg3)]"
+            className="h-2 w-2 animate-bounce rounded-full bg-muted-foreground"
             style={{ animationDelay: `${i * 0.15}s` }}
           />
         ))}

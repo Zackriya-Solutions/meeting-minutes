@@ -1,3 +1,5 @@
+import { getLanguageDisplayName } from '@/constants/languages';
+
 export interface LanguageOption {
   code: string;
   label: string;
@@ -8,38 +10,16 @@ export interface LanguageOption {
  * Codes must stay in sync with `language_name_from_code` in
  * `frontend/src-tauri/src/summary/processor.rs`.
  */
-export const LANGUAGE_OPTIONS: LanguageOption[] = [
-  { code: 'en', label: 'English' },
-  { code: 'zh', label: 'Chinese' },
-  { code: 'zh-tw', label: 'Traditional Chinese' },
-  { code: 'de', label: 'German' },
-  { code: 'es', label: 'Spanish' },
-  { code: 'ru', label: 'Russian' },
-  { code: 'ko', label: 'Korean' },
-  { code: 'fr', label: 'French' },
-  { code: 'ja', label: 'Japanese' },
-  { code: 'pt', label: 'Portuguese' },
-  { code: 'it', label: 'Italian' },
-  { code: 'nl', label: 'Dutch' },
-  { code: 'pl', label: 'Polish' },
-  { code: 'ar', label: 'Arabic' },
-  { code: 'hi', label: 'Hindi' },
-  { code: 'ta', label: 'Tamil' },
-  { code: 'tr', label: 'Turkish' },
-  { code: 'vi', label: 'Vietnamese' },
-  { code: 'th', label: 'Thai' },
-  { code: 'id', label: 'Indonesian' },
-  { code: 'sv', label: 'Swedish' },
-  { code: 'cs', label: 'Czech' },
-  { code: 'da', label: 'Danish' },
-  { code: 'fi', label: 'Finnish' },
-  { code: 'el', label: 'Greek' },
-  { code: 'he', label: 'Hebrew' },
-  { code: 'hu', label: 'Hungarian' },
-  { code: 'no', label: 'Norwegian' },
-  { code: 'ro', label: 'Romanian' },
-  { code: 'uk', label: 'Ukrainian' },
-];
+const SUMMARY_LANGUAGE_CODES = [
+  'en', 'zh', 'zh-tw', 'de', 'es', 'ru', 'ko', 'fr', 'ja', 'pt',
+  'it', 'nl', 'pl', 'ar', 'hi', 'ta', 'tr', 'vi', 'th', 'id',
+  'sv', 'cs', 'da', 'fi', 'el', 'he', 'hu', 'no', 'ro', 'uk',
+] as const;
+
+export const LANGUAGE_OPTIONS: LanguageOption[] = SUMMARY_LANGUAGE_CODES.map((code) => ({
+  code,
+  label: getLanguageDisplayName(code),
+}));
 
 export const AUTO_VALUE = '__auto__' as const;
 

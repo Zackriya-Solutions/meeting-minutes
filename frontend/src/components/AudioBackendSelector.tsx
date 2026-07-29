@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { Info } from '@/components/memento/LucideCompat';
+import { Info } from '@/components/deslop-icons';
 
 export interface BackendInfo {
   id: string;
@@ -77,8 +77,8 @@ export function AudioBackendSelector({
   if (loading) {
     return (
       <div className="animate-pulse">
-        <div className="h-4 bg-[var(--bg-elevated)] rounded w-32 mb-2"></div>
-        <div className="h-10 bg-[var(--bg-elevated)] rounded"></div>
+        <div className="h-4 bg-muted rounded w-32 mb-2"></div>
+        <div className="h-10 bg-muted rounded"></div>
       </div>
     );
   }
@@ -91,21 +91,21 @@ export function AudioBackendSelector({
   return (
     <div className="space-y-2">
       <div className="flex items-center gap-2">
-        <label className="text-sm font-medium text-[var(--fg2)]">
-          System Audio Backend
+        <label className="text-sm font-medium text-muted-foreground">
+          Способ захвата системного звука
         </label>
         <div className="relative">
           <button
             type="button"
             onMouseEnter={() => setShowTooltip(true)}
             onMouseLeave={() => setShowTooltip(false)}
-            className="text-[var(--fg3)] hover:text-[var(--fg2)] transition-colors"
+            className="text-muted-foreground hover:text-muted-foreground transition-colors"
           >
             <Info className="h-4 w-4" />
           </button>
           {showTooltip && (
-            <div className="absolute z-10 left-6 top-0 w-64 p-3 text-xs bg-[var(--fg3)] text-[var(--fg-inverse)] rounded-lg shadow-none">
-              <p className="font-semibold mb-1">Audio Capture Methods:</p>
+            <div className="absolute z-10 left-6 top-0 w-64 p-3 text-xs bg-muted-foreground text-primary-foreground rounded-lg shadow-none">
+              <p className="font-semibold mb-1">Способы захвата звука</p>
               <ul className="space-y-1">
                 {backends.map((backend) => (
                   <li key={backend.id}>
@@ -113,8 +113,8 @@ export function AudioBackendSelector({
                   </li>
                 ))}
               </ul>
-              <p className="mt-2 text-[var(--fg3)]">
-                Try different backends to find which works best for your system.
+              <p className="mt-2 text-muted-foreground">
+                Выберите способ, который лучше работает на этом устройстве.
               </p>
             </div>
           )}
@@ -122,7 +122,7 @@ export function AudioBackendSelector({
       </div>
 
       {error && (
-        <div className="p-2 text-xs text-[var(--danger)] bg-[color-mix(in_srgb,var(--danger)_12%,transparent)] border border-[color-mix(in_srgb,var(--danger)_42%,transparent)] rounded-md">
+        <div className="p-2 text-xs text-destructive bg-destructive/10 border border-destructive/40 rounded-md">
           {error}
         </div>
       )}
@@ -138,8 +138,8 @@ export function AudioBackendSelector({
               key={backend.id}
               className={`flex items-start p-3 border rounded-lg transition-all ${
                 currentBackend === backend.id
-                  ? 'border-[var(--gold-border)] bg-[var(--gold-soft)]'
-                  : 'border-[var(--border-strong)] hover:border-[var(--gold-border)] bg-[var(--bg-canvas)]'
+                  ? 'border-primary/40 bg-primary/10'
+                  : 'border-border hover:border-primary/40 bg-background'
               } ${isDisabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
             >
               <input
@@ -149,32 +149,32 @@ export function AudioBackendSelector({
                 checked={currentBackend === backend.id}
                 onChange={() => handleBackendChange(backend.id)}
                 disabled={isDisabled}
-                className="mt-1 h-4 w-4 text-[var(--gold)] ring-[var(--gold-ring)] border-[var(--border-strong)]"
+                className="mt-1 h-4 w-4 text-primary ring-ring border-border"
               />
               <div className="ml-3 flex-1">
                 <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium text-[var(--fg1)]">
+                  <span className="text-sm font-medium text-foreground">
                     {backend.name}
                   </span>
                   {currentBackend === backend.id && (
-                    <span className="text-xs font-medium text-[var(--gold)] bg-[var(--gold-soft)] px-2 py-0.5 rounded">
+                    <span className="text-xs font-medium text-primary bg-primary/10 px-2 py-0.5 rounded">
                       Active
                     </span>
                   )}
                   {isCoreAudio && (
-                    <span className="text-xs font-medium text-[var(--fg2)] bg-[var(--bg-elevated)] px-2 py-0.5 rounded">
+                    <span className="text-xs font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded">
                       Disabled
                     </span>
                   )}
                 </div>
-                <p className="mt-1 text-xs text-[var(--fg2)]">{backend.description}</p>
+                <p className="mt-1 text-xs text-muted-foreground">{backend.description}</p>
               </div>
             </label>
           );
         })}
       </div>
 
-      <div className="text-xs text-[var(--fg2)] space-y-1">
+      <div className="text-xs text-muted-foreground space-y-1">
         <p>• Backend selection only affects system audio capture</p>
         <p>• Microphone always uses the default method</p>
         <p>• Changes apply to new recording sessions</p>

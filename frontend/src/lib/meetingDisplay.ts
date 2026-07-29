@@ -13,14 +13,14 @@ interface MeetingDisplayInfo {
   dateUnknown: boolean;
 }
 
-const WEEKDAYS: Record<string, Record<Lang, string>> = {
-  mon: { ru: 'Пн', en: 'Mon' },
-  tue: { ru: 'Вт', en: 'Tue' },
-  wed: { ru: 'Ср', en: 'Wed' },
-  thu: { ru: 'Чт', en: 'Thu' },
-  fri: { ru: 'Пт', en: 'Fri' },
-  sat: { ru: 'Сб', en: 'Sat' },
-  sun: { ru: 'Вс', en: 'Sun' },
+const WEEKDAYS: Record<string, string> = {
+  mon: 'Пн',
+  tue: 'Вт',
+  wed: 'Ср',
+  thu: 'Чт',
+  fri: 'Пт',
+  sat: 'Сб',
+  sun: 'Вс',
 };
 
 function basename(path: string | null | undefined): string {
@@ -84,40 +84,40 @@ function descriptorFromMachineTitle(title: string): string {
     .replace(/__?[a-f0-9]{8}$/i, '');
 }
 
-function humanizeDescriptor(descriptor: string, lang: Lang): string {
+function humanizeDescriptor(descriptor: string): string {
   const normalized = descriptor.toLowerCase();
-  const known: Record<string, Record<Lang, string>> = {
-    gigatool_meeting: { ru: 'Встреча по GigaTool', en: 'GigaTool meeting' },
-    productivity_meeting: { ru: 'Встреча команды продуктивности', en: 'Productivity team meeting' },
-    standup_assistant: { ru: 'Стендап Assistant', en: 'Assistant standup' },
-    'standup_assistant-my-part': { ru: 'Стендап Assistant · моя часть', en: 'Assistant standup · my part' },
-    standup_mini: { ru: 'Мини-стендап', en: 'Mini standup' },
-    'standup_my-part': { ru: 'Стендап · моя часть', en: 'Standup · my part' },
-    'standup_proactive-harness': { ru: 'Стендап Proactive Harness', en: 'Proactive Harness standup' },
-    'planning_with-andrew': { ru: 'Планирование с Андреем', en: 'Planning with Andrew' },
+  const known: Record<string, string> = {
+    gigatool_meeting: 'Встреча по GigaTool',
+    productivity_meeting: 'Встреча команды продуктивности',
+    standup_assistant: 'Стендап Assistant',
+    'standup_assistant-my-part': 'Стендап Assistant · моя часть',
+    standup_mini: 'Мини-стендап',
+    'standup_my-part': 'Стендап · моя часть',
+    'standup_proactive-harness': 'Стендап Proactive Harness',
+    'planning_with-andrew': 'Планирование с Андреем',
   };
-  if (known[normalized]) return known[normalized][lang];
+  if (known[normalized]) return known[normalized];
 
   const words = descriptor
     .replace(/[_-]+/g, ' ')
-    .replace(/\bmeeting\b/gi, lang === 'ru' ? 'встреча' : 'meeting')
-    .replace(/\bstandup\b/gi, lang === 'ru' ? 'стендап' : 'standup')
+    .replace(/\bmeeting\b/gi, 'встреча')
+    .replace(/\bstandup\b/gi, 'стендап')
     .trim();
-  if (!words) return lang === 'ru' ? 'Без названия' : 'Untitled';
+  if (!words) return 'Без названия';
   return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
-function formatKnownDate(date: Date, lang: Lang): string {
-  if (Number.isNaN(date.getTime())) return lang === 'ru' ? 'Дата неизвестна' : 'Date unknown';
-  const locale = lang === 'ru' ? 'ru-RU' : 'en-US';
+function formatKnownDate(date: Date): string {
+  if (Number.isNaN(date.getTime())) return 'Дата неизвестна';
+  const locale = 'ru-RU';
   const now = new Date();
   const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
   const startOfDate = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
   const dayDifference = Math.round((startOfDate - startOfToday) / 86_400_000);
   const time = new Intl.DateTimeFormat(locale, { hour: '2-digit', minute: '2-digit' }).format(date);
 
-  if (dayDifference === 0) return `${lang === 'ru' ? 'Сегодня' : 'Today'}, ${time}`;
-  if (dayDifference === -1) return `${lang === 'ru' ? 'Вчера' : 'Yesterday'}, ${time}`;
+  if (dayDifference === 0) return `Сегодня, ${time}`;
+  if (dayDifference === -1) return `Вчера, ${time}`;
 
   const calendarDate = new Intl.DateTimeFormat(locale, {
     day: 'numeric',
@@ -129,20 +129,20 @@ function formatKnownDate(date: Date, lang: Lang): string {
 
 export function getMeetingDisplayInfo(
   meeting: MeetingDisplaySource,
-  lang: Lang,
+  _lang: Lang,
 ): MeetingDisplayInfo {
   const unknownHint = parseUnknownDateHint(meeting);
   const defaultMeetingDate = parseDefaultMeetingDate(meeting.title);
   const displayTitle = defaultMeetingDate
-    ? (lang === 'ru' ? 'Без названия' : 'Untitled')
+    ? 'Без названия'
     : isMachineTitle(meeting.title)
-      ? humanizeDescriptor(descriptorFromMachineTitle(meeting.title), lang)
-      : meeting.title || (lang === 'ru' ? 'Без названия' : 'Untitled');
+      ? humanizeDescriptor(descriptorFromMachineTitle(meeting.title))
+      : meeting.title || 'Без названия';
 
   if (unknownHint) {
-    const weekday = unknownHint.weekday ? WEEKDAYS[unknownHint.weekday]?.[lang] : undefined;
+    const weekday = unknownHint.weekday ? WEEKDAYS[unknownHint.weekday] : undefined;
     const knownParts = [weekday, unknownHint.time].filter(Boolean).join(', ');
-    const unknownText = lang === 'ru' ? 'дата неизвестна' : 'date unknown';
+    const unknownText = 'дата неизвестна';
     return {
       title: displayTitle,
       dateLabel: knownParts ? `${knownParts} · ${unknownText}` : unknownText,
@@ -154,8 +154,8 @@ export function getMeetingDisplayInfo(
   return {
     title: displayTitle,
     dateLabel: dateValue
-      ? formatKnownDate(new Date(dateValue), lang)
-      : (lang === 'ru' ? 'Дата неизвестна' : 'Date unknown'),
+      ? formatKnownDate(new Date(dateValue))
+      : 'Дата неизвестна',
     dateUnknown: !dateValue,
   };
 }

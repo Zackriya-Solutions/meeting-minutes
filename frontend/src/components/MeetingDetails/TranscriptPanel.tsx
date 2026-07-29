@@ -225,10 +225,10 @@ export function TranscriptPanel({
   return (
     // Width and the panel divider are owned by the wrapper + splitter in
     // meeting-details/page-content.tsx; this root just fills its pane.
-    <div className="relative flex h-full w-full min-w-0 flex-col bg-[var(--bg-sheet)]">
+    <div className="relative flex h-full w-full min-w-0 flex-col bg-background">
       {/* Title area */}
       {showToolbar && (
-        <div className="border-b border-[var(--border-subtle)] p-4">
+        <div className="border-b border-border p-4">
           <TranscriptButtonGroup
             transcriptCount={usePagination ? (totalCount ?? convertedSegments.length) : (transcripts?.length || 0)}
             onCopyTranscript={onCopyTranscript}
@@ -268,7 +268,7 @@ export function TranscriptPanel({
 
       {/* Marked moments — click to jump the transcript to that point */}
       {markedMoments.length > 0 && (
-        <div className="flex flex-wrap items-center gap-1.5 border-b border-[var(--border-subtle)] px-4 py-2">
+        <div className="flex flex-wrap items-center gap-1.5 border-b border-border px-4 py-2">
           <span className="mm-eyebrow mr-1">{t('Moments')}</span>
           {markedMoments.map((seconds) => (
             <button
@@ -276,7 +276,7 @@ export function TranscriptPanel({
               type="button"
               onClick={() => handleMarkedMoment(seconds)}
               title={t('Open this moment in the transcript')}
-              className="mm-numeric inline-flex items-center gap-1 rounded-full border border-[var(--gold-border)] bg-[var(--gold-soft)] px-2 py-0.5 text-xs text-[var(--gold)] transition-colors hover:bg-[var(--gold-soft-strong)]"
+              className="mm-numeric inline-flex items-center gap-1 rounded-full border border-primary/40 bg-primary/10 px-2 py-0.5 text-xs text-primary transition-colors hover:bg-primary/20"
             >
               <Icon name="dot" size={12} />
               {formatClock(seconds)}
@@ -312,7 +312,7 @@ export function TranscriptPanel({
 
       {/* Custom prompt input at bottom of transcript section */}
       {showContextField && !isRecording && convertedSegments.length > 0 && (
-        <div className="border-t border-[var(--border-subtle)] p-3">
+        <div className="border-t border-border p-3">
           <textarea
             placeholder={t('Add context for AI summary. For example people involved, meeting overview, objective etc...')}
             className="mm-field min-h-[80px] w-full resize-y px-3 py-2 text-sm outline-none"
