@@ -327,7 +327,12 @@ pub async fn get_or_init_transcription_engine<R: Runtime>(
             let prov_cfg = super::groq_provider::GroqConfig {
                 api_key,
                 model: if cfg.model.is_empty() { "whisper-large-v3".into() } else { cfg.model },
-                default_lang: "en".into(),
+                // Empty means "no configured default", which GroqProvider resolves to
+                // omitting the `language` field so the server auto-detects. This used
+                // to be hardcoded to "en", which silently transcribed non-English
+                // meetings as English whenever the user's preference was "auto".
+                // The live preference is supplied per call by the worker.
+                default_lang: String::new(),
                 request_timeout: std::time::Duration::from_secs(120),
             };
             let provider = super::groq_provider::GroqProvider::new(prov_cfg);
