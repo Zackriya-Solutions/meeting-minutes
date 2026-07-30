@@ -104,6 +104,7 @@ echo "Cleaning up previous builds..."
 echo "Cleaning up npm, pnp and next..."
 rm -rf node_modules
 rm -rf .next
+rm -rf .next-dev
 rm -rf .pnp.cjs
 rm -rf out
 

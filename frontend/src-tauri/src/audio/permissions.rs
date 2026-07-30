@@ -1,6 +1,6 @@
 // macOS audio permissions handling
 use anyhow::Result;
-use log::{info, warn, error};
+use log::{error, info, warn};
 
 #[cfg(target_os = "macos")]
 use std::process::Command;
@@ -85,8 +85,7 @@ pub async fn check_screen_recording_permission_command() -> bool {
 /// Tauri command to request Screen Recording permission
 #[tauri::command]
 pub async fn request_screen_recording_permission_command() -> Result<(), String> {
-    request_screen_recording_permission()
-        .map_err(|e| e.to_string())
+    request_screen_recording_permission().map_err(|e| e.to_string())
 }
 
 /// Trigger system audio permission request and verify it was granted
@@ -136,12 +135,10 @@ pub fn trigger_system_audio_permission() -> Result<bool> {
 #[tauri::command]
 pub async fn trigger_system_audio_permission_command() -> Result<bool, String> {
     // Run in blocking task to avoid blocking the async runtime
-    tokio::task::spawn_blocking(|| {
-        trigger_system_audio_permission()
-    })
-    .await
-    .map_err(|e| format!("Task join error: {}", e))?
-    .map_err(|e| e.to_string())
+    tokio::task::spawn_blocking(|| trigger_system_audio_permission())
+        .await
+        .map_err(|e| format!("Task join error: {}", e))?
+        .map_err(|e| e.to_string())
 }
 
 #[cfg(test)]

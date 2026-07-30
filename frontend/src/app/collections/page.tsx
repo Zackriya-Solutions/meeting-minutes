@@ -5,6 +5,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
+import { PromptInput } from '@/components/ui/prompt-input';
 import { Icon } from '@/components/memento/Icon';
 import {
   Dialog,
@@ -1044,35 +1045,14 @@ export default function CollectionsPage() {
                       {t('Open previous conversation')}
                     </Button>
                   </div>
-                  <div className="mt-4 flex items-end gap-2">
-                    <textarea
-                      value={collectionQuestion}
-                      onChange={(event) => setCollectionQuestion(event.target.value)}
-                      onKeyDown={(event) => {
-                        if (event.key === 'Enter' && !event.shiftKey) {
-                          event.preventDefault();
-                          submitCollectionQuestion();
-                        }
-                      }}
-                      rows={1}
-                      placeholder={t('Ask about this collection…')}
-                      className="mm-field max-h-40 min-h-[48px] flex-1 resize-none bg-card py-3 text-sm outline-none"
-                    />
-                    <button
-                      type="button"
-                      onClick={submitCollectionQuestion}
-                      disabled={!collectionQuestion.trim()}
-                      className={cn(
-                        'flex h-11 w-11 flex-none items-center justify-center rounded-xl text-primary-foreground transition-colors',
-                        collectionQuestion.trim()
-                          ? 'bg-primary hover:bg-primary/90'
-                          : 'cursor-not-allowed bg-muted',
-                      )}
-                      aria-label={t('Ask this collection')}
-                    >
-                      <Icon name="send" size={18} />
-                    </button>
-                  </div>
+                  <PromptInput
+                    value={collectionQuestion}
+                    onValueChange={setCollectionQuestion}
+                    onSubmit={submitCollectionQuestion}
+                    containerClassName="mt-4"
+                    placeholder={t('Ask about this collection…')}
+                    sendLabel={t('Ask this collection')}
+                  />
                 </section>
               </div>
             </>

@@ -1,5 +1,7 @@
 import type { Lang } from './i18n';
 
+type Translate = (key: string) => string;
+
 export interface MeetingDisplaySource {
   title: string;
   createdAt?: string | null;
@@ -73,7 +75,7 @@ function parseUnknownDateHint(meeting: MeetingDisplaySource): { weekday?: string
 }
 
 function parseDefaultMeetingDate(title: string): Date | null {
-  const iso = title.match(/^Meeting (\d{4})-(\d{2})-(\d{2})_(\d{2})-(\d{2})-(\d{2})$/i);
+  const iso = title.match(/^(?:Auto )?Meeting (\d{4})-(\d{2})-(\d{2})_(\d{2})-(\d{2})-(\d{2})$/i);
   if (iso) {
     return new Date(
       Number(iso[1]),
@@ -85,7 +87,7 @@ function parseDefaultMeetingDate(title: string): Date | null {
     );
   }
 
-  const legacy = title.match(/^Meeting (\d{2})_(\d{2})_(\d{2})_(\d{2})_(\d{2})_(\d{2})$/i);
+  const legacy = title.match(/^(?:Auto )?Meeting (\d{2})_(\d{2})_(\d{2})_(\d{2})_(\d{2})_(\d{2})$/i);
   if (legacy) {
     return new Date(
       2000 + Number(legacy[3]),
@@ -101,7 +103,7 @@ function parseDefaultMeetingDate(title: string): Date | null {
 
 function isMachineTitle(title: string): boolean {
   return (
-    /^Meeting (?:\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}|\d{2}_\d{2}_\d{2}_\d{2}_\d{2}_\d{2})$/i.test(title)
+    /^(?:Auto )?Meeting (?:\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}|\d{2}_\d{2}_\d{2}_\d{2}_\d{2}_\d{2})$/i.test(title)
     || /^(?:date-unknown_[a-z]{3}_(?:\d{2}-\d{2}|time-unknown)|\d{4}-\d{2}-\d{2}_(?:\d{2}-\d{2}|time-unknown))_/i.test(title)
   );
 }
@@ -174,12 +176,13 @@ function fallbackMeetingTitle(
   defaultMeetingDate: Date | null,
   unknownHint: { weekday?: string; time?: string } | null,
 ): string {
-  const seed = [
-    meeting.title,
-    meeting.occurredAt,
-    meeting.createdAt,
-    basename(meeting.folderPath),
-  ].filter(Boolean).join('|');
+  // The machine title is available both during recording and after persistence, while
+  // createdAt / folderPath arrive later. Prefer one canonical value so the generated
+  // name does not change from “Evening sync” to another noun after the meeting is saved.
+  const seed = meeting.title.trim()
+    || meeting.occurredAt
+    || meeting.createdAt
+    || basename(meeting.folderPath);
 
   if (!seed) return 'Встреча';
 
@@ -217,6 +220,37 @@ function formatKnownDate(date: Date): string {
     year: date.getFullYear() === now.getFullYear() ? undefined : 'numeric',
   }).format(date);
   return `${calendarDate}, ${time}`;
+}
+
+function capitalize(value: string): string {
+  return value ? value.charAt(0).toUpperCase() + value.slice(1) : value;
+}
+
+function localCalendarDay(date: Date): number {
+  return Date.UTC(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+export function formatRelativeMeetingDate(
+  value: Date | string | null | undefined,
+  locale: string,
+  t: Translate,
+): string {
+  const date = value instanceof Date ? value : value ? new Date(value) : null;
+  if (!date || Number.isNaN(date.getTime())) return t('Date unknown');
+
+  const daysAgo = Math.round(
+    (localCalendarDay(new Date()) - localCalendarDay(date)) / 86_400_000,
+  );
+
+  if (daysAgo === 0) return t('Today');
+  if (daysAgo === 1) return t('Yesterday');
+  if (daysAgo === 2) return t('Day before yesterday');
+
+  return capitalize(new Intl.DateTimeFormat(locale, {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+  }).format(date));
 }
 
 export function getMeetingDisplayInfo(

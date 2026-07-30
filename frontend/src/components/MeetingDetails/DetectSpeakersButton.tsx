@@ -13,7 +13,7 @@ import {
     DialogHeader,
     DialogTitle,
 } from "../ui/dialog";
-import { DiarizationStatus, DiarizeMeetingResult, SpeakerInfo } from "@/types";
+import { DiarizeMeetingResult, SpeakerInfo } from "@/types";
 import Analytics from "@/lib/analytics";
 import { useT } from "@/lib/i18n";
 
@@ -33,9 +33,9 @@ const errString = (err: unknown, fallback: string): string =>
     typeof err === "string" ? err : (err as any)?.message || fallback;
 
 /**
- * "Detect speakers" action for a saved meeting. Verifies the diarization models
- * exist (offering a one-time ~35 MB download if not), runs `diarize_meeting`,
- * and reports the outcome via toast — matching the retranscription idiom.
+ * "Detect speakers" action for a saved meeting. SaluteSpeech is the primary engine;
+ * local models are offered only if the cloud is unavailable, then `diarize_meeting`
+ * reports the outcome via toast — matching the retranscription idiom.
  */
 export function DetectSpeakersButton({ meetingId, speakerCount = 0, onDetected, label }: DetectSpeakersButtonProps) {
     const t = useT();
@@ -72,23 +72,9 @@ export function DetectSpeakersButton({ meetingId, speakerCount = 0, onDetected, 
         }
     };
 
-    const checkModelsAndRun = async () => {
+    const runPreferredDiarization = async () => {
         if (!meetingId || busy) return;
-        setPhase("checking");
-        try {
-            // Diarization is local-only in the UI (cloud measured far worse); the only
-            // gate is the one-time speaker-model download.
-            const status = await invoke<DiarizationStatus>("diarization_status");
-            if (!status.available) {
-                setPhase("idle");
-                setShowDownload(true);
-                return;
-            }
-            await runDiarize();
-        } catch (err) {
-            setPhase("idle");
-            toast.error(errString(err, t("Could not check speaker models")));
-        }
+        await runDiarize();
     };
 
     const handleClick = async () => {
@@ -107,7 +93,7 @@ export function DetectSpeakersButton({ meetingId, speakerCount = 0, onDetected, 
             console.warn("Could not inspect existing meeting speakers:", err);
         }
         setPhase("idle");
-        await checkModelsAndRun();
+        await runPreferredDiarization();
     };
 
     const handleDownloadAndDetect = async () => {
@@ -173,7 +159,7 @@ export function DetectSpeakersButton({ meetingId, speakerCount = 0, onDetected, 
                         <Button
                             onClick={async () => {
                                 setShowRerunConfirmation(false);
-                                await checkModelsAndRun();
+                                await runPreferredDiarization();
                             }}
                             className="bg-primary hover:bg-primary/90"
                         >

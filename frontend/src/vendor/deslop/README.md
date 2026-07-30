@@ -1,6 +1,10 @@
 # Deslop primitives snapshot
 
-This directory contains the font, icon, and surface color primitives used by Memento.
+Source revision: `43cfb7dc4523abe843dd9de7dd7a23d66331999b`.
+
+`primitives/` is a complete, unmodified snapshot of `mishanaer/deslop/primitives`.
+`deslop-primitives.css` is Memento's compatibility adapter and the application
+entry point for those primitives.
 
 - Source: `mishanaer/deslop/primitives`
 - Typography: SB Sans Interface, SB Serif Text, and SB Sans Text Mono
@@ -13,6 +17,11 @@ The files are vendored because the source repository does not currently expose
 sync with the source; Memento adapts Deslop's color-scheme selector to the
 `.dark` class used by `next-themes`. Product-specific icon aliases live outside
 this directory in `src/components/deslop-icons.tsx`.
+
+Do not import `primitives/colors.css` globally without an adapter. Deslop stores
+`--primary` as a hex color while the shadcn theme expects HSL channel values in
+the same variable. The adapter exposes the Deslop scale as `--deslop-primary-*`
+and keeps the shadcn token intact.
 
 `mini-app/Cell.tsx` is the desktop TypeScript port of Deslop's Mini App `Cells`
 component. It keeps the source spacing, separators, typography, and interaction

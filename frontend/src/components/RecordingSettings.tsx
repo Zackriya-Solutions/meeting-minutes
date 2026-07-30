@@ -105,7 +105,7 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
 
   if (loading) {
     return (
-      <div className="animate-pulse">
+      <div className="settings-section animate-pulse">
         <div className="h-4 bg-muted rounded w-1/4 mb-4"></div>
         <div className="h-8 bg-muted rounded mb-4"></div>
       </div>
@@ -113,9 +113,9 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
   }
 
   return (
-    <div className="space-y-6">
+    <section className="settings-section space-y-6">
       {/* Auto Save Toggle */}
-      <div className="flex items-center justify-between p-4 border rounded-lg">
+      <div className="flex items-center justify-between gap-4">
         <div className="flex-1">
           <div className="font-medium">{t('Save Audio Recordings')}</div>
           <div className="text-sm text-muted-foreground">
@@ -131,7 +131,7 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
 
       {/* Info when auto_save is disabled */}
       {!preferences.auto_save && (
-        <div className="p-4 border rounded-lg bg-primary/10">
+        <div className="rounded-xl border border-primary/20 bg-primary/10 p-4">
           <div className="text-sm text-primary">
             {t('Audio recording is disabled. Enable "Save Audio Recordings" to automatically save your meeting audio.')}
           </div>
@@ -146,7 +146,7 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
             {t('Set your preferred microphone and system audio devices for recording. These will be automatically selected when starting new recordings.')}
           </p>
 
-          <div className="border rounded-lg p-4 bg-background">
+          <div className="settings-subsection">
             <DeviceSelection
               selectedDevices={{
                 micDevice: preferences.preferred_mic_device,
@@ -158,6 +158,6 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
           </div>
         </div>
       </div>
-    </div>
+    </section>
   );
 }

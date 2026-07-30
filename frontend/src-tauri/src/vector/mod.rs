@@ -300,11 +300,9 @@ mod tests {
             .await
             .expect("insert initial embedding");
 
-        assert!(
-            !ensure_chunk_embeddings_table_for_dim(&pool, 0)
-                .await
-                .expect("invalid rebuild should degrade gracefully")
-        );
+        assert!(!ensure_chunk_embeddings_table_for_dim(&pool, 0)
+            .await
+            .expect("invalid rebuild should degrade gracefully"));
         let schema: String =
             sqlx::query_scalar("SELECT sql FROM sqlite_master WHERE name='chunk_embeddings'")
                 .fetch_one(&pool)

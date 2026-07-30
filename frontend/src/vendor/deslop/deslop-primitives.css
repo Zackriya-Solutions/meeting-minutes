@@ -1,4 +1,17 @@
-/* Vendored from mishanaer/deslop/primitives. */
+/* Memento compatibility adapter for the complete vendored Deslop primitives.
+   `colors.css` is intentionally not imported: Deslop's hex `--primary` token
+   conflicts with shadcn's HSL `--primary`. Safe aliases are mapped below. */
+
+@import "./primitives/typography.css";
+@import "./primitives/layout.css";
+@import "./primitives/material-symbols.css";
+
+:root {
+  --white: #ffffff;
+  --black: #111111;
+  --background-primary: #ffffff;
+  --background-secondary: #f5f5f5;
+}
 
 @font-face {
   font-family: "SB Sans Interface";
@@ -20,6 +33,14 @@
   font-family: "SB Sans Interface";
   src: url("./fonts/SBSansUI-Bold.otf") format("opentype");
   font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "SB Sans Display";
+  src: url("./fonts/SBSansDisplay-SemiBold.otf") format("opentype");
+  font-weight: 600;
   font-style: normal;
   font-display: swap;
 }
@@ -66,8 +87,33 @@
 
 :root {
   --ui-font-interface: "SB Sans Interface";
+  --ui-font-display: "SB Sans Display";
   --ui-font-serif: "SB Serif Text";
   --ui-font-mono: "SB Sans Text Mono";
+  --ui-title-67-font-size: 67px;
+  --ui-title-67-line-height: 60px;
+  --ui-title-67-font-weight: 700;
+  --ui-title-67-letter-spacing: -0.01em;
+  --ui-title-52-font-size: 52px;
+  --ui-title-52-line-height: 50px;
+  --ui-title-52-font-weight: 700;
+  --ui-title-52-letter-spacing: -0.01em;
+  --ui-title-40-font-size: 40px;
+  --ui-title-40-line-height: 40px;
+  --ui-title-40-font-weight: 700;
+  --ui-title-40-letter-spacing: -0.01em;
+  --ui-title-32-font-size: 32px;
+  --ui-title-32-line-height: 32px;
+  --ui-title-32-font-weight: 700;
+  --ui-title-32-letter-spacing: -0.01em;
+  --ui-title-24-font-size: 24px;
+  --ui-title-24-line-height: 28px;
+  --ui-title-24-font-weight: 700;
+  --ui-title-24-letter-spacing: -0.01em;
+  --ui-title-20-font-size: 20px;
+  --ui-title-20-line-height: 24px;
+  --ui-title-20-font-weight: 700;
+  --ui-title-20-letter-spacing: -0.01em;
   --ui-body-font-size: 16px;
   --ui-body-line-height: 20px;
   --ui-body-letter-spacing: 0;
@@ -75,24 +121,67 @@
   --ui-subtitle-line-height: 18px;
   --ui-subtitle-font-weight: 400;
   --ui-subtitle-letter-spacing: 0;
+  --ui-space-2: 2px;
+  --ui-space-3: 3px;
+  --ui-space-4: 4px;
+  --ui-space-6: 6px;
+  --ui-space-7: 7px;
   --ui-space-8: 8px;
   --ui-space-9: 9px;
+  --ui-space-10: 10px;
+  --ui-space-11: 11px;
   --ui-space-12: 12px;
+  --ui-space-14: 14px;
+  --ui-space-16: 16px;
+  --ui-space-20: 20px;
+  --ui-space-22: 22px;
+  --ui-space-24: 24px;
+  --ui-space-32: 32px;
+  --ui-space-44: 44px;
   --ui-layout-content-inset: 16px;
+  --ui-layout-section-gap: var(--ui-space-24);
+  --ui-layout-control-gap: var(--ui-space-8);
+  --ui-layout-compact-gap: var(--ui-space-4);
   --elevation-1: #ffffff;
+  --elevation-2: #ffffff;
   --deslop-primary: #111111;
+  --deslop-primary-90: #111111e6;
+  --deslop-primary-80: #111111cc;
+  --deslop-primary-70: #111111b3;
   --deslop-primary-60: #11111199;
+  --deslop-primary-50: #11111180;
+  --deslop-primary-40: #11111166;
+  --deslop-primary-30: #1111114d;
   --deslop-primary-20: #11111133;
+  --deslop-primary-10: #1111111a;
+  --deslop-primary-8: #11111114;
+  --deslop-primary-5: #1111110d;
+  --deslop-primary-4: #1111110a;
+  --primary-50: #11111180;
   --primary-40: #11111166;
   --primary-5: #1111110d;
   --primary-10: #1111111a;
 }
 
 .dark {
+  --background-primary: #111111;
+  --background-secondary: #111111;
   --elevation-1: #1d1d1d;
+  --elevation-2: #282828;
   --deslop-primary: #ffffff;
+  --deslop-primary-90: #ffffffe6;
+  --deslop-primary-80: #ffffffcc;
+  --deslop-primary-70: #ffffffb3;
   --deslop-primary-60: #ffffff99;
+  --deslop-primary-50: #ffffff80;
+  --deslop-primary-40: #ffffff66;
+  --deslop-primary-30: #ffffff4d;
   --deslop-primary-20: #ffffff33;
+  --deslop-primary-10: #ffffff1a;
+  --deslop-primary-8: #ffffff14;
+  --deslop-primary-5: #ffffff0d;
+  --deslop-primary-4: #ffffff0a;
+  --primary-50: #ffffff80;
   --primary-40: #ffffff66;
   --primary-5: #ffffff0d;
   --primary-10: #ffffff1a;

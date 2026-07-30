@@ -46,6 +46,33 @@ function Drawer({
   )
 }
 
+function DrawerProvider(props: DrawerPrimitive.Provider.Props) {
+  return <DrawerPrimitive.Provider {...props} />
+}
+
+function DrawerIndent({ className, ...props }: DrawerPrimitive.Indent.Props) {
+  return (
+    <DrawerPrimitive.Indent
+      data-slot="drawer-indent"
+      className={cn(className)}
+      {...props}
+    />
+  )
+}
+
+function DrawerIndentBackground({
+  className,
+  ...props
+}: DrawerPrimitive.IndentBackground.Props) {
+  return (
+    <DrawerPrimitive.IndentBackground
+      data-slot="drawer-indent-background"
+      className={cn(className)}
+      {...props}
+    />
+  )
+}
+
 function DrawerTrigger(props: DrawerPrimitive.Trigger.Props) {
   return <DrawerPrimitive.Trigger data-slot="drawer-trigger" {...props} />
 }
@@ -164,6 +191,9 @@ function DrawerDescription({
 
 export {
   Drawer,
+  DrawerProvider,
+  DrawerIndent,
+  DrawerIndentBackground,
   DrawerPortal,
   DrawerOverlay,
   DrawerSwipeHandle,

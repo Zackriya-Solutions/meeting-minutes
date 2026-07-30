@@ -787,7 +787,8 @@ async fn start_import<R: Runtime>(
             );
             // Imported meetings are already batch-transcribed; run the speaker pass
             // (diarize + labeled export) that recorded meetings get via refinement.
-            crate::audio::refinement::spawn_import_refinement(
+            crate::audio::refinement::spawn_import_refinement(app.clone(), res.meeting_id.clone());
+            crate::summary::commands::spawn_automatic_summary_for_meeting(
                 app.clone(),
                 res.meeting_id.clone(),
             );
@@ -929,6 +930,10 @@ pub async fn start_batch_import<R: Runtime>(
                     app.clone(),
                     imported.meeting_id.clone(),
                 );
+                crate::summary::commands::spawn_automatic_summary_for_meeting(
+                    app.clone(),
+                    imported.meeting_id.clone(),
+                );
                 result.imported.push(imported);
                 emit_batch_progress(&app, index + 1, &item, &result, "completed");
             }
@@ -1044,8 +1049,7 @@ async fn run_import<R: Runtime>(
         return Ok(ImportRunOutcome::AlreadyImported(existing));
     }
 
-    let (provider, model) =
-        resolve_import_transcription(pool, provider, model).await?;
+    let (provider, model) = resolve_import_transcription(pool, provider, model).await?;
     info!(
         "Starting import for '{}' from {} with language {:?}, model {:?}, provider {:?}",
         title, source_path, language, model, provider
@@ -1803,16 +1807,18 @@ async fn whisper_model_is_available(model_name: &str) -> bool {
     use crate::whisper_engine::whisper_engine::ModelStatus;
 
     let engine = {
-        let guard = WHISPER_ENGINE.lock().unwrap_or_else(|error| error.into_inner());
+        let guard = WHISPER_ENGINE
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
         guard.as_ref().cloned()
     };
     let Some(engine) = engine else {
         return false;
     };
     match engine.discover_models().await {
-        Ok(models) => models
-            .iter()
-            .any(|model| model.name == model_name && matches!(model.status, ModelStatus::Available)),
+        Ok(models) => models.iter().any(|model| {
+            model.name == model_name && matches!(model.status, ModelStatus::Available)
+        }),
         Err(error) => {
             warn!("Could not verify configured Whisper model '{model_name}': {error}");
             false
@@ -1838,9 +1844,7 @@ async fn resolve_import_transcription(
             .map_err(|error| anyhow!("Failed to query transcription settings: {error}"))?;
     if let Some((configured_provider, configured_model)) = configured {
         let normalized = normalize_import_provider(&configured_provider);
-        let target_model = model
-            .clone()
-            .unwrap_or_else(|| configured_model.clone());
+        let target_model = model.clone().unwrap_or_else(|| configured_model.clone());
         let whisper_available = if normalized == Some("whisper") {
             whisper_model_is_available(&target_model).await
         } else {
@@ -2483,29 +2487,23 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(provider.as_deref(), Some("gigaam"));
-        assert!(model.is_none(), "legacy Whisper model must not leak into GigaAM");
+        assert!(
+            model.is_none(),
+            "legacy Whisper model must not leak into GigaAM"
+        );
     }
 
     #[test]
     fn omitted_import_provider_preserves_available_configured_whisper_model() {
-        let selection = configured_import_selection(
-            "localWhisper",
-            "small".to_string(),
-            None,
-            true,
-        )
-        .expect("downloaded Whisper model remains selected");
+        let selection =
+            configured_import_selection("localWhisper", "small".to_string(), None, true)
+                .expect("downloaded Whisper model remains selected");
         assert_eq!(selection.0.as_deref(), Some("whisper"));
         assert_eq!(selection.1.as_deref(), Some("small"));
 
         assert!(
-            configured_import_selection(
-                "localWhisper",
-                "large-v3-turbo".to_string(),
-                None,
-                false,
-            )
-            .is_none(),
+            configured_import_selection("localWhisper", "large-v3-turbo".to_string(), None, false,)
+                .is_none(),
             "missing Whisper model falls back instead of failing late"
         );
     }
@@ -2527,14 +2525,12 @@ mod tests {
             .execute(&pool)
             .await
             .unwrap();
-            sqlx::query(
-                "INSERT INTO transcript_settings(id, provider, model) VALUES('1', ?, ?)",
-            )
-            .bind(configured_provider)
-            .bind(configured_model)
-            .execute(&pool)
-            .await
-            .unwrap();
+            sqlx::query("INSERT INTO transcript_settings(id, provider, model) VALUES('1', ?, ?)")
+                .bind(configured_provider)
+                .bind(configured_model)
+                .execute(&pool)
+                .await
+                .unwrap();
 
             let (provider, model) = resolve_import_transcription(&pool, None, None)
                 .await
@@ -3162,11 +3158,7 @@ mod tests {
         )
         .expect("failed to load GigaAM RNN-T fp32");
 
-        async fn transcribe_segments(
-            segments: &[SpeechSegment],
-            label: &str,
-            out_dir: &str,
-        ) {
+        async fn transcribe_segments(segments: &[SpeechSegment], label: &str, out_dir: &str) {
             let started = std::time::Instant::now();
             let mut rows = Vec::new();
             for (i, seg) in segments.iter().enumerate() {
@@ -3221,7 +3213,10 @@ mod tests {
                     split.push(seg);
                 }
             }
-            eprintln!("[{label}] VAD produced {} segments after splitting", split.len());
+            eprintln!(
+                "[{label}] VAD produced {} segments after splitting",
+                split.len()
+            );
             transcribe_segments(&split, label, &out_dir).await;
         }
 
@@ -3233,8 +3228,7 @@ mod tests {
                 crate::audio::decoder::decode_audio_file(Path::new(&path_48k)).expect("decode 48k");
             assert_eq!(decoded48.channels, 1, "expected mono 48k wav");
             let sr = decoded48.sample_rate;
-            let mut processor =
-                ContinuousVadProcessor::new(sr, 800).expect("VAD processor");
+            let mut processor = ContinuousVadProcessor::new(sr, 800).expect("VAD processor");
             let window = (sr as f64 * 0.6) as usize;
             let mut raw_segments: Vec<SpeechSegment> = Vec::new();
             let mut fed = 0usize;
@@ -3253,8 +3247,7 @@ mod tests {
             let mut segments: Vec<SpeechSegment> = Vec::new();
             let mut last_sent_end_ms = 0.0f64;
             for seg in raw_segments {
-                let Some(seg) =
-                    crate::audio::pipeline::trim_leading_overlap(seg, last_sent_end_ms)
+                let Some(seg) = crate::audio::pipeline::trim_leading_overlap(seg, last_sent_end_ms)
                 else {
                     continue;
                 };
@@ -3318,9 +3311,12 @@ mod tests {
         let samples = decoded.to_whisper_format();
         let total = samples.len();
 
-        let spans =
-            crate::audio::refinement::plan_turn_asr_segments(&turns, 1_000, 350, 25_000);
-        eprintln!("[turnaligned] {} turns -> {} ASR spans", turns.len(), spans.len());
+        let spans = crate::audio::refinement::plan_turn_asr_segments(&turns, 1_000, 350, 25_000);
+        eprintln!(
+            "[turnaligned] {} turns -> {} ASR spans",
+            turns.len(),
+            spans.len()
+        );
 
         // Majority cluster per span, for reporting speaker structure.
         let cluster_of = |s: i64, e: i64| -> i64 {

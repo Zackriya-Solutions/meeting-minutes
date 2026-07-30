@@ -34,7 +34,7 @@ export function PreferenceSettings() {
 
   // Show loading only if we're actually loading and don't have cached data
   if (isLoadingPreferences && !notificationSettings) {
-    return <div className="max-w-2xl mx-auto p-6">{t('Loading Preferences...')}</div>
+    return <div className="settings-section">{t('Loading Preferences...')}</div>
   }
 
   const handleAutoMeetingDetectionChange = async (enabled: boolean) => {
@@ -53,9 +53,9 @@ export function PreferenceSettings() {
   };
 
   return (
-    <div className="space-y-6">
+    <div>
       {/* Detection evidence remains in memory; only normalized auto-listening lifecycle is stored. */}
-      <div className="bg-background rounded-lg border border-border p-6 shadow-none">
+      <section className="settings-section">
         <div className="flex items-start justify-between gap-4 sm:gap-6">
           <div className="min-w-0">
             <h3 className="text-lg font-semibold text-foreground mb-2">{t('Automatic meeting detection')}</h3>
@@ -70,7 +70,7 @@ export function PreferenceSettings() {
             onCheckedChange={handleAutoMeetingDetectionChange}
           />
         </div>
-      </div>
+      </section>
 
     </div>
   )

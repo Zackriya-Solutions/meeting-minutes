@@ -302,12 +302,10 @@ pub async fn save_config(
         current_memory.ok_or_else(|| "Meeting not found".to_string())?;
     let needs_identity_update = current_memory_type
         != crate::database::repositories::meeting::MEMORY_TYPE_INTERVIEW
-        || current_sensitivity
-            != crate::database::repositories::meeting::SENSITIVITY_SENSITIVE;
+        || current_sensitivity != crate::database::repositories::meeting::SENSITIVITY_SENSITIVE;
     let entering_private_memory = current_memory_type
         != crate::database::repositories::meeting::MEMORY_TYPE_INTERVIEW
-        && current_sensitivity
-            != crate::database::repositories::meeting::SENSITIVITY_SENSITIVE;
+        && current_sensitivity != crate::database::repositories::meeting::SENSITIVITY_SENSITIVE;
 
     sqlx::query(
         "INSERT INTO interview_configs(meeting_id, candidate_name, role_title, interview_stage, \
@@ -381,10 +379,7 @@ pub async fn get_privacy(pool: &SqlitePool, meeting_id: &str) -> Result<Intervie
     })
 }
 
-pub(crate) async fn delete_search_index(
-    pool: &SqlitePool,
-    meeting_id: &str,
-) -> Result<(), String> {
+pub(crate) async fn delete_search_index(pool: &SqlitePool, meeting_id: &str) -> Result<(), String> {
     let ids: Vec<i64> = sqlx::query_scalar("SELECT id FROM chunks WHERE meeting_id=?")
         .bind(meeting_id)
         .fetch_all(pool)
@@ -891,7 +886,9 @@ pub async fn purge_expired(pool: &SqlitePool) -> Result<Vec<String>, String> {
     let mut deleted = Vec::new();
     for (id, folder_path) in rows {
         if let Some(folder_path) = folder_path.filter(|value| !value.trim().is_empty()) {
-            if let Err(error) = crate::api::api::delete_recording_folder(std::path::Path::new(&folder_path)) {
+            if let Err(error) =
+                crate::api::api::delete_recording_folder(std::path::Path::new(&folder_path))
+            {
                 log::warn!("Expired Interview Memory {id} was retained because its recording folder could not be safely deleted: {error}");
                 continue;
             }
@@ -1231,7 +1228,12 @@ mod tests {
 
         assert_eq!(sync_records(&pool, "m1", &report).await.unwrap(), 4);
         let rows = list_records(&pool, "m1").await.unwrap();
-        assert_eq!(rows.iter().filter(|row| row.kind == "question_answer").count(), 2);
+        assert_eq!(
+            rows.iter()
+                .filter(|row| row.kind == "question_answer")
+                .count(),
+            2
+        );
         assert_eq!(rows.iter().filter(|row| row.kind == "evidence").count(), 2);
     }
 }

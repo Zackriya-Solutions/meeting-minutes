@@ -5,9 +5,15 @@
 @layer components {
   /* Summary preview must retain document structure even if a build accidentally resolves
      the legacy Tailwind config without the typography plugin. */
+  .summary-markdown {
+    font-family: var(--ui-font-interface);
+    font-size: 14px;
+    font-weight: 400;
+    line-height: 1.6;
+  }
   .summary-markdown > :first-child { margin-top: 0; }
   .summary-markdown > :last-child { margin-bottom: 0; }
-  .summary-markdown p { margin: 0 0 1em; line-height: 1.65; }
+  .summary-markdown p { margin: 0 0 1em; line-height: inherit; }
   .summary-markdown h1,
   .summary-markdown h2,
   .summary-markdown h3,
@@ -202,7 +208,7 @@
 
   html.native-macos-vibrancy .memento-shell,
   html.native-macos-vibrancy .mm-page {
-    background: color-mix(in srgb, var(--elevation-1) 50%, transparent) !important;
+    background: var(--background-secondary) !important;
   }
 
   html.native-macos-vibrancy [data-home-scroll-container] {
@@ -214,15 +220,7 @@
      `.memento-shell`; otherwise swapping between the two briefly exposes the
      raw native vibrancy and looks like a white/dark flash. */
   html.native-macos-vibrancy .route-drawer-background {
-    background: color-mix(in srgb, var(--elevation-1) 50%, transparent) !important;
-  }
-
-  html.native-macos-vibrancy .home-ask-backdrop {
-    background: linear-gradient(
-      to bottom,
-      transparent,
-      color-mix(in srgb, var(--elevation-1) 72%, transparent)
-    );
+    background: var(--background-secondary) !important;
   }
 
   /* Make the window draggable */
@@ -236,28 +234,18 @@
     app-region: no-drag;
   }
 
-  /* Custom scrollbar styles */
-  .custom-scrollbar::-webkit-scrollbar {
-    width: 6px;
+  /* Keep every surface scrollable while hiding native scrollbar chrome. */
+  *,
+  *::before,
+  *::after {
+    scrollbar-width: none !important;
+    -ms-overflow-style: none;
   }
 
-  .custom-scrollbar::-webkit-scrollbar-track {
-    background: transparent;
-  }
-
-  .custom-scrollbar::-webkit-scrollbar-thumb {
-    background: hsl(var(--muted-foreground) / 0.24);
-    border-radius: 3px;
-  }
-
-  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-    background: hsl(var(--muted-foreground) / 0.4);
-  }
-
-  /* Firefox scrollbar */
-  .custom-scrollbar {
-    scrollbar-width: thin;
-    scrollbar-color: hsl(var(--muted-foreground) / 0.24) transparent;
+  *::-webkit-scrollbar {
+    display: none !important;
+    width: 0 !important;
+    height: 0 !important;
   }
 
   /* BlockNote Editor - Override fixed dimensions for responsive layout */
@@ -326,7 +314,7 @@
     overflow: hidden;
     border: 1px solid hsl(var(--border));
     background: var(--elevation-1);
-    box-shadow: 0 24px 80px rgb(0 0 0 / .22);
+    box-shadow: none;
     outline: none;
     transform: translate3d(var(--drawer-translate-x, 0), var(--drawer-translate-y, 0), 0);
     transition: transform 450ms cubic-bezier(.22, 1, .36, 1), opacity 450ms cubic-bezier(.22, 1, .36, 1);
@@ -400,8 +388,18 @@
     background: hsl(var(--muted-foreground) / .3);
   }
   .memento-drawer-popup[data-swipe-axis="x"] .memento-drawer-swipe-handle {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    z-index: 3;
     width: 16px;
     height: auto;
+  }
+  .memento-drawer-popup[data-swipe-direction="right"] .memento-drawer-swipe-handle {
+    left: 0;
+  }
+  .memento-drawer-popup[data-swipe-direction="left"] .memento-drawer-swipe-handle {
+    right: 0;
   }
   .memento-drawer-popup[data-swipe-axis="x"] .memento-drawer-swipe-handle > span {
     width: 4px;
@@ -415,6 +413,7 @@
     --drawer-width: min(calc(100vw - 24px), 500px);
     --drawer-height: calc(100dvh - 24px);
     --drawer-max-height: calc(100dvh - 24px);
+    --drawer-content-inset: var(--ui-space-24);
     border-radius: 22px;
   }
   .drawer-elevation-surface {
@@ -425,14 +424,37 @@
     box-shadow: none;
   }
   .route-drawer-background {
-    transform: translateX(0);
-    transition: transform 450ms cubic-bezier(.22, 1, .36, 1);
-    will-change: transform;
+    position: relative;
+    z-index: 1;
+    background: transparent;
+    transform: none !important;
   }
-  @media (min-width: 900px) {
-    .route-drawer-background.is-open {
-      transform: translateX(clamp(-250px, calc((600px - 100vw) / 2), 0px));
+  /* Every route drawer participates in the desktop layout like a right
+     sidebar. Shrinking this shared background wrapper re-centres the home
+     column inside the unobscured area instead of placing it under the drawer. */
+  @media (min-width: 1024px) {
+    .route-drawer-background {
+      --route-drawer-reserved-width: 512px;
+      width: 100%;
+      transition: width 450ms cubic-bezier(.22, 1, .36, 1);
+      will-change: width;
     }
+    .route-drawer-background[data-active] {
+      width: calc(100% - var(--route-drawer-reserved-width));
+    }
+    .route-drawer-background[data-active] .home-ask-dock {
+      left: calc((100vw - var(--route-drawer-reserved-width)) / 2);
+    }
+  }
+  .route-drawer-background-surface {
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    /* This layer is exposed in the inset around a route drawer. It must use
+       the same Deslop screen surface as the home page, never the white page
+       background, or opening a drawer visibly changes the window colour. */
+    background: var(--background-secondary);
+    pointer-events: none;
   }
   @media (max-width: 760px) {
     .meeting-route-drawer {
@@ -461,6 +483,13 @@
   .memento-primary-action:active { transform: scale(.985); }
   .memento-record-dock { padding: 6px; border: 1px solid hsl(var(--border)); border-radius: 999px; background: hsl(var(--muted)); }
   .memento-serif-title { font-family: var(--ui-font-serif); font-weight: 400; letter-spacing: -.035em; }
+  .memento-screen-title {
+    font-family: var(--ui-font-display);
+    font-size: var(--ui-title-40-font-size) !important;
+    font-weight: 600;
+    letter-spacing: var(--ui-title-40-letter-spacing);
+    line-height: var(--ui-title-40-line-height) !important;
+  }
 
   /* Home: an editorial meeting archive with the rhythm of a paper calendar. */
   .home-screen {
@@ -480,7 +509,7 @@
   }
   .home-screen__header { display: flex; align-items: flex-end; justify-content: space-between; gap: 18px; margin-bottom: 24px; }
   .home-display { font-family: var(--ui-font-serif); font-weight: 400; letter-spacing: -.035em; }
-  .home-screen__header h1 { width: 297px; max-width: 100%; font-size: 38px; line-height: 1; }
+  .home-screen__header h1 { width: 297px; max-width: 100%; }
   .home-screen__content { display: flex; flex-direction: column; gap: 22px; }
   .home-meeting-card { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
   .home-meeting-row {
@@ -494,7 +523,7 @@
     overflow: hidden;
     border: 1px solid var(--primary-10);
     border-radius: 32px;
-    background: var(--elevation-1);
+    background: var(--elevation-2);
     color: inherit;
     cursor: pointer;
     text-align: left;
@@ -502,7 +531,7 @@
   }
   .home-meeting-row:focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: -2px; }
   .home-meeting-date { display: flex; width: 100%; min-width: 0; min-height: 69px; align-items: center; gap: 16px; border-bottom: 1px dashed var(--primary-10); background: var(--primary-5); padding: 16px 20px; }
-  .home-meeting-day { display: flex; min-width: 38px; justify-content: flex-start; color: hsl(var(--foreground)); font-size: 40px; line-height: .9; font-variant-numeric: tabular-nums; letter-spacing: -1.19px; text-align: left; }
+  .home-meeting-day { display: flex; justify-content: flex-start; color: hsl(var(--foreground)); font-size: 40px; line-height: .9; font-variant-numeric: tabular-nums; letter-spacing: -1.19px; text-align: left; }
   .home-meeting-date-copy { display: flex; min-width: 0; flex-direction: column; line-height: 1.15; }
   .home-meeting-month { display: block; min-width: 0; overflow: hidden; color: hsl(var(--foreground)); font-size: 16px; font-weight: 400; line-height: 1.15; text-overflow: ellipsis; white-space: nowrap; }
   .home-meeting-weekday { margin-top: 2px; color: hsl(var(--muted-foreground)); font-size: 12px; font-weight: 400; line-height: 1.15; }
@@ -512,18 +541,66 @@
   .home-meeting-title { overflow: hidden; color: hsl(var(--foreground)); font-size: 16px; font-weight: 400; letter-spacing: -.02em; line-height: 1.18; text-overflow: ellipsis; white-space: nowrap; }
   .home-meeting-time { margin-top: 3px; color: hsl(var(--muted-foreground)); font-size: 12px; font-variant-numeric: tabular-nums; line-height: 1.45; }
   .home-history { padding: 0; }
-  .home-history h2 { margin-bottom: 5px; padding: 0 var(--ui-layout-content-inset); color: hsl(var(--muted-foreground)); font-size: var(--ui-body-font-size); font-weight: 700; line-height: var(--ui-body-line-height); }
+  .home-history__groups { display: flex; flex-direction: column; gap: 18px; }
+  .home-history__group h3 {
+    margin-bottom: 8px;
+    padding: 0 var(--ui-layout-content-inset);
+    color: var(--deslop-primary-60);
+    font-size: var(--ui-subtitle-font-size);
+    font-weight: var(--ui-subtitle-font-weight);
+    letter-spacing: var(--ui-subtitle-letter-spacing);
+    line-height: var(--ui-subtitle-line-height);
+  }
   .home-history__list {
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    border-radius: 16px;
-    background: var(--elevation-1);
+    padding-block: 4px;
+    border: 1px solid var(--primary-10);
+    border-radius: 24px;
+    background: var(--elevation-2);
   }
-  .home-history-icon { display: flex; width: 30px; height: 30px; align-items: center; justify-content: center; border: 1px solid hsl(var(--border)); border-radius: 9px; background: hsl(var(--muted)); color: hsl(var(--muted-foreground)); }
-  .home-history time { color: var(--deslop-primary-60); font-size: var(--ui-subtitle-font-size); font-variant-numeric: tabular-nums; line-height: var(--ui-subtitle-line-height); }
-  .home-ask-backdrop { pointer-events: none; position: fixed; z-index: 19; right: 0; bottom: 0; left: 0; height: 220px; background: linear-gradient(to bottom, transparent, hsl(var(--background))); }
-  .home-screen .home-ask {
+  .home-history-icon { display: flex; width: 40px; height: 40px; align-items: center; justify-content: center; border: 1px solid hsl(var(--border)); border-radius: 999px; background: var(--primary-5); color: hsl(var(--muted-foreground)); }
+  .home-history-emoji { display: block; font-family: system-ui, sans-serif; font-size: 16px; font-weight: 400; line-height: 1; }
+  .home-history-time { color: var(--deslop-primary-60); font-size: var(--ui-subtitle-font-size); font-variant-numeric: tabular-nums; line-height: var(--ui-subtitle-line-height); white-space: nowrap; }
+
+  /* Message and summary copy use Body 16/21. Sender labels keep the
+     smaller subtitle scale defined by the Message primitive. */
+  .meeting-conversation :where(.mm-md, .summary-markdown, [data-slot="bubble-content"]) {
+    font-family: var(--ui-font-interface);
+    font-size: var(--ui-body-font-size) !important;
+    font-weight: var(--ui-body-font-weight);
+    letter-spacing: var(--ui-body-letter-spacing);
+    line-height: 21px !important;
+  }
+  .memento-drawer-popup .memento-screen-title {
+    font-size: var(--ui-title-24-font-size) !important;
+    font-weight: var(--ui-title-24-font-weight);
+    letter-spacing: var(--ui-title-24-letter-spacing);
+    line-height: var(--ui-title-24-line-height) !important;
+  }
+  .prompt-input-fade {
+    --prompt-input-fade-color: var(--background-secondary);
+    position: relative;
+    isolation: isolate;
+  }
+  .meeting-conversation .prompt-input-fade {
+    --prompt-input-fade-color: var(--elevation-1);
+  }
+  .prompt-input-fade::before {
+    position: absolute;
+    z-index: -1;
+    inset: -96px -24px -24px;
+    content: "";
+    pointer-events: none;
+    background: linear-gradient(
+      to bottom,
+      color-mix(in srgb, var(--prompt-input-fade-color) 0%, transparent) 0%,
+      color-mix(in srgb, var(--prompt-input-fade-color) 72%, transparent) 58%,
+      var(--prompt-input-fade-color) 100%
+    );
+  }
+  .home-screen .home-ask-dock {
     position: fixed;
     z-index: 20;
     bottom: 16px;
@@ -533,36 +610,95 @@
       calc(var(--home-column-width) - var(--home-column-gutter) - var(--home-column-gutter))
     );
     transform: translateX(-50%);
+  }
+  .home-screen .home-ask {
+    width: 100%;
     overflow: clip;
-    border: 0;
+    border: 1px solid var(--primary-10);
     border-radius: 24px;
     background: color-mix(in srgb, var(--elevation-1) 72%, transparent);
     -webkit-backdrop-filter: blur(16px);
     backdrop-filter: blur(16px);
     box-shadow: 0 8px 20px rgb(0 0 0 / .05);
+    outline: none;
+    --tw-ring-offset-shadow: 0 0 #0000;
+    --tw-ring-shadow: 0 0 #0000;
     transition: border-color 150ms ease, box-shadow 150ms ease;
   }
-  .home-ask:focus-within { box-shadow: 0 8px 20px rgb(0 0 0 / .07); }
-  .home-ask__textarea { scrollbar-width: none; }
-  .home-ask__textarea::-webkit-scrollbar { display: none; }
-  .home-ask__submit-slot { position: relative; width: 0; height: 32px; margin-left: -8px; flex: none; overflow: visible; opacity: 0; pointer-events: none; transition: width 150ms cubic-bezier(.2, 0, 0, 1), margin-left 150ms cubic-bezier(.2, 0, 0, 1), opacity 150ms cubic-bezier(.2, 0, 0, 1); }
-  .home-ask__submit-slot.is-visible { width: 32px; margin-left: 0; opacity: 1; pointer-events: auto; }
-  .home-ask__send { position: absolute; right: 0; bottom: 0; width: 32px; height: 32px; opacity: 0; filter: blur(4px); box-shadow: none; pointer-events: none; transform: scale(.25); transform-origin: center; transition: opacity 150ms cubic-bezier(.2, 0, 0, 1), filter 150ms cubic-bezier(.2, 0, 0, 1), transform 150ms cubic-bezier(.2, 0, 0, 1); }
-  .home-ask__submit-slot.is-visible .home-ask__send { opacity: 1; filter: blur(0); pointer-events: auto; transform: scale(1); }
+  .home-screen .home-ask:focus-within {
+    border-color: var(--primary-10);
+    outline: none;
+    box-shadow: 0 8px 20px rgb(0 0 0 / .07) !important;
+  }
 
+  /* Settings shares the home archive's centered column, generous gutters and
+     elevated paper-like cards instead of introducing a second page language. */
+  .settings-screen {
+    --settings-column-width: 600px;
+    --settings-column-gutter: clamp(22px, 4vw, 42px);
+    min-height: 100vh;
+    color: hsl(var(--foreground));
+  }
+  .settings-screen__inner {
+    width: min(100%, var(--settings-column-width));
+    margin: 0 auto;
+    padding: 47px var(--settings-column-gutter) 64px;
+  }
+  .settings-screen__header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 24px;
+  }
+  .settings-screen__back {
+    display: inline-flex;
+    width: 40px;
+    height: 40px;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--primary-10);
+    border-radius: 999px;
+    background: var(--elevation-2);
+    color: hsl(var(--foreground));
+  }
+  .settings-screen__content {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .settings-section {
+    min-width: 0;
+    border: 1px solid var(--primary-10);
+    border-radius: 24px;
+    background: var(--elevation-2);
+    padding: 20px;
+    box-shadow: none;
+  }
+  .settings-subsection {
+    border: 1px solid var(--primary-10);
+    border-radius: 16px;
+    background: var(--elevation-1);
+    padding: 16px;
+  }
+  @media (max-width: 520px) {
+    .settings-screen { --settings-column-gutter: 18px; }
+    .settings-screen__header h1 {
+      font-size: var(--ui-title-32-font-size) !important;
+      line-height: var(--ui-title-32-line-height) !important;
+    }
+    .settings-section { border-radius: 20px; padding: 18px; }
+  }
   @media (max-width: 520px) {
     .home-screen { --home-column-gutter: 18px; }
     .home-screen__header { align-items: center; }
-    .home-screen__header h1 { font-size: 34px; }
+    .home-screen__header h1 { font-size: var(--ui-title-32-font-size) !important; line-height: var(--ui-title-32-line-height) !important; }
     .home-meeting-card { gap: 12px; }
     .home-meeting-row { border-radius: 24px; }
     .home-meeting-date, .home-meeting-main { padding-right: 14px; padding-left: 14px; }
-    .home-meeting-day { min-width: 34px; font-size: 36px; }
+    .home-meeting-day { font-size: 36px; }
     .home-meeting-month { font-size: 14px; }
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    .home-ask__submit-slot, .home-ask__send { transition: none; }
   }
 
   @keyframes homeReveal {
@@ -625,7 +761,13 @@
   .mm-record-actions > button { flex: 1; }
   .mm-page { height: 100vh; display: flex; flex-direction: column; padding: 24px 32px; background: hsl(var(--background)); color: hsl(var(--foreground)); }
   .mm-page-header { display: flex; align-items: center; gap: 12px; padding-bottom: 20px; border-bottom: 1px solid hsl(var(--border) / 0.6); }
-  .mm-page-title { font-size: 28px; font-weight: 600; line-height: .98; letter-spacing: -.045em; }
+  .mm-page-title {
+    font-family: var(--ui-font-display);
+    font-size: var(--ui-title-40-font-size);
+    font-weight: 600;
+    letter-spacing: var(--ui-title-40-letter-spacing);
+    line-height: var(--ui-title-40-line-height);
+  }
   .mm-icon-button { width: 40px; height: 40px; display: inline-flex; align-items: center; justify-content: center; flex: none; border-radius: var(--radius); background: hsl(var(--muted)); color: hsl(var(--foreground)); }
   .mm-icon-button:hover { color: hsl(var(--foreground)); background: hsl(var(--accent)); }
   .mm-field { min-height: 48px; display: flex; align-items: center; gap: 10px; padding: 0 14px; border: 1px solid hsl(var(--border) / 0.6); border-radius: var(--radius); background: hsl(var(--muted)); color: hsl(var(--muted-foreground)); }
@@ -647,13 +789,14 @@ input, textarea, button, [role='dialog'], [role='menu'], [role='listbox'] { font
 
 /* Standalone glyphs stay quiet. Icons inside actions inherit the action color,
    including the Link rendered through Button's `asChild` on the app chrome. */
-.deslop-material-symbol { color: hsl(var(--muted-foreground)) !important; }
-:where(button, [role='button'], .mm-icon-button) .deslop-material-symbol { color: inherit !important; }
+.deslop-material-symbol { color: var(--primary-50) !important; }
+:where(button, [role='button'], .mm-icon-button) .deslop-material-symbol { color: var(--primary-50) !important; }
 
 @keyframes mmPulse { 50% { opacity: 0.38; transform: scale(0.82); } }
 
 .mm-hover { transition: background 180ms cubic-bezier(0.2, 0, 0, 1), color 180ms cubic-bezier(0.2, 0, 0, 1); }
 .mm-hover:hover { background: hsl(var(--accent)); color: hsl(var(--accent-foreground)); }
+.global-header-action { background: var(--elevation-2); }
 .mm-press { transition: transform 180ms cubic-bezier(0.2, 0, 0, 1); }
 .mm-press:active { transform: scale(0.985); }
 .mm-numeric { font-family: var(--ui-font-interface); font-variant-numeric: tabular-nums; }
@@ -685,6 +828,10 @@ input, textarea, button, [role='dialog'], [role='menu'], [role='listbox'] { font
 .mm-md h6 { font-size: 0.9em; color: hsl(var(--muted-foreground)); }
 
 .mm-md ul, .mm-md ol { margin: 0 0 8px; padding-left: 20px; }
+.mm-summary-list > ul { padding-inline-start: 0; list-style: none; }
+.mm-summary-list > ul > li { display: grid; grid-template-columns: 6px minmax(0, 1fr); column-gap: 8px; }
+.mm-summary-list > ul > li::before { content: '•'; color: var(--primary-50); }
+.mm-summary-list > ol { padding-inline-start: 18px; }
 .mm-md li { margin: 2px 0; }
 .mm-md li > ul, .mm-md li > ol { margin: 2px 0; }
 .mm-md li.task-list-item { list-style: none; }

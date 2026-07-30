@@ -78,9 +78,7 @@ pub(crate) fn detect_summary_language(transcript_texts: &[String]) -> SummaryLan
     summarize_weighted_detection(weights)
 }
 
-fn summarize_weighted_detection(
-    weights: HashMap<&'static str, usize>,
-) -> SummaryLanguageDetection {
+fn summarize_weighted_detection(weights: HashMap<&'static str, usize>) -> SummaryLanguageDetection {
     let mut best: Option<(&'static str, usize)> = None;
     let mut tied = false;
 
@@ -167,7 +165,10 @@ mod tests {
             "The team reviewed the roadmap, discussed release blockers, and agreed on the next engineering milestones.",
         ]);
 
-        assert_eq!(detect_summary_language(&texts).language, Some("en".to_string()));
+        assert_eq!(
+            detect_summary_language(&texts).language,
+            Some("en".to_string())
+        );
     }
 
     #[test]
@@ -176,7 +177,10 @@ mod tests {
             "团队讨论了产品路线图、发布风险以及下一阶段的工程计划，并确认了后续负责人。",
         ]);
 
-        assert_eq!(detect_summary_language(&texts).language, Some("zh".to_string()));
+        assert_eq!(
+            detect_summary_language(&texts).language,
+            Some("zh".to_string())
+        );
     }
 
     #[test]
@@ -187,7 +191,10 @@ mod tests {
             "The group also assigned owners for documentation, QA verification, support readiness, and deployment communications.",
         ]);
 
-        assert_eq!(detect_summary_language(&texts).language, Some("en".to_string()));
+        assert_eq!(
+            detect_summary_language(&texts).language,
+            Some("en".to_string())
+        );
     }
 
     #[test]

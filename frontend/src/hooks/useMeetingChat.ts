@@ -231,7 +231,7 @@ export function useMeetingChat({
             content:
               typeof e === 'string'
                 ? e
-                : t('Failed to get an answer. Make sure an LLM provider (GigaChat or DeepSeek) is configured in settings.'),
+                : t('Failed to get an answer. Make sure OpenRouter is configured.'),
             error: true,
           },
         ]);

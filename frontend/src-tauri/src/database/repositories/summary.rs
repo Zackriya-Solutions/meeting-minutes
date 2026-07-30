@@ -97,8 +97,11 @@ impl SummaryProcessesRepository {
                 status = 'PENDING',
                 updated_at = excluded.updated_at,
                 start_time = excluded.start_time,
-                result_backup = result,
-                result_backup_timestamp = excluded.updated_at,
+                result_backup = COALESCE(result, result_backup),
+                result_backup_timestamp = CASE
+                    WHEN result IS NOT NULL THEN excluded.updated_at
+                    ELSE result_backup_timestamp
+                END,
                 result = result,
                 error = NULL
             "#
@@ -263,13 +266,10 @@ mod tests {
         .unwrap();
 
         // Deliberately do not create transcript_chunks: it is not part of summary ownership.
-        let summary = SummaryProcessesRepository::get_summary_data_for_meeting(
-            &pool,
-            "meeting-1",
-        )
-        .await
-        .unwrap()
-        .expect("summary remains visible");
+        let summary = SummaryProcessesRepository::get_summary_data_for_meeting(&pool, "meeting-1")
+            .await
+            .unwrap()
+            .expect("summary remains visible");
 
         assert_eq!(summary.status, "completed");
         assert!(summary.result.unwrap().contains("durable"));

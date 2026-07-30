@@ -178,7 +178,9 @@ mod live_load_tests {
         let parallel_elapsed = parallel_started.elapsed();
 
         assert_eq!(parallel.len(), CLOUD_TRANSCRIPTION_MAX_CONCURRENCY);
-        assert!(sequential.iter().all(|result| !result.text.trim().is_empty()));
+        assert!(sequential
+            .iter()
+            .all(|result| !result.text.trim().is_empty()));
         assert!(parallel.iter().all(|result| !result.text.trim().is_empty()));
         eprintln!(
             "requests={} sequential_ms={} parallel_ms={} speedup={:.2}x",

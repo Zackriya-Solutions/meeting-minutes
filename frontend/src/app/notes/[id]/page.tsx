@@ -135,7 +135,7 @@ Quarterly product review session with stakeholders.
   return (
     <div className="p-8 max-w-4xl mx-auto">
       <div className="mb-8">
-        <h1 className="text-3xl font-bold mb-4">{note.title}</h1>
+        <h1 className="memento-screen-title mb-4">{note.title}</h1>
         
         <div className="flex flex-wrap gap-4 text-muted-foreground">
           {note.date && (

@@ -47,6 +47,14 @@ export function useMeetingSpeakers({
             return;
         }
         try {
+            // Existing meetings may have been diarized before automatic name inference
+            // was introduced. The command is local and idempotent, so attempting it on
+            // open backfills provisional names without requiring another diarization run.
+            try {
+                await invoke<number>("infer_meeting_speaker_names", { meetingId });
+            } catch (err) {
+                console.warn("Failed to infer meeting speaker names:", err);
+            }
             const result = await invoke<SpeakerInfo[]>("get_meeting_speakers", { meetingId });
             setSpeakers(result);
             setSpeakersById(new Map(result.map((s) => [s.id, s.display_name])));

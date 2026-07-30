@@ -1,0 +1,25 @@
+{
+  "family": "Material Symbols Rounded",
+  "axes": {
+    "fill": [
+      0,
+      1
+    ],
+    "grade": [
+      -50,
+      200
+    ],
+    "opticalSize": [
+      20,
+      48
+    ],
+    "weight": [
+      100,
+      700
+    ]
+  },
+  "names": 113,
+  "registryHash": "dcf8c8b477a8437feb5311bba874a78bb875fa260e0765501d9c7df6afc5b608",
+  "fontHash": "f7f0533e144393226558a76ffd66abfd1665ce30b3933723b59e92b1576bb117",
+  "byteLength": 136468
+}

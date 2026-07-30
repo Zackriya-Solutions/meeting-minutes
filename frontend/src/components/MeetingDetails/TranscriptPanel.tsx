@@ -11,6 +11,7 @@ import { convertFileSrc, invoke } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
 import { useAudioPlayer } from '@/hooks/useAudioPlayer';
 import { MeetingAudioPlayer } from './MeetingAudioPlayer';
+import { cn } from '@/lib/utils';
 
 function formatClock(totalSeconds: number): string {
   const mins = Math.floor(totalSeconds / 60);
@@ -26,6 +27,9 @@ interface TranscriptPanelProps {
   onOpenMeetingFolder: () => Promise<void>;
   isRecording: boolean;
   disableAutoScroll?: boolean;
+  transcriptViewportClassName?: string;
+  /** Optional surface override for embedded variants such as the meeting drawer. */
+  surfaceClassName?: string;
 
   // Optional pagination props (when using virtualization)
   usePagination?: boolean;
@@ -72,6 +76,7 @@ interface TranscriptPanelProps {
    */
   showToolbar?: boolean;
   showContextField?: boolean;
+  showAudioPlayer?: boolean;
   compactPlayer?: boolean;
 }
 
@@ -83,6 +88,8 @@ export function TranscriptPanel({
   onOpenMeetingFolder,
   isRecording,
   disableAutoScroll = false,
+  transcriptViewportClassName,
+  surfaceClassName,
   usePagination = false,
   segments,
   hasMore,
@@ -103,6 +110,7 @@ export function TranscriptPanel({
   onSpeakersDetected,
   showToolbar = true,
   showContextField = true,
+  showAudioPlayer = true,
   compactPlayer = false,
 }: TranscriptPanelProps) {
   const t = useT();
@@ -225,7 +233,7 @@ export function TranscriptPanel({
   return (
     // Width and the panel divider are owned by the wrapper + splitter in
     // meeting-details/page-content.tsx; this root just fills its pane.
-    <div className="relative flex h-full w-full min-w-0 flex-col bg-background">
+    <div className={cn("relative flex h-full w-full min-w-0 flex-col bg-background", surfaceClassName)}>
       {/* Title area */}
       {showToolbar && (
         <div className="border-b border-border p-4">
@@ -248,7 +256,7 @@ export function TranscriptPanel({
         </div>
       )}
 
-      {meetingId && meetingFolderPath && (
+      {showAudioPlayer && meetingId && meetingFolderPath && (
         <MeetingAudioPlayer
           compact={compactPlayer}
           available={audioSources.length > 0 && !audioUnavailable}
@@ -286,7 +294,7 @@ export function TranscriptPanel({
       )}
 
       {/* Transcript content - use virtualized view for better performance */}
-      <div className="flex-1 overflow-hidden pb-4">
+      <div className="min-h-0 flex-1 overflow-hidden">
         <VirtualizedTranscriptView
           segments={convertedSegments}
           isRecording={isRecording}
@@ -296,6 +304,7 @@ export function TranscriptPanel({
           enableStreaming={false}
           showConfidence={true}
           disableAutoScroll={disableAutoScroll}
+          viewportClassName={transcriptViewportClassName}
           hasMore={hasMore}
           isLoadingMore={isLoadingMore}
           totalCount={totalCount}

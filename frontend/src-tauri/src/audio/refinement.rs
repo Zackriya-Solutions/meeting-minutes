@@ -60,7 +60,7 @@ pub fn spawn_post_meeting_refinement<R: Runtime>(
     });
 }
 
-async fn run_post_meeting_refinement<R: Runtime>(
+pub(crate) async fn run_post_meeting_refinement<R: Runtime>(
     app: &AppHandle<R>,
     meeting_id: &str,
     folder_path: &str,
@@ -70,28 +70,62 @@ async fn run_post_meeting_refinement<R: Runtime>(
         .ok_or_else(|| anyhow::anyhow!("app state unavailable"))?;
     let pool = state.db_manager.pool();
 
-    if !auto_refine_enabled(pool).await {
-        info!("[refinement] meeting {meeting_id}: disabled by setting; keeping live transcript");
-        return Ok(());
-    }
-
     let folder = Path::new(folder_path);
     if crate::audio::retranscription::find_audio_file(folder).is_err() {
         info!("[refinement] meeting {meeting_id}: no saved audio; keeping live transcript");
         return Ok(());
     }
+    let duration_seconds = std::fs::read_to_string(folder.join("metadata.json"))
+        .ok()
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+        .and_then(|metadata| {
+            metadata
+                .get("duration_seconds")
+                .and_then(serde_json::Value::as_f64)
+        });
+    if duration_seconds.is_some_and(|duration| duration < 120.0) {
+        info!(
+            "[refinement] meeting {meeting_id}: recording is shorter than two minutes; \
+             skipping hidden-meeting speaker processing"
+        );
+        return Ok(());
+    }
+
+    // Speaker attribution is an independent, always-on post-meeting step. The
+    // refinement toggle controls the slower batch re-transcription only; turning it
+    // off must not silently disable diarization for newly recorded meetings.
+    let transcript_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM transcripts WHERE meeting_id = ?")
+            .bind(meeting_id)
+            .fetch_one(pool)
+            .await?;
+    if !auto_refine_enabled(pool).await && transcript_count > 0 {
+        info!(
+            "[refinement] meeting {meeting_id}: batch re-transcription disabled; \
+             running speaker attribution only"
+        );
+        diarize_and_export(app, pool, meeting_id, folder).await;
+        let _ = app.emit(
+            "refinement-complete",
+            serde_json::json!({ "meeting_id": meeting_id }),
+        );
+        return Ok(());
+    }
+    if transcript_count == 0 {
+        info!(
+            "[refinement] meeting {meeting_id}: saved recording has no transcript; \
+             running recovery transcription before speaker attribution"
+        );
+    }
 
     // Same engine the live pass used (transcript_settings is the single active config).
-    let (provider, model): (String, String) = sqlx::query_as(
-        "SELECT provider, model FROM transcript_settings WHERE id='1'",
-    )
-    .fetch_optional(pool)
-    .await?
-    .ok_or_else(|| anyhow::anyhow!("no transcription model configured"))?;
+    let (provider, model): (String, String) =
+        sqlx::query_as("SELECT provider, model FROM transcript_settings WHERE id='1'")
+            .fetch_optional(pool)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("no transcription model configured"))?;
 
-    info!(
-        "[refinement] meeting {meeting_id}: refinement with {provider}/{model}"
-    );
+    info!("[refinement] meeting {meeting_id}: refinement with {provider}/{model}");
     let _ = app.emit(
         "refinement-started",
         serde_json::json!({ "meeting_id": meeting_id }),
@@ -152,10 +186,6 @@ pub fn spawn_import_refinement<R: Runtime>(app: AppHandle<R>, meeting_id: String
             return;
         };
         let pool = state.db_manager.pool();
-        if !auto_refine_enabled(pool).await {
-            info!("[refinement] import {meeting_id}: disabled by setting");
-            return;
-        }
         let folder: Option<Option<String>> =
             sqlx::query_scalar("SELECT folder_path FROM meetings WHERE id = ?")
                 .bind(&meeting_id)
@@ -167,6 +197,19 @@ pub fn spawn_import_refinement<R: Runtime>(app: AppHandle<R>, meeting_id: String
             return;
         };
         let folder = Path::new(&folder);
+
+        if !auto_refine_enabled(pool).await {
+            info!(
+                "[refinement] import {meeting_id}: batch re-transcription disabled; \
+                 running speaker attribution only"
+            );
+            diarize_and_export(&app, pool, &meeting_id, folder).await;
+            let _ = app.emit(
+                "refinement-complete",
+                serde_json::json!({ "meeting_id": meeting_id }),
+            );
+            return;
+        }
 
         match turn_aligned_retranscribe(&app, pool, &meeting_id, folder).await {
             Ok(outcome) => {
@@ -458,13 +501,16 @@ pub struct ExportTurn {
 /// merge), the silence between rows stays under `max_gap_s`, and the merged turn stays
 /// under `max_turn_s` — an unbounded merge would collapse a monologue-heavy meeting into
 /// one giant block.
-pub fn merge_rows_into_turns(rows: &[ExportRow], max_gap_s: f64, max_turn_s: f64) -> Vec<ExportTurn> {
+pub fn merge_rows_into_turns(
+    rows: &[ExportRow],
+    max_gap_s: f64,
+    max_turn_s: f64,
+) -> Vec<ExportTurn> {
     let mut turns: Vec<ExportTurn> = Vec::new();
     for row in rows {
         let can_merge = turns.last().is_some_and(|turn: &ExportTurn| {
             let same_speaker = turn.speaker == row.speaker_name
-                && (turn.speaker.is_some()
-                    || row.speaker_id.is_none() && turn.speaker.is_none());
+                && (turn.speaker.is_some() || row.speaker_id.is_none() && turn.speaker.is_none());
             let gap_ok = match (turn.end_s, row.start_s) {
                 (Some(end), Some(start)) => start - end <= max_gap_s,
                 _ => true,
@@ -503,18 +549,23 @@ pub async fn write_refined_transcript_export(
     meeting_id: &str,
     folder: &Path,
 ) -> anyhow::Result<()> {
-    let rows: Vec<(String, Option<f64>, Option<f64>, Option<i64>, Option<String>)> =
-        sqlx::query_as(
-            "SELECT t.transcript, t.audio_start_time, t.audio_end_time, t.speaker_id, \
+    let rows: Vec<(
+        String,
+        Option<f64>,
+        Option<f64>,
+        Option<i64>,
+        Option<String>,
+    )> = sqlx::query_as(
+        "SELECT t.transcript, t.audio_start_time, t.audio_end_time, t.speaker_id, \
                     s.display_name \
              FROM transcripts t \
              LEFT JOIN speakers s ON s.id = t.speaker_id \
              WHERE t.meeting_id = ? \
              ORDER BY t.audio_start_time ASC, t.rowid ASC",
-        )
-        .bind(meeting_id)
-        .fetch_all(pool)
-        .await?;
+    )
+    .bind(meeting_id)
+    .fetch_all(pool)
+    .await?;
 
     if rows.is_empty() {
         anyhow::bail!("no transcript rows for meeting {meeting_id}");
@@ -522,13 +573,15 @@ pub async fn write_refined_transcript_export(
 
     let export_rows: Vec<ExportRow> = rows
         .into_iter()
-        .map(|(text, start_s, end_s, speaker_id, speaker_name)| ExportRow {
-            text,
-            start_s,
-            end_s,
-            speaker_id,
-            speaker_name: speaker_name.filter(|n| !n.is_empty()),
-        })
+        .map(
+            |(text, start_s, end_s, speaker_id, speaker_name)| ExportRow {
+                text,
+                start_s,
+                end_s,
+                speaker_id,
+                speaker_name: speaker_name.filter(|n| !n.is_empty()),
+            },
+        )
         .collect();
 
     const MAX_TURN_GAP_S: f64 = 10.0;
@@ -599,15 +652,16 @@ mod tests {
             turn(15_300, 20_000, 0),
         ];
         let spans = plan_turn_asr_segments(&turns, 1_000, 350, 25_000);
-        assert_eq!(
-            spans,
-            vec![(0, 8_000), (8_200, 15_000), (15_300, 20_000)]
-        );
+        assert_eq!(spans, vec![(0, 8_000), (8_200, 15_000), (15_300, 20_000)]);
     }
 
     #[test]
     fn planner_merges_same_speaker_turns_across_short_pauses() {
-        let turns = vec![turn(0, 5_000, 0), turn(5_500, 9_000, 0), turn(9_100, 12_000, 0)];
+        let turns = vec![
+            turn(0, 5_000, 0),
+            turn(5_500, 9_000, 0),
+            turn(9_100, 12_000, 0),
+        ];
         let spans = plan_turn_asr_segments(&turns, 1_000, 350, 25_000);
         assert_eq!(spans, vec![(0, 12_000)]);
     }
@@ -634,7 +688,11 @@ mod tests {
         // A short overlapped interjection ("угу") is dropped as sub-minimum, and the
         // interrupted speaker's two halves merge back into one continuous ASR span —
         // exactly how a human transcript treats a backchannel.
-        let turns = vec![turn(0, 10_000, 0), turn(9_800, 10_100, 1), turn(10_200, 15_000, 0)];
+        let turns = vec![
+            turn(0, 10_000, 0),
+            turn(9_800, 10_100, 1),
+            turn(10_200, 15_000, 0),
+        ];
         let spans = plan_turn_asr_segments(&turns, 1_000, 350, 25_000);
         assert_eq!(spans, vec![(0, 15_000)]);
     }

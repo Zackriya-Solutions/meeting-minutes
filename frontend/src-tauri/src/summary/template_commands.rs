@@ -73,7 +73,10 @@ pub async fn api_get_template_details<R: Runtime>(
     _app: tauri::AppHandle<R>,
     template_id: String,
 ) -> Result<TemplateDetails, String> {
-    info!("api_get_template_details called for template_id: {}", template_id);
+    info!(
+        "api_get_template_details called for template_id: {}",
+        template_id
+    );
 
     let template = templates::get_template(&template_id)?;
 

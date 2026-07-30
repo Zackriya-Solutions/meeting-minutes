@@ -1,25 +1,56 @@
 'use client';
 
-import { type FormEvent, type MouseEvent, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import {
+  type FormEvent,
+  type MouseEvent,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
+import { invoke } from '@tauri-apps/api/core';
 import { useRouter } from 'next/navigation';
+import { toast } from 'sonner';
 import { Icon } from '@/components/memento/Icon';
 import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupButton,
-  InputGroupTextarea,
-} from '@/components/ui/input-group';
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu';
+import { PromptInput } from '@/components/ui/prompt-input';
 import { useSidebar, type CurrentMeeting } from '@/components/Sidebar/SidebarProvider';
 import { useLanguage } from '@/lib/i18n';
-import { getMeetingDisplayInfo } from '@/lib/meetingDisplay';
+import Analytics from '@/lib/analytics';
+import { clearMarkedMoments } from '@/lib/markedMoments';
+import { formatRelativeMeetingDate, getMeetingDisplayInfo } from '@/lib/meetingDisplay';
+import { prefetchMeetingSummary } from '@/lib/meetingSummaryCache';
+import { splitSummaryLead, summaryToMarkdown } from '@/lib/summaryToMarkdown';
 import { Cell, CellText } from '@/vendor/deslop/mini-app/Cell';
 
 interface CalendarMeeting {
   meeting: CurrentMeeting;
   title: string;
   date: Date | null;
-  dateLabel: string;
-  time: string;
+  timeRange: string;
+  description: string | null;
+}
+
+interface CalendarMeetingGroup {
+  key: string;
+  label: string;
+  meetings: CalendarMeeting[];
 }
 
 interface UpcomingMeeting {
@@ -39,6 +70,10 @@ const UPCOMING_MEETING_MOCKS = [
   { id: 'client-call', title: 'Client call', dayOffset: 7, hour: 10, minute: 30, duration: 45 },
   { id: 'design-review', title: 'Design review', dayOffset: 8, hour: 15, minute: 0, duration: 45 },
   { id: 'sprint-planning', title: 'Sprint planning', dayOffset: 11, hour: 11, minute: 0, duration: 60 },
+] as const;
+
+const MEETING_EMOJIS = [
+  '💬', '💡', '🎯', '✨', '🧠', '☕️', '🚀', '📝', '🤝', '🔎', '📌', '🌿',
 ] as const;
 
 export const HOME_SCROLL_POSITION_KEY = 'memento:home-scroll-position';
@@ -61,42 +96,148 @@ function meetingTimestamp(meeting: CurrentMeeting): number {
   return meetingDate(meeting)?.getTime() ?? 0;
 }
 
+const MIN_VISIBLE_MEETING_DURATION_SECONDS = 2 * 60;
+
+function isLongEnoughForHistory(meeting: CurrentMeeting): boolean {
+  const seconds = meeting.durationSeconds;
+  if (typeof seconds !== 'number' || !Number.isFinite(seconds)) return true;
+  return seconds >= MIN_VISIBLE_MEETING_DURATION_SECONDS;
+}
+
+function meetingDurationMinutes(meeting: CurrentMeeting): number | null {
+  const seconds = meeting.durationSeconds;
+  if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds <= 0) return null;
+  return Math.max(1, Math.round(seconds / 60));
+}
+
 function capitalize(value: string): string {
   return value ? value.charAt(0).toUpperCase() + value.slice(1) : value;
 }
 
-function localCalendarDay(date: Date): number {
-  return Date.UTC(date.getFullYear(), date.getMonth(), date.getDate());
+function historyDateKey(date: Date | null): string {
+  if (!date) return 'unknown';
+
+  return [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, '0'),
+    String(date.getDate()).padStart(2, '0'),
+  ].join('-');
 }
 
-function historyDateLabel(
-  date: Date | null,
-  locale: string,
-  t: (key: string) => string,
-): string {
-  if (!date) return t('Date unknown');
+function meetingEmoji(meetingId: string): string {
+  let hash = 0;
 
-  const daysAgo = Math.round(
-    (localCalendarDay(new Date()) - localCalendarDay(date)) / 86_400_000,
-  );
+  for (let index = 0; index < meetingId.length; index += 1) {
+    hash = ((hash << 5) - hash + meetingId.charCodeAt(index)) | 0;
+  }
 
-  if (daysAgo === 0) return t('Today');
-  if (daysAgo === 1) return t('Yesterday');
-  if (daysAgo === 2) return t('Day before yesterday');
+  return MEETING_EMOJIS[Math.abs(hash) % MEETING_EMOJIS.length];
+}
 
-  return new Intl.DateTimeFormat(locale, {
-    day: 'numeric',
-    month: 'long',
-  }).format(date);
+const MEETING_DESCRIPTION_MAX_WORDS = 4;
+const MEETING_DESCRIPTION_MAX_CHARACTERS = 56;
+
+function plainSummaryLine(value: string): string {
+  return value
+    .replace(/<!--[^]*?-->/g, ' ')
+    .replace(/```[^]*?```/g, ' ')
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+    .replace(/^\s*(?:#{1,6}|[-+*]|\d+[.)])\s+/gm, '')
+    .replace(/[*_~`>|]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/^(?:эта\s+)?(?:встреча|созвон|совещание)\s+(?:состоял[ао]?|включал[ао]?).*?[.!?]\s*/iu, '')
+    .replace(/^(?:эта\s+)?(?:встреча|созвон|совещание)\s+(?:был[ао]?\s+)?посвящ(?:ена|ено|ён|ен)\s+/iu, '')
+    .replace(/^(?:эта\s+)?(?:встреча|созвон|совещание)\s+представля(?:ет|л[ао]?)\s+собой\s+/iu, '')
+    .replace(/^(?:эта\s+)?(?:встреча|встречи|встречу|созвон|совещание)(?=[\s,:—–-]|$)[\s,:—–-]*/iu, '')
+    .replace(/^(?:в\s+первой\s+части|сначала)\s+/iu, '')
+    .replace(/^обсуждению(?=\s|$)/iu, 'Обсуждение')
+    .replace(/^координации(?=\s|$)/iu, 'Координация')
+    .replace(/^организации(?=\s|$)/iu, 'Организация')
+    .replace(/^планированию(?=\s|$)/iu, 'Планирование')
+    .replace(/^разбору(?=\s|$)/iu, 'Разбор')
+    .trim();
+}
+
+function truncateMeetingDescription(value: string): string | null {
+  const plainText = plainSummaryLine(value);
+  if (!plainText) return null;
+  const text = `${plainText.charAt(0).toLocaleUpperCase()}${plainText.slice(1)}`;
+
+  const words = text.split(/\s+/);
+  const selected: string[] = [];
+
+  for (const word of words) {
+    const next = [...selected, word].join(' ');
+    if (
+      selected.length >= MEETING_DESCRIPTION_MAX_WORDS
+      || (selected.length > 0 && Array.from(next).length > MEETING_DESCRIPTION_MAX_CHARACTERS)
+    ) {
+      break;
+    }
+    selected.push(word);
+  }
+
+  if (selected.length === 0) return null;
+
+  return selected.join(' ').replace(/[.,:;!?—–-]+$/u, '');
+}
+
+function firstSummaryTopic(markdown: string): string | null {
+  const topicHeading = /^#{1,6}\s+(?:основные темы(?: обсуждения)?|темы обсуждения|main topics(?: discussed)?|topics discussed)\s*$/imu;
+  const headingMatch = topicHeading.exec(markdown);
+  if (!headingMatch) return null;
+
+  const sectionStart = headingMatch.index + headingMatch[0].length;
+  const remainingMarkdown = markdown.slice(sectionStart);
+  const nextHeadingIndex = remainingMarkdown.search(/^#{1,6}\s+/m);
+  const topicSection = nextHeadingIndex >= 0
+    ? remainingMarkdown.slice(0, nextHeadingIndex)
+    : remainingMarkdown;
+  const firstTopicLine = topicSection
+    .split('\n')
+    .map((line) => line.trim())
+    .find((line) => /^[-+*]\s+/.test(line));
+
+  if (!firstTopicLine) return null;
+
+  const boldTopic = firstTopicLine.match(/^[-+*]\s+\*\*(.+?)\*\*/)?.[1];
+  return truncateMeetingDescription(boldTopic ?? firstTopicLine);
+}
+
+function meetingSummaryDescription(summary: unknown): string | null {
+  const markdown = summaryToMarkdown(summary);
+  if (!markdown) return null;
+
+  const topic = firstSummaryTopic(markdown);
+  if (topic) return topic;
+
+  const { lead } = splitSummaryLead(markdown);
+  if (lead) return truncateMeetingDescription(lead);
+
+  const firstContentLine = markdown
+    .split('\n')
+    .map((line) => line.trim())
+    .find((line) => line && !/^#{1,6}\s/.test(line) && !/^\|?\s*:?-{3,}/.test(line));
+
+  return firstContentLine ? truncateMeetingDescription(firstContentLine) : null;
 }
 
 export function HomeMeetingList({ animateOnMount = true }: { animateOnMount?: boolean }) {
   const router = useRouter();
-  const { meetings, setCurrentMeeting } = useSidebar();
+  const {
+    currentMeeting,
+    meetings,
+    refetchMeetings,
+    setCurrentMeeting,
+    stopSummaryPolling,
+  } = useSidebar();
   const { t, lang } = useLanguage();
   const [question, setQuestion] = useState('');
+  const [meetingToDelete, setMeetingToDelete] = useState<CalendarMeeting | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [meetingDescriptions, setMeetingDescriptions] = useState<Record<string, string>>({});
   const screenRef = useRef<HTMLDivElement>(null);
-  const hasQuestion = question.trim().length > 0;
   const locale = lang === 'ru' ? 'ru-RU' : 'en-US';
 
   useLayoutEffect(() => {
@@ -107,6 +248,30 @@ export function HomeMeetingList({ animateOnMount = true }: { animateOnMount?: bo
       scrollContainer.scrollTop = Math.max(0, storedPosition);
     }
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadDescriptions = async () => {
+      const entries = await Promise.all(
+        meetings.map(async (meeting) => {
+          const summary = await prefetchMeetingSummary(meeting.id);
+          return [meeting.id, meetingSummaryDescription(summary)] as const;
+        }),
+      );
+
+      if (cancelled) return;
+
+      setMeetingDescriptions(Object.fromEntries(
+        entries.filter((entry): entry is readonly [string, string] => entry[1] !== null),
+      ));
+    };
+
+    void loadDescriptions();
+    return () => {
+      cancelled = true;
+    };
+  }, [meetings]);
 
   const upcomingMeetings = useMemo<UpcomingMeeting[]>(() => {
     const today = new Date();
@@ -143,22 +308,54 @@ export function HomeMeetingList({ animateOnMount = true }: { animateOnMount?: bo
   }, [locale, t]);
 
   const calendarMeetings = useMemo<CalendarMeeting[]>(() => {
+    const timeFormatter = new Intl.DateTimeFormat(locale, { hour: '2-digit', minute: '2-digit' });
+
     return [...meetings]
+      .filter(isLongEnoughForHistory)
       .sort((left, right) => meetingTimestamp(right) - meetingTimestamp(left))
       .map((meeting) => {
         const display = getMeetingDisplayInfo(meeting, lang);
         const date = meetingDate(meeting);
+        const durationSeconds = meeting.durationSeconds;
+        const durationMinutes = meetingDurationMinutes(meeting);
+        const end = date && durationMinutes && typeof durationSeconds === 'number'
+          ? new Date(date.getTime() + durationSeconds * 1_000)
+          : null;
         return {
           meeting,
           title: display.title,
           date,
-          dateLabel: historyDateLabel(date, locale, t),
-          time: date
-            ? new Intl.DateTimeFormat(locale, { hour: '2-digit', minute: '2-digit' }).format(date)
+          timeRange: date
+            ? end
+              ? `${timeFormatter.format(date)}\u00a0–\u00a0${timeFormatter.format(end)}`
+              : timeFormatter.format(date)
             : display.dateLabel,
+          description: meetingDescriptions[meeting.id] ?? null,
         };
       });
-  }, [lang, locale, meetings, t]);
+  }, [lang, locale, meetingDescriptions, meetings]);
+
+  const calendarMeetingGroups = useMemo<CalendarMeetingGroup[]>(() => {
+    const groups = new Map<string, CalendarMeetingGroup>();
+
+    calendarMeetings.forEach((meeting) => {
+      const key = historyDateKey(meeting.date);
+      const existingGroup = groups.get(key);
+
+      if (existingGroup) {
+        existingGroup.meetings.push(meeting);
+        return;
+      }
+
+      groups.set(key, {
+        key,
+        label: formatRelativeMeetingDate(meeting.date, locale, t),
+        meetings: [meeting],
+      });
+    });
+
+    return Array.from(groups.values());
+  }, [calendarMeetings, locale, t]);
 
   const openMeeting = (meeting: CurrentMeeting, event: MouseEvent<HTMLButtonElement>) => {
     rememberHomeScrollPosition(event.currentTarget);
@@ -189,12 +386,41 @@ export function HomeMeetingList({ animateOnMount = true }: { animateOnMount?: bo
     router.push(query ? `/chat?question=${encodeURIComponent(query)}` : '/chat');
   };
 
+  const deleteMeeting = async () => {
+    const item = meetingToDelete;
+    if (!item || isDeleting) return;
+
+    setIsDeleting(true);
+    try {
+      await invoke('api_delete_meeting', {
+        meetingId: item.meeting.id,
+        deleteRecordingFiles: false,
+      });
+      stopSummaryPolling(item.meeting.id);
+      clearMarkedMoments(item.meeting.id);
+      await refetchMeetings();
+      Analytics.trackMeetingDeleted(item.meeting.id);
+
+      if (currentMeeting?.id === item.meeting.id) {
+        setCurrentMeeting({ id: 'intro-call', title: t('+ New Call') });
+      }
+      setMeetingToDelete(null);
+    } catch (error) {
+      console.error('Failed to delete meeting:', error);
+      toast.error(t('Failed to delete meeting'), {
+        description: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
   return (
     <div ref={screenRef} className={`home-screen min-h-full${animateOnMount ? '' : ' home-screen--static'}`}>
       <div className="home-screen__inner">
         <header className="home-screen__header">
           <div>
-            <h1 className="home-display">{t('Upcoming meetings')}</h1>
+            <h1 className="memento-screen-title">{t('Upcoming meetings')}</h1>
           </div>
         </header>
 
@@ -232,27 +458,43 @@ export function HomeMeetingList({ animateOnMount = true }: { animateOnMount?: bo
 
           {calendarMeetings.length > 0 ? (
             <section className="home-history" aria-label={t('Earlier')}>
-              <h2>{t('Earlier')}</h2>
-              <div className="home-history__list">
-                {calendarMeetings.map((item) => (
-                  <Cell
-                    key={item.meeting.id}
-                    type="button"
-                    className="no-drag"
-                    onClick={(event) => openMeeting(item.meeting, event)}
-                    start={(
-                      <span className="home-history-icon">
-                        <Icon name="meeting" size={16} />
-                      </span>
-                    )}
-                    end={<time dateTime={item.date?.toISOString()}>{item.time}</time>}
-                  >
-                    <CellText
-                      title={item.title}
-                      description={item.dateLabel}
-                      bold
-                    />
-                  </Cell>
+              <div className="home-history__groups">
+                {calendarMeetingGroups.map((group) => (
+                  <section key={group.key} className="home-history__group" aria-label={group.label}>
+                    <h3>{group.label}</h3>
+                    <div className="home-history__list">
+                      {group.meetings.map((item) => (
+                        <ContextMenu key={item.meeting.id}>
+                          <ContextMenuTrigger asChild>
+                            <Cell
+                              type="button"
+                              className="no-drag"
+                              onClick={(event) => openMeeting(item.meeting, event)}
+                              start={(
+                                <span className="home-history-icon" aria-hidden="true">
+                                  <span className="home-history-emoji">
+                                    {meetingEmoji(item.meeting.id)}
+                                  </span>
+                                </span>
+                              )}
+                              end={<span className="home-history-time">{item.timeRange}</span>}
+                            >
+                              <CellText title={item.title} description={item.description} bold />
+                            </Cell>
+                          </ContextMenuTrigger>
+                          <ContextMenuContent className="w-[210px] rounded-[14px] p-1.5">
+                            <ContextMenuItem
+                              onSelect={() => setMeetingToDelete(item)}
+                              className="gap-2 rounded-[9px] px-2.5 py-[9px] text-destructive focus:bg-destructive/10 focus:text-destructive"
+                            >
+                              <Icon name="trash" size={16} />
+                              <span>{t('Delete meeting')}</span>
+                            </ContextMenuItem>
+                          </ContextMenuContent>
+                        </ContextMenu>
+                      ))}
+                    </div>
+                  </section>
                 ))}
               </div>
             </section>
@@ -260,46 +502,43 @@ export function HomeMeetingList({ animateOnMount = true }: { animateOnMount?: bo
         </main>
       </div>
 
-      <div className="home-ask-backdrop" aria-hidden="true" />
-      <form className="no-drag" onSubmit={askArchive}>
-        <InputGroup className="home-ask min-h-[50px] items-center rounded-[24px] bg-background">
-          <InputGroupTextarea
-            className="home-ask__textarea h-12 min-h-12 max-h-[240px] resize-none overflow-y-auto py-3 pl-4 pr-1 text-sm leading-6"
-            rows={1}
-            value={question}
-            onChange={(event) => {
-              setQuestion(event.target.value);
-              event.currentTarget.style.height = 'auto';
-              event.currentTarget.style.height = `${Math.min(event.currentTarget.scrollHeight, 240)}px`;
-            }}
-            onKeyDown={(event) => {
-              if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return;
-              event.preventDefault();
-              if (!hasQuestion) return;
-              event.currentTarget.form?.requestSubmit();
-            }}
-            placeholder={t('Ask anything')}
-            aria-label={t('Ask anything')}
-          />
-          <InputGroupAddon align="inline-end" className="self-end py-2 pr-[14px]">
-            <div
-              className={`home-ask__submit-slot${hasQuestion ? ' is-visible' : ''}`}
-              aria-hidden={!hasQuestion}
-            >
-              <InputGroupButton
-                type={hasQuestion ? 'submit' : 'button'}
-                variant="default"
-                size="icon-sm"
-                tabIndex={hasQuestion ? undefined : -1}
-                className="home-ask__send rounded-full"
-                aria-label={t('Send')}
-              >
-                <Icon name="chevron-up" size={16} strokeWidth={2.4} />
-              </InputGroupButton>
-            </div>
-          </InputGroupAddon>
-        </InputGroup>
+      <form className="no-drag prompt-input-fade home-ask-dock" onSubmit={askArchive}>
+        <PromptInput
+          value={question}
+          onValueChange={setQuestion}
+          submitButtonType="submit"
+          containerClassName="home-ask"
+          placeholder={t('Ask anything')}
+          aria-label={t('Ask anything')}
+          sendLabel={t('Send')}
+        />
       </form>
+
+      <AlertDialog
+        open={meetingToDelete !== null}
+        onOpenChange={(open) => {
+          if (!open && !isDeleting) setMeetingToDelete(null);
+        }}
+      >
+        <AlertDialogContent className="max-w-md">
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('Delete this meeting?')}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t('Are you sure you want to delete this meeting? This action cannot be undone.')}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeleting}>{t('Cancel')}</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={isDeleting}
+              onClick={() => void deleteMeeting()}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {isDeleting ? t('Deleting...') : t('Delete meeting')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

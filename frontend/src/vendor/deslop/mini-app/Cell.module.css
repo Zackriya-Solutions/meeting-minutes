@@ -5,7 +5,7 @@
   display: flex;
   width: 100%;
   min-height: 50px;
-  padding: 0 0 0 var(--ui-layout-content-inset);
+  padding: 0 0 0 12px;
   border: 0;
   background: transparent;
   color: var(--deslop-primary);
@@ -33,7 +33,7 @@
 .start {
   display: flex;
   align-items: center;
-  padding: 7px 15px 7px 0;
+  padding: 7px 16px 7px 0;
 }
 
 .body {
@@ -51,7 +51,7 @@
   flex: none;
   flex-direction: column;
   justify-content: center;
-  padding: 0 var(--ui-space-12) 0 var(--ui-space-8);
+  padding: 0 16px 0 var(--ui-space-8);
   border-bottom: var(--cell-separator-height) solid var(--deslop-primary-20);
   color: var(--deslop-primary-60);
   text-align: right;

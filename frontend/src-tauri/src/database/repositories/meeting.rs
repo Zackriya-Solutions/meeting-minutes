@@ -2,6 +2,7 @@ use crate::api::{MeetingDetails, MeetingTranscript};
 use crate::database::models::{MeetingModel, Transcript};
 use chrono::Utc;
 use sqlx::{Connection, Error as SqlxError, SqliteConnection, SqlitePool};
+use std::path::Path;
 use tracing::{error, info, warn};
 
 pub struct MeetingsRepository;
@@ -38,12 +39,55 @@ fn valid_summary_template(value: &str) -> bool {
         && value != ".."
 }
 
+fn duration_from_metadata_json(contents: &str) -> Option<f64> {
+    let metadata: serde_json::Value = serde_json::from_str(contents).ok()?;
+    if let Some(duration) = metadata
+        .get("duration_seconds")
+        .and_then(serde_json::Value::as_f64)
+        .filter(|duration| duration.is_finite() && *duration > 0.0)
+    {
+        return Some(duration);
+    }
+
+    let created_at = metadata.get("created_at")?.as_str()?;
+    let completed_at = metadata.get("completed_at")?.as_str()?;
+    let created_at = chrono::DateTime::parse_from_rfc3339(created_at).ok()?;
+    let completed_at = chrono::DateTime::parse_from_rfc3339(completed_at).ok()?;
+    let duration = (completed_at - created_at).num_milliseconds() as f64 / 1000.0;
+    (duration.is_finite() && duration > 0.0).then_some(duration)
+}
+
+async fn recording_duration_from_metadata(folder_path: Option<&str>) -> Option<f64> {
+    let folder_path = folder_path?.trim();
+    if folder_path.is_empty() {
+        return None;
+    }
+
+    let contents = tokio::fs::read_to_string(Path::new(folder_path).join("metadata.json"))
+        .await
+        .ok()?;
+    duration_from_metadata_json(&contents)
+}
+
 impl MeetingsRepository {
     pub async fn get_meetings(pool: &SqlitePool) -> Result<Vec<MeetingModel>, sqlx::Error> {
-        let meetings =
-            sqlx::query_as::<_, MeetingModel>("SELECT * FROM meetings ORDER BY created_at DESC")
-                .fetch_all(pool)
-                .await?;
+        let mut meetings = sqlx::query_as::<_, MeetingModel>(
+            "SELECT m.*, \
+                (SELECT MAX(COALESCE(t.audio_end_time, COALESCE(t.audio_start_time, 0) + t.duration)) \
+                 FROM transcripts t WHERE t.meeting_id = m.id) AS duration_seconds \
+             FROM meetings m ORDER BY m.created_at DESC",
+        )
+        .fetch_all(pool)
+        .await?;
+
+        for meeting in &mut meetings {
+            if let Some(duration) =
+                recording_duration_from_metadata(meeting.folder_path.as_deref()).await
+            {
+                meeting.duration_seconds = Some(duration);
+            }
+        }
+
         Ok(meetings)
     }
 
@@ -154,12 +198,23 @@ impl MeetingsRepository {
             ));
         }
 
-        let meeting: Option<MeetingModel> = sqlx::query_as(
-            "SELECT id, title, created_at, updated_at, folder_path, occurred_at FROM meetings WHERE id = ?",
+        let mut meeting: Option<MeetingModel> = sqlx::query_as(
+            "SELECT m.*, \
+                (SELECT MAX(COALESCE(t.audio_end_time, COALESCE(t.audio_start_time, 0) + t.duration)) \
+                 FROM transcripts t WHERE t.meeting_id = m.id) AS duration_seconds \
+             FROM meetings m WHERE m.id = ?",
         )
         .bind(meeting_id)
         .fetch_optional(pool)
         .await?;
+
+        if let Some(meeting) = &mut meeting {
+            if let Some(duration) =
+                recording_duration_from_metadata(meeting.folder_path.as_deref()).await
+            {
+                meeting.duration_seconds = Some(duration);
+            }
+        }
 
         Ok(meeting)
     }
@@ -609,6 +664,42 @@ async fn delete_meeting_with_transaction(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reads_positive_duration_from_metadata_json() {
+        assert_eq!(
+            duration_from_metadata_json(r#"{"duration_seconds": 117.4}"#),
+            Some(117.4)
+        );
+    }
+
+    #[test]
+    fn derives_duration_from_metadata_timestamps() {
+        assert_eq!(
+            duration_from_metadata_json(
+                r#"{
+                    "duration_seconds": null,
+                    "created_at": "2026-07-28T15:10:21.108179+00:00",
+                    "completed_at": "2026-07-28T15:10:38.819151+00:00"
+                }"#
+            ),
+            Some(17.711)
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_duration_from_metadata_json() {
+        assert_eq!(duration_from_metadata_json("not json"), None);
+        assert_eq!(
+            duration_from_metadata_json(r#"{"duration_seconds": 0}"#),
+            None
+        );
+        assert_eq!(
+            duration_from_metadata_json(r#"{"duration_seconds": -10}"#),
+            None
+        );
+        assert_eq!(duration_from_metadata_json(r#"{"title": "Standup"}"#), None);
+    }
 
     /// In-memory pool with the meetings columns the diarization-prefs SQL touches
     /// (mirrors the real schema's relevant subset incl. migration 20260714000000).

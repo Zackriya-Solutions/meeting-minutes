@@ -34,7 +34,6 @@ export default function PageContent({
   onRetrySummary,
   onSummaryDataChange,
   shouldAutoGenerate = false,
-  onAutoGenerateComplete,
   onMeetingUpdated,
   onRefetchTranscripts,
   // Pagination props for efficient transcript loading
@@ -57,7 +56,6 @@ export default function PageContent({
   onRetrySummary?: () => Promise<void> | void;
   onSummaryDataChange?: (summary: Summary | null) => void;
   shouldAutoGenerate?: boolean;
-  onAutoGenerateComplete?: () => void;
   onMeetingUpdated?: () => Promise<void>;
   onRefetchTranscripts?: () => Promise<void>;
   // Pagination props
@@ -178,13 +176,10 @@ export default function PageContent({
     }
 
     autoGenerationMeetingRef.current = meeting.id;
-    void summaryGeneration.handleGenerateSummary().finally(() => {
-      onAutoGenerateComplete?.();
-    });
+    void summaryGeneration.handleGenerateSummary();
   }, [
     meeting.id,
     meetingData.aiSummary,
-    onAutoGenerateComplete,
     shouldAutoGenerate,
     summaryGeneration.handleGenerateSummary,
     summaryGeneration.summaryStatus,
@@ -256,7 +251,6 @@ export default function PageContent({
         isSaving={meetingData.isSaving}
         isSummaryDirty={isSummaryDirty}
         onCopySummary={copyOperations.handleCopySummary}
-        onSaveSummary={meetingData.saveAllChanges}
         onOpenModelSettings={handleOpenModelSettings}
         transcripts={meetingData.transcripts}
         segments={segments}

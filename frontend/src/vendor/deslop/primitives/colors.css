@@ -1,0 +1,150 @@
+/* stylelint-disable color-hex-length */
+
+:root {
+  --white: #ffffff;
+  --black: #111111;
+  /* Deprecated background aliases kept while product packages migrate. */
+  --background: var(--background-primary);
+  --surface: var(--background-secondary);
+  /* Deprecated aliases kept for Mini Apps until they migrate to --primary-*. */
+  --elevation-90: var(--primary-90);
+  --elevation-80: var(--primary-80);
+  --elevation-70: var(--primary-70);
+  --elevation-60: var(--primary-60);
+  --elevation-50: var(--primary-50);
+  --elevation-40: var(--primary-40);
+  --elevation-30: var(--primary-30);
+  --elevation-20: var(--primary-20);
+  --elevation-10: var(--primary-10);
+  --elevation-5: var(--primary-5);
+  --elevation-4: var(--primary-4);
+  --avatar-red-top: #ff885e;
+  --avatar-red-bottom: #ff516a;
+  --avatar-red-gradient: linear-gradient(180deg, #ff885e 0%, #ff516a 100%);
+  --avatar-orange-top: #ffcd6a;
+  --avatar-orange-bottom: #ffa85c;
+  --avatar-orange-gradient: linear-gradient(
+    180deg,
+    #ffcd6a 0%,
+    #ffa85c 100%
+  );
+  --avatar-purple-top: #82b1ff;
+  --avatar-purple-bottom: #665fff;
+  --avatar-purple-gradient: linear-gradient(
+    180deg,
+    #82b1ff 0%,
+    #665fff 100%
+  );
+  --avatar-green-top: #a0de7e;
+  --avatar-green-bottom: #54cb68;
+  --avatar-green-gradient: linear-gradient(180deg, #a0de7e 0%, #54cb68 100%);
+  --avatar-cyan-top: #53edd6;
+  --avatar-cyan-bottom: #28c9b7;
+  --avatar-cyan-gradient: linear-gradient(180deg, #53edd6 0%, #28c9b7 100%);
+  --avatar-blue-top: #72d5fd;
+  --avatar-blue-bottom: #2a9ef1;
+  --avatar-blue-gradient: linear-gradient(180deg, #72d5fd 0%, #2a9ef1 100%);
+  --avatar-pink-top: #e0a2f3;
+  --avatar-pink-bottom: #d669ed;
+  --avatar-pink-gradient: linear-gradient(180deg, #e0a2f3 0%, #d669ed 100%);
+}
+
+:root,
+:where([data-color-scheme="light"]) {
+  --accent-red: #ff383c;
+  --accent-orange: #ff8d28;
+  --accent-yellow: #ffcc00;
+  --accent-green: #46dc66;
+  --accent-mint: #00c8b3;
+  --accent-teal: #00c3d0;
+  --accent-cyan: #00c0e8;
+  --accent-blue: #0088ff;
+  --accent-indigo: #6155f5;
+  --accent-purple: #cb30e0;
+  --accent-pink: #ff2d55;
+  --accent-brown: #ac7f5e;
+  --background-primary: #ffffff;
+  --elevation-1: #ffffff;
+  --elevation-2: #ffffff;
+  --background-secondary: #f5f5f5;
+  --primary: #111111;
+  --primary-90: #111111e6;
+  --primary-80: #111111cc;
+  --primary-70: #111111b3;
+  --primary-60: #11111199;
+  --primary-50: #11111180;
+  --primary-40: #11111166;
+  --primary-30: #1111114d;
+  --primary-20: #11111133;
+  --primary-10: #1111111a;
+  --primary-8: #11111114;
+  --primary-5: #1111110d;
+  --primary-4: #1111110a;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-color-scheme="light"]) {
+    --accent-red: #ff4245;
+    --accent-orange: #ff9230;
+    --accent-yellow: #ffd600;
+    --accent-green: #46dc66;
+    --accent-mint: #00dac3;
+    --accent-teal: #00d2e0;
+    --accent-cyan: #3cd3fe;
+    --accent-blue: #0091ff;
+    --accent-indigo: #6d7cff;
+    --accent-purple: #db34f2;
+    --accent-pink: #ff375f;
+    --accent-brown: #b78a66;
+    --background-primary: #111111;
+    --elevation-1: #1d1d1d;
+    --elevation-2: #282828;
+    --background-secondary: #111111;
+    --primary: #ffffff;
+    --primary-90: #ffffffe6;
+    --primary-80: #ffffffcc;
+    --primary-70: #ffffffb3;
+    --primary-60: #ffffff99;
+    --primary-50: #ffffff80;
+    --primary-40: #ffffff66;
+    --primary-30: #ffffff4d;
+    --primary-20: #ffffff33;
+    --primary-10: #ffffff1a;
+    --primary-8: #ffffff14;
+    --primary-5: #ffffff0d;
+    --primary-4: #ffffff0a;
+  }
+}
+
+:root[data-color-scheme="dark"],
+:where([data-color-scheme="dark"]) {
+  --accent-red: #ff4245;
+  --accent-orange: #ff9230;
+  --accent-yellow: #ffd600;
+  --accent-green: #46dc66;
+  --accent-mint: #00dac3;
+  --accent-teal: #00d2e0;
+  --accent-cyan: #3cd3fe;
+  --accent-blue: #0091ff;
+  --accent-indigo: #6d7cff;
+  --accent-purple: #db34f2;
+  --accent-pink: #ff375f;
+  --accent-brown: #b78a66;
+  --background-primary: #111111;
+  --elevation-1: #1d1d1d;
+  --elevation-2: #282828;
+  --background-secondary: #111111;
+  --primary: #ffffff;
+  --primary-90: #ffffffe6;
+  --primary-80: #ffffffcc;
+  --primary-70: #ffffffb3;
+  --primary-60: #ffffff99;
+  --primary-50: #ffffff80;
+  --primary-40: #ffffff66;
+  --primary-30: #ffffff4d;
+  --primary-20: #ffffff33;
+  --primary-10: #ffffff1a;
+  --primary-8: #ffffff14;
+  --primary-5: #ffffff0d;
+  --primary-4: #ffffff0a;
+}

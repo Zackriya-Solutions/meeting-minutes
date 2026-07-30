@@ -38,8 +38,8 @@ fn as_f32(bytes: &[u8]) -> Vec<f32> {
 }
 
 pub struct Featurizer {
-    window: Vec<f32>,           // [WIN_LEN]
-    fbank: Vec<f32>,            // [N_FREQ * N_MELS], row-major: fbank[freq*N_MELS + mel]
+    window: Vec<f32>, // [WIN_LEN]
+    fbank: Vec<f32>,  // [N_FREQ * N_MELS], row-major: fbank[freq*N_MELS + mel]
     fft: Arc<dyn RealToComplex<f32>>,
 }
 
@@ -50,7 +50,11 @@ impl Featurizer {
         debug_assert_eq!(window.len(), WIN_LEN);
         debug_assert_eq!(fbank.len(), N_FREQ * N_MELS);
         let mut planner = RealFftPlanner::<f32>::new();
-        Self { window, fbank, fft: planner.plan_fft_forward(N_FFT) }
+        Self {
+            window,
+            fbank,
+            fft: planner.plan_fft_forward(N_FFT),
+        }
     }
 
     /// Number of frames for a waveform of `n_samples` (no padding).

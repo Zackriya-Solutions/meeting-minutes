@@ -170,6 +170,7 @@ export interface MeetingMetadata {
   updated_at: string;
   occurred_at?: string | null;
   folder_path?: string;
+  duration_seconds?: number | null;
 }
 
 export interface PaginatedTranscriptsResponse {

@@ -42,7 +42,7 @@ function MessageScrollerViewport({
     <MessageScrollerPrimitive.Viewport
       data-slot="message-scroller-viewport"
       className={cn(
-        "h-full w-full min-h-0 min-w-0 overflow-y-auto overscroll-contain [contain:content] [scrollbar-gutter:stable] [scrollbar-width:thin]",
+        "h-full w-full min-h-0 min-w-0 overflow-y-auto overscroll-contain [contain:content] [scrollbar-width:none]",
         className
       )}
       {...props}
@@ -86,7 +86,7 @@ function MessageScrollerButton({
   className,
   children,
   render,
-  variant = "secondary",
+  variant = "ghost",
   size = "icon",
   ...props
 }: React.ComponentProps<typeof MessageScrollerPrimitive.Button> &
@@ -99,7 +99,7 @@ function MessageScrollerButton({
       data-size={size}
       direction={direction}
       className={cn(
-        "absolute left-1/2 -translate-x-1/2 rounded-full border border-border bg-background text-foreground shadow-sm transition-[transform,opacity] duration-200 hover:bg-muted data-[active=false]:pointer-events-none data-[active=false]:scale-95 data-[active=false]:opacity-0 data-[active=true]:scale-100 data-[active=true]:opacity-100 data-[direction=end]:bottom-4 data-[direction=start]:top-4 data-[direction=start]:[&_svg]:rotate-180",
+        "absolute left-1/2 -translate-x-1/2 rounded-full border border-border bg-[var(--elevation-2)] text-foreground shadow-sm transition-[transform,opacity] duration-200 hover:bg-[var(--elevation-2)] data-[active=false]:pointer-events-none data-[active=false]:scale-95 data-[active=false]:opacity-0 data-[active=true]:scale-100 data-[active=true]:opacity-100 data-[direction=end]:bottom-4 data-[direction=start]:top-4 data-[direction=start]:[&_svg]:rotate-180",
         className
       )}
       render={render ?? <Button variant={variant} size={size} />}

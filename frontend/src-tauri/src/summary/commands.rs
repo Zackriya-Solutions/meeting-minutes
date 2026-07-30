@@ -1,5 +1,5 @@
 use crate::database::repositories::{
-    meeting::MeetingsRepository, summary::SummaryProcessesRepository,
+    meeting::MeetingsRepository, setting::SettingsRepository, summary::SummaryProcessesRepository,
     transcript_chunk::TranscriptChunksRepository,
 };
 use crate::state::AppState;
@@ -11,8 +11,11 @@ use crate::summary::metadata::{
 use crate::summary::service::SummaryService;
 use log::{error as log_error, info as log_info, warn as log_warn};
 use serde::{Deserialize, Serialize};
+use sqlx::SqlitePool;
 use std::path::PathBuf;
-use tauri::{AppHandle, Runtime};
+use tauri::{AppHandle, Manager, Runtime};
+
+const AUTOMATIC_SUMMARY_VERSION: &str = "automatic_summary_v2";
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SummaryResponse {
@@ -561,6 +564,226 @@ pub async fn api_get_summary<R: Runtime>(
 /// Processes transcript and generates summary (Native SQLx implementation)
 ///
 /// Spawns a background task and returns immediately with process_id
+async fn start_summary_process<R: Runtime>(
+    app: AppHandle<R>,
+    pool: SqlitePool,
+    text: String,
+    model: String,
+    model_name: String,
+    meeting_id: String,
+    chunk_size: Option<i32>,
+    overlap: Option<i32>,
+    custom_prompt: Option<String>,
+    template_id: Option<String>,
+    summary_language: Option<String>,
+) -> Result<ProcessTranscriptResponse, String> {
+    let m_id = meeting_id;
+    log_info!(
+        "Starting summary process for meeting_id: {}, model: {}",
+        &m_id,
+        &model
+    );
+
+    // Rebuild the summary input with speaker labels when this meeting's stored transcripts
+    // carry speaker info (a diarized `speaker_id` or a 'mic'/'system' channel tag).
+    let text =
+        crate::summary::transcript_labeling::build_speaker_labeled_transcript(&pool, &m_id, text)
+            .await;
+
+    let final_prompt = custom_prompt.unwrap_or_default();
+    let final_template_id = template_id.unwrap_or_else(|| "daily_standup".to_string());
+    let summary_language = summary_language.and_then(|language| {
+        let language = language.trim();
+        (!language.is_empty()).then(|| language.to_string())
+    });
+
+    SummaryProcessesRepository::create_or_reset_process(&pool, &m_id)
+        .await
+        .map_err(|error| format!("Failed to initialize process: {error}"))?;
+
+    let chunk_size = chunk_size.unwrap_or(40000);
+    let overlap = overlap.unwrap_or(1000);
+    TranscriptChunksRepository::save_transcript_data(
+        &pool,
+        &m_id,
+        &text,
+        &model,
+        &model_name,
+        chunk_size,
+        overlap,
+    )
+    .await
+    .map_err(|error| format!("Failed to save transcript data: {error}"))?;
+
+    let meeting_id_clone = m_id.clone();
+    tauri::async_runtime::spawn(async move {
+        SummaryService::process_transcript_background(
+            app,
+            pool,
+            meeting_id_clone,
+            text,
+            model,
+            model_name,
+            final_prompt,
+            final_template_id,
+            summary_language,
+        )
+        .await;
+    });
+
+    Ok(ProcessTranscriptResponse {
+        message: "Summary generation started".to_string(),
+        process_id: m_id,
+    })
+}
+
+/// Start the configured summary model for a durable meeting, unless that meeting already
+/// has a result or an active generation. The version marker makes startup recovery retry an
+/// old failure once without hammering a broken/paid provider on every application launch.
+pub async fn start_automatic_summary_for_meeting<R: Runtime>(
+    app: AppHandle<R>,
+    pool: SqlitePool,
+    meeting_id: &str,
+) -> Result<bool, String> {
+    let existing: Option<(String, Option<String>, bool)> = sqlx::query_as(
+        "SELECT status, metadata, result IS NOT NULL FROM summary_processes WHERE meeting_id=?",
+    )
+    .bind(meeting_id)
+    .fetch_optional(&pool)
+    .await
+    .map_err(|error| error.to_string())?;
+
+    let mut metadata = serde_json::Map::new();
+    if let Some((status, raw_metadata, has_result)) = existing {
+        let normalized = status.to_ascii_lowercase();
+        if has_result || matches!(normalized.as_str(), "pending" | "processing" | "completed") {
+            return Ok(false);
+        }
+        if let Some(raw_metadata) = raw_metadata {
+            metadata = serde_json::from_str::<serde_json::Value>(&raw_metadata)
+                .ok()
+                .and_then(|value| value.as_object().cloned())
+                .unwrap_or_default();
+        }
+        if metadata
+            .get("automatic_summary_version")
+            .and_then(serde_json::Value::as_str)
+            == Some(AUTOMATIC_SUMMARY_VERSION)
+        {
+            return Ok(false);
+        }
+    }
+
+    let transcript_rows: Vec<String> = sqlx::query_scalar(
+        "SELECT transcript FROM transcripts \
+         WHERE meeting_id=? AND length(trim(transcript)) > 0 \
+         ORDER BY CASE WHEN audio_start_time IS NULL THEN 1 ELSE 0 END, \
+                  audio_start_time, timestamp, id",
+    )
+    .bind(meeting_id)
+    .fetch_all(&pool)
+    .await
+    .map_err(|error| error.to_string())?;
+    let text = transcript_rows.join("\n");
+    if text.trim().is_empty() {
+        return Ok(false);
+    }
+
+    let config = SettingsRepository::get_model_config(&pool)
+        .await
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "No summary model configured".to_string())?;
+    let template_id = MeetingsRepository::get_summary_template_id(&pool, meeting_id)
+        .await
+        .map_err(|error| error.to_string())?
+        .unwrap_or_else(|| "standard_meeting".to_string());
+    let summary_language = match resolve_meeting_folder(&pool, meeting_id).await {
+        Ok(MeetingFolderResolution::Folder(folder)) => {
+            read_summary_language_from_metadata(&folder).ok().flatten()
+        }
+        Ok(MeetingFolderResolution::NoFolder) | Err(_) => None,
+    };
+
+    start_summary_process(
+        app,
+        pool.clone(),
+        text,
+        config.provider,
+        config.model,
+        meeting_id.to_string(),
+        Some(40000),
+        Some(1000),
+        None,
+        Some(template_id),
+        summary_language,
+    )
+    .await?;
+
+    metadata.insert(
+        "automatic_summary_version".to_string(),
+        serde_json::Value::String(AUTOMATIC_SUMMARY_VERSION.to_string()),
+    );
+    metadata.insert(
+        "automatic_summary_source".to_string(),
+        serde_json::Value::String("meeting_saved".to_string()),
+    );
+    sqlx::query("UPDATE summary_processes SET metadata=? WHERE meeting_id=?")
+        .bind(serde_json::Value::Object(metadata).to_string())
+        .bind(meeting_id)
+        .execute(&pool)
+        .await
+        .map_err(|error| error.to_string())?;
+
+    Ok(true)
+}
+
+/// Fire-and-forget entry point used by every meeting creation path.
+pub fn spawn_automatic_summary_for_meeting<R: Runtime>(app: AppHandle<R>, meeting_id: String) {
+    tauri::async_runtime::spawn(async move {
+        // The renderer persists the per-meeting language preference immediately after save.
+        // Give that tiny write a chance to land; explicit UI generation wins the race and the
+        // status guard below makes this fallback a no-op.
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        let Some(state) = app.try_state::<AppState>() else {
+            log_warn!("Could not start automatic summary for {meeting_id}: app state unavailable");
+            return;
+        };
+        let pool = state.db_manager.pool().clone();
+        drop(state);
+        match start_automatic_summary_for_meeting(app, pool, &meeting_id).await {
+            Ok(true) => log_info!("Automatic summary started for meeting {meeting_id}"),
+            Ok(false) => {}
+            Err(error) => {
+                log_warn!("Could not start automatic summary for meeting {meeting_id}: {error}")
+            }
+        }
+    });
+}
+
+/// Catch up meetings created by older versions or interrupted before generation started.
+pub async fn backfill_missing_automatic_summaries<R: Runtime>(
+    app: AppHandle<R>,
+    pool: SqlitePool,
+) -> Result<usize, String> {
+    let meeting_ids: Vec<String> = sqlx::query_scalar(
+        "SELECT m.id FROM meetings m \
+         WHERE EXISTS (SELECT 1 FROM transcripts t \
+                       WHERE t.meeting_id=m.id AND length(trim(t.transcript)) > 0) \
+         ORDER BY COALESCE(m.occurred_at, m.created_at), m.id",
+    )
+    .fetch_all(&pool)
+    .await
+    .map_err(|error| error.to_string())?;
+
+    let mut started = 0usize;
+    for meeting_id in meeting_ids {
+        if start_automatic_summary_for_meeting(app.clone(), pool.clone(), &meeting_id).await? {
+            started += 1;
+        }
+    }
+    Ok(started)
+}
+
 #[tauri::command]
 pub async fn api_process_transcript<R: Runtime>(
     app: AppHandle<R>,
@@ -585,80 +808,20 @@ pub async fn api_process_transcript<R: Runtime>(
         &model
     );
 
-    let pool = state.db_manager.pool().clone();
-
-    // Rebuild the summary input with speaker labels when this meeting's stored transcripts
-    // carry speaker info (a diarized `speaker_id` or a 'mic'/'system' channel tag). The
-    // frontend concatenates `text` WITHOUT labels, so without this the LLM never learns who
-    // said what. Doing it here — keyed on `meeting_id`, before chunk storage / language
-    // detection / caching / the summary itself — covers both Generate and Regenerate at once,
-    // keeps renamed speaker names fresh at generation time, and leaves pre-diarization and
-    // unsaved/live meetings byte-for-bit unchanged (falls back to the passed `text`).
-    let text =
-        crate::summary::transcript_labeling::build_speaker_labeled_transcript(&pool, &m_id, text)
-            .await;
-
-    let final_prompt = custom_prompt.unwrap_or_else(|| "".to_string());
-    let final_template_id = template_id.unwrap_or_else(|| "daily_standup".to_string());
-
-    // Normalise empty / whitespace-only to None so "" and null behave identically
-    let summary_language = summary_language.and_then(|s| {
-        let t = s.trim();
-        if t.is_empty() {
-            None
-        } else {
-            Some(t.to_string())
-        }
-    });
-
-    // Create or reset the process entry in the database
-    SummaryProcessesRepository::create_or_reset_process(&pool, &m_id)
-        .await
-        .map_err(|e| format!("Failed to initialize process: {}", e))?;
-
-    log_info!("✓ Summary process initialized for meeting_id: {}", &m_id);
-
-    // Save transcript chunks data (matching Python backend behavior)
-    let chunk_size = _chunk_size.unwrap_or(40000);
-    let overlap = _overlap.unwrap_or(1000);
-
-    TranscriptChunksRepository::save_transcript_data(
-        &pool,
-        &m_id,
-        &text,
-        &model,
-        &model_name,
-        chunk_size,
-        overlap,
+    start_summary_process(
+        app,
+        state.db_manager.pool().clone(),
+        text,
+        model,
+        model_name,
+        m_id,
+        _chunk_size,
+        _overlap,
+        custom_prompt,
+        template_id,
+        summary_language,
     )
     .await
-    .map_err(|e| format!("Failed to save transcript data: {}", e))?;
-
-    log_info!("✓ Transcript chunks saved for meeting_id: {}", &m_id);
-
-    // Spawn background task for actual processing
-    let meeting_id_clone = m_id.clone();
-    tauri::async_runtime::spawn(async move {
-        SummaryService::process_transcript_background(
-            app,
-            pool,
-            meeting_id_clone.clone(),
-            text,
-            model,
-            model_name,
-            final_prompt,
-            final_template_id,
-            summary_language,
-        )
-        .await;
-    });
-
-    log_info!("🚀 Background task spawned for meeting_id: {}", &m_id);
-
-    Ok(ProcessTranscriptResponse {
-        message: "Summary generation started".to_string(),
-        process_id: m_id,
-    })
 }
 
 /// Cancels an ongoing summary generation process

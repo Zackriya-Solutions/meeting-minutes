@@ -7,6 +7,9 @@ import {
   Drawer,
   DrawerContent,
   DrawerDescription,
+  DrawerIndent,
+  DrawerIndentBackground,
+  DrawerProvider,
   DrawerTitle,
 } from "@/components/ui/drawer"
 import { useT } from "@/lib/i18n"
@@ -45,14 +48,18 @@ export function ChatDrawerShell({ children }: { children: ReactNode }) {
   }, [router])
 
   return (
-    <>
-      <div
+    <DrawerProvider>
+      <DrawerIndentBackground
+        className="route-drawer-background-surface"
+        aria-hidden="true"
+      />
+      <DrawerIndent
         ref={backgroundRef}
         data-home-scroll-container
-        className={`route-drawer-background h-screen overflow-y-auto bg-background${open ? " is-open" : ""}`}
+        className="route-drawer-background h-screen overflow-hidden"
       >
         <HomeMeetingList animateOnMount={false} />
-      </div>
+      </DrawerIndent>
       <Drawer
         open={open}
         onOpenChange={setOpen}
@@ -69,6 +76,6 @@ export function ChatDrawerShell({ children }: { children: ReactNode }) {
           <div className="min-h-0 flex-1 overflow-hidden">{children}</div>
         </DrawerContent>
       </Drawer>
-    </>
+    </DrawerProvider>
   )
 }

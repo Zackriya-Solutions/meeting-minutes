@@ -13,8 +13,8 @@ interface SummaryModelSettingsProps {
 
 export function SummaryModelSettings({ refetchTrigger }: SummaryModelSettingsProps) {
   const [modelConfig, setModelConfig] = useState<ModelConfig>({
-    provider: 'deepseek',
-    model: 'deepseek-v4-pro',
+    provider: 'openrouter',
+    model: '~anthropic/claude-sonnet-latest',
     whisperModel: 'large-v3',
     apiKey: null,
     ollamaEndpoint: null

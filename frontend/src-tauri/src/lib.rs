@@ -531,6 +531,21 @@ pub fn run() {
                         .map(std::path::PathBuf::from);
                     tauri::async_runtime::spawn(async move {
                         gigaam_engine::commands::init_gigaam_at_startup(&app_handle).await;
+                        if let Some(state) = app_handle.try_state::<state::AppState>() {
+                            match jobs::enqueue_missing_transcript_refinement(
+                                state.db_manager.pool(),
+                            )
+                            .await
+                            {
+                                Ok(0) => {}
+                                Ok(count) => log::info!(
+                                    "Queued {count} completed recording transcript repair job(s)"
+                                ),
+                                Err(error) => log::warn!(
+                                    "Could not queue completed recording transcript repairs: {error}"
+                                ),
+                            }
+                        }
                         #[cfg(debug_assertions)]
                         if let Some(folder) = batch_folder {
                             log::info!(
@@ -570,6 +585,42 @@ pub fn run() {
                 summary::templates::set_bundled_templates_dir(templates_dir);
             } else {
                 log::warn!("Failed to resolve resource directory for templates");
+            }
+
+            // Recover summaries that older builds never started. The automatic version
+            // marker prevents a failed provider from being retried on every launch.
+            if !corpus_mode {
+                let app_handle = _app.handle().clone();
+                if let Some(state) = _app.try_state::<state::AppState>() {
+                    let pool = state.db_manager.pool().clone();
+                    tauri::async_runtime::spawn(async move {
+                        match pipeline::speaker_names::backfill_existing_speaker_names(&pool).await {
+                            Ok((checked, 0)) => log::info!(
+                                "Checked automatic speaker names for {checked} diarized meeting(s)"
+                            ),
+                            Ok((checked, applied)) => log::info!(
+                                "Checked {checked} diarized meeting(s) and applied {applied} automatic speaker name(s)"
+                            ),
+                            Err(error) => {
+                                log::warn!("Could not backfill automatic speaker names: {error}")
+                            }
+                        }
+                        match summary::commands::backfill_missing_automatic_summaries(
+                            app_handle,
+                            pool,
+                        )
+                        .await
+                        {
+                            Ok(0) => {}
+                            Ok(count) => {
+                                log::info!("Started {count} missing automatic meeting summary job(s)")
+                            }
+                            Err(error) => {
+                                log::warn!("Could not backfill automatic meeting summaries: {error}")
+                            }
+                        }
+                    });
+                }
             }
 
             // Explicit local corpus automation. It is inert unless meeting IDs are supplied;
@@ -675,6 +726,7 @@ pub fn run() {
             learning::reconciliation::review_reconciliation_suggestion,
             learning::reconciliation::rollback_reconciliation_suggestion,
             pipeline::speaker_names::scan_speaker_name_candidates,
+            pipeline::speaker_names::infer_meeting_speaker_names,
             pipeline::speaker_names::list_speaker_name_candidates,
             pipeline::speaker_names::review_speaker_name_candidate,
             gigaam_engine::commands::gigaam_status,

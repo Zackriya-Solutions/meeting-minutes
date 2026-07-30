@@ -4,8 +4,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useRouter } from 'next/navigation';
 import { Loader2 } from '@/components/deslop-icons';
-import { cn } from '@/lib/utils';
 import { Icon } from '@/components/memento/Icon';
+import { PromptInput } from '@/components/ui/prompt-input';
 import { useT } from '@/lib/i18n';
 import { KnowledgeReadinessCard } from '@/components/KnowledgeReadinessCard';
 import { useMeetingChat, type Citation, type ScopeKind } from '@/hooks/useMeetingChat';
@@ -117,10 +117,10 @@ export default function ChatPage() {
   const meetingTitle = (id: string) => meetings.find((m) => m.id === id)?.title ?? id.slice(0, 8);
   return (
     <ChatDrawerShell>
-    <div className="mm-page drawer-elevation-surface !h-full">
+    <div className="mm-page drawer-elevation-surface !h-full !px-0">
       {/* Header */}
-      <div className="mm-page-header">
-        <h1 className="memento-serif-title truncate text-2xl leading-tight text-foreground">
+      <div className="mm-page-header px-[var(--drawer-content-inset)]">
+        <h1 className="memento-screen-title truncate text-foreground">
           {scopeKind === 'collection' ? t('Chat with collection') : t('Chat with archive')}
         </h1>
       </div>
@@ -133,7 +133,7 @@ export default function ChatPage() {
         scrollPreviousItemPeek={48}
       >
         <MessageScroller className="min-h-0 flex-1">
-          <MessageScrollerViewport className="px-6 py-6">
+          <MessageScrollerViewport className="px-[var(--drawer-content-inset)] py-6">
             <MessageScrollerContent className="mx-auto w-full max-w-3xl gap-5">
               {loadingHistory ? (
                 <MessageScrollerItem className="flex min-h-[240px] items-center justify-center text-muted-foreground">
@@ -173,33 +173,20 @@ export default function ChatPage() {
       </MessageScrollerProvider>
 
       {/* Composer */}
-      <div className="border-t border-border py-4">
-        <div className="mx-auto flex max-w-3xl items-end gap-2">
-          <textarea
-            ref={inputRef}
+      <div className="px-[var(--drawer-content-inset)] pt-4">
+        <div className="mx-auto max-w-3xl">
+          <PromptInput
+            inputRef={inputRef}
             value={input}
             disabled={loadingHistory}
-            onChange={(e) => setInput(e.target.value)}
+            sending={sending}
+            onValueChange={setInput}
             onKeyDown={onKeyDown}
-            rows={1}
+            onSubmit={() => send(input)}
             placeholder={t('Ask about your meetings…')}
-            className="mm-field max-h-40 min-h-[48px] flex-1 resize-none py-3 text-sm outline-none"
+            sendLabel={t('Send')}
           />
-          <button
-            onClick={() => send(input)}
-            disabled={loadingHistory || sending || !input.trim()}
-            className={cn(
-              'flex h-11 w-11 items-center justify-center rounded-xl text-primary-foreground transition-colors',
-              loadingHistory || sending || !input.trim() ? 'cursor-not-allowed bg-muted' : 'bg-primary hover:bg-primary/90',
-            )}
-            aria-label={t('Send')}
-          >
-            {sending ? <Loader2 className="h-5 w-5 animate-spin" /> : <Icon name="send" />}
-          </button>
         </div>
-        <p className="mx-auto mt-2 max-w-3xl text-center text-xs text-muted-foreground">
-          {t('Answers are drawn only from your recordings, with links to the sources.')}
-        </p>
       </div>
     </div>
     </ChatDrawerShell>

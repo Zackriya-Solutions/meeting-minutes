@@ -4,18 +4,18 @@ import { motion } from 'framer-motion';
 import { Icon } from '@/components/memento/Icon';
 import { cn } from '@/lib/utils';
 import { useT } from '@/lib/i18n';
+import { avatarGradients } from '@/vendor/deslop/primitives/tokens.js';
 import { Bubble, BubbleContent } from '@/components/ui/bubble';
-import { Message, MessageContent } from '@/components/ui/message';
+import { Message, MessageAvatar, MessageContent, MessageHeader } from '@/components/ui/message';
 import { ChatMarkdown } from './ChatMarkdown';
 import type { ChatMessage, Citation, RetrievalDiagnostics } from '@/hooks/useMeetingChat';
 
 /**
  * Chat primitives shared by the archive/collection chat page and the embedded
- * meeting conversation. Variant 3a: the user keeps a gold bubble; the assistant
- * answer flows as plain content (no card, no border) rendered as Markdown + LaTeX,
- * with muted (neutral, not gold) citation chips. The citation click handler is
- * injected — the archive page routes to `/meeting-details`, the meeting screen
- * expands the transcript pin and scrolls to the cited segment in place.
+ * meeting conversation. Uses the official shadcn Message composition: avatar,
+ * sender header, and a visible Bubble surface for both sides. The citation click
+ * handler is injected — the archive page routes to `/meeting-details`, the meeting
+ * screen expands the transcript pin and scrolls to the cited segment in place.
  */
 
 export function MessageBubble({
@@ -32,27 +32,9 @@ export function MessageBubble({
   const t = useT();
   const isUser = msg.role === 'user';
   const notFound = msg.role === 'assistant' && msg.found === false && !msg.error;
-
-  if (isUser) {
-    return (
-      <motion.div
-        initial={{ opacity: 0, y: 6 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.18 }}
-        className="w-full"
-      >
-        <Message align="end">
-          <MessageContent className="items-end">
-            <Bubble align="end" className="max-w-[78%] rounded-[16px_16px_4px_16px]">
-              <BubbleContent className="whitespace-pre-wrap px-[15px] py-[11px] text-[14px] leading-[1.5]">
-                {msg.content}
-              </BubbleContent>
-            </Bubble>
-          </MessageContent>
-        </Message>
-      </motion.div>
-    );
-  }
+  const senderName = isUser ? t('You') : 'Memento';
+  const avatarGradient = avatarGradients[isUser ? 0 : 2];
+  const avatarInitials = isUser ? senderName.slice(0, 1).toUpperCase() : 'M';
 
   return (
     <motion.div
@@ -61,17 +43,25 @@ export function MessageBubble({
       transition={{ duration: 0.18 }}
       className="w-full"
     >
-      <Message align="start">
+      <Message align={isUser ? 'end' : 'start'}>
+        <MessageAvatar
+          aria-label={senderName}
+          title={senderName}
+          className="h-8 w-8 text-xs font-bold text-white"
+          style={{
+            background: `linear-gradient(180deg, ${avatarGradient.top} 0%, ${avatarGradient.bottom} 100%)`,
+          }}
+        >
+          <span aria-hidden="true">{avatarInitials}</span>
+        </MessageAvatar>
         <MessageContent>
+          <MessageHeader>{senderName}</MessageHeader>
           <Bubble
-            variant={msg.error ? 'destructive' : 'ghost'}
-            className="w-full max-w-full"
+            align={isUser ? 'end' : 'start'}
+            variant={msg.error ? 'destructive' : isUser ? 'default' : 'muted'}
           >
             <BubbleContent
-              className={cn(
-                'w-full text-[14.5px] leading-[1.65]',
-                msg.error ? 'px-3 py-2' : 'text-foreground',
-              )}
+              className={cn(isUser && 'whitespace-pre-wrap')}
             >
               {notFound && (
                 <div className="mb-1 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
@@ -80,7 +70,9 @@ export function MessageBubble({
                 </div>
               )}
 
-              {msg.error ? <div className="whitespace-pre-wrap">{msg.content}</div> : <ChatMarkdown content={msg.content} />}
+              {isUser || msg.error
+                ? <div className="whitespace-pre-wrap">{msg.content}</div>
+                : <ChatMarkdown content={msg.content} />}
 
               {notFound && msg.diagnostics && <RetrievalExplanation diagnostics={msg.diagnostics} />}
 
@@ -146,12 +138,24 @@ export function RetrievalExplanation({ diagnostics }: { diagnostics: RetrievalDi
 
 export function TypingIndicator() {
   const t = useT();
+  const avatarGradient = avatarGradients[2];
 
   return (
     <Message align="start" role="status" aria-label={t('Assistant is typing')}>
+      <MessageAvatar
+        aria-label="Memento"
+        title="Memento"
+        className="h-8 w-8 text-xs font-bold text-white"
+        style={{
+          background: `linear-gradient(180deg, ${avatarGradient.top} 0%, ${avatarGradient.bottom} 100%)`,
+        }}
+      >
+        <span aria-hidden="true">M</span>
+      </MessageAvatar>
       <MessageContent>
-        <Bubble variant="muted" className="rounded-full">
-          <BubbleContent className="flex items-center gap-1 px-3 py-2">
+        <MessageHeader>Memento</MessageHeader>
+        <Bubble variant="muted">
+          <BubbleContent className="flex items-center gap-1">
             {[0, 1, 2].map((i) => (
               <span
                 key={i}

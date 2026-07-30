@@ -22,7 +22,7 @@ pub fn configure_linux_audio(host: &cpal::Host) -> Result<Vec<AudioDevice>> {
                 if name.contains("monitor") {
                     devices.push(AudioDevice::new(
                         format!("{} (System Audio)", name),
-                        DeviceType::Output
+                        DeviceType::Output,
                     ));
                 }
             }

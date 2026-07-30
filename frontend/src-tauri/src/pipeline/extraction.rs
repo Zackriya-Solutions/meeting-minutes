@@ -69,7 +69,10 @@ pub fn resolve_entity(name: &str, entity_type: &str, existing: &[KnownEntity]) -
 
     match best {
         Some((id, score)) if score >= MERGE_THRESHOLD => Resolution::Merge(id),
-        Some((id, score)) if score >= REVIEW_THRESHOLD => Resolution::Review { entity_id: id, score },
+        Some((id, score)) if score >= REVIEW_THRESHOLD => Resolution::Review {
+            entity_id: id,
+            score,
+        },
         _ => Resolution::New,
     }
 }
@@ -124,7 +127,11 @@ pub fn parse_and_validate(raw: &str) -> Result<Extraction, String> {
             return Err(format!("invalid entity type: {}", ent.entity_type));
         }
     }
-    if extraction.action_items.iter().any(|item| item.text.trim().is_empty()) {
+    if extraction
+        .action_items
+        .iter()
+        .any(|item| item.text.trim().is_empty())
+    {
         return Err("action item text must not be empty".to_string());
     }
     Ok(extraction)
@@ -132,7 +139,10 @@ pub fn parse_and_validate(raw: &str) -> Result<Extraction, String> {
 
 fn strip_code_fence(raw: &str) -> &str {
     let t = raw.trim();
-    let t = t.strip_prefix("```json").or_else(|| t.strip_prefix("```")).unwrap_or(t);
+    let t = t
+        .strip_prefix("```json")
+        .or_else(|| t.strip_prefix("```"))
+        .unwrap_or(t);
     t.trim().strip_suffix("```").unwrap_or(t).trim()
 }
 
@@ -161,12 +171,21 @@ mod tests {
             ent(3, "client", &["Иванов и партнёры"]),
         ];
         // «Альфа» resolves to the project by exact alias.
-        assert_eq!(resolve_entity("альфа", "project", &existing), Resolution::Exact(1));
+        assert_eq!(
+            resolve_entity("альфа", "project", &existing),
+            Resolution::Exact(1)
+        );
         // person «Иванов» does NOT merge with client «Иванов и партнёры».
-        assert_eq!(resolve_entity("Иванов", "person", &existing), Resolution::Exact(2));
+        assert_eq!(
+            resolve_entity("Иванов", "person", &existing),
+            Resolution::Exact(2)
+        );
         let client = resolve_entity("Иванов", "client", &existing);
         assert!(
-            matches!(client, Resolution::Review { entity_id: 3, .. } | Resolution::New),
+            matches!(
+                client,
+                Resolution::Review { entity_id: 3, .. } | Resolution::New
+            ),
             "person name must not auto-merge into a client; got {client:?}"
         );
     }
@@ -176,7 +195,10 @@ mod tests {
         let existing = vec![ent(1, "project", &["Проект Альфа"])];
         // A close-but-not-identical variant lands in the review band or as new.
         let r = resolve_entity("Проект Альфабет", "project", &existing);
-        assert!(matches!(r, Resolution::Review { .. } | Resolution::Merge(_) | Resolution::New));
+        assert!(matches!(
+            r,
+            Resolution::Review { .. } | Resolution::Merge(_) | Resolution::New
+        ));
         assert_ne!(r, Resolution::Exact(1));
     }
 
@@ -193,7 +215,8 @@ mod tests {
 
     #[test]
     fn missing_optional_fields_default() {
-        let parsed = parse_and_validate("{\"action_items\":[{\"text\":\"сделать отчёт\"}]}").unwrap();
+        let parsed =
+            parse_and_validate("{\"action_items\":[{\"text\":\"сделать отчёт\"}]}").unwrap();
         assert!(parsed.entities.is_empty());
         assert_eq!(parsed.action_items[0].text, "сделать отчёт");
         assert!(parsed.action_items[0].owner.is_none());

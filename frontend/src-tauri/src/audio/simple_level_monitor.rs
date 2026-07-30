@@ -1,16 +1,16 @@
-use std::sync::atomic::{AtomicBool, Ordering};
-use tauri::{AppHandle, Emitter, Runtime};
 use anyhow::Result;
 use log::{error, info};
 use serde::Serialize;
+use std::sync::atomic::{AtomicBool, Ordering};
+use tauri::{AppHandle, Emitter, Runtime};
 
 #[derive(Debug, Serialize, Clone)]
 pub struct AudioLevelData {
     pub device_name: String,
     pub device_type: String, // "input" or "output"
-    pub rms_level: f32,     // RMS level (0.0 to 1.0)
-    pub peak_level: f32,    // Peak level (0.0 to 1.0)
-    pub is_active: bool,    // Whether audio is being detected
+    pub rms_level: f32,      // RMS level (0.0 to 1.0)
+    pub peak_level: f32,     // Peak level (0.0 to 1.0)
+    pub is_active: bool,     // Whether audio is being detected
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -27,7 +27,10 @@ pub async fn start_monitoring<R: Runtime>(
     app_handle: AppHandle<R>,
     device_names: Vec<String>,
 ) -> Result<()> {
-    info!("Starting simplified audio level monitoring for devices: {:?}", device_names);
+    info!(
+        "Starting simplified audio level monitoring for devices: {:?}",
+        device_names
+    );
 
     // Stop any existing monitoring
     IS_MONITORING.store(false, Ordering::SeqCst);
@@ -49,15 +52,16 @@ pub async fn start_monitoring<R: Runtime>(
             counter += 0.1;
             let fake_level = (counter.sin().abs() * 0.8) as f32; // Simulate varying levels
 
-            let levels: Vec<AudioLevelData> = device_names.iter().map(|name| {
-                AudioLevelData {
+            let levels: Vec<AudioLevelData> = device_names
+                .iter()
+                .map(|name| AudioLevelData {
                     device_name: name.clone(),
                     device_type: "input".to_string(),
                     rms_level: fake_level,
                     peak_level: fake_level * 1.2,
                     is_active: fake_level > 0.1,
-                }
-            }).collect();
+                })
+                .collect();
 
             let update = AudioLevelUpdate {
                 timestamp: std::time::SystemTime::now()

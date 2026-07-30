@@ -86,6 +86,15 @@ impl DatabaseManager {
                     log::warn!("Could not queue meeting audio identity backfill jobs: {error}")
                 }
             }
+            match crate::jobs::enqueue_missing_diarization(&pool).await {
+                Ok(0) => {}
+                Ok(count) => {
+                    log::info!("Queued {count} missing meeting diarization job(s)")
+                }
+                Err(error) => {
+                    log::warn!("Could not queue missing meeting diarization jobs: {error}")
+                }
+            }
             crate::jobs::JobRunner::new(
                 pool.clone(),
                 crate::jobs::JobRegistry::with_defaults(),

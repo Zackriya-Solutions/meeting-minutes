@@ -68,7 +68,12 @@ pub fn compute_score(
     let deadline = pct(
         commitments
             .iter()
-            .filter(|c| c.due.as_deref().map(|d| !d.trim().is_empty()).unwrap_or(false))
+            .filter(|c| {
+                c.due
+                    .as_deref()
+                    .map(|d| !d.trim().is_empty())
+                    .unwrap_or(false)
+            })
             .count(),
         commitments.len(),
     );
@@ -340,7 +345,10 @@ fn apply_template(template: &str, replacements: &[(&str, String)]) -> String {
 
 // ============================ Section builders ============================
 
-fn build_participants(input: &RenderInput, color_for_name: &dyn Fn(&str) -> &'static str) -> String {
+fn build_participants(
+    input: &RenderInput,
+    color_for_name: &dyn Fn(&str) -> &'static str,
+) -> String {
     if let Some(c) = input.classification {
         if !c.participants.is_empty() {
             return c
@@ -891,7 +899,11 @@ fn build_transcript(input: &RenderInput, key_to_index: &HashMap<&str, usize>) ->
             .and_then(|t| key_to_index.get(t.speaker_key.as_str()))
             .map(|idx| palette_color(*idx))
             .unwrap_or("var(--muted)");
-        let label = input.seg_labels.get(i).map(String::as_str).unwrap_or("Спикер");
+        let label = input
+            .seg_labels
+            .get(i)
+            .map(String::as_str)
+            .unwrap_or("Спикер");
         out.push_str(&format!(
             "<div class=\"turn\" id=\"t{}\"><span class=\"ts\">{}</span>\
              <span class=\"sn\"><span class=\"dot\" style=\"background:{}\"></span>{}</span>\
@@ -944,7 +956,10 @@ fn build_speaker_js(
         .iter()
         .enumerate()
         .map(|(i, t)| {
-            let idx = key_to_index.get(t.speaker_key.as_str()).copied().unwrap_or(0) as i64;
+            let idx = key_to_index
+                .get(t.speaker_key.as_str())
+                .copied()
+                .unwrap_or(0) as i64;
             let txt = input
                 .seg_texts
                 .get(i)
@@ -1021,7 +1036,11 @@ fn build_markers_js(input: &RenderInput, seg_times: &[f64]) -> String {
     if let Some(d) = input.decisions {
         for dec in &d.decisions {
             if let Some(t) = time_of(dec.seg) {
-                markers.push(json!([t, "d", format!("Решение: {}", preview(&dec.statement, 60))]));
+                markers.push(json!([
+                    t,
+                    "d",
+                    format!("Решение: {}", preview(&dec.statement, 60))
+                ]));
             }
         }
     }
@@ -1029,7 +1048,11 @@ fn build_markers_js(input: &RenderInput, seg_times: &[f64]) -> String {
         for dis in &dc.disagreements {
             if let Some(seg) = dis.positions.first().map(|p| p.seg) {
                 if let Some(t) = time_of(seg) {
-                    markers.push(json!([t, "x", format!("Разногласие: {}", preview(&dis.topic, 60))]));
+                    markers.push(json!([
+                        t,
+                        "x",
+                        format!("Разногласие: {}", preview(&dis.topic, 60))
+                    ]));
                 }
             }
         }
@@ -1040,7 +1063,11 @@ fn build_markers_js(input: &RenderInput, seg_times: &[f64]) -> String {
                 markers.push(json!([
                     t,
                     "c",
-                    format!("Обязательство: {} — {}", preview(&cm.who, 24), preview(&cm.what, 40))
+                    format!(
+                        "Обязательство: {} — {}",
+                        preview(&cm.who, 24),
+                        preview(&cm.what, 40)
+                    )
                 ]));
             }
         }
@@ -1210,8 +1237,16 @@ mod tests {
             }],
         };
         let timed = vec![
-            TimedSegment { start: 0.0, end: 3.0, speaker_key: "ch:mic".into() },
-            TimedSegment { start: 5.0, end: 7.0, speaker_key: "ch:mic".into() },
+            TimedSegment {
+                start: 0.0,
+                end: 3.0,
+                speaker_key: "ch:mic".into(),
+            },
+            TimedSegment {
+                start: 5.0,
+                end: 7.0,
+                speaker_key: "ch:mic".into(),
+            },
         ];
         let seg_labels = vec!["Аня".to_string(), "Аня".to_string()];
         // Include a hostile string to prove escaping in transcript output.

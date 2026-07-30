@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import { useTranscripts } from '@/contexts/TranscriptContext';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
 import { useRecordingState, RecordingStatus } from '@/contexts/RecordingStateContext';
+import { useConfig } from '@/contexts/ConfigContext';
 import { invoke } from '@tauri-apps/api/core';
 import { appDataDir } from '@tauri-apps/api/path';
 import { storageService } from '@/services/storageService';
@@ -52,6 +53,7 @@ export function useRecordingStop(
   const t = useT();
   // USE global state instead
   const recordingState = useRecordingState();
+  const { modelConfig } = useConfig();
   const {
     status,
     setStatus,
@@ -74,6 +76,7 @@ export function useRecordingStop(
     setMeetings,
     meetings,
     setIsMeetingActive,
+    startSummaryPolling,
   } = useSidebar();
 
   const router = useRouter();
@@ -313,9 +316,11 @@ export function useRecordingStop(
             }
           }
 
+          let summaryLanguage: string | null = null;
           let shouldDetectSummaryLanguage = false;
           try {
-            shouldDetectSummaryLanguage = !(await applyPinnedSummaryLanguageToMeeting(meetingId));
+            summaryLanguage = await applyPinnedSummaryLanguageToMeeting(meetingId);
+            shouldDetectSummaryLanguage = !summaryLanguage;
           } catch (error) {
             console.warn('Failed to apply pinned summary language preference for new meeting:', error);
             toast.warning(t('Could not apply default summary language'), {
@@ -325,14 +330,52 @@ export function useRecordingStop(
 
           if (shouldDetectSummaryLanguage) {
             try {
-              await detectAndCacheSummaryLanguage(
+              const detection = await detectAndCacheSummaryLanguage(
                 meetingId,
                 freshTranscripts.map(t => t.text)
               );
+              summaryLanguage = detection.language;
             } catch (error) {
               console.warn('Failed to detect summary language for new meeting:', error);
               toast.warning(t('Could not detect summary language'), {
                 description: t('The meeting was saved, but Auto could not detect the summary language.'),
+              });
+            }
+          }
+
+          // Queue the summary while the meeting is still being finalized. The
+          // drawer can then show the persisted job/result immediately instead
+          // of starting generation only after the user opens the meeting.
+          const summaryTranscript = freshTranscripts
+            .map((transcript) => transcript.text.trim())
+            .filter(Boolean)
+            .join('\n');
+
+          if (summaryTranscript) {
+            try {
+              const result = await invoke<{ process_id: string }>('api_process_transcript', {
+                text: summaryTranscript,
+                model: modelConfig.provider,
+                modelName: modelConfig.model,
+                meetingId,
+                chunkSize: 40000,
+                overlap: 1000,
+                customPrompt: '',
+                templateId: 'standard_meeting',
+                summaryLanguage,
+              });
+
+              if (result.process_id) {
+                startSummaryPolling(meetingId, result.process_id, (pollingResult) => {
+                  window.dispatchEvent(new CustomEvent('meeting-summary-updated', {
+                    detail: { meetingId, result: pollingResult },
+                  }));
+                });
+              }
+            } catch (error) {
+              console.error('Failed to queue automatic summary generation:', error);
+              toast.error(t('Could not start automatic summary generation'), {
+                description: error instanceof Error ? error.message : undefined,
               });
             }
           }
@@ -393,25 +436,6 @@ export function useRecordingStop(
 
           // Mark as completed
           setStatus(RecordingStatus.COMPLETED);
-
-          // Show success toast with navigation option
-          const recordingToast = freshTranscripts.length === 0 ? toast.warning : toast.success;
-          recordingToast(
-            freshTranscripts.length === 0
-              ? t('Audio saved, but transcription produced no text')
-              : t('Recording saved successfully!'), {
-            description: freshTranscripts.length === 0
-              ? t('Open the meeting to play the saved audio or retranscribe it with a local model.')
-              : `${freshTranscripts.length} ${t('transcript segments saved.')}`,
-            action: {
-              label: t('View Meeting'),
-              onClick: () => {
-                router.push(`/meeting-details?id=${meetingId}`);
-                Analytics.trackButtonClick('view_meeting_from_toast', 'recording_complete');
-              }
-            },
-            duration: freshTranscripts.length === 0 ? Infinity : 10000,
-          });
 
           // Auto-navigate after a short delay with source parameter
           setTimeout(() => {
@@ -512,6 +536,10 @@ export function useRecordingStop(
     setMeetings,
     meetings,
     setIsMeetingActive,
+    modelConfig.provider,
+    modelConfig.model,
+    startSummaryPolling,
+    t,
     router,
   ]);
 

@@ -308,10 +308,7 @@ async fn meeting_title(pool: &SqlitePool, meeting_id: &str) -> Result<String, St
     title.ok_or_else(|| format!("Meeting not found: {meeting_id}"))
 }
 
-async fn meeting_transcript(
-    pool: &SqlitePool,
-    meeting_id: &str,
-) -> Result<String, String> {
+async fn meeting_transcript(pool: &SqlitePool, meeting_id: &str) -> Result<String, String> {
     let segments: Vec<(String, Option<f64>, String)> = sqlx::query_as(
         "SELECT transcript, audio_start_time, timestamp FROM transcripts \
          WHERE meeting_id = ? AND trim(transcript) != '' \
@@ -585,8 +582,7 @@ async fn process_meeting<R: Runtime>(
     };
     let has_standup_payload = has_standup_v2(outcome.result.as_deref());
     let provenance_matches = result_matches_provenance(outcome.result.as_deref(), provenance);
-    let completed =
-        outcome.status == "completed" && has_standup_payload && provenance_matches;
+    let completed = outcome.status == "completed" && has_standup_payload && provenance_matches;
     let extracted_record_count = if completed {
         match standup_result_record_count(outcome.result.as_deref()) {
             Ok(count) => count,

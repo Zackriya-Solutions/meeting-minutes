@@ -13,6 +13,7 @@ interface EditableTitleProps {
   onFinishEditing: () => void;
   onChange: (value: string) => void;
   onDelete?: () => void;
+  showEditButton?: boolean;
 }
 
 export const EditableTitle: React.FC<EditableTitleProps> = ({
@@ -22,6 +23,7 @@ export const EditableTitle: React.FC<EditableTitleProps> = ({
   onFinishEditing,
   onChange,
   onDelete,
+  showEditButton = true,
 }) => {
   const t = useT();
   const titleInputRef = useRef<HTMLTextAreaElement>(null);
@@ -54,31 +56,33 @@ export const EditableTitle: React.FC<EditableTitleProps> = ({
             onFinishEditing();
           }
         }}
-        className="memento-serif-title w-full resize-none overflow-hidden text-2xl font-normal leading-tight"
+        className="memento-screen-title w-full resize-none overflow-hidden"
         style={{ minWidth: '300px', minHeight: '40px' }}
         autoFocus
         rows={1}
       />
     </div>
   ) : (
-    <div className="group flex items-center space-x-2 flex-1">
+    <div className="group flex flex-1 items-center space-x-2 text-left">
       <h1
-        className="memento-serif-title flex-1 cursor-pointer whitespace-pre-wrap rounded px-1 text-2xl font-normal leading-tight hover:bg-background"
+        className="memento-screen-title flex-1 cursor-pointer whitespace-pre-wrap rounded text-left hover:bg-background"
         onClick={onStartEditing}
       >
         {title}
       </h1>
       <div className="flex space-x-1">
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          onClick={onStartEditing}
-          className="opacity-0 transition-opacity duration-200 group-hover:opacity-100"
-          title={t('Edit section title')}
-        >
-          <Pencil />
-        </Button>
+        {showEditButton && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            onClick={onStartEditing}
+            className="opacity-0 transition-opacity duration-200 group-hover:opacity-100"
+            title={t('Edit section title')}
+          >
+            <Pencil />
+          </Button>
+        )}
         {onDelete && (
           <Button
             type="button"

@@ -14,7 +14,6 @@ interface BlockProps {
   onMouseUp: (e: React.MouseEvent<HTMLDivElement>) => void;
   onKeyDown: (e: React.KeyboardEvent) => void;
   onDelete?: () => void;
-  onContextMenu: (e: React.MouseEvent) => void;
   onNavigate?: (direction: 'up' | 'down', cursorPosition: number) => void;
   onCreateNewBlock?: (blockId: string, newBlockContent: string, blockType: Block['type'], currentBlockContent?: string) => void;
 }
@@ -68,7 +67,6 @@ export const BlockComponent: React.FC<BlockProps> = ({
   onMouseUp,
   onKeyDown,
   onDelete,
-  onContextMenu,
   onNavigate,
   onCreateNewBlock,
 }) => {
@@ -227,7 +225,6 @@ export const BlockComponent: React.FC<BlockProps> = ({
       onMouseDown={onMouseDown}
       onMouseEnter={onMouseEnter}
       onMouseUp={onMouseUp}
-      onContextMenu={onContextMenu}
     >
       {block.type === 'bullet' && (
         <div className="flex-shrink-0 mr-2 select-none mt-[2px]">•</div>
@@ -243,7 +240,6 @@ export const BlockComponent: React.FC<BlockProps> = ({
           onMouseDown={(e) => onMouseDown(e as unknown as React.MouseEvent<HTMLDivElement>)}
           onMouseEnter={onMouseEnter}
           onMouseUp={(e) => onMouseUp(e as unknown as React.MouseEvent<HTMLDivElement>)}
-          onContextMenu={onContextMenu}
           rows={1}
           className={`
             w-full resize-none overflow-hidden bg-transparent border-none p-0 focus:outline-none focus:ring-0

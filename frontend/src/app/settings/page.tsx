@@ -13,31 +13,25 @@ export default function SettingsPage() {
   const { t } = useLanguage();
 
   return (
-    <div className="mm-page min-w-0 overflow-hidden !p-0">
-      {/* Fixed Header */}
-      <div className="sticky top-0 z-10 bg-background">
-        <div className="mx-auto w-full max-w-6xl px-4 py-5 sm:px-8 sm:py-6">
-          <div className="flex min-w-0 flex-wrap items-center gap-3 sm:gap-4">
-            <button
-              onClick={() => router.push('/')}
-              className="mm-icon-button mm-hover"
-              aria-label={t('Back')}
-            >
-              <Icon name="back" />
-            </button>
-          </div>
-        </div>
-      </div>
+    <div className="settings-screen min-h-full">
+      <div className="settings-screen__inner">
+        <header className="settings-screen__header">
+          <button
+            type="button"
+            onClick={() => router.push('/')}
+            className="settings-screen__back no-drag mm-hover"
+            aria-label={t('Back')}
+          >
+            <Icon name="back" />
+          </button>
+          <h1 className="memento-screen-title">{t('Settings')}</h1>
+        </header>
 
-      {/* Scrollable Content */}
-      <div className="min-w-0 flex-1 overflow-x-hidden overflow-y-auto">
-        <div className="mx-auto w-full min-w-0 max-w-6xl p-4 pt-4 sm:p-8 sm:pt-6">
-          <div className="min-w-0 space-y-6">
-            <PreferenceSettings />
-            <RecordingSettings />
-            <EmbeddingModelSettings />
-          </div>
-        </div>
+        <main className="settings-screen__content">
+          <PreferenceSettings />
+          <RecordingSettings />
+          <EmbeddingModelSettings />
+        </main>
       </div>
     </div>
   );

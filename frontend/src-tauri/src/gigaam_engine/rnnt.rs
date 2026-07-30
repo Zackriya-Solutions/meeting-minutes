@@ -83,7 +83,8 @@ impl RnntModel {
             // encoded is [1, D, T'] row-major: element [0,d,t] = d*T' + t.
             let enc_frame: Vec<f32> = (0..enc_dim).map(|d| encoded[d * enc_tp + t_idx]).collect();
 
-            let (logits, h_new, c_new) = self.decode_step(last_token, &h, &c, enc_frame, enc_dim)?;
+            let (logits, h_new, c_new) =
+                self.decode_step(last_token, &h, &c, enc_frame, enc_dim)?;
             let token = argmax(&logits);
 
             if token != self.blank {
@@ -111,8 +112,10 @@ impl RnntModel {
         use ort::inputs;
         use ort::value::TensorRef;
 
-        let f_ref = TensorRef::from_array_view(features.view()).map_err(|e| anyhow!("enc features: {e}"))?;
-        let l_ref = TensorRef::from_array_view(length.view()).map_err(|e| anyhow!("enc length: {e}"))?;
+        let f_ref = TensorRef::from_array_view(features.view())
+            .map_err(|e| anyhow!("enc features: {e}"))?;
+        let l_ref =
+            TensorRef::from_array_view(length.view()).map_err(|e| anyhow!("enc length: {e}"))?;
         let out = self
             .encoder
             .run(inputs!["audio_signal" => f_ref, "length" => l_ref])
@@ -157,10 +160,14 @@ impl RnntModel {
         // Prediction network. Extract everything owned before the joiner call so the
         // `&mut self.decoder` borrow is released.
         let (dec, h_new, c_new) = {
-            let x = Array2::from_shape_vec((1, 1), vec![last_token]).map_err(|e| anyhow!("dec x: {e}"))?;
-            let x_ref = TensorRef::from_array_view(x.view()).map_err(|e| anyhow!("dec x ref: {e}"))?;
-            let h_ref = TensorRef::from_array_view(h.view()).map_err(|e| anyhow!("dec h ref: {e}"))?;
-            let c_ref = TensorRef::from_array_view(c.view()).map_err(|e| anyhow!("dec c ref: {e}"))?;
+            let x = Array2::from_shape_vec((1, 1), vec![last_token])
+                .map_err(|e| anyhow!("dec x: {e}"))?;
+            let x_ref =
+                TensorRef::from_array_view(x.view()).map_err(|e| anyhow!("dec x ref: {e}"))?;
+            let h_ref =
+                TensorRef::from_array_view(h.view()).map_err(|e| anyhow!("dec h ref: {e}"))?;
+            let c_ref =
+                TensorRef::from_array_view(c.view()).map_err(|e| anyhow!("dec c ref: {e}"))?;
             let out = self
                 .decoder
                 .run(inputs!["x" => x_ref, "h.1" => h_ref, "c.1" => c_ref])
@@ -189,11 +196,15 @@ impl RnntModel {
         };
 
         // Joiner: enc frame [1,D,1] + prediction output reshaped to [1,320,1].
-        let enc_in = Array3::from_shape_vec((1, enc_dim, 1), enc_frame).map_err(|e| anyhow!("joiner enc: {e}"))?;
-        let dec_in = Array3::from_shape_vec((1, PRED_HIDDEN, 1), dec).map_err(|e| anyhow!("joiner dec: {e}"))?;
+        let enc_in = Array3::from_shape_vec((1, enc_dim, 1), enc_frame)
+            .map_err(|e| anyhow!("joiner enc: {e}"))?;
+        let dec_in = Array3::from_shape_vec((1, PRED_HIDDEN, 1), dec)
+            .map_err(|e| anyhow!("joiner dec: {e}"))?;
         let joint: Vec<f32> = {
-            let e_ref = TensorRef::from_array_view(enc_in.view()).map_err(|e| anyhow!("joiner enc ref: {e}"))?;
-            let d_ref = TensorRef::from_array_view(dec_in.view()).map_err(|e| anyhow!("joiner dec ref: {e}"))?;
+            let e_ref = TensorRef::from_array_view(enc_in.view())
+                .map_err(|e| anyhow!("joiner enc ref: {e}"))?;
+            let d_ref = TensorRef::from_array_view(dec_in.view())
+                .map_err(|e| anyhow!("joiner dec ref: {e}"))?;
             let out = self
                 .joiner
                 .run(inputs!["enc" => e_ref, "dec" => d_ref])

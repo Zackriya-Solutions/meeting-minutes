@@ -4,12 +4,14 @@
 
 pub mod deepseek;
 pub mod gigachat;
+pub mod openrouter;
 
 use base64::Engine as _;
 use sqlx::SqlitePool;
 
 use deepseek::DeepSeekClient;
 use gigachat::{GigaChatAuth, GigaChatClient};
+use openrouter::OpenRouterClient;
 
 #[derive(Clone)]
 pub struct DeepSeekTransport {
@@ -40,6 +42,33 @@ async fn setting_or_env(pool: &SqlitePool, key: &str, env: &str) -> Option<Strin
         return Some(v);
     }
     std::env::var(env).ok().filter(|s| !s.is_empty())
+}
+
+/// Build the single network LLM used by Memento. The key is stored in the
+/// existing write-only OpenRouter column; an environment variable remains a
+/// useful development fallback.
+pub async fn resolve_openrouter(pool: &SqlitePool) -> Option<OpenRouterClient> {
+    let api_key = match crate::database::repositories::setting::SettingsRepository::get_api_key(
+        pool,
+        "openrouter",
+    )
+    .await
+    {
+        Ok(Some(value)) if !value.trim().is_empty() => value,
+        _ => std::env::var("OPENROUTER_API_KEY")
+            .ok()
+            .filter(|value| !value.trim().is_empty())?,
+    };
+    let model = crate::database::repositories::setting::SettingsRepository::get_model_config(pool)
+        .await
+        .ok()
+        .flatten()
+        .filter(|config| config.provider == "openrouter")
+        .map(|config| config.model)
+        .filter(|model| !model.trim().is_empty())
+        .unwrap_or_else(|| openrouter::DEFAULT_MODEL.to_string());
+
+    Some(OpenRouterClient::new(api_key, Some(model), None))
 }
 
 fn deepseek_max_tokens(value: Option<String>) -> u32 {

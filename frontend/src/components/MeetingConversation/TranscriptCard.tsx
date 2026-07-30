@@ -33,6 +33,7 @@ interface TranscriptCardProps {
   speakerCount?: number;
   onRenameSpeaker?: (speakerId: number, displayName: string) => Promise<void> | void;
   onSpeakersDetected?: () => Promise<void> | void;
+  transcriptViewportClassName?: string;
 }
 
 export function TranscriptCard({
@@ -55,9 +56,10 @@ export function TranscriptCard({
   speakerCount = 0,
   onRenameSpeaker,
   onSpeakersDetected,
+  transcriptViewportClassName,
 }: TranscriptCardProps) {
   return (
-    <div className="flex h-[min(46vh,440px)] flex-col">
+    <div className="flex h-full min-h-0 flex-col">
       <TranscriptPanel
         transcripts={transcripts}
         customPrompt=""
@@ -66,6 +68,8 @@ export function TranscriptCard({
         onOpenMeetingFolder={onOpenMeetingFolder}
         isRecording={false}
         disableAutoScroll
+        transcriptViewportClassName={transcriptViewportClassName}
+        surfaceClassName="bg-transparent"
         usePagination
         segments={segments}
         hasMore={hasMore}
@@ -86,7 +90,7 @@ export function TranscriptCard({
         onSpeakersDetected={onSpeakersDetected}
         showToolbar={false}
         showContextField={false}
-        compactPlayer
+        showAudioPlayer={false}
       />
     </div>
   );

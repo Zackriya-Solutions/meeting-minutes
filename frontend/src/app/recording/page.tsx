@@ -10,7 +10,8 @@ import { useTranscripts } from "@/contexts/TranscriptContext"
 import { useRecordingStart } from "@/hooks/useRecordingStart"
 import { useRecordingStateSync } from "@/hooks/useRecordingStateSync"
 import { useRecordingStop } from "@/hooks/useRecordingStop"
-import { useT } from "@/lib/i18n"
+import { useLanguage } from "@/lib/i18n"
+import { getMeetingDisplayInfo } from "@/lib/meetingDisplay"
 import { RecordingDrawerShell } from "./recording-drawer-shell"
 
 const LOCKED_STATUSES = new Set<RecordingStatus>([
@@ -22,7 +23,7 @@ const LOCKED_STATUSES = new Set<RecordingStatus>([
 ])
 
 export default function RecordingPage() {
-  const t = useT()
+  const { lang, t } = useLanguage()
   const recordingState = useRecordingState()
   const { setIsMeetingActive } = useSidebar()
   const { transcripts, meetingTitle, currentMeetingId } = useTranscripts()
@@ -51,6 +52,11 @@ export default function RecordingPage() {
     confidence: transcript.confidence,
   })), [transcripts])
 
+  const displayMeetingTitle = useMemo(() => {
+    if (!meetingTitle || meetingTitle === "+ New Call") return t("New meeting")
+    return getMeetingDisplayInfo({ title: meetingTitle }, lang).title
+  }, [lang, meetingTitle, t])
+
   const locked = recordingState.isRecording || LOCKED_STATUSES.has(recordingState.status)
   const isStarting = recordingState.status === RecordingStatus.STARTING
   const isFinalizing =
@@ -66,9 +72,9 @@ export default function RecordingPage() {
   return (
     <RecordingDrawerShell locked={locked}>
       <div className="flex h-full flex-col bg-[var(--elevation-1)]">
-        <header className="shrink-0 border-b border-border px-[22px] py-4">
-          <h1 className="memento-serif-title truncate text-2xl leading-tight text-foreground">
-            {meetingTitle && meetingTitle !== "+ New Call" ? meetingTitle : t("New meeting")}
+        <header className="shrink-0 border-b border-border px-[var(--drawer-content-inset)] py-4">
+          <h1 className="memento-screen-title truncate text-foreground">
+            {displayMeetingTitle}
           </h1>
           <p className="mt-0.5 text-xs text-muted-foreground">
             {isFinalizing ? t("Saving meeting…") : isStarting ? t("Starting recording…") : t("Meeting recording")}
@@ -89,21 +95,22 @@ export default function RecordingPage() {
               isStopping={recordingState.isStopping}
               enableStreaming={recordingState.isRecording}
               showConfidence
+              viewportClassName="px-[var(--drawer-content-inset)]"
             />
           )}
         </main>
 
         {recordingState.isRecording && (
-          <footer className="shrink-0 border-t border-border p-4">
+          <footer className="shrink-0 border-t border-border px-[var(--drawer-content-inset)] py-4">
             <RecordOverlay
-              title={meetingTitle || t("New meeting")}
+              title={displayMeetingTitle}
               meetingId={currentMeetingId}
               onStop={stopRecording}
             />
           </footer>
         )}
         {isFinalizing && (
-          <footer className="flex shrink-0 items-center justify-center gap-2 border-t border-border px-4 py-5 text-sm text-muted-foreground">
+          <footer className="flex shrink-0 items-center justify-center gap-2 border-t border-border px-[var(--drawer-content-inset)] py-5 text-sm text-muted-foreground">
             <Loader2 className="size-4 animate-spin" />
             <span>{t("Saving meeting…")}</span>
           </footer>

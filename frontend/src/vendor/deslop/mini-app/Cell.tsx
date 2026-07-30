@@ -1,4 +1,4 @@
-import type { ButtonHTMLAttributes, ReactNode } from 'react';
+import { forwardRef, type ButtonHTMLAttributes, type ReactNode } from 'react';
 
 import styles from './Cell.module.css';
 
@@ -18,15 +18,18 @@ interface CellTextProps {
  * The source package is not currently published, so Memento vendors the
  * component beside the Deslop primitives it already consumes.
  */
-export function Cell({ start, end, children, className = '', ...props }: CellProps) {
+export const Cell = forwardRef<HTMLButtonElement, CellProps>(function Cell(
+  { start, end, children, className = '', ...props },
+  ref,
+) {
   return (
-    <button className={`${styles.root} ${className}`} {...props}>
+    <button ref={ref} className={`${styles.root} ${className}`} {...props}>
       {start ? <span className={styles.start}>{start}</span> : null}
       <span className={styles.body}>{children}</span>
       {end ? <span className={styles.end}>{end}</span> : null}
     </button>
   );
-}
+});
 
 export function CellText({ title, description, bold = false }: CellTextProps) {
   return (

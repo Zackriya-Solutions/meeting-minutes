@@ -34,11 +34,11 @@ export function GlobalSettingsButton() {
   };
 
   return (
-    <div className="fixed right-4 top-4 z-50 flex items-center gap-2">
+    <div className="global-header-actions fixed right-4 top-4 z-50 flex items-center gap-2">
       <Button
         type="button"
         variant="ghost"
-        className="mm-hover h-10 gap-2 rounded-[var(--radius)] border-0 bg-muted px-4 font-medium shadow-none hover:bg-accent"
+        className="global-header-action mm-hover h-10 gap-2 rounded-full border-0 px-4 font-medium shadow-none"
         onClick={startNewMeeting}
         disabled={!canStartMeeting}
         aria-label={t('New meeting')}
@@ -52,7 +52,7 @@ export function GlobalSettingsButton() {
         type="button"
         variant="ghost"
         size="icon"
-        className="mm-icon-button mm-hover border-0 shadow-none"
+        className="global-header-action mm-hover h-10 w-10 rounded-full border-0 shadow-none"
         onClick={toggleTheme}
         aria-label={t('Switch theme')}
         title={t('Switch theme')}
@@ -71,7 +71,7 @@ export function GlobalSettingsButton() {
           type="button"
           variant="ghost"
           size="icon"
-          className="mm-icon-button mm-hover border-0 shadow-none"
+          className="global-header-action mm-hover h-10 w-10 rounded-full border-0 shadow-none"
         >
           <Link href="/settings" aria-label={t('Settings')} title={t('Settings')}>
             <Icon name="settings" size={22} />

@@ -158,8 +158,8 @@ export function EmbeddingModelSettings() {
       : 0;
 
   return (
-    <div className="mt-6 max-w-2xl">
-      <div className="rounded-xl border border-border p-5">
+    <div>
+      <section className="settings-section">
         <div className="flex items-start gap-3">
           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10">
             <Search className="h-5 w-5 text-primary" />
@@ -330,7 +330,7 @@ export function EmbeddingModelSettings() {
             </div>
           </div>
         </div>
-      </div>
+      </section>
 
       <p className="mt-3 px-1 text-xs text-muted-foreground">
         {t('Embeddings and search stay on-device. Only summaries, extraction, and chat prompts are sent to your configured LLM provider (GigaChat / DeepSeek).')}

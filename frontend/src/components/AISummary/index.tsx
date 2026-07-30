@@ -5,6 +5,12 @@ import { Summary, Block } from '@/types';
 import { Section } from './Section';
 import { EditableTitle } from '../EditableTitle';
 import { AlertTriangle, Copy, Trash2 } from '@/components/deslop-icons';
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu';
 import { useT } from '@/lib/i18n';
 
 interface Props {
@@ -468,67 +474,13 @@ export const AISummary = ({ summary, status, error, onSummaryChange, onRegenerat
     setLastSelectedBlock(null);
   };
 
-  // Context menu state
-  const [contextMenu, setContextMenu] = useState<{
-    x: number;
-    y: number;
-    visible: boolean;
-  }>({ x: 0, y: 0, visible: false });
-
-  // Close context menu when clicking outside
-  useEffect(() => {
-    const handleClickOutside = () => {
-      setContextMenu(prev => ({ ...prev, visible: false }));
-    };
-    document.addEventListener('click', handleClickOutside);
-    return () => document.removeEventListener('click', handleClickOutside);
-  }, []);
-
-  const handleContextMenu = (e: React.MouseEvent) => {
-    e.preventDefault();
-    
-    const menuWidth = 160;
-    const menuHeight = 80; // Approximate height for 2 items
-    
-    let x = e.clientX;
-    let y = e.clientY;
-    
-    // Check right boundary
-    if (x + menuWidth > window.innerWidth) {
-      x = window.innerWidth - menuWidth - 10;
-    }
-    
-    // Check bottom boundary
-    if (y + menuHeight > window.innerHeight) {
-      y = window.innerHeight - menuHeight - 10;
-    }
-    
-    // Check left boundary
-    if (x < 10) {
-      x = 10;
-    }
-    
-    // Check top boundary
-    if (y < 10) {
-      y = 10;
-    }
-    
-    setContextMenu({
-      x,
-      y,
-      visible: true
-    });
-  };
-
   const handleCopyBlocks = useCallback(() => {
     const content = getSelectedBlocksContent();
     navigator.clipboard.writeText(content);
-    setContextMenu(prev => ({ ...prev, visible: false }));
   }, [getSelectedBlocksContent]);
 
   const handleDeleteBlocks = () => {
     handleDeleteSelectedBlocks();
-    setContextMenu(prev => ({ ...prev, visible: false }));
   };
 
   const handleSectionDelete = (sectionKey: keyof Summary) => {
@@ -658,46 +610,18 @@ export const AISummary = ({ summary, status, error, onSummaryChange, onRegenerat
   }
 
   return (
-    <div className="relative">
-
-      
-      {selectedBlocks.length > 1 && (
-        <textarea
-          ref={hiddenInputRef}
-          className="sr-only"
-          readOnly
-          value={getSelectedBlocksContent()}
-          tabIndex={-1}
-        />
-      )}
-      
-      {/* Context Menu */}
-      {contextMenu.visible && selectedBlocks.length > 0 && (
-        <div
-          className="fixed z-50 bg-background shadow-none rounded-lg py-1 min-w-[160px] border border-border
-                     animate-in fade-in zoom-in-95 duration-150"
-          style={{ 
-            left: contextMenu.x, 
-            top: contextMenu.y
-          }}
-          onClick={e => e.stopPropagation()}
-        >
-          <button
-            className="w-full px-4 py-2 text-left hover:bg-muted flex items-center space-x-2"
-            onClick={handleCopyBlocks}
-          >
-            <Copy size={16} className="text-muted-foreground" />
-            <span>{t('Copy')} {selectedBlocks.length > 1 ? `${selectedBlocks.length} ${t('blocks')}` : t('block')}</span>
-          </button>
-          <button
-            className="w-full px-4 py-2 text-left hover:bg-muted text-destructive flex items-center space-x-2"
-            onClick={handleDeleteBlocks}
-          >
-            <Trash2 size={16} />
-            <span>{t('Delete')} {selectedBlocks.length > 1 ? `${selectedBlocks.length} ${t('blocks')}` : t('block')}</span>
-          </button>
-        </div>
-      )}
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <div className="relative">
+          {selectedBlocks.length > 1 && (
+            <textarea
+              ref={hiddenInputRef}
+              className="sr-only"
+              readOnly
+              value={getSelectedBlocksContent()}
+              tabIndex={-1}
+            />
+          )}
 
       {/* <div className="flex items-center justify-between mb-4">
         <div className="flex items-center space-x-2">
@@ -811,13 +735,40 @@ export const AISummary = ({ summary, status, error, onSummaryChange, onRegenerat
               onTitleChange={handleTitleChange}
               onSectionDelete={handleSectionDelete}
               onBlockDelete={(blockId, mergeContent) => handleBlockDelete(blockId, mergeContent)}
-              onContextMenu={handleContextMenu}
               onBlockNavigate={(blockId, direction) => handleBlockNavigate(blockId, direction)}
               onCreateNewBlock={handleCreateNewBlock}
             />
           );
         })}
 
-    </div>
+        </div>
+      </ContextMenuTrigger>
+      {selectedBlocks.length > 0 ? (
+        <ContextMenuContent className="min-w-[190px] rounded-[14px] p-1.5">
+          <ContextMenuItem
+            onSelect={handleCopyBlocks}
+            className="gap-2 rounded-[9px] px-2.5 py-[9px]"
+          >
+            <Copy size={16} className="text-muted-foreground" />
+            <span>
+              {t('Copy')} {selectedBlocks.length > 1
+                ? `${selectedBlocks.length} ${t('blocks')}`
+                : t('block')}
+            </span>
+          </ContextMenuItem>
+          <ContextMenuItem
+            onSelect={handleDeleteBlocks}
+            className="gap-2 rounded-[9px] px-2.5 py-[9px] text-destructive focus:bg-destructive/10 focus:text-destructive"
+          >
+            <Trash2 size={16} />
+            <span>
+              {t('Delete')} {selectedBlocks.length > 1
+                ? `${selectedBlocks.length} ${t('blocks')}`
+                : t('block')}
+            </span>
+          </ContextMenuItem>
+        </ContextMenuContent>
+      ) : null}
+    </ContextMenu>
   );
 };

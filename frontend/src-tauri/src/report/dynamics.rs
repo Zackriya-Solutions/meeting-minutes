@@ -305,9 +305,9 @@ mod tests {
     fn pauses_detect_short_and_long_gaps() {
         // Short utterances (est ~0.5s each). Gaps chosen around the thresholds.
         let segs = vec![
-            seg(0.0, "a", "A", "тут"),   // end ~0.5
-            seg(5.0, "b", "B", "там"),   // gap ~4.5s  -> >3s
-            seg(6.0, "a", "A", "ага"),   // gap ~0.5s  -> none
+            seg(0.0, "a", "A", "тут"),    // end ~0.5
+            seg(5.0, "b", "B", "там"),    // gap ~4.5s  -> >3s
+            seg(6.0, "a", "A", "ага"),    // gap ~0.5s  -> none
             seg(20.0, "b", "B", "конец"), // gap ~13.5s -> >3s AND >10s
         ];
         let d = Dynamics::compute(&segs);
@@ -361,7 +361,10 @@ mod tests {
         ];
         let timed = timeline(&segs);
         assert_eq!(timed.len(), 2);
-        assert!(timed[1].start >= timed[0].end - 1e-9, "second follows first");
+        assert!(
+            timed[1].start >= timed[0].end - 1e-9,
+            "second follows first"
+        );
         let d = Dynamics::from_timed(&segs, &timed);
         assert!(d.duration_secs > 0.0);
     }

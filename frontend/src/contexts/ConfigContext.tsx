@@ -99,8 +99,8 @@ const ConfigContext = createContext<ConfigContextType | undefined>(undefined);
 export function ConfigProvider({ children }: { children: ReactNode }) {
   // Model configuration state
   const [modelConfig, setModelConfig] = useState<ModelConfig>({
-    provider: 'deepseek',
-    model: 'deepseek-v4-pro',
+    provider: 'openrouter',
+    model: '~anthropic/claude-sonnet-latest',
     whisperModel: 'large-v3',
     ollamaEndpoint: null
   });
@@ -361,7 +361,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     ollama: models.map(model => model.name),
     claude: ['claude-3-5-sonnet-latest'],
     groq: ['llama-3.3-70b-versatile'],
-    openrouter: [],
+    openrouter: ['~anthropic/claude-sonnet-latest'],
     openai: ['gpt-4', 'gpt-4-turbo', 'gpt-3.5-turbo'],
     'builtin-ai': [],
     'custom-openai': [],

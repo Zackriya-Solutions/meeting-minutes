@@ -7,9 +7,9 @@ use std::time::Duration;
 use sqlx::SqlitePool;
 use tokio::sync::{Notify, Semaphore};
 
-use super::{store, JobContext, JobRegistry};
 #[cfg(test)]
 use super::JobHandler;
+use super::{store, JobContext, JobRegistry};
 
 #[derive(Debug, Clone, Copy)]
 pub struct RunnerConfig {
@@ -173,9 +173,16 @@ pub(crate) async fn run_one_for_test(
             let err = e.to_string();
             let exp = (attempts_made - 1).clamp(0, 16) as u32;
             let backoff = config.base_backoff_seconds.saturating_mul(2i64.pow(exp));
-            store::mark_failed_or_retry(pool, row.id, attempts_made, config.max_attempts, backoff, &err)
-                .await
-                .unwrap();
+            store::mark_failed_or_retry(
+                pool,
+                row.id,
+                attempts_made,
+                config.max_attempts,
+                backoff,
+                &err,
+            )
+            .await
+            .unwrap();
         }
     }
 }
@@ -194,7 +201,11 @@ async fn run_one(
         serde_json::from_str(&row.payload).unwrap_or_else(|_| serde_json::json!({}));
 
     let Some(handler) = registry.get(&row.kind) else {
-        log::error!("job {} has unknown kind '{}'; marking failed", row.id, row.kind);
+        log::error!(
+            "job {} has unknown kind '{}'; marking failed",
+            row.id,
+            row.kind
+        );
         // Force the permanent-failure branch (attempts == max).
         let _ = store::mark_failed_or_retry(
             pool,
@@ -208,7 +219,12 @@ async fn run_one(
         return;
     };
 
-    log::debug!("running job {} kind={} (attempt {})", row.id, row.kind, attempts_made);
+    log::debug!(
+        "running job {} kind={} (attempt {})",
+        row.id,
+        row.kind,
+        attempts_made
+    );
     match handler.run(ctx, row.meeting_id.as_deref(), &payload).await {
         Ok(()) => {
             if let Err(e) = store::mark_done(pool, row.id).await {

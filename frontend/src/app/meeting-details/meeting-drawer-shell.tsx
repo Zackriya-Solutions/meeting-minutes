@@ -18,6 +18,9 @@ import {
   Drawer,
   DrawerContent,
   DrawerDescription,
+  DrawerIndent,
+  DrawerIndentBackground,
+  DrawerProvider,
   DrawerTitle,
 } from "@/components/ui/drawer"
 import { MeetingDrawerProvider } from "@/contexts/MeetingDrawerContext"
@@ -70,29 +73,35 @@ export function MeetingDrawerShell({ children }: { children: ReactNode }) {
 
   return (
     <MeetingDrawerProvider value={contextValue}>
-      <div
-        ref={backgroundRef}
-        data-home-scroll-container
-        className={`route-drawer-background h-screen overflow-y-auto bg-background${open ? " is-open" : ""}`}
-      >
-        <HomeMeetingList animateOnMount={false} />
-      </div>
-      <Drawer
-        open={open}
-        onOpenChange={setOpen}
-        onOpenChangeComplete={handleOpenChangeComplete}
-        modal={false}
-        swipeDirection="right"
-        showSwipeHandle
-      >
-        <DrawerContent className="meeting-route-drawer" initialFocus={false}>
-          <DrawerTitle className="sr-only">{t("Meeting")}</DrawerTitle>
-          <DrawerDescription className="sr-only">
-            {t("Meeting details")}
-          </DrawerDescription>
-          <div className="min-h-0 flex-1 overflow-hidden">{children}</div>
-        </DrawerContent>
-      </Drawer>
+      <DrawerProvider>
+        <DrawerIndentBackground
+          className="route-drawer-background-surface"
+          aria-hidden="true"
+        />
+        <DrawerIndent
+          ref={backgroundRef}
+          data-home-scroll-container
+          className="route-drawer-background h-screen overflow-x-hidden overflow-y-auto"
+        >
+          <HomeMeetingList animateOnMount={false} />
+        </DrawerIndent>
+        <Drawer
+          open={open}
+          onOpenChange={setOpen}
+          onOpenChangeComplete={handleOpenChangeComplete}
+          modal={false}
+          swipeDirection="right"
+          showSwipeHandle
+        >
+          <DrawerContent className="meeting-route-drawer" initialFocus={false}>
+            <DrawerTitle className="sr-only">{t("Meeting")}</DrawerTitle>
+            <DrawerDescription className="sr-only">
+              {t("Meeting details")}
+            </DrawerDescription>
+            <div className="min-h-0 flex-1 overflow-hidden">{children}</div>
+          </DrawerContent>
+        </Drawer>
+      </DrawerProvider>
     </MeetingDrawerProvider>
   )
 }
