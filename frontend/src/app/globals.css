@@ -603,7 +603,7 @@
   .home-screen .home-ask-dock {
     position: fixed;
     z-index: 20;
-    bottom: 16px;
+    bottom: 30px;
     left: 50%;
     width: min(
       calc(100% - var(--home-column-gutter) - var(--home-column-gutter)),
