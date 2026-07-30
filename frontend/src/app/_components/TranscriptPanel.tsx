@@ -50,6 +50,8 @@ export function TranscriptPanel({
       endTime: t.audio_end_time,
       text: t.text,
       confidence: t.confidence,
+      speaker: t.speaker,
+      speaker_id: t.speaker_id,
     })),
     [transcripts]
   );
@@ -58,7 +60,7 @@ export function TranscriptPanel({
     <div
       ref={transcriptContainerRef}
       data-home-scroll-container
-      className="flex w-full flex-col overflow-y-auto bg-background"
+      className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto bg-background"
     >
       {/* Actions only exist once they have something useful to control. */}
       {showTranscriptActions && <div className="sticky top-0 z-10 border-border bg-background p-4">

@@ -56,7 +56,7 @@ export function ChatDrawerShell({ children }: { children: ReactNode }) {
       <DrawerIndent
         ref={backgroundRef}
         data-home-scroll-container
-        className="route-drawer-background h-screen overflow-hidden"
+        className="route-drawer-background h-screen overflow-x-hidden overflow-y-auto"
       >
         <HomeMeetingList animateOnMount={false} />
       </DrawerIndent>

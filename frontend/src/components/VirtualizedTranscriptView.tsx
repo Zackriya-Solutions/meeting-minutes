@@ -2,8 +2,7 @@
 
 import { useCallback, useRef, useEffect, useState, memo } from "react";
 import { useTranscriptStreaming } from "@/hooks/useTranscriptStreaming";
-import { RecordingStatusBar } from "./RecordingStatusBar";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion } from "framer-motion";
 import { TranscriptSegmentData, localizeSpeakerLabel, resolveSpeakerLabel } from "@/types";
 import { SpeakerRenameDialog } from "./MeetingDetails/SpeakerRenameDialog";
 import { useT } from "@/lib/i18n";
@@ -199,7 +198,7 @@ const TranscriptSegment = memo(function TranscriptSegment({
 
                 <Bubble
                     align={align}
-                    variant={isStreaming ? 'muted' : isOwn ? 'default' : 'secondary'}
+                    variant={isOwn || isStreaming ? 'muted' : 'secondary'}
                     className={cn(
                         'max-w-[82%]',
                         isOwn
@@ -219,9 +218,6 @@ const TranscriptSegment = memo(function TranscriptSegment({
 export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps> = ({
     segments,
     isRecording = false,
-    isPaused = false,
-    isProcessing = false,
-    isStopping = false,
     enableStreaming = false,
     showConfidence = true,
     disableAutoScroll = false,
@@ -331,35 +327,9 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
         <MessageScroller className="h-full">
         <MessageScrollerViewport className={cn("px-4 py-2", viewportClassName)}>
         <MessageScrollerContent className="gap-0">
-            {/* Recording Status Bar - Sticky at top, always visible when recording */}
-            <AnimatePresence>
-                {isRecording && (
-                    <div className="sticky top-0 z-10 bg-background pb-2">
-                        <RecordingStatusBar isPaused={isPaused} />
-                    </div>
-                )}
-            </AnimatePresence>
-
-            {/* Content - add padding when recording to prevent overlap */}
-            <div className={isRecording ? 'pt-2' : ''}>
+            <div>
             {segments.length === 0 ? (
-                isRecording ? (
-                <motion.div
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    className="text-center text-muted-foreground mt-8"
-                >
-                    <div className="flex items-center justify-center mb-3">
-                        <div className={`w-3 h-3 rounded-full ${isPaused ? 'bg-primary' : 'bg-primary animate-pulse'}`}></div>
-                    </div>
-                    <p className="text-sm text-muted-foreground">
-                        {isPaused ? t('Recording paused') : t('Listening for speech...')}
-                    </p>
-                    <p className="text-xs mt-1 text-muted-foreground">
-                        {isPaused ? t('Click resume to continue recording') : t('Speak to see live transcription')}
-                    </p>
-                </motion.div>
-                ) : (
+                isRecording ? null : (
                     <MessageScrollerItem messageId="transcript-empty">
                         <div className="flex min-h-40 items-center justify-center px-6 text-center text-sm text-muted-foreground">
                             {t('No speech was recognized in this recording')}
@@ -371,6 +341,16 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                     <div className="space-y-1" role="list">
                         {segments.map((segment) => {
                             const isStreaming = streamingSegmentId === segment.id;
+                            // Live chunks from older/in-flight recorder sessions can arrive
+                            // before the backend has attached the mic/system channel tag.
+                            // In an active recording the safe UI fallback is the local mic:
+                            // otherwise the user's own speech is rendered as an incoming
+                            // anonymous speaker message until the recording is finalized.
+                            const isOwnSegment = segment.speaker === 'mic'
+                                || (isRecording && segment.speaker == null);
+                            const speakerLabel = isOwnSegment
+                                ? t('You')
+                                : localizeSpeakerLabel(resolveSpeakerLabel(segment, speakersById), t);
 
                             return (
                                 <MessageScrollerItem
@@ -391,7 +371,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                         isStreaming={isStreaming}
                                         showConfidence={showConfidence}
                                         highlight={highlightedId === segment.id}
-                                        speakerLabel={localizeSpeakerLabel(resolveSpeakerLabel(segment, speakersById), t)}
+                                        speakerLabel={speakerLabel}
                                         speakerId={segment.speaker_id}
                                         speakerRenamable={
                                             !!onRenameSpeaker &&
@@ -402,7 +382,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                         onPlayTimestamp={onPlayTimestamp}
                                         playbackActive={isPlaybackSegmentActive(segment, playbackTime)}
                                         onEdit={onCorrectTranscript ? () => setEditingSegment({ id: segment.id, text: segment.text }) : undefined}
-                                        isOwn={segment.speaker === 'mic'}
+                                        isOwn={isOwnSegment}
                                     />
                                   </motion.div>
                                 </MessageScrollerItem>
@@ -424,19 +404,6 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                 </span>
                             ) : null}
                         </div>
-                    )}
-
-                    {/* Listening indicator when recording */}
-                    {!isStopping && isRecording && !isPaused && !isProcessing && segments.length > 0 && (
-                        <motion.div
-                            initial={{ opacity: 0 }}
-                            animate={{ opacity: 1 }}
-                            exit={{ opacity: 0 }}
-                            className="flex items-center gap-2 mt-4 text-muted-foreground"
-                        >
-                            <div className="w-2 h-2 bg-primary rounded-full animate-pulse"></div>
-                            <span className="text-sm">{t('Listening...')}</span>
-                        </motion.div>
                     )}
                 </>
             )}

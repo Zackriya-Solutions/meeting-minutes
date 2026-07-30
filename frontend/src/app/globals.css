@@ -611,6 +611,9 @@
     );
     transform: translateX(-50%);
   }
+  .home-screen .home-ask-dock::before {
+    bottom: -40px;
+  }
   .home-screen .home-ask {
     width: 100%;
     overflow: clip;

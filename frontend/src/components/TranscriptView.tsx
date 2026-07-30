@@ -4,8 +4,7 @@ import { Transcript, localizeSpeakerLabel, resolveSpeakerLabel } from '@/types';
 import { useEffect, useRef, useState } from 'react';
 import { ConfidenceIndicator } from './ConfidenceIndicator';
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
-import { RecordingStatusBar } from './RecordingStatusBar';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { useT } from '@/lib/i18n';
 
 interface TranscriptViewProps {
@@ -253,15 +252,6 @@ export const TranscriptView: React.FC<TranscriptViewProps> = ({ transcripts, isR
 
   return (
     <div className="px-4 py-2">
-      {/* Recording Status Bar - Sticky at top, always visible when recording */}
-      <AnimatePresence>
-        {isRecording && (
-          <div className="sticky top-4 z-10 bg-background pb-2">
-            <RecordingStatusBar isPaused={isPaused} />
-          </div>
-        )}
-      </AnimatePresence>
-
       {transcripts?.map((transcript, index) => {
         const isStreaming = streamingTranscript?.id === transcript.id;
         const textToShow = isStreaming ? streamingTranscript.visibleText : transcript.text;
@@ -345,40 +335,6 @@ export const TranscriptView: React.FC<TranscriptViewProps> = ({ transcripts, isR
           </motion.div>
         );
       })}
-
-      {/* Show listening indicator when recording and has transcripts */}
-      {!isStopping && isRecording && !isPaused && !isProcessing && transcripts.length > 0 && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          className="flex items-center gap-2 mt-4 text-muted-foreground"
-        >
-          <div className="w-2 h-2 bg-primary rounded-full animate-pulse"></div>
-          <span className="text-sm">{t('Listening...')}</span>
-        </motion.div>
-      )}
-
-      {/* Empty state when no transcripts */}
-      {transcripts.length === 0 && isRecording && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          className="text-center text-muted-foreground mt-8"
-        >
-          <div className="flex items-center justify-center mb-3">
-            <div className={`w-3 h-3 rounded-full ${isPaused ? 'bg-primary' : 'bg-primary animate-pulse'}`}></div>
-          </div>
-          <p className="text-sm text-muted-foreground">
-            {isPaused ? t('Recording paused') : t('Listening for speech...')}
-          </p>
-          <p className="text-xs mt-1 text-muted-foreground">
-            {isPaused
-              ? t('Click resume to continue recording')
-              : t('Speak to see live transcription')}
-          </p>
-        </motion.div>
-      )}
     </div>
   );
 };

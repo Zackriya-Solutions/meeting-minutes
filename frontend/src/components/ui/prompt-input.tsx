@@ -25,6 +25,22 @@ type PromptInputProps = Omit<
   submitButtonType?: "button" | "submit"
 }
 
+export function PromptInputContainer({
+  className,
+  ...props
+}: React.ComponentProps<typeof InputGroup>) {
+  return (
+    <InputGroup
+      className={cn(
+        "min-h-[50px] items-center rounded-[24px] border-[var(--primary-10)] bg-[var(--elevation-1)] py-0 pl-4 pr-2 shadow-none dark:bg-[var(--elevation-1)]",
+        "focus-within:border-[var(--primary-10)] has-[[data-slot=input-group-control]:focus-visible]:ring-0",
+        className,
+      )}
+      {...props}
+    />
+  )
+}
+
 function assignRef<T>(ref: React.Ref<T> | undefined, value: T | null) {
   if (typeof ref === "function") ref(value)
   else if (ref) (ref as React.MutableRefObject<T | null>).current = value
@@ -67,13 +83,7 @@ export function PromptInput({
   }, [resize, value])
 
   return (
-    <InputGroup
-      className={cn(
-        "min-h-[50px] items-center rounded-[24px] border-[var(--primary-10)] bg-[var(--elevation-1)] py-0 pl-4 pr-2 shadow-none dark:bg-[var(--elevation-1)]",
-        "focus-within:border-[var(--primary-10)] has-[[data-slot=input-group-control]:focus-visible]:ring-0",
-        containerClassName,
-      )}
-    >
+    <PromptInputContainer className={containerClassName}>
       <InputGroupTextarea
         ref={setControlRef}
         value={value}
@@ -119,6 +129,6 @@ export function PromptInput({
           {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Icon name="send" size={17} />}
         </InputGroupButton>
       </InputGroupAddon>
-    </InputGroup>
+    </PromptInputContainer>
   )
 }

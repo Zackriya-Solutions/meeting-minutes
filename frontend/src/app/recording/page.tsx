@@ -12,15 +12,8 @@ import { useRecordingStateSync } from "@/hooks/useRecordingStateSync"
 import { useRecordingStop } from "@/hooks/useRecordingStop"
 import { useLanguage } from "@/lib/i18n"
 import { getMeetingDisplayInfo } from "@/lib/meetingDisplay"
+import { isRecordingNavigationLocked } from "@/lib/recordingNavigation"
 import { RecordingDrawerShell } from "./recording-drawer-shell"
-
-const LOCKED_STATUSES = new Set<RecordingStatus>([
-  RecordingStatus.STARTING,
-  RecordingStatus.RECORDING,
-  RecordingStatus.STOPPING,
-  RecordingStatus.PROCESSING_TRANSCRIPTS,
-  RecordingStatus.SAVING,
-])
 
 export default function RecordingPage() {
   const { lang, t } = useLanguage()
@@ -50,6 +43,8 @@ export default function RecordingPage() {
     endTime: transcript.audio_end_time,
     text: transcript.text,
     confidence: transcript.confidence,
+    speaker: transcript.speaker,
+    speaker_id: transcript.speaker_id,
   })), [transcripts])
 
   const displayMeetingTitle = useMemo(() => {
@@ -57,7 +52,10 @@ export default function RecordingPage() {
     return getMeetingDisplayInfo({ title: meetingTitle }, lang).title
   }, [lang, meetingTitle, t])
 
-  const locked = recordingState.isRecording || LOCKED_STATUSES.has(recordingState.status)
+  const locked = isRecordingNavigationLocked(
+    recordingState.isRecording,
+    recordingState.status,
+  )
   const isStarting = recordingState.status === RecordingStatus.STARTING
   const isFinalizing =
     recordingState.status === RecordingStatus.STOPPING ||
@@ -76,9 +74,6 @@ export default function RecordingPage() {
           <h1 className="memento-screen-title truncate text-foreground">
             {displayMeetingTitle}
           </h1>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            {isFinalizing ? t("Saving meeting…") : isStarting ? t("Starting recording…") : t("Meeting recording")}
-          </p>
         </header>
 
         <main className="min-h-0 flex-1 overflow-hidden">
@@ -100,19 +95,14 @@ export default function RecordingPage() {
           )}
         </main>
 
-        {recordingState.isRecording && (
+        {(recordingState.isRecording || isFinalizing) && (
           <footer className="shrink-0 border-t border-border px-[var(--drawer-content-inset)] py-4">
             <RecordOverlay
               title={displayMeetingTitle}
               meetingId={currentMeetingId}
               onStop={stopRecording}
+              isFinalizing={isFinalizing}
             />
-          </footer>
-        )}
-        {isFinalizing && (
-          <footer className="flex shrink-0 items-center justify-center gap-2 border-t border-border px-[var(--drawer-content-inset)] py-5 text-sm text-muted-foreground">
-            <Loader2 className="size-4 animate-spin" />
-            <span>{t("Saving meeting…")}</span>
           </footer>
         )}
       </div>

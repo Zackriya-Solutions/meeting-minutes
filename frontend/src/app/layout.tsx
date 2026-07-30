@@ -30,6 +30,7 @@ import { isAudioExtension, getAudioFormatsDisplayList } from '@/constants/audioF
 import { ManagedDefaultsMigrationDialog } from '@/components/ManagedDefaultsMigrationDialog'
 import { AutoMeetingDetection } from '@/components/AutoMeetingDetection'
 import { ThemeProvider, useTheme } from 'next-themes'
+import { RecordingNavigationGuard } from '@/components/RecordingNavigationGuard'
 
 function NativeWindowThemeSync() {
   const { resolvedTheme } = useTheme()
@@ -250,6 +251,7 @@ export default function RootLayout({
                                   <DownloadProgressToastProvider />
                                   <ManagedDefaultsMigrationDialog />
                                   <AutoMeetingDetection />
+                                  <RecordingNavigationGuard />
 
                                   <div>
                                     <GlobalSettingsButton />

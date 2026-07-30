@@ -63,7 +63,20 @@ export function RecordingDrawerShell({
       <DrawerIndent
         ref={backgroundRef}
         data-home-scroll-container
-        className="route-drawer-background h-screen overflow-hidden"
+        aria-disabled={locked || undefined}
+        onClickCapture={locked ? (event) => {
+          event.preventDefault()
+          event.stopPropagation()
+        } : undefined}
+        onContextMenuCapture={locked ? (event) => {
+          event.preventDefault()
+          event.stopPropagation()
+        } : undefined}
+        onSubmitCapture={locked ? (event) => {
+          event.preventDefault()
+          event.stopPropagation()
+        } : undefined}
+        className={`route-drawer-background h-screen overflow-x-hidden overflow-y-auto${locked ? " select-none" : ""}`}
       >
         <HomeMeetingList animateOnMount={false} />
       </DrawerIndent>

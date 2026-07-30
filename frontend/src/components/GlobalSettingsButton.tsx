@@ -7,6 +7,7 @@ import { Icon } from '@/components/memento/Icon';
 import { Button } from '@/components/ui/button';
 import { RecordingStatus, useRecordingState } from '@/contexts/RecordingStateContext';
 import { useT } from '@/lib/i18n';
+import { isRecordingNavigationLocked } from '@/lib/recordingNavigation';
 import { IconMoon, IconSun } from '@/vendor/deslop/material-symbols-react';
 
 export function GlobalSettingsButton() {
@@ -15,7 +16,8 @@ export function GlobalSettingsButton() {
   const { setTheme } = useTheme();
   const { isRecording, status } = useRecordingState();
   const t = useT();
-  const canStartMeeting = !isRecording && (
+  const navigationLocked = isRecordingNavigationLocked(isRecording, status);
+  const canStartMeeting = !navigationLocked && (
     status === RecordingStatus.IDLE ||
     status === RecordingStatus.COMPLETED ||
     status === RecordingStatus.ERROR
@@ -65,7 +67,7 @@ export function GlobalSettingsButton() {
         </span>
       </Button>
 
-      {pathname !== '/settings' ? (
+      {pathname !== '/settings' && !navigationLocked ? (
         <Button
           asChild
           type="button"
@@ -76,6 +78,18 @@ export function GlobalSettingsButton() {
           <Link href="/settings" aria-label={t('Settings')} title={t('Settings')}>
             <Icon name="settings" size={22} />
           </Link>
+        </Button>
+      ) : pathname !== '/settings' ? (
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          disabled
+          className="global-header-action h-10 w-10 rounded-full border-0 shadow-none"
+          aria-label={t('Settings')}
+          title={t('Settings')}
+        >
+          <Icon name="settings" size={22} />
         </Button>
       ) : null}
     </div>
