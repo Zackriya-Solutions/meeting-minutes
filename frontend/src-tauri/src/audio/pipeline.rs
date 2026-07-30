@@ -13,6 +13,15 @@ use super::recording_state::{AudioChunk, AudioError, RecordingState, DeviceType}
 use super::audio_processing::{audio_to_mono, LoudnessNormalizer, NoiseSuppressionProcessor, HighPassFilter};
 use super::vad::{ContinuousVadProcessor};
 
+/// How long a silence must last before the VAD closes a speech segment, and
+/// therefore how long the audio clips handed to the ASR engine are.
+///
+/// Kept equal to `import.rs::VAD_REDEMPTION_TIME_MS` and
+/// `retranscription.rs::VAD_REDEMPTION_TIME_MS` so that live recording and
+/// offline re-transcription of the same audio segment identically. Raising this
+/// trades live-transcript latency for longer, more accurate ASR requests.
+const VAD_REDEMPTION_TIME_MS: u32 = 2000;
+
 /// Ring buffer for synchronized audio mixing
 /// Accumulates samples from mic and system streams until we have aligned windows
 struct AudioMixerRingBuffer {
@@ -719,16 +728,34 @@ impl AudioPipeline {
         // For now, we log it for monitoring and potential optimization
         let _ = (mic_device_name, mic_device_kind, system_device_name, system_device_kind);
 
-        // Create VAD processor with balanced redemption time for speech accumulation
-        // The VAD processor now handles 48kHz->16kHz resampling internally
-        // This bridges natural pauses without excessive fragmentation
-        // For mac os core audio, 900ms, for windows 400ms seems good
-
-        let redemption_time = if cfg!(target_os = "macos") { 400 } else { 400 };
-
-        let vad_processor = match ContinuousVadProcessor::new(sample_rate, redemption_time) {
+        // Create VAD processor. The VAD processor handles 48kHz->16kHz resampling
+        // internally.
+        //
+        // Redemption time is how long a silence must last before the VAD closes a
+        // speech segment, so it decides how long the audio clips handed to the ASR
+        // engine are. Conversational speech pauses constantly for breath and
+        // mid-sentence thought, and every pause longer than this becomes a segment
+        // boundary and therefore a separate transcription request.
+        //
+        // This was 400ms, which fragmented a 26-minute meeting into 322 requests with
+        // a median length of 3.5s. Whisper is a fixed 30-second-window model: below
+        // that it zero-pads the window and leans on its language-model prior, which
+        // was trained on web subtitles, so short clips come back as memorised
+        // boilerplate ("subscribe to the channel", "thank you") instead of speech.
+        // Measured on a real recording, 47% of segment boundaries sat in the
+        // 0.42-0.75s range that a longer redemption simply bridges.
+        //
+        // 2000ms matches what the offline paths already use (see
+        // `import.rs::VAD_REDEMPTION_TIME_MS` and
+        // `retranscription.rs::VAD_REDEMPTION_TIME_MS`), so live and batch
+        // transcription now segment identically. It costs up to ~1.6s of extra
+        // live-transcript latency at the end of each utterance.
+        let vad_processor = match ContinuousVadProcessor::new(sample_rate, VAD_REDEMPTION_TIME_MS) {
             Ok(processor) => {
-                info!("VAD-driven pipeline: VAD segments will be sent directly to Whisper (no time-based accumulation)");
+                info!(
+                    "VAD-driven pipeline: segments dispatched per speech burst (redemption_time={}ms)",
+                    VAD_REDEMPTION_TIME_MS
+                );
                 processor
             }
             Err(e) => {
