@@ -67,43 +67,28 @@ const BOILERPLATE_PATTERNS: &[&str] = &[
     "لا تنسوا الاشتراك",
 ];
 
-/// Standalone filler that is only ever a hallucination when it constitutes the
-/// entire segment. Unlike [`BOILERPLATE_PATTERNS`] these are matched against the
-/// whole trimmed string, because the same words are legitimate mid-sentence.
-///
-/// Whisper's Arabic "شكرا" attractor is the direct analogue of its English
-/// "Thank you." attractor on near-silent input.
-const STANDALONE_FILLER: &[&str] = &[
-    // English
-    "thank you",
-    "thank you.",
-    "thanks",
-    "you",
-    "bye",
-    "okay",
-    // Arabic — "thank you" in its common orthographic variants
-    "شكرا",
-    "شكراً",
-    "شكرا.",
-    "شكراً.",
-    "شكرا لك",
-    "شكراً لك",
-    "شكرا لكم",
-    "شكراً لكم",
-    "شكرا جزيلا",
-    "شكراً جزيلاً",
-];
-
-/// Strip trailing punctuation and Arabic tatweel so orthographic variants of the
-/// same filler word collapse to one form for comparison.
-fn normalize_for_filler_match(text: &str) -> String {
-    text.trim()
-        .trim_end_matches(|c: char| matches!(c, '.' | '!' | '?' | '،' | '؟' | '۔' | ',' | ' '))
-        .replace('\u{0640}', "") // ARABIC TATWEEL
-        .to_lowercase()
-}
+// DELIBERATELY ABSENT: a denylist of standalone filler words such as "thank you",
+// "okay", "thanks" or Arabic "شكرا".
+//
+// Whisper does hallucinate exactly those on near-silent input, so filtering them
+// is tempting. But they are also completely ordinary meeting speech, and *nothing
+// in the text distinguishes the two cases* — "شكرا" produced from 300ms of silence
+// and "شكرا" produced from someone actually saying it are byte-identical.
+//
+// Dropping them by text therefore trades a cosmetic annoyance (a stray "thanks" in
+// the transcript) for a semantic one (a participant's answer silently missing).
+// Issue #675 is the maintainers reporting that exact failure for "OK" / "Yes" /
+// "Thanks", so a text-only filler list here would compound a known bug.
+//
+// Short-clip hallucination is instead handled where the evidence actually lives:
+// the provider layer, using Whisper's own `avg_logprob` / `compression_ratio`
+// scores. Only unambiguous multi-word boilerplate — phrases that never occur in a
+// meeting — is filtered by text.
 
 /// True when `text` is a whole-segment hallucination rather than speech.
+///
+/// Conservative by construction: it must be possible to tell from the text alone,
+/// with no plausible reading in which the text is genuine speech.
 pub fn is_meaningless_output(text: &str) -> bool {
     let trimmed = text.trim();
     if trimmed.is_empty() {
@@ -114,14 +99,6 @@ pub fn is_meaningless_output(text: &str) -> bool {
     if BOILERPLATE_PATTERNS
         .iter()
         .any(|pattern| lower.contains(pattern))
-    {
-        return true;
-    }
-
-    let normalized = normalize_for_filler_match(trimmed);
-    if STANDALONE_FILLER
-        .iter()
-        .any(|filler| normalized == normalize_for_filler_match(filler))
     {
         return true;
     }
@@ -232,18 +209,20 @@ pub fn clean_transcript_text(text: &str) -> String {
         return trimmed.to_string();
     }
 
+    // Judge degeneracy on the ORIGINAL text. A segment that is overwhelmingly one
+    // repeated word is a decoder loop whatever that word happens to be, so this
+    // catches "شكرا شكرا شكرا شكرا شكرا" without needing to know what "شكرا" means.
+    // Measuring after collapsing would hide it: collapsing leaves one word, and one
+    // word has a repetition ratio of zero.
+    if calculate_repetition_ratio(trimmed) > MAX_REPETITION_RATIO {
+        return String::new();
+    }
+
     let cleaned_words = remove_word_repetitions(&words);
     let cleaned_words = remove_phrase_repetitions(&cleaned_words);
 
     let final_text = cleaned_words.join(" ");
     if calculate_repetition_ratio(&final_text) > MAX_REPETITION_RATIO {
-        return String::new();
-    }
-
-    // Re-check after collapsing: a repeated hallucination such as
-    // "شكرا شكرا شكرا" only becomes recognisable as standalone filler once the
-    // repetition has been removed.
-    if is_meaningless_output(&final_text) {
         return String::new();
     }
 
@@ -267,15 +246,29 @@ mod tests {
         assert_eq!(clean_transcript_text("ترجمة نانسي قنقر"), "");
     }
 
+    /// Regression guard for issue #675: short acknowledgements are real speech and
+    /// must survive. Whisper does hallucinate these on near-silent input, but the
+    /// text cannot tell the two apart, so dropping them here would silently delete a
+    /// participant's answer. That case is handled at the provider layer using
+    /// Whisper's own confidence scores instead.
     #[test]
-    fn drops_standalone_arabic_thank_you_in_all_orthographies() {
-        for variant in ["شكرا", "شكراً", "شكرا لك", "شكراً جزيلاً", "شكرا."] {
+    fn keeps_short_acknowledgements_issue_675() {
+        for reply in [
+            "OK", "Yes", "No", "Sure", "Got it", "Thanks", "Okay.", "Bye",
+            "شكرا", "شكراً", "شكرا لك", "نعم", "طيب", "لا",
+        ] {
             assert_eq!(
-                clean_transcript_text(variant),
-                "",
-                "expected {variant:?} to be filtered"
+                clean_transcript_text(reply),
+                reply,
+                "expected the short reply {reply:?} to survive cleaning"
             );
         }
+    }
+
+    #[test]
+    fn keeps_tatweel_stretched_words() {
+        // Tatweel stretches a word without changing it; it is still real speech.
+        assert_eq!(clean_transcript_text("شكـــرا"), "شكـــرا");
     }
 
     #[test]
@@ -345,9 +338,4 @@ mod tests {
         assert!(is_meaningless_output("............."));
     }
 
-    #[test]
-    fn tatweel_variants_normalize_to_the_same_filler() {
-        // ARABIC TATWEEL stretches a word without changing it.
-        assert_eq!(clean_transcript_text("شكـــرا"), "");
-    }
 }
