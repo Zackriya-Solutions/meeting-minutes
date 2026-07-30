@@ -77,3 +77,7 @@ experiments/
 target/
 
 frontend/src-tauri/binaries/
+
+# Tooling artifacts (not for upstream PRs)
+.hermes/
+graphify-out/

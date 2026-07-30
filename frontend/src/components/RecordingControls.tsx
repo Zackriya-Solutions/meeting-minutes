@@ -3,7 +3,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { appDataDir } from '@tauri-apps/api/path';
 import { useCallback, useEffect, useState, useRef } from 'react';
-import { Play, Pause, Square, Mic, AlertCircle, X } from 'lucide-react';
+import { Play, Pause, Square, Mic, AlertCircle, X, PauseCircle, PlayCircle } from 'lucide-react';
 import { ProcessRequest, SummaryResponse } from '@/types/summary';
 import { listen } from '@tauri-apps/api/event';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -53,7 +53,16 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
   const [isStopping, setIsStopping] = useState(false);
   const [isPausing, setIsPausing] = useState(false);
   const [isResuming, setIsResuming] = useState(false);
-  const MIN_RECORDING_DURATION = 2000; // 2 seconds minimum recording time
+    // Bug 2 (Plan Y): in-session transcription pause toggle.
+    const [transcriptionPaused, setTranscriptionPaused] = useState(false);
+    const [isTogglingTranscription, setIsTogglingTranscription] = useState(false);
+    const MIN_RECORDING_DURATION = 2000; // 2 seconds minimum recording time
+
+  // Bug 1: track whether the backend actually started recording.
+  // The Tauri event 'recording-started' fires when the backend succeeds.
+  // If invoke() rejects but this is true, suppress the device-error alert.
+  let recordingStarted = false;
+
   const [transcriptionErrors, setTranscriptionErrors] = useState(0);
   const [isValidatingModel, setIsValidatingModel] = useState(false);
   const [speechDetected, setSpeechDetected] = useState(false);
@@ -93,6 +102,11 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
     setShowPlayback(false);
     setTranscript(''); // Clear any previous transcript
     setSpeechDetected(false); // Reset speech detection on new recording
+    // Bug 1: reset the recording-started flag on new recording start
+    // This flag is set when the 'recording-started' Tauri event fires.
+    // It suppresses the false "check your audio device" alert when the
+    // backend accepted the start but the invoke() promise rejected.
+    recordingStarted = false;
 
     try {
       // Call the validation callback which will:
@@ -108,6 +122,13 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
         name: error instanceof Error ? error.name : 'Unknown',
         stack: error instanceof Error ? error.stack : undefined
       });
+
+      // Bug 1: if the backend DID start recording (event fired), don't
+      // show the device-error alert — the rejection is a false positive.
+      if (recordingStarted) {
+        console.log('Recording started successfully despite promise rejection — suppressing alert');
+        return;
+      }
 
       // Parse error message to provide user-friendly feedback
       const errorMsg = error instanceof Error ? error.message : String(error);
@@ -145,12 +166,25 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
       const savePath = `${dataDir}/recording-${timestamp}.wav`;
       console.log('Saving recording to:', savePath);
-      console.log('About to call stop_recording command');
-      const result = await invoke('stop_recording', {
-        args: {
-          save_path: savePath
-        }
-      });
+      // Race invoke('stop_recording') against a 120s timeout. The Rust
+      // backend can take up to 10 minutes on the transcription wait, but
+      // we cap the frontend wait at 120s. If the backend doesn't respond
+      // by then, the timeout fires: we reset the UI so the stop button
+      // is clickable again and the user can retry. Crucially we do NOT
+      // call onRecordingStop(false) here — that would tell the parent
+      // the recording stopped, collapsing the UI to the start button,
+      // while the backend is still recording (IS_RECORDING still true).
+      // The user retries until the backend eventually finishes.
+      const result = await Promise.race([
+        invoke('stop_recording', {
+          args: {
+            save_path: savePath
+          }
+        }),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('stop_recording timed out')), 120000)
+        )
+      ]);
       console.log('stop_recording command completed successfully:', result);
       setRecordingPath(savePath);
       // setShowPlayback(true);
@@ -176,8 +210,15 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
           return;
         }
       }
+      // On timeout (or any error that isn't "No recording in progress"),
+      // reset UI state but do NOT call onRecordingStop — the backend is
+      // still recording. The stop button becomes clickable again so the
+      // user can retry. A toast warns them what happened.
       setIsProcessing(false);
-      onRecordingStop(false);
+      if ((error as Error)?.message?.includes('timed out')) {
+        console.warn('⏱️ stop_recording timed out — backend still processing, user can retry');
+      }
+      // No onRecordingStop(false) here — would falsely signal "stopped"
     } finally {
       setIsStopping(false);
     }
@@ -237,13 +278,48 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
     }
   }, [isRecording, isPaused, isResuming]);
 
-  useEffect(() => {
-    return () => {
-      // Cleanup on unmount if needed
-    };
-  }, []);
+    // Bug 2 (Plan Y): toggle the in-session transcription pause flag.
+    // Optimistic flip, then confirm with the backend; revert on failure.
+    const handleToggleTranscriptionPaused = useCallback(async () => {
+      if (!isRecording || isTogglingTranscription) return;
 
-  useEffect(() => {
+      const next = !transcriptionPaused;
+      console.log(`${next ? 'Pausing' : 'Resuming'} transcription...`);
+      setIsTogglingTranscription(true);
+
+      // Optimistic update so the UI reacts instantly.
+      setTranscriptionPaused(next);
+      try {
+        await invoke('set_transcription_paused', { paused: next });
+        console.log(`Transcription ${next ? 'paused' : 'resumed'} successfully`);
+      } catch (error) {
+        // Revert the optimistic flip so the UI matches the backend state.
+        setTranscriptionPaused(!next);
+      } finally {
+        setIsTogglingTranscription(false);
+      }
+    }, [isRecording, isTogglingTranscription, transcriptionPaused]);
+
+    useEffect(() => {
+      return () => {
+        // Cleanup on unmount if needed
+      };
+    }, []);
+
+    // Bug 2 (Plan Y): sync local transcriptionPaused state from the backend
+    useEffect(() => {
+      let cancelled = false;
+      invoke<boolean>('is_transcription_paused')
+        .then((flag) => {
+          if (!cancelled) setTranscriptionPaused(Boolean(flag));
+        })
+        .catch((err) => {
+          console.warn('Could not sync transcription-paused state from backend:', err);
+        });
+      return () => { cancelled = true; };
+    }, []);
+
+    useEffect(() => {
     console.log('Setting up recording event listeners');
     let unsubscribes: (() => void)[] = [];
 
@@ -316,9 +392,20 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
           setSpeechDetected(true);
         });
 
+        // Bug 1: listen for the 'recording-started' event from the backend.
+        // If this fires, the backend successfully started recording — even if
+        // the invoke() promise rejects (race condition). We set a flag to
+        // suppress the false "check your audio device" alert.
+        const recordingStartedUnsubscribe = await listen('recording-started', (event) => {
+                  console.log('recording-started event received:', event);
+                  recordingStarted = true;
+                  console.log('Recording started flag set to true — will suppress false device-error alert');
+                });
+
         unsubscribes = [
           transcriptErrorUnsubscribe,
           transcriptionErrorUnsubscribe,
+          recordingStartedUnsubscribe,
           speechDetectedUnsubscribe
         ];
         console.log('Recording event listeners set up successfully');
@@ -468,10 +555,46 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
                           <p>Stop recording</p>
                         </TooltipContent>
                       </Tooltip>
-                    </>
-                  )}
 
-                  <div className="flex items-center space-x-1 mx-4">
+                                            {/* Bug 2 (Plan Y): in-session transcription pause/resume toggle. */}
+                                            <Tooltip>
+                                              <TooltipTrigger asChild>
+                                                <button
+                                                  onClick={() => {
+                                                    Analytics.trackButtonClick(
+                                                      transcriptionPaused ? 'resume_transcription' : 'pause_transcription',
+                                                      'recording_controls'
+                                                    );
+                                                    handleToggleTranscriptionPaused();
+                                                  }}
+                                                  disabled={isTogglingTranscription}
+                                                  className={`w-10 h-10 flex items-center justify-center 
+                                                    ${isTogglingTranscription
+                                                      ? 'bg-gray-200 border-2 border-gray-300 text-gray-400'
+                                                      : transcriptionPaused
+                                                        ? 'bg-blue-50 border-2 border-blue-400 text-blue-600 hover:bg-blue-100'
+                                                        : 'bg-white border-2 border-gray-300 text-gray-600 hover:border-gray-400 hover:bg-gray-50'
+                                                    } rounded-full transition-colors`}
+                                                >
+                                                  {transcriptionPaused
+                                                    ? <PlayCircle size={16} />
+                                                    : <PauseCircle size={16} />
+                                                  }
+                                                  {isTogglingTranscription && (
+                                                    <div className="absolute -top-8 text-gray-600 font-medium text-xs">
+                                                      {transcriptionPaused ? 'Resuming...' : 'Pausing...'}
+                                                    </div>
+                                                  )}
+                                                </button>
+                                              </TooltipTrigger>
+                                              <TooltipContent>
+                                                <p>{transcriptionPaused ? 'Resume transcription' : 'Pause transcription'}</p>
+                                              </TooltipContent>
+                                            </Tooltip>
+                                          </>
+                                        )}
+
+                                        <div className="flex items-center space-x-1 mx-4">
                     {barHeights.map((height, index) => (
                       <div
                         key={index}

@@ -173,37 +173,59 @@ impl SettingsRepository {
     }
 
     pub async fn save_transcript_api_key(
-        pool: &SqlitePool,
-        provider: &str,
-        api_key: &str,
-    ) -> std::result::Result<(), sqlx::Error> {
-        let api_key_column = match provider {
-            "localWhisper" => "whisperApiKey",
-            "parakeet" => return Ok(()), // Parakeet doesn't need an API key, return early
-            "deepgram" => "deepgramApiKey",
-            "elevenLabs" => "elevenLabsApiKey",
-            "groq" => "groqApiKey",
-            "openai" => "openaiApiKey",
-            _ => {
-                return Err(sqlx::Error::Protocol(
-                    format!("Invalid provider: {}", provider).into(),
-                ))
-            }
-        };
+            pool: &SqlitePool,
+            provider: &str,
+            api_key: &str,
+        ) -> std::result::Result<(), sqlx::Error> {
+            let api_key_column = match provider {
+                "localWhisper" => "whisperApiKey",
+                "parakeet" => return Ok(()), // Parakeet doesn't need an API key, return early
+                "deepgram" => "deepgramApiKey",
+                "elevenLabs" => "elevenLabsApiKey",
+                "groq" => "groqApiKey",
+                "openai" => "openaiApiKey",
+                _ => {
+                    return Err(sqlx::Error::Protocol(
+                        format!("Invalid provider: {}", provider).into(),
+                    ))
+                }
+            };
 
-        let query = format!(
-            r#"
-            INSERT INTO transcript_settings (id, provider, model, "{}")
-            VALUES ('1', 'parakeet', '{}', $1)
-            ON CONFLICT(id) DO UPDATE SET
-                "{}" = $1
-            "#,
-            api_key_column, crate::config::DEFAULT_PARAKEET_MODEL, api_key_column
-        );
-        sqlx::query(&query).bind(api_key).execute(pool).await?;
+            // First get the current model to preserve it
+            let current_model: Option<String> = sqlx::query_scalar(
+                "SELECT model FROM transcript_settings WHERE id = '1' LIMIT 1"
+            )
+            .fetch_optional(pool)
+            .await?;
 
-        Ok(())
-    }
+            let current_model = current_model.unwrap_or_else(|| {
+                if provider == "parakeet" {
+                    crate::config::DEFAULT_PARAKEET_MODEL.to_string()
+                } else {
+                    String::new()
+                }
+            });
+
+            let query = format!(
+                r#"
+                INSERT INTO transcript_settings (id, provider, model, "{}")
+                VALUES ('1', $1, $2, $3)
+                ON CONFLICT(id) DO UPDATE SET
+                    provider = excluded.provider,
+                    model = excluded.model,
+                    "{}" = $3
+                "#,
+                api_key_column, api_key_column
+            );
+            sqlx::query(&query)
+                .bind(provider)
+                .bind(current_model)
+                .bind(api_key)
+                .execute(pool)
+                .await?;
+
+            Ok(())
+        }
 
     pub async fn get_transcript_api_key(
         pool: &SqlitePool,
@@ -212,6 +234,14 @@ impl SettingsRepository {
         let api_key_column = match provider {
             "localWhisper" => "whisperApiKey",
             "parakeet" => return Ok(None), // Parakeet doesn't need an API key
+            // Keyless providers. Neither has an API-key column, so the catch-all
+            // below would return Err and make api_get_transcript_config fail for
+            // the entire config — which the frontend reads as "provider
+            // unreadable" and turns into a false "Transcription model not ready"
+            // on Record. RemoteProvider authenticates with the bearer token held
+            // in remote_config, not from this table.
+            "remote" => return Ok(None),
+            "disabled" | "none" | "" => return Ok(None),
             "deepgram" => "deepgramApiKey",
             "elevenLabs" => "elevenLabsApiKey",
             "groq" => "groqApiKey",
@@ -229,6 +259,38 @@ impl SettingsRepository {
         );
         let api_key = sqlx::query_scalar(&query).fetch_optional(pool).await?;
         Ok(api_key)
+    }
+
+    /// Save the RemoteProvider configuration as a JSON blob.
+    /// Other providers ignore this column. Stored per-row at id='1'.
+    pub async fn save_transcript_remote_config(
+        pool: &SqlitePool,
+        config_json: &str,
+    ) -> std::result::Result<(), sqlx::Error> {
+        sqlx::query(
+            r#"
+            INSERT INTO transcript_settings (id, provider, model, remoteConfig)
+            VALUES ('1', 'remote', 'default', $1)
+            ON CONFLICT(id) DO UPDATE SET
+                remoteConfig = excluded.remoteConfig
+            "#,
+        )
+        .bind(config_json)
+        .execute(pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Fetch the RemoteProvider configuration JSON, if any.
+    pub async fn get_transcript_remote_config(
+        pool: &SqlitePool,
+    ) -> std::result::Result<Option<String>, sqlx::Error> {
+        let row: Option<(Option<String>,)> = sqlx::query_as(
+            "SELECT remoteConfig FROM transcript_settings WHERE id = '1' LIMIT 1",
+        )
+        .fetch_optional(pool)
+        .await?;
+        Ok(row.and_then(|(c,)| c))
     }
 
     pub async fn delete_api_key(
