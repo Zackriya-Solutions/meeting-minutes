@@ -398,155 +398,6 @@ impl WhisperEngine {
         self.current_context.read().await.is_some()
     }
     
-    // Enhanced function to clean repetitive text patterns and meaningless outputs
-    fn clean_repetitive_text(text: &str) -> String {
-        if text.is_empty() {
-            return String::new();
-        }
-
-        // Check for obviously meaningless patterns first
-        if Self::is_meaningless_output(text) {
-            // Performance optimization: reduce meaningless output logging to debug level
-            perf_debug!("Detected meaningless output, returning empty: '{}'", text);
-            return String::new();
-        }
-
-        let words: Vec<&str> = text.split_whitespace().collect();
-        if words.len() < 3 {
-            return text.to_string();
-        }
-
-        // Enhanced repetition detection with sliding window
-        let cleaned_words = Self::remove_word_repetitions(&words);
-
-        // Remove phrase repetitions with more sophisticated detection
-        let cleaned_words = Self::remove_phrase_repetitions(&cleaned_words);
-
-        // Check for overall repetition ratio
-        let final_text = cleaned_words.join(" ");
-        if Self::calculate_repetition_ratio(&final_text) > 0.7 {
-            // Performance optimization: reduce repetition ratio logging to debug level
-            perf_debug!("High repetition ratio detected, filtering out: '{}'", final_text);
-            return String::new();
-        }
-
-        final_text
-    }
-
-    // Check for obviously meaningless patterns
-    fn is_meaningless_output(text: &str) -> bool {
-        let text_lower = text.to_lowercase();
-
-        // Check for common meaningless patterns
-        let meaningless_patterns = [
-            "thank you for watching",
-            "thanks for watching",
-            "like and subscribe",
-            "music playing",
-            "applause",
-            "laughter",
-            "um um um",
-            "uh uh uh",
-            "ah ah ah",
-        ];
-
-        for pattern in &meaningless_patterns {
-            if text_lower.contains(pattern) {
-                return true;
-            }
-        }
-
-        // Check if text is mostly the same character or very short repetitive patterns
-        let unique_chars: HashSet<char> = text.chars().collect();
-        if unique_chars.len() <= 3 && text.len() > 10 {
-            return true;
-        }
-
-        false
-    }
-
-    // Enhanced word repetition removal
-    fn remove_word_repetitions<'a>(words: &'a [&'a str]) -> Vec<&'a str> {
-        let mut cleaned_words = Vec::new();
-        let mut i = 0;
-
-        while i < words.len() {
-            let current_word = words[i];
-            let mut repeat_count = 1;
-
-            // Count consecutive repetitions of the same word
-            while i + repeat_count < words.len() && words[i + repeat_count] == current_word {
-                repeat_count += 1;
-            }
-
-            // Be more aggressive: if word is repeated 2+ times, only keep one instance
-            if repeat_count >= 2 {
-                cleaned_words.push(current_word);
-                i += repeat_count;
-            } else {
-                cleaned_words.push(current_word);
-                i += 1;
-            }
-        }
-
-        cleaned_words
-    }
-
-    // Enhanced phrase repetition removal with variable length detection
-    fn remove_phrase_repetitions<'a>(words: &'a [&'a str]) -> Vec<&'a str> {
-        if words.len() < 4 {
-            return words.to_vec();
-        }
-
-        let mut final_words = Vec::new();
-        let mut i = 0;
-
-        while i < words.len() {
-            let mut phrase_found = false;
-
-            // Check for 2-word to 5-word phrase repetitions
-            for phrase_len in 2..=std::cmp::min(5, (words.len() - i) / 2) {
-                if i + phrase_len * 2 <= words.len() {
-                    let phrase1 = &words[i..i + phrase_len];
-                    let phrase2 = &words[i + phrase_len..i + phrase_len * 2];
-
-                    if phrase1 == phrase2 {
-                        // Add the phrase once and skip the repetition
-                        final_words.extend_from_slice(phrase1);
-                        i += phrase_len * 2;
-                        phrase_found = true;
-                        break;
-                    }
-                }
-            }
-
-            if !phrase_found {
-                final_words.push(words[i]);
-                i += 1;
-            }
-        }
-
-        final_words
-    }
-
-    // Calculate repetition ratio in text
-    fn calculate_repetition_ratio(text: &str) -> f32 {
-        let words: Vec<&str> = text.split_whitespace().collect();
-        if words.len() < 4 {
-            return 0.0;
-        }
-
-        let mut word_counts = HashMap::new();
-        for word in &words {
-            *word_counts.entry(word.to_lowercase()).or_insert(0) += 1;
-        }
-
-        let total_words = words.len() as f32;
-        let repeated_words: usize = word_counts.values().map(|&count| if count > 1 { count - 1 } else { 0 }).sum();
-
-        repeated_words as f32 / total_words
-    }
-    
     /// Transcribe audio with streaming support for partial results and adaptive quality
     pub async fn transcribe_audio_with_confidence(&self, audio_data: Vec<f32>, language: Option<String>) -> Result<(String, f32, bool)> {
         let ctx_lock = self.current_context.read().await;
@@ -654,7 +505,8 @@ impl WhisperEngine {
         }
 
         let final_result = result.trim().to_string();
-        let cleaned_result = Self::clean_repetitive_text(&final_result);
+        let cleaned_result =
+            crate::audio::transcription::text_cleanup::clean_transcript_text(&final_result);
 
         let avg_confidence = if segment_count > 0 {
             total_confidence / segment_count as f32
@@ -814,7 +666,8 @@ impl WhisperEngine {
         let final_result = result.trim().to_string();
 
         // Check for repetition loops and clean them up
-        let cleaned_result = Self::clean_repetitive_text(&final_result);
+        let cleaned_result =
+            crate::audio::transcription::text_cleanup::clean_transcript_text(&final_result);
 
         // Performance optimization: smart logging for transcription results
         if cleaned_result.is_empty() {
