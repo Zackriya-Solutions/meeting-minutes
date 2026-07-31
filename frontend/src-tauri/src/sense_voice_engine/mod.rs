@@ -1,6 +1,9 @@
-//! Embedded SenseVoice support backed by sherpa-onnx.
+//! Embedded SenseVoice support with native CoreML on Apple Silicon and
+//! sherpa-onnx on other platforms.
 
 pub mod commands;
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+mod coreml;
 mod engine;
 mod model;
 

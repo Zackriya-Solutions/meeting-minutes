@@ -1,3 +1,5 @@
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+use super::coreml::CoreMlSenseVoiceModel;
 use super::model::{
     inspect_model, mark_model_verified, model_info, verify_model_file, verify_model_hashes,
     DownloadProgress, ModelInfo, ModelStatus, MODEL_BASE_URL, MODEL_FILES, MODEL_REVISION,
@@ -10,21 +12,28 @@ use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
 use futures_util::StreamExt;
 use reqwest::header::RANGE;
+#[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
 use sherpa_onnx::{OfflineRecognizer, OfflineRecognizerConfig, OfflineSenseVoiceModelConfig};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::io::AsyncWriteExt;
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 
 const SAMPLE_RATE: i32 = 16_000;
 const MIN_AUDIO_SAMPLES: usize = 1_600;
 
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+type LoadedSenseVoiceModel = CoreMlSenseVoiceModel;
+#[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+type LoadedSenseVoiceModel = OfflineRecognizer;
+
 pub struct SenseVoiceEngine {
     models_dir: PathBuf,
-    recognizer: RwLock<Option<Arc<OfflineRecognizer>>>,
+    model: RwLock<Option<Arc<LoadedSenseVoiceModel>>>,
     current_model: RwLock<Option<String>>,
+    load_lock: Mutex<()>,
     downloading: AtomicBool,
     cancel_download: AtomicBool,
 }
@@ -39,8 +48,9 @@ impl SenseVoiceEngine {
         })?;
         Ok(Self {
             models_dir,
-            recognizer: RwLock::new(None),
+            model: RwLock::new(None),
             current_model: RwLock::new(None),
+            load_lock: Mutex::new(()),
             downloading: AtomicBool::new(false),
             cancel_download: AtomicBool::new(false),
         })
@@ -59,7 +69,14 @@ impl SenseVoiceEngine {
             return Err(anyhow!("Unknown SenseVoice model: {model_name}"));
         }
         if self.current_model.read().await.as_deref() == Some(model_name)
-            && self.recognizer.read().await.is_some()
+            && self.model.read().await.is_some()
+        {
+            return Ok(());
+        }
+
+        let _load_guard = self.load_lock.lock().await;
+        if self.current_model.read().await.as_deref() == Some(model_name)
+            && self.model.read().await.is_some()
         {
             return Ok(());
         }
@@ -72,26 +89,26 @@ impl SenseVoiceEngine {
             ));
         }
 
-        self.recognizer.write().await.take();
+        self.model.write().await.take();
         self.current_model.write().await.take();
-        let recognizer = tokio::task::spawn_blocking(move || create_recognizer(&model_dir))
+        let model = tokio::task::spawn_blocking(move || create_model(&model_dir))
             .await
             .map_err(|error| anyhow!("SenseVoice model loading task failed: {error}"))??;
 
-        *self.recognizer.write().await = Some(Arc::new(recognizer));
+        *self.model.write().await = Some(Arc::new(model));
         *self.current_model.write().await = Some(model_name.to_string());
         log::info!("SenseVoice model '{}' loaded", model_name);
         Ok(())
     }
 
     pub async fn unload_model(&self) -> bool {
-        let unloaded = self.recognizer.write().await.take().is_some();
+        let unloaded = self.model.write().await.take().is_some();
         self.current_model.write().await.take();
         unloaded
     }
 
     pub async fn is_model_loaded(&self) -> bool {
-        self.recognizer.read().await.is_some()
+        self.model.read().await.is_some()
     }
 
     pub async fn get_current_model(&self) -> Option<String> {
@@ -100,32 +117,25 @@ impl SenseVoiceEngine {
 
     pub async fn transcribe_audio(&self, audio: Vec<f32>) -> Result<String> {
         if audio.len() < MIN_AUDIO_SAMPLES {
-            return Err(anyhow!(
-                "Audio too short: {} samples (minimum {})",
+            log::debug!(
+                "Skipping short SenseVoice audio segment: {} samples (minimum {})",
                 audio.len(),
                 MIN_AUDIO_SAMPLES
-            ));
+            );
+            return Ok(String::new());
         }
 
-        let recognizer = self
-            .recognizer
+        let model = self
+            .model
             .read()
             .await
             .clone()
             .ok_or_else(|| anyhow!("No SenseVoice model is loaded"))?;
         let audio_duration_seconds = audio.len() as f64 / SAMPLE_RATE as f64;
         let started = Instant::now();
-        let text = tokio::task::spawn_blocking(move || {
-            let stream = recognizer.create_stream();
-            stream.accept_waveform(SAMPLE_RATE, &audio);
-            recognizer.decode(&stream);
-            stream
-                .get_result()
-                .map(|result| result.text.trim().to_string())
-                .ok_or_else(|| anyhow!("SenseVoice returned no result"))
-        })
-        .await
-        .map_err(|error| anyhow!("SenseVoice inference task failed: {error}"))??;
+        let text = tokio::task::spawn_blocking(move || transcribe_model(&model, &audio))
+            .await
+            .map_err(|error| anyhow!("SenseVoice inference task failed: {error}"))??;
         log::info!(
             "SenseVoice decoded {:.2}s of audio in {:.2}s (language: auto)",
             audio_duration_seconds,
@@ -172,6 +182,9 @@ impl SenseVoiceEngine {
                 return Err(anyhow!("SenseVoice model download cancelled"));
             }
             let destination = model_dir.join(file.relative_path);
+            if let Some(parent) = destination.parent() {
+                tokio::fs::create_dir_all(parent).await?;
+            }
             let existing_size = tokio::fs::metadata(&destination)
                 .await
                 .map(|metadata| metadata.len())
@@ -263,6 +276,7 @@ impl SenseVoiceEngine {
                 "Downloaded SenseVoice model failed final validation"
             ));
         }
+        cleanup_obsolete_model_files(&model_dir).await;
         emit_progress(progress, MODEL_SIZE_BYTES, initial_bytes, started);
         Ok(())
     }
@@ -290,7 +304,13 @@ impl SenseVoiceEngine {
     }
 }
 
-fn create_recognizer(model_dir: &Path) -> Result<OfflineRecognizer> {
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+fn create_model(model_dir: &Path) -> Result<LoadedSenseVoiceModel> {
+    CoreMlSenseVoiceModel::new(model_dir).map_err(anyhow::Error::new)
+}
+
+#[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+fn create_model(model_dir: &Path) -> Result<LoadedSenseVoiceModel> {
     let mut config = OfflineRecognizerConfig::default();
     config.model_config.sense_voice = OfflineSenseVoiceModelConfig {
         model: Some(path_string(model_dir.join("model.int8.onnx"))?),
@@ -305,6 +325,23 @@ fn create_recognizer(model_dir: &Path) -> Result<OfflineRecognizer> {
         .ok_or_else(|| anyhow!("sherpa-onnx could not create the SenseVoice recognizer"))
 }
 
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+fn transcribe_model(model: &LoadedSenseVoiceModel, audio: &[f32]) -> Result<String> {
+    model.transcribe_samples(audio).map_err(anyhow::Error::new)
+}
+
+#[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+fn transcribe_model(model: &LoadedSenseVoiceModel, audio: &[f32]) -> Result<String> {
+    let stream = model.create_stream();
+    stream.accept_waveform(SAMPLE_RATE, audio);
+    model.decode(&stream);
+    stream
+        .get_result()
+        .map(|result| result.text.trim().to_string())
+        .ok_or_else(|| anyhow!("SenseVoice returned no result"))
+}
+
+#[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
 fn path_string(path: PathBuf) -> Result<String> {
     path.into_os_string()
         .into_string()
@@ -338,6 +375,28 @@ where
         speed_mbps: downloaded_bytes.saturating_sub(initial_bytes) as f64 / 1_048_576.0 / elapsed,
     });
 }
+
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+async fn cleanup_obsolete_model_files(model_dir: &Path) {
+    for relative_path in ["model.int8.onnx", "tokens.txt", "LICENSE"] {
+        let path = model_dir.join(relative_path);
+        match tokio::fs::remove_file(&path).await {
+            Ok(()) => log::info!(
+                "Removed obsolete SenseVoice ONNX artifact {}",
+                path.display()
+            ),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => log::warn!(
+                "Failed to remove obsolete SenseVoice artifact {}: {}",
+                path.display(),
+                error
+            ),
+        }
+    }
+}
+
+#[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+async fn cleanup_obsolete_model_files(_model_dir: &Path) {}
 
 #[async_trait]
 impl TranscriptionProvider for SenseVoiceEngine {
@@ -376,7 +435,7 @@ impl TranscriptionProvider for SenseVoiceEngine {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(all(target_os = "macos", target_arch = "aarch64"))))]
 mod tests {
     use super::*;
 

@@ -708,20 +708,25 @@ pub async fn stop_recording<R: Runtime>(
             }
         }
         Some("senseVoice") => {
-            info!("Unloading SenseVoice model...");
-            let engine = {
-                let guard = crate::sense_voice_engine::commands::SENSE_VOICE_ENGINE
-                    .lock()
-                    .unwrap();
-                guard.as_ref().cloned()
-            };
-            if let Some(engine) = engine {
-                let current_model = engine
-                    .get_current_model()
-                    .await
-                    .unwrap_or_else(|| "unknown".to_string());
-                if engine.unload_model().await {
-                    info!("SenseVoice model '{}' unloaded successfully", current_model);
+            #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+            info!("Keeping the SenseVoice CoreML model resident to reuse its ANE specialization");
+            #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+            {
+                info!("Unloading SenseVoice model...");
+                let engine = {
+                    let guard = crate::sense_voice_engine::commands::SENSE_VOICE_ENGINE
+                        .lock()
+                        .unwrap();
+                    guard.as_ref().cloned()
+                };
+                if let Some(engine) = engine {
+                    let current_model = engine
+                        .get_current_model()
+                        .await
+                        .unwrap_or_else(|| "unknown".to_string());
+                    if engine.unload_model().await {
+                        info!("SenseVoice model '{}' unloaded successfully", current_model);
+                    }
                 }
             }
         }

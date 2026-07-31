@@ -49,14 +49,19 @@ pub(crate) async fn unload_engine_after_batch(provider: &str) {
             }
         }
         "senseVoice" => {
-            let engine = {
-                let guard = crate::sense_voice_engine::commands::SENSE_VOICE_ENGINE
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner());
-                guard.as_ref().cloned()
-            };
-            if let Some(engine) = engine {
-                engine.unload_model().await;
+            #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+            log::info!("Keeping the SenseVoice CoreML model resident after the batch job");
+            #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+            {
+                let engine = {
+                    let guard = crate::sense_voice_engine::commands::SENSE_VOICE_ENGINE
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner());
+                    guard.as_ref().cloned()
+                };
+                if let Some(engine) = engine {
+                    engine.unload_model().await;
+                }
             }
         }
         _ => {

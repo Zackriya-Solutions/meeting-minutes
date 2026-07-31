@@ -4,9 +4,19 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 
 pub const SENSE_VOICE_MODEL: &str = "sense-voice-small-int8";
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+pub const MODEL_REVISION: &str = "cdea3526163035c19915d4a10268992d018ebd46";
+#[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
 pub const MODEL_REVISION: &str = "2365baeacb507f821a0c8120fcee3d484dba7a07";
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+pub const MODEL_BASE_URL: &str =
+    "https://huggingface.co/FluidInference/sensevoice-small-coreml/resolve";
+#[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
 pub const MODEL_BASE_URL: &str =
     "https://huggingface.co/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/resolve";
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+pub const MODEL_SIZE_BYTES: u64 = 239_913_642;
+#[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
 pub const MODEL_SIZE_BYTES: u64 = 239_549_806;
 pub const REVISION_MARKER: &str = ".meetily-model-revision";
 
@@ -17,6 +27,56 @@ pub struct ModelFile {
     pub sha256: &'static str,
 }
 
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+pub const MODEL_FILES: [ModelFile; 9] = [
+    ModelFile {
+        relative_path: "SenseVoicePreprocessor.mlmodelc/analytics/coremldata.bin",
+        size: 243,
+        sha256: "5bdb0b132e48c7e852ec18eeba7e217b6cb7153e6a939ce76b5ed17242e956dd",
+    },
+    ModelFile {
+        relative_path: "SenseVoicePreprocessor.mlmodelc/coremldata.bin",
+        size: 330,
+        sha256: "e64cc73b2a9b01bad799a23874bc20dba3cf3342c23e3f60012c3e884f682944",
+    },
+    ModelFile {
+        relative_path: "SenseVoicePreprocessor.mlmodelc/model.mil",
+        size: 15_008,
+        sha256: "1b9b18be0a35b11165269b1ca071a30af736deb314d8bd82d9540c769137a70e",
+    },
+    ModelFile {
+        relative_path: "SenseVoicePreprocessor.mlmodelc/weights/weight.bin",
+        size: 3_037_504,
+        sha256: "69c630a115da5e4db36ec41662f0b776c0ef33ec6776d86f8cdaaba022518396",
+    },
+    ModelFile {
+        relative_path: "SenseVoiceSmall_int8.mlmodelc/analytics/coremldata.bin",
+        size: 243,
+        sha256: "ab5e9ee0d49e1f88838f1c2178cbe58a20dac12b50c4da803a75a54c6229845a",
+    },
+    ModelFile {
+        relative_path: "SenseVoiceSmall_int8.mlmodelc/coremldata.bin",
+        size: 436,
+        sha256: "55ef1c194e641418817d7d07f6bfbd8032571e800b81264caba37eb63a95335b",
+    },
+    ModelFile {
+        relative_path: "SenseVoiceSmall_int8.mlmodelc/model.mil",
+        size: 1_134_696,
+        sha256: "015fe7242a15eeb2fc0ca7f908ca3a09a5826b36e7d7f704803c8bbe60c1a148",
+    },
+    ModelFile {
+        relative_path: "SenseVoiceSmall_int8.mlmodelc/weights/weight.bin",
+        size: 235_373_118,
+        sha256: "dab122c65d5043cba5b47561d5c1d3a049dd123c662e802d9dbce8fdd0505a38",
+    },
+    ModelFile {
+        relative_path: "vocab.json",
+        size: 352_064,
+        sha256: "a2594fc1474e78973149cba8cd1f603ebed8c39c7decb470631f66e70ce58e97",
+    },
+];
+
+#[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
 pub const MODEL_FILES: [ModelFile; 3] = [
     ModelFile {
         relative_path: "model.int8.onnx",
@@ -70,8 +130,11 @@ pub fn model_info(models_dir: &Path) -> ModelInfo {
         path: model_dir.clone(),
         size_mb: MODEL_SIZE_BYTES / 1_048_576,
         status: inspect_model(&model_dir),
-        description: "Fast Mandarin, Cantonese, English, Japanese, and Korean recognition"
-            .to_string(),
+        description: if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+            "Fast multilingual recognition accelerated by Apple Neural Engine".to_string()
+        } else {
+            "Fast Mandarin, Cantonese, English, Japanese, and Korean recognition".to_string()
+        },
     }
 }
 

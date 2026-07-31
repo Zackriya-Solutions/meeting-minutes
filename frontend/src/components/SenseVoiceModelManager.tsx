@@ -34,6 +34,7 @@ export function SenseVoiceModelManager({
   const { setSelectedLanguage } = useConfig();
   const [model, setModel] = useState<SenseVoiceModelInfo | null>(null);
   const [loading, setLoading] = useState(true);
+  const [preparing, setPreparing] = useState(false);
   const [download, setDownload] = useState<DownloadEvent | null>(null);
   const callbackRef = useRef(onModelSelect);
 
@@ -87,6 +88,12 @@ export function SenseVoiceModelManager({
         if (!payload.error.toLowerCase().includes('cancelled')) {
           toast.error('SenseVoice download failed', { description: payload.error });
         }
+      }),
+      listen<string>('sense-voice-model-loading-started', () => setPreparing(true)),
+      listen<{ error?: string }>('sense-voice-model-loading-completed', () => setPreparing(false)),
+      listen<{ error?: string }>('sense-voice-model-loading-failed', ({ payload }) => {
+        setPreparing(false);
+        toast.error('SenseVoice preparation failed', { description: payload.error });
       }),
     ]);
     return () => {
@@ -160,13 +167,15 @@ export function SenseVoiceModelManager({
             {selected && <CheckCircle2 className="h-4 w-4 text-blue-600" />}
           </div>
           <p className="ml-8 mt-1 text-sm text-gray-600">Fast automatic recognition for Chinese, Cantonese, English, Japanese, and Korean</p>
-          <p className="ml-8 mt-2 text-xs text-gray-500">228 MiB · CPU · Automatic language detection · Punctuation</p>
+          <p className="ml-8 mt-2 text-xs text-gray-500">228 MiB · Apple Neural Engine on Apple Silicon · CPU elsewhere</p>
         </div>
 
         <div className="flex shrink-0 items-center gap-1">
           {available ? (
             <>
-              <span className="mr-2 text-xs font-medium text-green-700">Ready</span>
+              <span className="mr-2 text-xs font-medium text-green-700">
+                {preparing ? <span className="flex items-center gap-1"><Loader2 className="h-3 w-3 animate-spin" />Preparing</span> : 'Ready'}
+              </span>
               <Button variant="ghost" size="icon" title="Open model folder" onClick={(event) => {
                 event.stopPropagation();
                 SenseVoiceAPI.openModelsFolder();
