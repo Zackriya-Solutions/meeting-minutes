@@ -5,9 +5,10 @@
 //!   * `embedding.v2.onnx`  — 3D-Speaker CAM++ zh-en advanced speaker embeddings (~28 MB,
 //!     Apache-2.0, sherpa-onnx export; replaced the WeSpeaker VoxCeleb v1 model 2026-07-20)
 //!
-//! Everything degrades gracefully: until both files are present,
-//! `diarization_status.available` is false and the diarize job leaves segments
-//! unattributed (existing v1 installs re-enter the download-consent flow once).
+//! SaluteSpeech is the primary diarization engine. These models are an optional local
+//! fallback: until both files are present, `diarization_status.available` is false and
+//! a cloud failure leaves segments unattributed (existing v1 installs re-enter the
+//! download-consent flow once).
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -154,7 +155,10 @@ pub async fn download_diarization_models<R: Runtime>(app: AppHandle<R>) -> Resul
     let legacy = dir.join(LEGACY_EMBEDDING_FILE);
     if legacy.exists() {
         if let Err(e) = std::fs::remove_file(&legacy) {
-            log::warn!("could not remove legacy embedding model {}: {e}", legacy.display());
+            log::warn!(
+                "could not remove legacy embedding model {}: {e}",
+                legacy.display()
+            );
         } else {
             log::info!("removed legacy v1 embedding model {}", legacy.display());
         }
@@ -288,10 +292,10 @@ async fn resolve_diarization_provider(pool: &SqlitePool) -> String {
     .flatten()
     .map(|s| s.trim().to_string())
     .filter(|s| !s.is_empty())
-    // Local is the default and the only UI-selectable engine (2026-07-20: cloud found
-    // 4/7 speakers at 68.8% agreement vs local 7/7 at 92.5% on the reference meeting).
-    // The cloud path stays reachable via env/kv for research.
-    .unwrap_or_else(|| "local".to_string())
+    // SaluteSpeech is the product default; local ONNX models remain the offline fallback.
+    // `privacy.local_only` is enforced inside SaluteSpeech config resolution before any
+    // credentials or network clients are used.
+    .unwrap_or_else(|| "salutespeech".to_string())
 }
 
 /// Create a fresh unconfirmed `Speaker N` profile per distinct cloud speaker id, returning
@@ -542,12 +546,28 @@ pub async fn compute_speaker_turns<R: Runtime>(
         log::info!("[diarize] meeting {meeting_id}: using expected speaker count hint = {n}");
     }
 
+    let provider = resolve_diarization_provider(pool).await;
+    let cloud_processing_allowed =
+        sqlx::query_scalar::<_, i64>("SELECT cloud_processing_allowed FROM meetings WHERE id = ?")
+            .bind(meeting_id)
+            .fetch_optional(pool)
+            .await
+            .map_err(|error| DiarizeError::Other(error.into()))?
+            .unwrap_or(0)
+            != 0;
+    let use_salutespeech = provider == "salutespeech" && cloud_processing_allowed;
+    if provider == "salutespeech" && !cloud_processing_allowed {
+        log::info!(
+            "[diarize] meeting {meeting_id}: cloud processing is disabled; using local engine"
+        );
+    }
+
     // 2) Produce speaker turns + a cluster->speaker map from the configured engine.
     let (turns, cluster_to_speaker, cluster_to_learning): (
         Vec<SpeakerTurn>,
         HashMap<i64, i64>,
         HashMap<i64, i64>,
-    ) = if resolve_diarization_provider(pool).await == "salutespeech" {
+    ) = if use_salutespeech {
         // Cloud: SaluteSpeech async recognition with speaker separation.
         log::info!("[diarize] using SaluteSpeech cloud engine");
         let cloud_result = async {
@@ -730,6 +750,18 @@ pub async fn attribute_transcripts<R: Runtime>(
         Ok(0) => {}
         Ok(n) => log::info!("[diarize] GC removed {n} orphaned unconfirmed speaker profile(s)"),
         Err(e) => log::warn!("[diarize] orphaned-speaker GC failed (non-fatal): {e}"),
+    }
+
+    // Names are a second, text-based pass over the diarized transcript. Apply only
+    // unambiguous provisional mappings; a failure must not invalidate voice separation.
+    match crate::pipeline::speaker_names::infer_and_apply_names(pool, meeting_id).await {
+        Ok(0) => {}
+        Ok(count) => {
+            log::info!("[diarize] meeting {meeting_id}: provisionally named {count} speaker(s)")
+        }
+        Err(error) => {
+            log::warn!("[diarize] meeting {meeting_id}: automatic speaker naming failed: {error}")
+        }
     }
 
     // 6) Notify the UI. snake_case field names, exactly as the frontend expects.

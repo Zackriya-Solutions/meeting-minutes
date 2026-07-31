@@ -2,11 +2,10 @@ import React, { useState, useEffect } from "react";
 import { invoke } from '@tauri-apps/api/core';
 import { getVersion } from '@tauri-apps/api/app';
 import Image from 'next/image';
-import AnalyticsConsentSwitch from "./AnalyticsConsentSwitch";
 import { UpdateDialog } from "./UpdateDialog";
 import { updateService, UpdateInfo } from '@/services/updateService';
 import { Button } from './ui/button';
-import { Loader2, CheckCircle2 } from '@/components/memento/LucideCompat';
+import { Loader2, CheckCircle2 } from '@/components/deslop-icons';
 import { toast } from 'sonner';
 import { useT } from '@/lib/i18n';
 
@@ -63,8 +62,8 @@ export function About() {
                     />
                 </div>
                 <h1 className="text-xl font-semibold">memento</h1>
-                <span className="text-sm text-[var(--fg2)]"> v{currentVersion}</span>
-                <p className="text-medium text-[var(--fg2)] mt-1">
+                <span className="text-sm text-muted-foreground"> v{currentVersion}</span>
+                <p className="text-medium text-muted-foreground mt-1">
                     {t('Real-time notes and summaries that never leave your machine.')}
                 </p>
                 <div className="mt-3">
@@ -88,7 +87,7 @@ export function About() {
                         )}
                     </Button>
                     {updateInfo?.available && (
-                        <div className="mt-2 text-xs text-[var(--gold)]">
+                        <div className="mt-2 text-xs text-primary">
                             {t('Update available: v')}{updateInfo.version}
                         </div>
                     )}
@@ -97,56 +96,54 @@ export function About() {
 
             {/* Features Grid - Compact */}
             <div className="space-y-3">
-                <h2 className="text-base font-semibold text-[var(--fg1)]">{t('What makes Memento different')}</h2>
+                <h2 className="text-base font-semibold text-foreground">{t('What makes Memento different')}</h2>
                 <div className="grid grid-cols-2 gap-2">
-                    <div className="bg-[var(--bg-sheet)] rounded p-3 hover:bg-[var(--bg-elevated)] transition-colors">
-                        <h3 className="font-bold text-sm text-[var(--fg1)] mb-1">{t('Privacy-first')}</h3>
-                        <p className="text-xs text-[var(--fg2)] leading-relaxed">{t('Your data & AI processing workflow can now stay within your premise. No cloud, no leaks.')}</p>
+                    <div className="bg-background rounded p-3 hover:bg-muted transition-colors">
+                        <h3 className="font-bold text-sm text-foreground mb-1">{t('Privacy-first')}</h3>
+                        <p className="text-xs text-muted-foreground leading-relaxed">{t('Your data & AI processing workflow can now stay within your premise. No cloud, no leaks.')}</p>
                     </div>
-                    <div className="bg-[var(--bg-sheet)] rounded p-3 hover:bg-[var(--bg-elevated)] transition-colors">
-                        <h3 className="font-bold text-sm text-[var(--fg1)] mb-1">{t('Use Any Model')}</h3>
-                        <p className="text-xs text-[var(--fg2)] leading-relaxed">{t('Prefer local open-source model? Great. Want to plug in an external API? Also fine. No lock-in.')}</p>
+                    <div className="bg-background rounded p-3 hover:bg-muted transition-colors">
+                        <h3 className="font-bold text-sm text-foreground mb-1">{t('Use Any Model')}</h3>
+                        <p className="text-xs text-muted-foreground leading-relaxed">{t('Prefer local open-source model? Great. Want to plug in an external API? Also fine. No lock-in.')}</p>
                     </div>
-                    <div className="bg-[var(--bg-sheet)] rounded p-3 hover:bg-[var(--bg-elevated)] transition-colors">
-                        <h3 className="font-bold text-sm text-[var(--fg1)] mb-1">{t('Cost-Smart')}</h3>
-                        <p className="text-xs text-[var(--fg2)] leading-relaxed">{t('Avoid pay-per-minute bills by running models locally (or pay only for the calls you choose).')}</p>
+                    <div className="bg-background rounded p-3 hover:bg-muted transition-colors">
+                        <h3 className="font-bold text-sm text-foreground mb-1">{t('Cost-Smart')}</h3>
+                        <p className="text-xs text-muted-foreground leading-relaxed">{t('Avoid pay-per-minute bills by running models locally (or pay only for the calls you choose).')}</p>
                     </div>
-                    <div className="bg-[var(--bg-sheet)] rounded p-3 hover:bg-[var(--bg-elevated)] transition-colors">
-                        <h3 className="font-bold text-sm text-[var(--fg1)] mb-1">{t('Works everywhere')}</h3>
-                        <p className="text-xs text-[var(--fg2)] leading-relaxed">{t('Google Meet, Zoom, Teams-online or offline.')}</p>
+                    <div className="bg-background rounded p-3 hover:bg-muted transition-colors">
+                        <h3 className="font-bold text-sm text-foreground mb-1">{t('Works everywhere')}</h3>
+                        <p className="text-xs text-muted-foreground leading-relaxed">{t('Google Meet, Zoom, Teams-online or offline.')}</p>
                     </div>
                 </div>
             </div>
 
             {/* Coming Soon - Compact */}
-            <div className="bg-[var(--gold-soft)] rounded p-3">
-                <p className="text-s text-[var(--gold)]">
+            <div className="bg-primary/10 rounded p-3">
+                <p className="text-s text-primary">
                     <span className="font-bold">{t('Coming soon:')}</span> {t('A library of on-device AI agents-automating follow-ups, action tracking, and more.')}
                 </p>
             </div>
 
             {/* CTA Section - Compact */}
             <div className="text-center space-y-2">
-                <h3 className="text-medium font-semibold text-[var(--fg1)]">{t('Ready to push your business further?')}</h3>
-                <p className="text-s text-[var(--fg2)]">
+                <h3 className="text-medium font-semibold text-foreground">{t('Ready to push your business further?')}</h3>
+                <p className="text-s text-muted-foreground">
                     {t("If you're planning to build privacy-first custom AI agents or a fully tailored product for your business, we can help you build it.")}
                 </p>
                 <button
                     onClick={handleContactClick}
-                    className="inline-flex items-center px-4 py-2 bg-[var(--gold)] hover:bg-[var(--gold-active)] text-[var(--fg-inverse)] text-sm font-medium rounded transition-colors duration-200 shadow-none hover:shadow-none"
+                    className="inline-flex items-center px-4 py-2 bg-primary hover:bg-primary/90 text-primary-foreground text-sm font-medium rounded transition-colors duration-200 shadow-none hover:shadow-none"
                 >
                     {t('Chat with the Zackriya team')}
                 </button>
             </div>
 
             {/* Footer - Compact */}
-            <div className="pt-2 border-t border-[var(--border-subtle)] text-center">
-                <p className="text-xs text-[var(--fg3)]">
+            <div className="pt-2 border-t border-border text-center">
+                <p className="text-xs text-muted-foreground">
                     {t('Built by Zackriya Solutions')}
                 </p>
             </div>
-            <AnalyticsConsentSwitch />
-
             {/* Update Dialog */}
             <UpdateDialog
                 open={showUpdateDialog}

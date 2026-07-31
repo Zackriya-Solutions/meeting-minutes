@@ -11,6 +11,7 @@ import { convertFileSrc, invoke } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
 import { useAudioPlayer } from '@/hooks/useAudioPlayer';
 import { MeetingAudioPlayer } from './MeetingAudioPlayer';
+import { cn } from '@/lib/utils';
 
 function formatClock(totalSeconds: number): string {
   const mins = Math.floor(totalSeconds / 60);
@@ -26,6 +27,9 @@ interface TranscriptPanelProps {
   onOpenMeetingFolder: () => Promise<void>;
   isRecording: boolean;
   disableAutoScroll?: boolean;
+  transcriptViewportClassName?: string;
+  /** Optional surface override for embedded variants such as the meeting drawer. */
+  surfaceClassName?: string;
 
   // Optional pagination props (when using virtualization)
   usePagination?: boolean;
@@ -72,6 +76,7 @@ interface TranscriptPanelProps {
    */
   showToolbar?: boolean;
   showContextField?: boolean;
+  showAudioPlayer?: boolean;
   compactPlayer?: boolean;
 }
 
@@ -83,6 +88,8 @@ export function TranscriptPanel({
   onOpenMeetingFolder,
   isRecording,
   disableAutoScroll = false,
+  transcriptViewportClassName,
+  surfaceClassName,
   usePagination = false,
   segments,
   hasMore,
@@ -103,6 +110,7 @@ export function TranscriptPanel({
   onSpeakersDetected,
   showToolbar = true,
   showContextField = true,
+  showAudioPlayer = true,
   compactPlayer = false,
 }: TranscriptPanelProps) {
   const t = useT();
@@ -225,10 +233,10 @@ export function TranscriptPanel({
   return (
     // Width and the panel divider are owned by the wrapper + splitter in
     // meeting-details/page-content.tsx; this root just fills its pane.
-    <div className="relative flex h-full w-full min-w-0 flex-col bg-[var(--bg-sheet)]">
+    <div className={cn("relative flex h-full w-full min-w-0 flex-col bg-background", surfaceClassName)}>
       {/* Title area */}
       {showToolbar && (
-        <div className="border-b border-[var(--border-subtle)] p-4">
+        <div className="border-b border-border p-4">
           <TranscriptButtonGroup
             transcriptCount={usePagination ? (totalCount ?? convertedSegments.length) : (transcripts?.length || 0)}
             onCopyTranscript={onCopyTranscript}
@@ -248,7 +256,7 @@ export function TranscriptPanel({
         </div>
       )}
 
-      {meetingId && meetingFolderPath && (
+      {showAudioPlayer && meetingId && meetingFolderPath && (
         <MeetingAudioPlayer
           compact={compactPlayer}
           available={audioSources.length > 0 && !audioUnavailable}
@@ -268,7 +276,7 @@ export function TranscriptPanel({
 
       {/* Marked moments — click to jump the transcript to that point */}
       {markedMoments.length > 0 && (
-        <div className="flex flex-wrap items-center gap-1.5 border-b border-[var(--border-subtle)] px-4 py-2">
+        <div className="flex flex-wrap items-center gap-1.5 border-b border-border px-4 py-2">
           <span className="mm-eyebrow mr-1">{t('Moments')}</span>
           {markedMoments.map((seconds) => (
             <button
@@ -276,7 +284,7 @@ export function TranscriptPanel({
               type="button"
               onClick={() => handleMarkedMoment(seconds)}
               title={t('Open this moment in the transcript')}
-              className="mm-numeric inline-flex items-center gap-1 rounded-full border border-[var(--gold-border)] bg-[var(--gold-soft)] px-2 py-0.5 text-xs text-[var(--gold)] transition-colors hover:bg-[var(--gold-soft-strong)]"
+              className="mm-numeric inline-flex items-center gap-1 rounded-full border border-primary/40 bg-primary/10 px-2 py-0.5 text-xs text-primary transition-colors hover:bg-primary/20"
             >
               <Icon name="dot" size={12} />
               {formatClock(seconds)}
@@ -286,7 +294,7 @@ export function TranscriptPanel({
       )}
 
       {/* Transcript content - use virtualized view for better performance */}
-      <div className="flex-1 overflow-hidden pb-4">
+      <div className="min-h-0 flex-1 overflow-hidden">
         <VirtualizedTranscriptView
           segments={convertedSegments}
           isRecording={isRecording}
@@ -296,6 +304,7 @@ export function TranscriptPanel({
           enableStreaming={false}
           showConfidence={true}
           disableAutoScroll={disableAutoScroll}
+          viewportClassName={transcriptViewportClassName}
           hasMore={hasMore}
           isLoadingMore={isLoadingMore}
           totalCount={totalCount}
@@ -312,7 +321,7 @@ export function TranscriptPanel({
 
       {/* Custom prompt input at bottom of transcript section */}
       {showContextField && !isRecording && convertedSegments.length > 0 && (
-        <div className="border-t border-[var(--border-subtle)] p-3">
+        <div className="border-t border-border p-3">
           <textarea
             placeholder={t('Add context for AI summary. For example people involved, meeting overview, objective etc...')}
             className="mm-field min-h-[80px] w-full resize-y px-3 py-2 text-sm outline-none"

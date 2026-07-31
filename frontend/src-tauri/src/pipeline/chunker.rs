@@ -126,7 +126,12 @@ mod tests {
     use super::*;
 
     fn seg(id: &str, text: &str, start_ms: i64, end_ms: i64) -> Segment {
-        Segment { id: id.into(), text: text.into(), start_ms, end_ms }
+        Segment {
+            id: id.into(),
+            text: text.into(),
+            start_ms,
+            end_ms,
+        }
     }
 
     // One "word" == one token under approx_token_count; build segments of known size.
@@ -142,10 +147,21 @@ mod tests {
 
     #[test]
     fn respects_min_max_and_never_splits_segments() {
-        let cfg = ChunkConfig { min_tokens: 20, max_tokens: 40, overlap_segments: 1 };
+        let cfg = ChunkConfig {
+            min_tokens: 20,
+            max_tokens: 40,
+            overlap_segments: 1,
+        };
         // 6 segments of 15 tokens each = 90 tokens total.
         let segs: Vec<Segment> = (0..6)
-            .map(|i| seg(&format!("s{i}"), &words(15), i as i64 * 1000, (i as i64 + 1) * 1000))
+            .map(|i| {
+                seg(
+                    &format!("s{i}"),
+                    &words(15),
+                    i as i64 * 1000,
+                    (i as i64 + 1) * 1000,
+                )
+            })
             .collect();
         let chunks = chunk_segments(&segs, &cfg, approx_token_count);
 
@@ -164,9 +180,20 @@ mod tests {
 
     #[test]
     fn overlap_reincludes_trailing_segment() {
-        let cfg = ChunkConfig { min_tokens: 20, max_tokens: 40, overlap_segments: 1 };
+        let cfg = ChunkConfig {
+            min_tokens: 20,
+            max_tokens: 40,
+            overlap_segments: 1,
+        };
         let segs: Vec<Segment> = (0..6)
-            .map(|i| seg(&format!("s{i}"), &words(15), i as i64 * 1000, (i as i64 + 1) * 1000))
+            .map(|i| {
+                seg(
+                    &format!("s{i}"),
+                    &words(15),
+                    i as i64 * 1000,
+                    (i as i64 + 1) * 1000,
+                )
+            })
             .collect();
         let chunks = chunk_segments(&segs, &cfg, approx_token_count);
         // chunk0 = [s0,s1]; overlap 1 => chunk1 starts at s1.
@@ -176,8 +203,15 @@ mod tests {
 
     #[test]
     fn oversized_single_segment_becomes_its_own_chunk() {
-        let cfg = ChunkConfig { min_tokens: 20, max_tokens: 40, overlap_segments: 1 };
-        let segs = vec![seg("big", &words(100), 0, 1000), seg("s1", &words(10), 1000, 2000)];
+        let cfg = ChunkConfig {
+            min_tokens: 20,
+            max_tokens: 40,
+            overlap_segments: 1,
+        };
+        let segs = vec![
+            seg("big", &words(100), 0, 1000),
+            seg("s1", &words(10), 1000, 2000),
+        ];
         let chunks = chunk_segments(&segs, &cfg, approx_token_count);
         assert_eq!(chunks[0].first_segment_id, "big");
         assert_eq!(chunks[0].last_segment_id, "big");
@@ -188,7 +222,14 @@ mod tests {
     fn is_deterministic_and_covers_boundaries() {
         let cfg = ChunkConfig::default();
         let segs: Vec<Segment> = (0..20)
-            .map(|i| seg(&format!("s{i}"), &words(60), i as i64 * 1000, (i as i64 + 1) * 1000))
+            .map(|i| {
+                seg(
+                    &format!("s{i}"),
+                    &words(60),
+                    i as i64 * 1000,
+                    (i as i64 + 1) * 1000,
+                )
+            })
             .collect();
         let a = chunk_segments(&segs, &cfg, approx_token_count);
         let b = chunk_segments(&segs, &cfg, approx_token_count);

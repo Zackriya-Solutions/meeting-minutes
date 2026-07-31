@@ -6,6 +6,7 @@ import Analytics from '@/lib/analytics';
 import { invoke } from '@tauri-apps/api/core';
 import { useRecordingState } from '@/contexts/RecordingStateContext';
 import { useT } from '@/lib/i18n';
+import { prefetchMeetingSummary } from '@/lib/meetingSummaryCache';
 
 
 interface SidebarItem {
@@ -21,6 +22,7 @@ export interface CurrentMeeting {
   createdAt?: string | null;
   occurredAt?: string | null;
   folderPath?: string | null;
+  durationSeconds?: number | null;
 }
 
 // Search result type for transcript search
@@ -129,35 +131,52 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
 
   // Extract fetchMeetings as a reusable function
   const fetchMeetings = React.useCallback(async () => {
-    if (serverAddress) {
-      try {
-        const meetings = await invoke('api_get_meetings') as Array<{
-          id: string;
-          title: string;
-          created_at: string;
-          occurred_at?: string | null;
-          folder_path?: string | null;
-        }>;
-        const transformedMeetings = meetings.map((meeting: any) => ({
-          id: meeting.id,
-          title: meeting.title,
-          createdAt: meeting.created_at,
-          occurredAt: meeting.occurred_at ?? null,
-          folderPath: meeting.folder_path ?? null,
-        }));
-        setMeetings(transformedMeetings);
-        Analytics.trackBackendConnection(true);
-      } catch (error) {
-        console.error('Error fetching meetings:', error);
-        setMeetings([]);
-        Analytics.trackBackendConnection(false, error instanceof Error ? error.message : 'Unknown error');
-      }
+    try {
+      const meetings = await invoke('api_get_meetings', { authToken: null }) as Array<{
+        id: string;
+        title: string;
+        created_at: string;
+        occurred_at?: string | null;
+        folder_path?: string | null;
+        duration_seconds?: number | null;
+      }>;
+      const transformedMeetings = meetings.map((meeting) => ({
+        id: meeting.id,
+        title: meeting.title,
+        createdAt: meeting.created_at,
+        occurredAt: meeting.occurred_at ?? null,
+        folderPath: meeting.folder_path ?? null,
+        durationSeconds: meeting.duration_seconds ?? null,
+      }));
+      setMeetings(transformedMeetings);
+      // Warm the small in-memory summary cache as soon as the archive becomes
+      // available. Reads are independent SQLite calls and are de-duplicated by
+      // meetingSummaryCache, so opening a drawer can render saved content at once.
+      void Promise.allSettled(
+        transformedMeetings.map((meeting) => prefetchMeetingSummary(meeting.id)),
+      );
+      Analytics.trackBackendConnection(true);
+    } catch (error) {
+      console.error('Error fetching meetings:', error);
+      Analytics.trackBackendConnection(false, error instanceof Error ? error.message : 'Unknown error');
     }
-  }, [serverAddress]);
+  }, []);
 
   useEffect(() => {
-    fetchMeetings();
-  }, [serverAddress, fetchMeetings]);
+    void fetchMeetings();
+
+    // A freshly opened dev WebView can hydrate before Tauri IPC and the database
+    // are ready. Repeat the initial read instead of leaving the home screen empty
+    // for the whole session after that transient startup race.
+    const retryTimer = window.setTimeout(() => void fetchMeetings(), 1_000);
+    const handleFocus = () => void fetchMeetings();
+    window.addEventListener('focus', handleFocus);
+
+    return () => {
+      window.clearTimeout(retryTimer);
+      window.removeEventListener('focus', handleFocus);
+    };
+  }, [fetchMeetings]);
 
   useEffect(() => {
     const fetchSettings = async () => {

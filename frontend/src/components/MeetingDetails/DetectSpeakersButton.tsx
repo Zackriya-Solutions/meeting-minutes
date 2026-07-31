@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
-import { Users, Loader2, Download } from '@/components/memento/LucideCompat';
+import { Users, Loader2, Download } from '@/components/deslop-icons';
 import { Button } from "../ui/button";
 import {
     Dialog,
@@ -13,7 +13,7 @@ import {
     DialogHeader,
     DialogTitle,
 } from "../ui/dialog";
-import { DiarizationStatus, DiarizeMeetingResult, SpeakerInfo } from "@/types";
+import { DiarizeMeetingResult, SpeakerInfo } from "@/types";
 import Analytics from "@/lib/analytics";
 import { useT } from "@/lib/i18n";
 
@@ -33,9 +33,9 @@ const errString = (err: unknown, fallback: string): string =>
     typeof err === "string" ? err : (err as any)?.message || fallback;
 
 /**
- * "Detect speakers" action for a saved meeting. Verifies the diarization models
- * exist (offering a one-time ~35 MB download if not), runs `diarize_meeting`,
- * and reports the outcome via toast — matching the retranscription idiom.
+ * "Detect speakers" action for a saved meeting. SaluteSpeech is the primary engine;
+ * local models are offered only if the cloud is unavailable, then `diarize_meeting`
+ * reports the outcome via toast — matching the retranscription idiom.
  */
 export function DetectSpeakersButton({ meetingId, speakerCount = 0, onDetected, label }: DetectSpeakersButtonProps) {
     const t = useT();
@@ -72,23 +72,9 @@ export function DetectSpeakersButton({ meetingId, speakerCount = 0, onDetected, 
         }
     };
 
-    const checkModelsAndRun = async () => {
+    const runPreferredDiarization = async () => {
         if (!meetingId || busy) return;
-        setPhase("checking");
-        try {
-            // Diarization is local-only in the UI (cloud measured far worse); the only
-            // gate is the one-time speaker-model download.
-            const status = await invoke<DiarizationStatus>("diarization_status");
-            if (!status.available) {
-                setPhase("idle");
-                setShowDownload(true);
-                return;
-            }
-            await runDiarize();
-        } catch (err) {
-            setPhase("idle");
-            toast.error(errString(err, t("Could not check speaker models")));
-        }
+        await runDiarize();
     };
 
     const handleClick = async () => {
@@ -107,7 +93,7 @@ export function DetectSpeakersButton({ meetingId, speakerCount = 0, onDetected, 
             console.warn("Could not inspect existing meeting speakers:", err);
         }
         setPhase("idle");
-        await checkModelsAndRun();
+        await runPreferredDiarization();
     };
 
     const handleDownloadAndDetect = async () => {
@@ -156,14 +142,14 @@ export function DetectSpeakersButton({ meetingId, speakerCount = 0, onDetected, 
                 <DialogContent className="sm:max-w-[460px]">
                     <DialogHeader>
                         <DialogTitle className="flex items-center gap-2">
-                            <Users className="h-5 w-5 text-[var(--gold)]" />
+                            <Users className="h-5 w-5 text-primary" />
                             {t('Run speaker detection again?')}
                         </DialogTitle>
                         <DialogDescription>
                             {t('This meeting already has detected speakers. Running detection again replaces the current automatic speaker assignments and may produce a different count. User-confirmed speaker names are preserved.')}
                         </DialogDescription>
                     </DialogHeader>
-                    <p className="text-sm text-[var(--fg2)]">
+                    <p className="text-sm text-muted-foreground">
                         {t('Currently detected')}: {existingSpeakerCount}
                     </p>
                     <DialogFooter>
@@ -173,9 +159,9 @@ export function DetectSpeakersButton({ meetingId, speakerCount = 0, onDetected, 
                         <Button
                             onClick={async () => {
                                 setShowRerunConfirmation(false);
-                                await checkModelsAndRun();
+                                await runPreferredDiarization();
                             }}
-                            className="bg-[var(--gold)] hover:bg-[var(--gold-active)]"
+                            className="bg-primary hover:bg-primary/90"
                         >
                             {t('Run again')}
                         </Button>
@@ -190,7 +176,7 @@ export function DetectSpeakersButton({ meetingId, speakerCount = 0, onDetected, 
                 <DialogContent className="w-[calc(100vw-2rem)] sm:max-w-[580px]">
                     <DialogHeader>
                         <DialogTitle className="flex items-center gap-2">
-                            <Users className="h-5 w-5 text-[var(--gold)]" />
+                            <Users className="h-5 w-5 text-primary" />
                             {t('Detect Speakers')}
                         </DialogTitle>
                         <DialogDescription>
@@ -224,7 +210,7 @@ export function DetectSpeakersButton({ meetingId, speakerCount = 0, onDetected, 
                         <Button
                             onClick={handleDownloadAndDetect}
                             disabled={downloading}
-                            className="h-auto min-h-10 whitespace-normal bg-[var(--gold)] px-4 py-2 text-center hover:bg-[var(--gold-active)]"
+                            className="h-auto min-h-10 whitespace-normal bg-primary px-4 py-2 text-center hover:bg-primary/90"
                         >
                             {downloading ? (
                                 <>

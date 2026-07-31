@@ -1,7 +1,7 @@
+use anyhow::Result;
+use log::{error, info, warn};
 use std::sync::Arc;
 use tokio::sync::mpsc;
-use anyhow::Result;
-use log::{info, warn, error};
 
 /// Post-processing request for transcript text
 #[derive(Debug, Clone)]
@@ -61,11 +61,17 @@ impl PostProcessor {
                         }
 
                         if processing_time > 100 {
-                            warn!("Slow post-processing for sequence {}: {}ms", request.sequence_id, processing_time);
+                            warn!(
+                                "Slow post-processing for sequence {}: {}ms",
+                                request.sequence_id, processing_time
+                            );
                         }
                     }
                     Err(e) => {
-                        warn!("Post-processing failed for sequence {}: {}", request.sequence_id, e);
+                        warn!(
+                            "Post-processing failed for sequence {}: {}",
+                            request.sequence_id, e
+                        );
                         // Send original text as fallback
                         let response = PostProcessResponse {
                             sequence_id: request.sequence_id,
@@ -164,8 +170,8 @@ impl PostProcessor {
             }
             // Check for phrase repetitions
             else if i + 3 < words.len() {
-                let phrase = &words[i..i+2];
-                let next_phrase = &words[i+2..i+4];
+                let phrase = &words[i..i + 2];
+                let next_phrase = &words[i + 2..i + 4];
 
                 if phrase == next_phrase {
                     result.extend_from_slice(phrase);
@@ -173,7 +179,7 @@ impl PostProcessor {
 
                     // Skip additional repetitions of the same phrase
                     while i + 1 < words.len() && i + 1 < words.len() - 1 {
-                        let check_phrase = &words[i..std::cmp::min(i+2, words.len())];
+                        let check_phrase = &words[i..std::cmp::min(i + 2, words.len())];
                         if check_phrase == phrase && check_phrase.len() == 2 {
                             i += 2;
                         } else {
@@ -194,14 +200,11 @@ impl PostProcessor {
 
     /// Remove common transcription artifacts using simple string matching
     fn remove_artifacts(text: &str) -> String {
-        let mut words: Vec<String> = text.split_whitespace()
-            .map(|w| w.to_string())
-            .collect();
+        let mut words: Vec<String> = text.split_whitespace().map(|w| w.to_string()).collect();
 
         // Remove common filler words and sounds
         let fillers = [
-            "uh", "um", "er", "ah", "oh", "hm", "hmm",
-            "uhh", "umm", "err", "ahh", "ohh",
+            "uh", "um", "er", "ah", "oh", "hm", "hmm", "uhh", "umm", "err", "ahh", "ohh",
         ];
 
         words.retain(|word| {

@@ -78,7 +78,6 @@ interface ConfigContextType {
 
   // Summary configuration
   isAutoSummary: boolean;
-  toggleIsAutoSummary: (checked: boolean) => void;
 
   // Provider-specific API keys
   providerApiKeys: {
@@ -103,8 +102,8 @@ const ConfigContext = createContext<ConfigContextType | undefined>(undefined);
 export function ConfigProvider({ children }: { children: ReactNode }) {
   // Model configuration state
   const [modelConfig, setModelConfig] = useState<ModelConfig>({
-    provider: 'deepseek',
-    model: 'deepseek-v4-pro',
+    provider: 'openrouter',
+    model: '~anthropic/claude-sonnet-latest',
     whisperModel: 'large-v3',
     ollamaEndpoint: null
   });
@@ -160,13 +159,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
   });
 
   // Summary configs
-  const [isAutoSummary, setisAutoSummary] = useState<boolean>(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('isAutoSummary');
-      return saved !== null ? saved === 'true' : false
-    }
-    return false;
-  });
+  const isAutoSummary = true;
 
   // Beta features state (localStorage)
   const [betaFeatures, setBetaFeatures] = useState<BetaFeatures>(() => {
@@ -371,7 +364,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     ollama: models.map(model => model.name),
     claude: ['claude-3-5-sonnet-latest'],
     groq: ['llama-3.3-70b-versatile'],
-    openrouter: [],
+    openrouter: ['~anthropic/claude-sonnet-latest'],
     openai: ['gpt-4', 'gpt-4-turbo', 'gpt-3.5-turbo'],
     'builtin-ai': [],
     'custom-openai': [],
@@ -388,13 +381,6 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     // Trigger a custom event to notify other components
     window.dispatchEvent(new CustomEvent('confidenceIndicatorChanged', { detail: checked }));
   }, []);
-
-  const toggleIsAutoSummary = useCallback((checked: boolean) => {
-    setisAutoSummary(checked);
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('isAutoSummary', checked.toString());
-    }
-  }, [])
 
   // Toggle beta feature with localStorage persistence and analytics
   const toggleBetaFeature = useCallback((featureKey: BetaFeatureKey, enabled: boolean) => {
@@ -493,7 +479,6 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     modelConfig,
     setModelConfig,
     isAutoSummary,
-    toggleIsAutoSummary,
     providerApiKeys,
     updateProviderApiKey,
     transcriptModelConfig,
@@ -517,7 +502,6 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
   }), [
     modelConfig,
     isAutoSummary,
-    toggleIsAutoSummary,
     providerApiKeys,
     updateProviderApiKey,
     transcriptModelConfig,

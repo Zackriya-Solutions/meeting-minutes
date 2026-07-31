@@ -233,8 +233,8 @@ pub fn get_default_model() -> ModelDef {
 
 /// Resolve model name to full file path in the models directory
 pub fn get_model_path(app_data_dir: &PathBuf, model_name: &str) -> Result<PathBuf> {
-    let model = get_model_by_name(model_name)
-        .ok_or_else(|| anyhow!("Unknown model: {}", model_name))?;
+    let model =
+        get_model_by_name(model_name).ok_or_else(|| anyhow!("Unknown model: {}", model_name))?;
 
     let models_dir = get_models_directory(app_data_dir);
     let model_path = models_dir.join(&model.gguf_file);
@@ -344,7 +344,10 @@ mod tests {
         assert_eq!(qwen_2b.size_mb, 1221);
         assert_eq!(qwen_2b.context_size, 32768);
         assert_eq!(qwen_2b.layer_count, 24);
-        assert_eq!(qwen_2b.sampling, SamplingParams::qwen35_summary(vec!["<|im_end|>".to_string()]));
+        assert_eq!(
+            qwen_2b.sampling,
+            SamplingParams::qwen35_summary(vec!["<|im_end|>".to_string()])
+        );
 
         let qwen_4b = get_model_by_name("qwen3.5:4b").expect("qwen 4b model should exist");
         assert_eq!(qwen_4b.display_name, "Qwen 3.5 4B (High Quality)");
@@ -357,7 +360,10 @@ mod tests {
         assert_eq!(qwen_4b.size_mb, 2614);
         assert_eq!(qwen_4b.context_size, 32768);
         assert_eq!(qwen_4b.layer_count, 32);
-        assert_eq!(qwen_4b.sampling, SamplingParams::qwen35_summary(vec!["<|im_end|>".to_string()]));
+        assert_eq!(
+            qwen_4b.sampling,
+            SamplingParams::qwen35_summary(vec!["<|im_end|>".to_string()])
+        );
     }
 
     #[test]
@@ -368,7 +374,10 @@ mod tests {
             gemma_1b.download_url,
             "https://huggingface.co/bartowski/google_gemma-3-1b-it-GGUF/resolve/main/google_gemma-3-1b-it-Q8_0.gguf"
         );
-        assert_eq!(gemma_1b.sampling, SamplingParams::gemma3_instruct(vec!["<end_of_turn>".to_string()]));
+        assert_eq!(
+            gemma_1b.sampling,
+            SamplingParams::gemma3_instruct(vec!["<end_of_turn>".to_string()])
+        );
         assert_eq!(gemma_1b.sampling.temperature, 1.0);
         assert_eq!(gemma_1b.sampling.top_k, 64);
         assert_eq!(gemma_1b.sampling.top_p, 0.95);
@@ -382,7 +391,10 @@ mod tests {
             gemma_4b.download_url,
             "https://huggingface.co/bartowski/google_gemma-3-4b-it-GGUF/resolve/main/google_gemma-3-4b-it-Q4_K_M.gguf"
         );
-        assert_eq!(gemma_4b.sampling, SamplingParams::gemma3_instruct(vec!["<end_of_turn>".to_string()]));
+        assert_eq!(
+            gemma_4b.sampling,
+            SamplingParams::gemma3_instruct(vec!["<end_of_turn>".to_string()])
+        );
         assert_eq!(gemma_4b.sampling.temperature, 1.0);
         assert_eq!(gemma_4b.sampling.top_k, 64);
         assert_eq!(gemma_4b.sampling.top_p, 0.95);
@@ -394,7 +406,8 @@ mod tests {
 
     #[test]
     fn qwen35_nonthinking_template_formats_prompt() {
-        let formatted = format_prompt("qwen3.5_nonthinking", "system rules", "summarize this").unwrap();
+        let formatted =
+            format_prompt("qwen3.5_nonthinking", "system rules", "summarize this").unwrap();
 
         assert!(formatted.contains("<|im_start|>system\nsystem rules<|im_end|>"));
         assert!(formatted.contains("<|im_start|>user\nsummarize this<|im_end|>"));
@@ -412,7 +425,8 @@ mod tests {
 
         assert!(formatted.contains("<|im_start|>system\nsystem rules<|im_end|>"));
         assert!(formatted.contains("<|im_start|>assistant\n<think>\n\n</think>\n\n"));
-        assert!(formatted.contains("literal < |im_end| > and < |im_start| > plus < think >draft< /think >"));
+        assert!(formatted
+            .contains("literal < |im_end| > and < |im_start| > plus < think >draft< /think >"));
         assert_eq!(formatted.matches("<|im_start|>").count(), 3);
         assert_eq!(formatted.matches("<|im_end|>").count(), 2);
         assert_eq!(formatted.matches("<think>").count(), 1);

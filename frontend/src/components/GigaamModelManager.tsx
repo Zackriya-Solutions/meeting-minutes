@@ -3,7 +3,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { Download, CheckCircle2, Loader2, AlertTriangle } from '@/components/memento/LucideCompat';
+import { Download, CheckCircle2, Loader2, AlertTriangle } from '@/components/deslop-icons';
 import { useT } from '@/lib/i18n';
 
 interface VariantInfo {
@@ -152,33 +152,33 @@ export function GigaamModelManager() {
   const selectedActive = loaded && status?.loaded_variant === status?.selected;
 
   return (
-    <div className="rounded-xl border border-[var(--border-subtle)] p-5">
+    <div className="rounded-xl border border-border p-5">
       <div className="mb-1 flex items-center justify-between">
         <div>
-          <h3 className="text-sm font-semibold text-[var(--fg1)]">{t('GigaAM v3 (Russian)')}</h3>
-          <p className="text-xs text-[var(--fg3)]">
+          <h3 className="text-sm font-semibold text-foreground">{t('GigaAM v3 (Russian)')}</h3>
+          <p className="text-xs text-muted-foreground">
             {t('Sber ASR · punctuated & capitalized · fully local')}
           </p>
         </div>
         {selectedActive ? (
-          <span className="flex items-center gap-1 rounded-full bg-[color-mix(in_srgb,var(--success)_12%,transparent)] px-2 py-0.5 text-xs font-medium text-[var(--success)]">
+          <span className="flex items-center gap-1 rounded-full bg-success/10 px-2 py-0.5 text-xs font-medium text-success">
             <CheckCircle2 className="h-3.5 w-3.5" /> {t('Active')}
           </span>
         ) : present ? (
-          <span className="rounded-full bg-[var(--bg-elevated)] px-2 py-0.5 text-xs text-[var(--fg2)]">{t('Installed — restart to load')}</span>
+          <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">{t('Installed — restart to load')}</span>
         ) : (
-          <span className="rounded-full bg-[var(--bg-elevated)] px-2 py-0.5 text-xs text-[var(--fg2)]">{t('Not downloaded')}</span>
+          <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">{t('Not downloaded')}</span>
         )}
       </div>
 
       {/* Variant selector for A/B quality testing */}
       <div className="mt-4">
-        <label className="mb-1 block text-xs font-medium text-[var(--fg2)]">{t('Model variant')}</label>
+        <label className="mb-1 block text-xs font-medium text-muted-foreground">{t('Model variant')}</label>
         <select
           value={status?.selected ?? 'e2e-rnnt-fp32'}
           onChange={(e) => selectVariant(e.target.value)}
           disabled={!status || downloading || switching}
-          className="w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-canvas)] px-3 py-2 text-sm text-[var(--fg1)] focus:border-[var(--gold-border)] focus:outline-none disabled:opacity-50"
+          className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground focus:border-primary/40 focus:outline-none disabled:opacity-50"
         >
           {(status?.variants ?? []).map((v) => (
             <option key={v.id} value={v.id}>
@@ -186,7 +186,7 @@ export function GigaamModelManager() {
             </option>
           ))}
         </select>
-        <p className="mt-1 text-xs text-[var(--fg3)]">
+        <p className="mt-1 text-xs text-muted-foreground">
           {t('RNN-T usually beats CTC on accuracy; fp32 avoids int8 quantization loss (larger & slower).')}
         </p>
       </div>
@@ -194,7 +194,7 @@ export function GigaamModelManager() {
       <div className="mt-4">
         {downloading ? (
           <div>
-            <div className="mb-1.5 flex items-center justify-between text-xs text-[var(--fg2)]">
+            <div className="mb-1.5 flex items-center justify-between text-xs text-muted-foreground">
               <span className="flex items-center gap-1.5">
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
                 {t('Downloading')}{progress ? ` ${progress.file}` : '…'}
@@ -205,27 +205,27 @@ export function GigaamModelManager() {
                 </span>
               )}
             </div>
-            <div className="h-2 w-full overflow-hidden rounded-full bg-[var(--bg-elevated)]">
+            <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
               <div
-                className="h-full rounded-full bg-[var(--gold)] transition-all"
+                className="h-full rounded-full bg-primary transition-all"
                 style={{ width: `${progress?.percent ?? 0}%` }}
               />
             </div>
           </div>
         ) : switching ? (
-          <div className="flex items-center gap-2 text-sm text-[var(--fg2)]">
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <Loader2 className="h-4 w-4 animate-spin" />
             {t('Loading')} {selected?.label ?? t('variant')}…
           </div>
         ) : selectedActive ? (
-          <div className="flex items-center gap-2 text-sm font-medium text-[var(--success)]">
+          <div className="flex items-center gap-2 text-sm font-medium text-success">
             <CheckCircle2 className="h-4 w-4" />
             {t('Ready — recordings will transcribe with this variant')}
           </div>
         ) : (
           <button
             onClick={download}
-            className="flex items-center gap-2 rounded-lg bg-[var(--gold)] px-4 py-2 text-sm font-medium text-[var(--fg-inverse)] transition-colors hover:bg-[var(--gold-active)]"
+            className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
           >
             <Download className="h-4 w-4" />
             {present ? t('Re-download variant') : `${t('Download variant (~')}${selected?.size_mb ?? '?'}${t(' MB)')}`}
@@ -234,14 +234,14 @@ export function GigaamModelManager() {
 
         {/* Loaded-vs-selected mismatch hint (e.g. selected a new variant that still needs a download) */}
         {!switching && !downloading && loaded && !selectedActive && (
-          <p className="mt-2 text-xs text-[var(--gold)]">
+          <p className="mt-2 text-xs text-primary">
             {t('Currently running')} <span className="font-medium">{status?.loaded_variant}</span>.
             {present ? t(' Restart to load the selected variant.') : t(' Download the selected variant to switch.')}
           </p>
         )}
 
         {error && (
-          <div className="mt-3 flex items-start gap-1.5 text-sm text-[var(--danger)]">
+          <div className="mt-3 flex items-start gap-1.5 text-sm text-destructive">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
             <span>{error}</span>
           </div>

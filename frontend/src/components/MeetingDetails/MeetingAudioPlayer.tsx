@@ -1,7 +1,7 @@
 "use client";
 
 import { Button } from '@/components/ui/button';
-import { Download, FolderOpen, Loader2, Pause, Play, Speaker } from '@/components/memento/LucideCompat';
+import { Download, FolderOpen, Loader2, Pause, Play, Speaker } from '@/components/deslop-icons';
 import { useT } from '@/lib/i18n';
 
 function formatTime(seconds: number): string {
@@ -57,17 +57,17 @@ export function MeetingAudioPlayer({
     <div
       className={
         compact
-          ? 'rounded-[var(--radius-12)] border border-[var(--border-subtle)] bg-[var(--bg-canvas)] px-3 py-2'
-          : 'border-b border-[var(--border-subtle)] bg-[var(--bg-canvas)] px-4 py-3'
+          ? 'rounded-md border border-border bg-background px-3 py-2'
+          : 'border-b border-border bg-background px-4 py-3'
       }
     >
       {!compact && (
       <div className="mb-2 flex items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2">
-          <Speaker className="h-4 w-4 shrink-0 text-[var(--gold)]" />
+          <Speaker className="h-4 w-4 shrink-0 text-primary" />
           <div className="min-w-0">
-            <p className="truncate text-xs font-medium text-[var(--fg1)]">{t('Meeting audio')}</p>
-            <p className="truncate text-[10px] text-[var(--fg3)]">
+            <p className="truncate text-xs font-medium text-foreground">{t('Meeting audio')}</p>
+            <p className="truncate text-[10px] text-muted-foreground">
               {available
                 ? t('Click a transcript timestamp to play from that moment')
                 : t('No saved audio is available for this meeting')}
@@ -105,7 +105,7 @@ export function MeetingAudioPlayer({
       <div className="flex items-center gap-2">
         <button
           type="button"
-          className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[var(--gold)] text-black transition-colors hover:bg-[var(--gold-active)] disabled:cursor-not-allowed disabled:opacity-40"
+          className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary text-black transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-40"
           onClick={isPlaying ? onPause : onPlay}
           disabled={!available || isLoading}
           aria-label={isPlaying ? t('Pause meeting audio') : t('Play meeting audio')}
@@ -113,7 +113,7 @@ export function MeetingAudioPlayer({
         >
           {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
         </button>
-        <span className="mm-numeric w-10 shrink-0 text-right text-[11px] text-[var(--fg2)]">
+        <span className="mm-numeric w-10 shrink-0 text-right text-[11px] text-muted-foreground">
           {formatTime(currentTime)}
         </span>
         <input
@@ -125,14 +125,14 @@ export function MeetingAudioPlayer({
           onChange={(event) => onSeek(Number(event.target.value))}
           disabled={!available || duration <= 0}
           aria-label={t('Audio position')}
-          className="h-1 min-w-0 flex-1 cursor-pointer accent-[var(--gold)] disabled:cursor-not-allowed disabled:opacity-40"
+          className="h-1 min-w-0 flex-1 cursor-pointer accent-primary disabled:cursor-not-allowed disabled:opacity-40"
         />
-        <span className="mm-numeric w-10 shrink-0 text-[11px] text-[var(--fg2)]">
+        <span className="mm-numeric w-10 shrink-0 text-[11px] text-muted-foreground">
           {formatTime(duration)}
         </span>
       </div>
 
-      {error && <p className="mt-1.5 text-[10px] text-[var(--danger)]">{t(error)}</p>}
+      {error && <p className="mt-1.5 text-[10px] text-destructive">{t(error)}</p>}
     </div>
   );
 }

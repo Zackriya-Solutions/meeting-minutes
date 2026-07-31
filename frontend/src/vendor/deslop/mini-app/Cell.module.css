@@ -1,0 +1,94 @@
+.root {
+  --cell-separator-height: 0.33px;
+  --tappable-highlight: var(--primary-5);
+
+  display: flex;
+  width: 100%;
+  min-height: 50px;
+  padding: 0 0 0 12px;
+  border: 0;
+  background: transparent;
+  color: var(--deslop-primary);
+  cursor: pointer;
+  font: inherit;
+  text-align: start;
+  text-decoration: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.root:last-child .body,
+.root:last-child .end {
+  --cell-separator-height: 0px;
+}
+
+.root:focus {
+  outline: none;
+}
+
+.root:focus-visible,
+.root:active {
+  background-color: var(--tappable-highlight);
+}
+
+.start {
+  display: flex;
+  align-items: center;
+  padding: 7px 16px 7px 0;
+}
+
+.body {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  justify-content: center;
+  padding: var(--ui-space-9) var(--ui-space-12) var(--ui-space-9) 0;
+  border-bottom: var(--cell-separator-height) solid var(--deslop-primary-20);
+}
+
+.end {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  justify-content: center;
+  padding: 0 16px 0 var(--ui-space-8);
+  border-bottom: var(--cell-separator-height) solid var(--deslop-primary-20);
+  color: var(--deslop-primary-60);
+  text-align: right;
+  white-space: nowrap;
+}
+
+.text {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  font-family: var(--ui-font-interface);
+}
+
+.label {
+  overflow: hidden;
+  color: var(--deslop-primary);
+  font-size: var(--ui-body-font-size);
+  font-variant-numeric: lining-nums tabular-nums;
+  font-weight: 400;
+  letter-spacing: var(--ui-body-letter-spacing);
+  line-height: var(--ui-body-line-height);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.label[data-weight='medium'] {
+  font-weight: 500;
+}
+
+.caption {
+  overflow: hidden;
+  margin-top: 2px;
+  color: var(--deslop-primary-60);
+  font-size: var(--ui-subtitle-font-size);
+  font-weight: var(--ui-subtitle-font-weight);
+  letter-spacing: var(--ui-subtitle-letter-spacing);
+  line-height: var(--ui-subtitle-line-height);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

@@ -301,9 +301,16 @@ async fn ask_single_meeting(
         "Транскрипт встречи:\n{transcript}{summary_block}{history_block}\n\nВопрос: {query}"
     );
 
-    let raw = complete_routed(pool, Purpose::Chat, Scope::SingleMeeting, query.len(), system, &user)
-        .await
-        .map_err(|e| e.to_string())?;
+    let raw = complete_routed(
+        pool,
+        Purpose::Chat,
+        Scope::SingleMeeting,
+        query.len(),
+        system,
+        &user,
+    )
+    .await
+    .map_err(|e| e.to_string())?;
 
     Ok(RagAnswer {
         answer: raw,

@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { Switch } from '@/components/ui/switch';
-import { FolderOpen } from '@/components/memento/LucideCompat';
 import { invoke } from '@tauri-apps/api/core';
 import { DeviceSelection, SelectedDevices } from '@/components/DeviceSelection';
 import Analytics from '@/lib/analytics';
@@ -30,7 +29,6 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [showRecordingNotification, setShowRecordingNotification] = useState(true);
 
   // Load recording preferences on component mount
   useEffect(() => {
@@ -53,21 +51,6 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
     };
 
     loadPreferences();
-  }, []);
-
-  // Load recording notification preference
-  useEffect(() => {
-    const loadNotificationPref = async () => {
-      try {
-        const { Store } = await import('@tauri-apps/plugin-store');
-        const store = await Store.load('preferences.json');
-        const show = await store.get<boolean>('show_recording_notification') ?? true;
-        setShowRecordingNotification(show);
-      } catch (error) {
-        console.error('Failed to load notification preference:', error);
-      }
-    };
-    loadNotificationPref();
   }, []);
 
   const handleAutoSaveToggle = async (enabled: boolean) => {
@@ -98,31 +81,6 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
     });
   };
 
-  const handleOpenFolder = async () => {
-    try {
-      await invoke('open_recordings_folder');
-    } catch (error) {
-      console.error('Failed to open recordings folder:', error);
-    }
-  };
-
-  const handleNotificationToggle = async (enabled: boolean) => {
-    try {
-      setShowRecordingNotification(enabled);
-      const { Store } = await import('@tauri-apps/plugin-store');
-      const store = await Store.load('preferences.json');
-      await store.set('show_recording_notification', enabled);
-      await store.save();
-      toast.success(t('Preference saved'));
-      await Analytics.track('recording_notification_preference_changed', {
-        enabled: enabled.toString()
-      });
-    } catch (error) {
-      console.error('Failed to save notification preference:', error);
-      toast.error(t('Failed to save preference'));
-    }
-  };
-
   const savePreferences = async (prefs: RecordingPreferences) => {
     setSaving(true);
     try {
@@ -147,27 +105,20 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
 
   if (loading) {
     return (
-      <div className="animate-pulse">
-        <div className="h-4 bg-[var(--bg-elevated)] rounded w-1/4 mb-4"></div>
-        <div className="h-8 bg-[var(--bg-elevated)] rounded mb-4"></div>
+      <div className="settings-section animate-pulse">
+        <div className="h-4 bg-muted rounded w-1/4 mb-4"></div>
+        <div className="h-8 bg-muted rounded mb-4"></div>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h3 className="text-lg font-semibold mb-4">{t('Recording Settings')}</h3>
-        <p className="text-sm text-[var(--fg2)] mb-6">
-          {t('Configure how your audio recordings are saved during meetings.')}
-        </p>
-      </div>
-
+    <section className="settings-section space-y-6">
       {/* Auto Save Toggle */}
-      <div className="flex items-center justify-between p-4 border rounded-lg">
+      <div className="flex items-center justify-between gap-4">
         <div className="flex-1">
           <div className="font-medium">{t('Save Audio Recordings')}</div>
-          <div className="text-sm text-[var(--fg2)]">
+          <div className="text-sm text-muted-foreground">
             {t('Automatically save audio files when recording stops')}
           </div>
         </div>
@@ -178,72 +129,24 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
         />
       </div>
 
-      {/* Folder Location - Only shown when auto_save is enabled */}
-      {preferences.auto_save && (
-        <div className="space-y-4">
-          <div className="p-4 border rounded-lg bg-[var(--bg-sheet)]">
-            <div className="font-medium mb-2">{t('Save Location')}</div>
-            <div className="text-sm text-[var(--fg2)] mb-3 break-all">
-              {preferences.save_folder || t('Default folder')}
-            </div>
-            <button
-              onClick={handleOpenFolder}
-              className="flex items-center gap-2 px-3 py-2 text-sm border border-[var(--border-strong)] rounded-md hover:bg-[var(--bg-sheet)] transition-colors"
-            >
-              <FolderOpen className="w-4 h-4" />
-              {t('Open Folder')}
-            </button>
-          </div>
-
-          <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-sheet)] p-4">
-            <div className="text-sm font-medium text-[var(--fg1)]">
-              {t('Audio recording format')}
-            </div>
-            <div className="mt-2 grid gap-1 text-xs leading-relaxed text-[var(--fg2)]">
-              <p>{t('Audio: AAC-LC, 192 kbps, mono')}</p>
-              <p>{t('Container: MP4 (.mp4)')}</p>
-              <p>{t('This is an audio-only file. Memento does not record video.')}</p>
-              <p>{t('MP4 is used for reliable checkpoint saving and recovery if recording is interrupted.')}</p>
-            </div>
-            <div className="mt-3 text-xs text-[var(--fg3)]">
-              {t('File name example: recording_YYYYMMDD_HHMMSS.mp4')}
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Info when auto_save is disabled */}
       {!preferences.auto_save && (
-        <div className="p-4 border rounded-lg bg-[var(--gold-soft)]">
-          <div className="text-sm text-[var(--gold)]">
+        <div className="rounded-xl border border-primary/20 bg-primary/10 p-4">
+          <div className="text-sm text-primary">
             {t('Audio recording is disabled. Enable "Save Audio Recordings" to automatically save your meeting audio.')}
           </div>
         </div>
       )}
 
-      {/* Recording Notification Toggle */}
-      <div className="flex items-center justify-between p-4 border rounded-lg">
-        <div className="flex-1">
-          <div className="font-medium">{t('Recording Start Notification')}</div>
-          <div className="text-sm text-[var(--fg2)]">
-            {t('Show reminder to inform participants when recording starts')}
-          </div>
-        </div>
-        <Switch
-          checked={showRecordingNotification}
-          onCheckedChange={handleNotificationToggle}
-        />
-      </div>
-
       {/* Device Настройки */}
       <div className="space-y-4">
         <div className="border-t pt-6">
-          <h4 className="text-base font-medium text-[var(--fg1)] mb-4">{t('Default Audio Devices')}</h4>
-          <p className="text-sm text-[var(--fg2)] mb-4">
+          <h4 className="text-base font-medium text-foreground mb-4">{t('Default Audio Devices')}</h4>
+          <p className="text-sm text-muted-foreground mb-4">
             {t('Set your preferred microphone and system audio devices for recording. These will be automatically selected when starting new recordings.')}
           </p>
 
-          <div className="border rounded-lg p-4 bg-[var(--bg-sheet)]">
+          <div className="settings-subsection">
             <DeviceSelection
               selectedDevices={{
                 micDevice: preferences.preferred_mic_device,
@@ -255,6 +158,6 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
           </div>
         </div>
       </div>
-    </div>
+    </section>
   );
 }

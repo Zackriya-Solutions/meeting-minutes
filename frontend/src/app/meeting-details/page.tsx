@@ -3,88 +3,100 @@ import { useSidebar } from "@/components/Sidebar/SidebarProvider";
 import { useState, useEffect, useCallback, useRef, Suspense } from "react";
 import { Transcript, Summary } from "@/types";
 import PageContent from "./page-content";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import Analytics from "@/lib/analytics";
 import { invoke } from "@tauri-apps/api/core";
-import { LoaderIcon } from '@/components/memento/LucideCompat';
-import { useConfig } from "@/contexts/ConfigContext";
+import { LoaderIcon } from '@/components/deslop-icons';
 import { usePaginatedTranscripts } from "@/hooks/usePaginatedTranscripts";
 import { useMeetingSpeakers } from "@/hooks/useMeetingSpeakers";
-import { useT } from "@/lib/i18n";
+import { useLanguage, useT } from "@/lib/i18n";
+import { useMeetingDrawer } from "@/contexts/MeetingDrawerContext";
+import { MeetingDrawerShell } from "./meeting-drawer-shell";
+import {
+  cacheMeetingSummary,
+  parsePersistedSummary,
+  readCachedMeetingSummary,
+} from '@/lib/meetingSummaryCache';
 
 interface MeetingDetailsResponse {
   id: string;
   title: string;
   created_at: string;
   updated_at: string;
+  occurred_at?: string | null;
   transcripts: Transcript[];
   folder_path?: string;
+  duration_seconds?: number | null;
 }
 
 type SummaryLoadStatus = 'loading' | 'loaded' | 'absent' | 'error';
 
-function parsePersistedSummary(rawData: unknown): Summary | null {
-  let parsedData: any = rawData;
-  if (typeof parsedData === 'string') {
-    try {
-      parsedData = JSON.parse(parsedData);
-    } catch {
-      return null;
-    }
-  }
-  if (!parsedData || typeof parsedData !== 'object') return null;
+function UpcomingMeetingPreview() {
+  const searchParams = useSearchParams();
+  const { t, lang } = useLanguage();
+  const title = searchParams.get('title') || t('Upcoming meeting');
+  const start = new Date(searchParams.get('start') || '');
+  const end = new Date(searchParams.get('end') || '');
+  const hasStart = !Number.isNaN(start.getTime());
+  const hasEnd = !Number.isNaN(end.getTime());
+  const locale = lang === 'ru' ? 'ru-RU' : 'en-US';
+  const dateLabel = hasStart
+    ? new Intl.DateTimeFormat(locale, {
+        weekday: 'long',
+        day: 'numeric',
+        month: 'long',
+      }).format(start)
+    : '';
+  const timeFormatter = new Intl.DateTimeFormat(locale, { hour: '2-digit', minute: '2-digit' });
+  const timeLabel = hasStart
+    ? `${timeFormatter.format(start)}${hasEnd ? `\u00a0–\u00a0${timeFormatter.format(end)}` : ''}`
+    : '';
 
-  // Current formats must retain their generation/freshness metadata.
-  if (parsedData.summary_json || parsedData.markdown) return parsedData as Summary;
-
-  // Legacy section format.
-  const { MeetingName: _meetingName, _section_order, ...restSummaryData } = parsedData;
-  const formattedSummary: Summary = {};
-  const sectionKeys = Array.isArray(_section_order)
-    ? _section_order
-    : Object.keys(restSummaryData);
-
-  for (const key of sectionKeys) {
-    const section = restSummaryData[key];
-    if (!section || typeof section !== 'object' || !('title' in section) || !('blocks' in section)) {
-      continue;
-    }
-    const blocks = Array.isArray(section.blocks) ? section.blocks : [];
-    formattedSummary[key] = {
-      title: typeof section.title === 'string' ? section.title : key,
-      blocks: blocks.map((block: any) => ({
-        ...block,
-        color: 'default',
-        content: block?.content?.trim() || '',
-      })),
-    };
-  }
-
-  return Object.keys(formattedSummary).length > 0 ? formattedSummary : null;
+  return (
+    <div className="flex h-full flex-col bg-[var(--elevation-1)]">
+      <div className="flex items-center gap-3 border-b border-border px-[var(--drawer-content-inset)] py-4">
+        <div className="min-w-0 flex-1">
+          <h1 className="memento-screen-title truncate text-foreground">{title}</h1>
+          {(dateLabel || timeLabel) && (
+            <p className="mm-numeric mt-0.5 truncate text-xs text-muted-foreground">
+              {[dateLabel, timeLabel].filter(Boolean).join(' · ')}
+            </p>
+          )}
+        </div>
+      </div>
+      <main className="flex min-h-0 flex-1 items-center justify-center px-[var(--drawer-content-inset)] py-12">
+        <div className="max-w-md text-center">
+          <p className="text-base font-medium text-foreground">{t('This meeting has not started yet')}</p>
+          <p className="mt-2 text-sm leading-relaxed text-[var(--primary-40)]">
+            {t('The transcript and summary will appear here after the meeting is recorded.')}
+          </p>
+        </div>
+      </main>
+    </div>
+  );
 }
 
 function MeetingDetailsContent() {
   const searchParams = useSearchParams();
   const meetingId = searchParams.get('id');
-  const source = searchParams.get('source'); // Check if navigated from recording
   // Optional jump-to-timestamp deep link (?t=<seconds>) from search results / RAG citations.
   const seekParam = searchParams.get('t');
   const seekToSeconds =
     seekParam != null && seekParam !== '' && Number.isFinite(Number(seekParam)) ? Number(seekParam) : null;
   const { setCurrentMeeting, refetchMeetings, stopSummaryPolling } = useSidebar();
-  const { isAutoSummary } = useConfig(); // Get auto-summary toggle state
-  const router = useRouter();
+  const meetingDrawer = useMeetingDrawer();
   const t = useT();
   const [meetingDetails, setMeetingDetails] = useState<MeetingDetailsResponse | null>(null);
-  const [meetingSummary, setMeetingSummary] = useState<Summary | null>(null);
-  const meetingSummaryRef = useRef<Summary | null>(null);
+  const initialCachedSummary = meetingId ? readCachedMeetingSummary(meetingId) : null;
+  const [meetingSummary, setMeetingSummary] = useState<Summary | null>(initialCachedSummary);
+  const meetingSummaryRef = useRef<Summary | null>(initialCachedSummary);
   const summaryLoadRequestRef = useRef(0);
-  const [summaryLoadStatus, setSummaryLoadStatus] = useState<SummaryLoadStatus>('loading');
+  const [summaryLoadStatus, setSummaryLoadStatus] = useState<SummaryLoadStatus>(
+    initialCachedSummary ? 'loaded' : 'loading',
+  );
   const [summaryLoadError, setSummaryLoadError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
-  const [shouldAutoGenerate, setShouldAutoGenerate] = useState<boolean>(false);
-  const [hasCheckedAutoGen, setHasCheckedAutoGen] = useState<boolean>(false);
 
   // Use pagination hook for efficient transcript loading
   const {
@@ -114,7 +126,8 @@ function MeetingDetailsContent() {
     setMeetingSummary(summary);
     setSummaryLoadStatus(summary ? 'loaded' : 'absent');
     setSummaryLoadError(null);
-  }, []);
+    if (meetingId) cacheMeetingSummary(meetingId, summary);
+  }, [meetingId]);
 
   // Explicit refresh after a Detect action completes (immediate feedback;
   // the diarization-complete event covers refreshes triggered elsewhere).
@@ -143,74 +156,6 @@ function MeetingDetailsContent() {
     });
   }, [renameSpeaker]);
 
-  // Check if gemma3:1b model is available in Ollama
-  const checkForGemmaModel = useCallback(async (): Promise<boolean> => {
-    try {
-      const models = await invoke('get_ollama_models', { endpoint: null }) as any[];
-      const hasGemma = models.some((m: any) => m.name === 'gemma3:1b');
-      console.log('🔍 Checked for gemma3:1b:', hasGemma);
-      return hasGemma;
-    } catch (error) {
-      console.error('❌ Failed to check Ollama models:', error);
-      return false;
-    }
-  }, []);
-
-  // Set up auto-generation - respects DB as source of truth
-  const setupAutoGeneration = useCallback(async () => {
-    if (hasCheckedAutoGen) return; // Only check once
-
-    // Only auto-generate if navigated from recording
-    if (source !== 'recording') {
-      console.log('Not from recording navigation, skipping auto-generation');
-      setHasCheckedAutoGen(true);
-      return;
-    }
-
-    // Respect user's auto-summary toggle preference
-    if (!isAutoSummary) {
-      console.log('Auto-summary is disabled in settings');
-      setHasCheckedAutoGen(true);
-      return;
-    }
-
-    try {
-      // Check what's currently in database
-      const currentConfig = await invoke('api_get_model_config') as any;
-
-      // If DB already has a model, use it (never override!)
-      if (currentConfig && currentConfig.model) {
-        console.log('Using existing model from DB:', currentConfig.model);
-        setShouldAutoGenerate(true);
-        setHasCheckedAutoGen(true);
-        return;
-      }
-
-      // DB is empty - check if gemma3:1b exists as fallback
-      const hasGemma = await checkForGemmaModel();
-
-      if (hasGemma) {
-        console.log('💾 DB empty, using gemma3:1b as initial default');
-
-        await invoke('api_save_model_config', {
-          provider: 'ollama',
-          model: '',
-          whisperModel: 'large-v3',
-          apiKey: null,
-          ollamaEndpoint: null,
-        });
-
-        setShouldAutoGenerate(true);
-      } else {
-        console.log('⚠️ No model configured and gemma3:1b not found');
-      }
-    } catch (error) {
-      console.error('❌ Failed to setup auto-generation:', error);
-    }
-
-    setHasCheckedAutoGen(true);
-  }, [hasCheckedAutoGen, checkForGemmaModel, source, isAutoSummary]);
-
   // Sync meeting metadata from pagination hook to meeting details state
   useEffect(() => {
     if (metadata && (!meetingId || meetingId === 'intro-call')) {
@@ -227,12 +172,21 @@ function MeetingDetailsContent() {
         title: metadata.title,
         created_at: metadata.created_at,
         updated_at: metadata.updated_at,
+        occurred_at: metadata.occurred_at,
         transcripts: transcripts, // Paginated transcripts from hook
         folder_path: metadata.folder_path, // For retranscription feature
+        duration_seconds: metadata.duration_seconds,
       });
 
       // Sync with sidebar context
-      setCurrentMeeting({ id: metadata.id, title: metadata.title });
+      setCurrentMeeting({
+        id: metadata.id,
+        title: metadata.title,
+        createdAt: metadata.created_at,
+        occurredAt: metadata.occurred_at,
+        folderPath: metadata.folder_path,
+        durationSeconds: metadata.duration_seconds,
+      });
     }
   }, [metadata, transcripts, meetingId, setCurrentMeeting]);
 
@@ -260,7 +214,7 @@ function MeetingDetailsContent() {
 
     const requestId = ++summaryLoadRequestRef.current;
     if (showPageLoader) setIsLoading(true);
-    setSummaryLoadStatus('loading');
+    if (!meetingSummaryRef.current) setSummaryLoadStatus('loading');
     setSummaryLoadError(null);
 
     let lastError: unknown = null;
@@ -298,6 +252,20 @@ function MeetingDetailsContent() {
             return;
           }
 
+          if (['failed', 'error', 'cancelled'].includes(response?.status)) {
+            if (meetingSummaryRef.current) {
+              setSummaryLoadStatus('loaded');
+            } else {
+              // A failed background attempt is still a missing summary. Mark it as
+              // absent so the automatic generation effect can retry once for this
+              // meeting instead of permanently stranding the drawer in an error
+              // snapshot created by an earlier app/network failure.
+              setSummaryLoadStatus('absent');
+            }
+            setSummaryLoadError(response?.error || t('The summary could not be generated automatically.'));
+            return;
+          }
+
           throw new Error(response?.error || t('The saved summary could not be loaded.'));
         } catch (error) {
           lastError = error;
@@ -320,16 +288,14 @@ function MeetingDetailsContent() {
 
   // Reset states when meetingId changes (prevent race conditions)
   useEffect(() => {
+    const cachedSummary = meetingId ? readCachedMeetingSummary(meetingId) : null;
     setMeetingDetails(null);
-    setMeetingSummary(null);
-    meetingSummaryRef.current = null;
-    setSummaryLoadStatus('loading');
+    setMeetingSummary(cachedSummary);
+    meetingSummaryRef.current = cachedSummary;
+    setSummaryLoadStatus(cachedSummary ? 'loaded' : 'loading');
     setSummaryLoadError(null);
     setError(null);
     setIsLoading(true);
-    // Reset auto-generation state to allow new meeting to be checked
-    setHasCheckedAutoGen(false);
-    setShouldAutoGenerate(false);
   }, [meetingId]);
 
   // Cleanup: Stop polling when navigating away from a meeting
@@ -354,7 +320,7 @@ function MeetingDetailsContent() {
     }
 
     console.log('Valid meeting ID found, fetching details for:', meetingId);
-    void fetchMeetingSummary(true);
+    void fetchMeetingSummary(!meetingSummaryRef.current);
 
     return () => {
       // Ignore a late response from a meeting that is no longer open.
@@ -362,38 +328,35 @@ function MeetingDetailsContent() {
     };
   }, [meetingId, fetchMeetingSummary, t]);
 
-  // Auto-generation check: runs when meeting is loaded with no summary
+  // A summary may be queued before this drawer opens (the normal recording-stop
+  // path). Keep reading the persisted background job until it resolves instead
+  // of leaving the drawer on a permanent "not created"/loading snapshot.
   useEffect(() => {
-    const checkAutoGen = async () => {
-      // Only auto-generate if:
-      // 1. We have meeting details
-      // 2. No summary exists
-      // 3. Meeting has transcripts
-      // 4. Haven't checked yet
-      if (
-        meetingDetails &&
-        meetingSummary === null &&
-        summaryLoadStatus === 'absent' &&
-        meetingDetails.transcripts &&
-        meetingDetails.transcripts.length > 0 &&
-        !hasCheckedAutoGen
-      ) {
-        console.log('No summary found, checking for auto-generation...');
-        await setupAutoGeneration();
-      }
+    if (!meetingId || meetingId === 'intro-call' || summaryLoadStatus !== 'loading') return;
+
+    let cancelled = false;
+    let timer: number | null = null;
+
+    const poll = async () => {
+      await fetchMeetingSummary(false);
+      if (!cancelled) timer = window.setTimeout(poll, 1500);
     };
 
-    checkAutoGen();
-  }, [meetingDetails, meetingSummary, summaryLoadStatus, hasCheckedAutoGen, setupAutoGeneration]);
+    timer = window.setTimeout(poll, 750);
+    return () => {
+      cancelled = true;
+      if (timer !== null) window.clearTimeout(timer);
+    };
+  }, [meetingId, summaryLoadStatus, fetchMeetingSummary]);
 
   if (error) {
     return (
-      <div className="flex items-center justify-center h-screen">
+      <div className="flex h-full items-center justify-center">
         <div className="text-center">
-          <p className="text-[var(--danger)] mb-4">{error}</p>
+          <p className="text-destructive mb-4">{error}</p>
           <button
-            onClick={() => router.push('/')}
-            className="px-4 py-2 bg-[var(--gold)] text-[var(--fg-inverse)] rounded hover:bg-[var(--gold-active)]"
+            onClick={() => meetingDrawer?.close()}
+            className="px-4 py-2 bg-primary text-primary-foreground rounded hover:bg-primary/90"
           >
             {t('Go Back')}
           </button>
@@ -404,7 +367,7 @@ function MeetingDetailsContent() {
 
   // Show loading spinner while initial data loads
   if ((isLoading || isLoadingTranscripts) || !meetingDetails) {
-    return <div className="flex items-center justify-center h-screen">
+    return <div className="flex h-full items-center justify-center">
       <LoaderIcon className="animate-spin size-6 " />
     </div>;
   }
@@ -416,8 +379,11 @@ function MeetingDetailsContent() {
     summaryLoadError={summaryLoadError}
     onRetrySummary={() => fetchMeetingSummary(false)}
     onSummaryDataChange={commitMeetingSummary}
-    shouldAutoGenerate={shouldAutoGenerate}
-    onAutoGenerateComplete={() => setShouldAutoGenerate(false)}
+    shouldAutoGenerate={
+      summaryLoadStatus === 'absent'
+      && meetingSummary === null
+      && ((totalCount ?? 0) > 0 || transcripts.length > 0)
+    }
     onMeetingUpdated={async () => {
       // Refetch meeting details to get updated title from backend
       await fetchMeetingDetails();
@@ -443,12 +409,21 @@ function MeetingDetailsContent() {
 
 export default function MeetingDetails() {
   return (
-    <Suspense fallback={
-      <div className="flex items-center justify-center h-screen">
-        <LoaderIcon className="animate-spin size-6" />
-      </div>
-    }>
-      <MeetingDetailsContent />
-    </Suspense>
+    <MeetingDrawerShell>
+      <Suspense fallback={
+        <div className="flex h-full items-center justify-center">
+          <LoaderIcon className="animate-spin size-6" />
+        </div>
+      }>
+        <MeetingDetailsRoute />
+      </Suspense>
+    </MeetingDrawerShell>
   );
+}
+
+function MeetingDetailsRoute() {
+  const searchParams = useSearchParams();
+  return searchParams.get('upcoming') === '1'
+    ? <UpcomingMeetingPreview />
+    : <MeetingDetailsContent />;
 }

@@ -17,7 +17,7 @@ import {
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Switch } from '@/components/ui/switch';
-import { Lock, Unlock, Eye, EyeOff, RefreshCw, CheckCircle2, XCircle, ChevronDown, ChevronUp, Download, ExternalLink, Check, ChevronsUpDown } from '@/components/memento/LucideCompat';
+import { Lock, Unlock, Eye, EyeOff, RefreshCw, CheckCircle2, XCircle, ChevronDown, ChevronUp, Download, ExternalLink, Check, ChevronsUpDown } from '@/components/deslop-icons';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import {
   Command,
@@ -1123,7 +1123,7 @@ export function ModelSettingsModal({
                     variant="ghost"
                     size="icon"
                     onClick={() => setIsApiKeyLocked(!isApiKeyLocked)}
-                    className={isLockButtonVibrating ? 'animate-vibrate text-[var(--danger)]' : ''}
+                    className={isLockButtonVibrating ? 'animate-vibrate text-destructive' : ''}
                     title={isApiKeyLocked ? t('Unlock to edit') : t('Lock to prevent editing')}
                   >
                     {isApiKeyLocked ? <Lock /> : <Unlock />}
@@ -1177,14 +1177,14 @@ export function ModelSettingsModal({
                       placeholder="http://localhost:11434"
                       className={cn(
                         "pr-10",
-                        endpointValidationState === 'invalid' && "border-[color-mix(in_srgb,var(--danger)_42%,transparent)]"
+                        endpointValidationState === 'invalid' && "border-destructive/40"
                       )}
                     />
                     {endpointValidationState === 'valid' && (
-                      <CheckCircle2 className="absolute right-3 top-1/2 -translate-y-1/2 h-5 w-5 text-[var(--success)]" />
+                      <CheckCircle2 className="absolute right-3 top-1/2 -translate-y-1/2 h-5 w-5 text-success" />
                     )}
                     {endpointValidationState === 'invalid' && (
-                      <XCircle className="absolute right-3 top-1/2 -translate-y-1/2 h-5 w-5 text-[var(--danger)]" />
+                      <XCircle className="absolute right-3 top-1/2 -translate-y-1/2 h-5 w-5 text-destructive" />
                     )}
                   </div>
                   <Button
@@ -1209,8 +1209,8 @@ export function ModelSettingsModal({
                   </Button>
                 </div>
                 {ollamaEndpointChanged && !error && (
-                  <Alert className="mt-3 border-[var(--gold-border)] bg-[var(--gold-soft)]">
-                    <AlertDescription className="text-[var(--gold)]">
+                  <Alert className="mt-3 border-primary/40 bg-primary/10">
+                    <AlertDescription className="text-primary">
                       {t('Endpoint changed. Please click "Fetch Models" to load models from the new endpoint before saving.')}
                     </AlertDescription>
                   </Alert>
@@ -1253,8 +1253,8 @@ export function ModelSettingsModal({
                 {ollamaNotInstalled ? (
                   /* Show Ollama download link when not installed */
                   <div className="space-y-4">
-                    <Alert className="border-[var(--gold-border)] bg-[var(--gold-soft)]">
-                      <AlertDescription className="text-[var(--gold)]">
+                    <Alert className="border-primary/40 bg-primary/10">
+                      <AlertDescription className="text-primary">
                         {t('Ollama is not installed or not running. Please download and install Ollama to use local models.')}
                       </AlertDescription>
                     </Alert>
@@ -1262,7 +1262,7 @@ export function ModelSettingsModal({
                       variant="default"
                       size="sm"
                       onClick={() => invoke('open_external_url', { url: 'https://ollama.com/download' })}
-                      className="w-full bg-[var(--gold)] hover:bg-[var(--gold-active)]"
+                      className="w-full bg-primary hover:bg-primary/90"
                     >
                       <ExternalLink className="mr-2 h-4 w-4" />
                       {t('Download Ollama')}
@@ -1305,16 +1305,16 @@ export function ModelSettingsModal({
 
                         {/* Show progress for gemma3:1b download */}
                         {isDownloading('gemma3:1b') && getProgress('gemma3:1b') !== undefined && (
-                          <div className="bg-[var(--bg-canvas)] rounded-md border p-3">
+                          <div className="bg-background rounded-md border p-3">
                             <div className="flex items-center justify-between mb-2">
-                              <span className="text-sm font-medium text-[var(--gold)]">{t('Downloading')} gemma3:1b</span>
-                              <span className="text-sm font-semibold text-[var(--gold)]">
+                              <span className="text-sm font-medium text-primary">{t('Downloading')} gemma3:1b</span>
+                              <span className="text-sm font-semibold text-primary">
                                 {Math.round(getProgress('gemma3:1b')!)}%
                               </span>
                             </div>
-                            <div className="w-full h-2 bg-[var(--bg-elevated)] rounded-full overflow-hidden">
+                            <div className="w-full h-2 bg-muted rounded-full overflow-hidden">
                               <div
-                                className="h-full rounded-full bg-[var(--gold)] transition-all duration-300"
+                                className="h-full rounded-full bg-primary transition-all duration-300"
                                 style={{ width: `${getProgress('gemma3:1b')}%` }}
                               />
                             </div>
@@ -1345,7 +1345,7 @@ export function ModelSettingsModal({
                           className={cn(
                             'bg-card p-2 m-0 rounded-md border transition-colors',
                             modelConfig.model === model.name
-                              ? 'ring-1 ring-[var(--gold-ring)] border-[var(--gold-border)] bg-[var(--gold-soft)]'
+                              ? 'ring-1 ring-ring border-primary/40 bg-primary/10'
                               : 'hover:bg-muted/50',
                             !modelIsDownloading && 'cursor-pointer'
                           )}
@@ -1363,14 +1363,14 @@ export function ModelSettingsModal({
 
                           {/* Progress bar for downloading models */}
                           {modelIsDownloading && progress !== undefined && (
-                            <div className="mt-3 pt-3 border-t border-[var(--border-subtle)]">
+                            <div className="mt-3 pt-3 border-t border-border">
                               <div className="flex items-center justify-between mb-2">
-                                <span className="text-sm font-medium text-[var(--gold)]">{t('Downloading...')}</span>
-                                <span className="text-sm font-semibold text-[var(--gold)]">{Math.round(progress)}%</span>
+                                <span className="text-sm font-medium text-primary">{t('Downloading...')}</span>
+                                <span className="text-sm font-semibold text-primary">{Math.round(progress)}%</span>
                               </div>
-                              <div className="w-full h-2 bg-[var(--bg-elevated)] rounded-full overflow-hidden">
+                              <div className="w-full h-2 bg-muted rounded-full overflow-hidden">
                                 <div
-                                  className="h-full rounded-full bg-[var(--gold)] transition-all duration-300"
+                                  className="h-full rounded-full bg-primary transition-all duration-300"
                                   style={{ width: `${progress}%` }}
                                 />
                               </div>
@@ -1401,7 +1401,7 @@ export function ModelSettingsModal({
       </div>
 
       {/* Auto-generate summaries toggle */}
-      {/* <div className="mt-6 pt-6 border-t border-[var(--border-subtle)]">
+      {/* <div className="mt-6 pt-6 border-t border-border">
         <div className="flex items-center justify-between">
           <div className="flex-1">
             <Label htmlFor="auto-generate" className="text-base font-medium">
@@ -1422,8 +1422,8 @@ export function ModelSettingsModal({
       <div className="mt-6 flex justify-end">
         <Button
           className={cn(
-            'px-4 text-sm font-medium text-[var(--fg-inverse)] rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 ring-[var(--gold-ring)]',
-            isDoneDisabled ? 'bg-[var(--fg3)] cursor-not-allowed' : 'bg-[var(--gold)] hover:bg-[var(--gold-active)]'
+            'px-4 text-sm font-medium text-primary-foreground rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 ring-ring',
+            isDoneDisabled ? 'bg-muted-foreground cursor-not-allowed' : 'bg-primary hover:bg-primary/90'
           )}
           onClick={handleSave}
           disabled={isDoneDisabled}

@@ -1,0 +1,23 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "app": {
+    "windows": [
+      {
+        "title": "Memento",
+        "width": 1100,
+        "height": 700,
+        "resizable": true,
+        "fullscreen": false,
+        "acceptFirstMouse": true,
+        "decorations": true,
+        "transparent": true,
+        "windowEffects": {
+          "effects": [
+            "underWindowBackground"
+          ],
+          "state": "followsWindowActiveState"
+        }
+      }
+    ]
+  }
+}

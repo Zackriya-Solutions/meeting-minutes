@@ -4,7 +4,11 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
 import { useT } from '@/lib/i18n';
-import { Play } from '@/components/memento/LucideCompat';
+import { Play } from '@/components/deslop-icons';
+import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Input } from '@/components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 interface MeetingTypeSuggestion {
   id: number;
@@ -413,43 +417,42 @@ export function LearningReviewPanel({
   };
 
   return (
-    <details className="mx-4 mt-4 rounded-xl border border-[var(--gold-border)] bg-[var(--gold-soft)] px-4 py-3" open={totalPending > 0}>
-      <summary className="cursor-pointer select-none text-sm font-semibold text-[var(--fg1)]">
+    <details className="mx-4 mt-4 rounded-xl border border-primary/40 bg-primary/10 px-4 py-3" open={totalPending > 0}>
+      <summary className="cursor-pointer select-none text-sm font-semibold text-foreground">
         {t('Memento learning review')} · {totalPending} {t('items pending review')}
       </summary>
-      {loadError && <p className="mt-3 text-xs text-[var(--danger)]">{loadError}</p>}
+      {loadError && <p className="mt-3 text-xs text-destructive">{loadError}</p>}
       <div className="mt-3 grid gap-3 xl:grid-cols-2">
         {classification && (
-          <section className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-sheet)] p-3">
-            <div className="text-xs font-semibold text-[var(--fg1)]">{t('Meeting type')}</div>
-            <p className="mt-1 text-xs text-[var(--fg3)]">
+          <section className="rounded-lg border border-border bg-background p-3">
+            <div className="text-xs font-semibold text-foreground">{t('Meeting type')}</div>
+            <p className="mt-1 text-xs text-muted-foreground">
               {t('Suggested')} {meetingTypeLabel(classification.suggested_type, t)} · {percent(classification.confidence)}
             </p>
             <div className="mt-2 flex flex-wrap items-center gap-2">
-              <select
-                value={selectedType}
-                onChange={(event) => setSelectedType(event.target.value)}
-                className="rounded-md border border-[var(--border-strong)] bg-[var(--bg-canvas)] px-2 py-1 text-xs"
-              >
-                {meetingTypes.map((type) => (
-                  <option key={type} value={type}>{meetingTypeLabel(type, t)}</option>
-                ))}
-              </select>
-              <button disabled={busy != null} onClick={() => void reviewType('accepted')} className="rounded-md bg-[var(--gold)] px-2 py-1 text-xs text-[var(--fg-inverse)]">{t('Accept')}</button>
-              <button disabled={busy != null} onClick={() => void reviewType('rejected')} className="rounded-md border border-[var(--border-strong)] px-2 py-1 text-xs">{t('Reject')}</button>
+              <Select value={selectedType} onValueChange={setSelectedType}>
+                <SelectTrigger className="h-8 w-48 text-xs"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {meetingTypes.map((type) => (
+                    <SelectItem key={type} value={type}>{meetingTypeLabel(type, t)}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Button disabled={busy != null} onClick={() => void reviewType('accepted')} size="sm">{t('Accept')}</Button>
+              <Button disabled={busy != null} onClick={() => void reviewType('rejected')} variant="outline" size="sm">{t('Reject')}</Button>
             </div>
           </section>
         )}
 
         {collections.map((suggestion) => (
-          <section key={suggestion.id} className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-sheet)] p-3">
-            <div className="text-xs font-semibold text-[var(--fg1)]">{t('Collection')}</div>
-            <p className="mt-1 text-xs text-[var(--fg2)]">
+          <section key={suggestion.id} className="rounded-lg border border-border bg-background p-3">
+            <div className="text-xs font-semibold text-foreground">{t('Collection')}</div>
+            <p className="mt-1 text-xs text-muted-foreground">
               {t('Suggested')} <strong>{suggestion.suggested_name}</strong> · {percent(suggestion.confidence)}
             </p>
             <div className="mt-2 flex gap-2">
-              <button disabled={busy != null} onClick={() => void reviewCollection(suggestion, 'accepted')} className="rounded-md bg-[var(--gold)] px-2 py-1 text-xs text-[var(--fg-inverse)]">{t('Add to collection')}</button>
-              <button disabled={busy != null} onClick={() => void reviewCollection(suggestion, 'rejected')} className="rounded-md border border-[var(--border-strong)] px-2 py-1 text-xs">{t('Reject')}</button>
+              <Button disabled={busy != null} onClick={() => void reviewCollection(suggestion, 'accepted')} size="sm">{t('Add to collection')}</Button>
+              <Button disabled={busy != null} onClick={() => void reviewCollection(suggestion, 'rejected')} variant="outline" size="sm">{t('Reject')}</Button>
             </div>
           </section>
         ))}
@@ -458,70 +461,69 @@ export function LearningReviewPanel({
           const top = item.candidates[0];
           const speakerLabel = localizedSpeakerLabel(item.operational_display_name, t);
           return (
-            <section key={item.cluster_id} className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-sheet)] p-3">
-              <div className="text-xs font-semibold text-[var(--fg1)]">
+            <section key={item.cluster_id} className="rounded-lg border border-border bg-background p-3">
+              <div className="text-xs font-semibold text-foreground">
                 {speakerLabel ?? `${t('Unassigned voice')} ${item.local_cluster_id + 1}`} · {Math.round(item.speech_duration_ms / 1000)}s
               </div>
-              <p className="mt-1 text-[11px] text-[var(--fg3)]">
+              <p className="mt-1 text-[11px] text-muted-foreground">
                 {t('Voice detection group')} {item.local_cluster_id + 1} ·{' '}
                 {speakerLabel
                   ? t('linked to this speaker label in the transcript')
                   : t('not linked to a speaker in the transcript yet')}
               </p>
-              <p className="mt-1 text-xs text-[var(--fg3)]">
+              <p className="mt-1 text-xs text-muted-foreground">
                 {top
                   ? `${top.display_name} · ${t('voice match')} ${percent(top.voice_score)} · ${t(top.confidence_band)}`
                   : t('No reliable identity candidate')}
               </p>
-              <div className="mt-2 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-canvas)] p-2">
-                <p className="mb-1.5 text-[11px] text-[var(--fg2)]">
+              <div className="mt-2 rounded-md border border-border bg-background p-2">
+                <p className="mb-1.5 text-[11px] text-muted-foreground">
                   {t('Listen to excerpts before assigning a name')}
                 </p>
                 {item.samples.length > 0 ? (
                   <div className="grid gap-1">
                     {item.samples.map((sample) => (
-                      <button
+                      <Button
                         key={sample.transcript_id}
                         type="button"
                         disabled={!onPlayIdentitySample}
                         onClick={() => onPlayIdentitySample?.(sample)}
                         title={t('Play voice excerpt and open it in the transcript')}
-                        className="flex min-w-0 items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-[var(--fg2)] transition-colors hover:bg-[var(--gold-soft)] disabled:cursor-not-allowed disabled:opacity-50"
+                        className="flex min-w-0 items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-muted-foreground transition-colors hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-50"
                       >
-                        <Play className="h-3.5 w-3.5 shrink-0 text-[var(--gold)]" />
-                        <span className="mm-numeric shrink-0 text-[var(--gold)]">{clock(sample.start_seconds)}</span>
+                        <Play className="h-3.5 w-3.5 shrink-0 text-primary" />
+                        <span className="mm-numeric shrink-0 text-primary">{clock(sample.start_seconds)}</span>
                         <span className="min-w-0 truncate">{sample.text}</span>
-                      </button>
+                      </Button>
                     ))}
                   </div>
                 ) : (
-                  <p className="text-[11px] text-[var(--fg3)]">{t('No timed voice excerpts are available')}</p>
+                  <p className="text-[11px] text-muted-foreground">{t('No timed voice excerpts are available')}</p>
                 )}
               </div>
               {!top && (
-                <input
+                <Input
                   value={identityNames[item.cluster_id] ?? ''}
                   onChange={(event) => setIdentityNames((current) => ({
                     ...current,
                     [item.cluster_id]: event.target.value,
                   }))}
                   placeholder={t('Enter speaker name')}
-                  className="mt-2 w-full rounded-md border border-[var(--border-strong)] bg-[var(--bg-canvas)] px-2 py-1.5 text-xs"
+                  className="mt-2 h-8 text-xs"
                 />
               )}
-              <label className="mt-2 flex items-center gap-2 text-[11px] text-[var(--fg2)]">
-                <input
-                  type="checkbox"
+              <label className="mt-2 flex items-center gap-2 text-[11px] text-muted-foreground">
+                <Checkbox
                   checked={!!allowLearning[item.cluster_id]}
-                  onChange={(event) => setAllowLearning((current) => ({ ...current, [item.cluster_id]: event.target.checked }))}
+                  onCheckedChange={(checked) => setAllowLearning((current) => ({ ...current, [item.cluster_id]: checked === true }))}
                 />
                 {t('Use this confirmed sample to improve future voice recognition')}
               </label>
               <div className="mt-2 flex flex-wrap gap-2">
-                {top && <button disabled={busy != null} onClick={() => void reviewIdentity(item, 'confirm', top.speaker_id)} className="rounded-md bg-[var(--gold)] px-2 py-1 text-xs text-[var(--fg-inverse)]">{t('Confirm')} {top.display_name}</button>}
-                {top && <button disabled={busy != null} onClick={() => void reviewIdentity(item, 'reject', top.speaker_id)} className="rounded-md border border-[var(--border-strong)] px-2 py-1 text-xs">{t('Not this person')}</button>}
+                {top && <Button disabled={busy != null} onClick={() => void reviewIdentity(item, 'confirm', top.speaker_id)} size="sm">{t('Confirm')} {top.display_name}</Button>}
+                {top && <Button disabled={busy != null} onClick={() => void reviewIdentity(item, 'reject', top.speaker_id)} variant="outline" size="sm">{t('Not this person')}</Button>}
                 {!top && (
-                  <button
+                  <Button
                     disabled={busy != null || !identityNames[item.cluster_id]?.trim()}
                     onClick={() => void reviewIdentity(
                       item,
@@ -529,12 +531,12 @@ export function LearningReviewPanel({
                       undefined,
                       identityNames[item.cluster_id],
                     )}
-                    className="rounded-md bg-[var(--gold)] px-2 py-1 text-xs text-[var(--fg-inverse)] disabled:opacity-50"
+                    className="rounded-md bg-primary px-2 py-1 text-xs text-primary-foreground disabled:opacity-50"
                   >
                     {t('Confirm speaker name')}
-                  </button>
+                  </Button>
                 )}
-                <button disabled={busy != null} onClick={() => void reviewIdentity(item, 'unknown')} className="rounded-md border border-[var(--border-strong)] px-2 py-1 text-xs">{t('Unknown')}</button>
+                <Button disabled={busy != null} onClick={() => void reviewIdentity(item, 'unknown')} variant="outline" size="sm">{t('Unknown')}</Button>
               </div>
             </section>
           );
@@ -550,57 +552,56 @@ export function LearningReviewPanel({
             t,
           ) ?? t('Confirmed speaker');
           return (
-            <section key={`speaker-memory-${speakerId}`} className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-sheet)] p-3">
-              <div className="text-xs font-semibold text-[var(--fg1)]">
+            <section key={`speaker-memory-${speakerId}`} className="rounded-lg border border-border bg-background p-3">
+              <div className="text-xs font-semibold text-foreground">
                 {t('Speaker memory')} · {confirmedLabel}
               </div>
-              <label className="mt-2 flex items-center gap-2 text-[11px] text-[var(--fg2)]">
-                <input
-                  type="checkbox"
+              <label className="mt-2 flex items-center gap-2 text-[11px] text-muted-foreground">
+                <Checkbox
                   checked={advanced?.enabled ?? false}
                   disabled={busy != null}
-                  onChange={(event) => void setAdvancedLearning(speakerId, event.target.checked)}
+                  onCheckedChange={(checked) => void setAdvancedLearning(speakerId, checked === true)}
                 />
                 {t('Build opt-in shadow language and conversation-dynamics profiles')}
               </label>
-              {advanced?.enabled && <p className="mt-1 text-[11px] text-[var(--fg3)]">{advanced.support_meetings} {t('reviewed meetings')}</p>}
+              {advanced?.enabled && <p className="mt-1 text-[11px] text-muted-foreground">{advanced.support_meetings} {t('reviewed meetings')}</p>}
               <div className="mt-2 flex flex-wrap gap-2">
                 {versions.filter((version) => !version.is_active).slice(0, 3).map((version) => (
-                  <button key={version.version} disabled={busy != null} onClick={() => void rollbackProfile(speakerId, version.version)} className="rounded-md border border-[var(--border-strong)] px-2 py-1 text-xs">
+                  <Button key={version.version} disabled={busy != null} onClick={() => void rollbackProfile(speakerId, version.version)} variant="outline" size="sm">
                     {t('Rollback')} v{version.version}
-                  </button>
+                  </Button>
                 ))}
-                <button disabled={busy != null} onClick={() => void purgeSpeakerMemory(speakerId)} className="rounded-md border border-[var(--danger)] px-2 py-1 text-xs text-[var(--danger)]">
+                <Button disabled={busy != null} onClick={() => void purgeSpeakerMemory(speakerId)} variant="destructive" size="sm">
                   {t('Delete learned data')}
-                </button>
+                </Button>
               </div>
             </section>
           );
         })}
 
         {terms.map((term) => (
-          <section key={term.id} className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-sheet)] p-3">
-            <div className="text-xs font-semibold text-[var(--fg1)]">{t('Terminology')}</div>
-            <p className="mt-1 text-xs text-[var(--fg2)]">
+          <section key={term.id} className="rounded-lg border border-border bg-background p-3">
+            <div className="text-xs font-semibold text-foreground">{t('Terminology')}</div>
+            <p className="mt-1 text-xs text-muted-foreground">
               {term.aliases.join(', ') || '—'} → <strong>{term.canonical}</strong> · {term.support_count}×
             </p>
             <div className="mt-2 flex gap-2">
-              <button disabled={busy != null} onClick={() => void reviewTerm(term, 'confirmed')} className="rounded-md bg-[var(--gold)] px-2 py-1 text-xs text-[var(--fg-inverse)]">{t('Confirm')}</button>
-              <button disabled={busy != null} onClick={() => void reviewTerm(term, 'rejected')} className="rounded-md border border-[var(--border-strong)] px-2 py-1 text-xs">{t('Reject')}</button>
+              <Button disabled={busy != null} onClick={() => void reviewTerm(term, 'confirmed')} size="sm">{t('Confirm')}</Button>
+              <Button disabled={busy != null} onClick={() => void reviewTerm(term, 'rejected')} variant="outline" size="sm">{t('Reject')}</Button>
             </div>
           </section>
         ))}
 
         {reconciliation.map((row) => (
-          <section key={row.id} className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-sheet)] p-3">
-            <div className="text-xs font-semibold text-[var(--fg1)]">{t('Historical correction')}</div>
-            <p className="mt-1 break-words text-xs text-[var(--fg3)]">
+          <section key={row.id} className="rounded-lg border border-border bg-background p-3">
+            <div className="text-xs font-semibold text-foreground">{t('Historical correction')}</div>
+            <p className="mt-1 break-words text-xs text-muted-foreground">
               {row.suggestion_kind} · {percent(row.confidence)} · {row.status}
             </p>
             <div className="mt-2 flex gap-2">
-              {row.status === 'pending' && <button disabled={busy != null} onClick={() => void reviewBackfill(row, 'accepted')} className="rounded-md bg-[var(--gold)] px-2 py-1 text-xs text-[var(--fg-inverse)]">{t('Apply')}</button>}
-              {row.status === 'pending' && <button disabled={busy != null} onClick={() => void reviewBackfill(row, 'rejected')} className="rounded-md border border-[var(--border-strong)] px-2 py-1 text-xs">{t('Reject')}</button>}
-              {row.status === 'applied' && <button disabled={busy != null} onClick={() => void rollbackBackfill(row)} className="rounded-md border border-[var(--border-strong)] px-2 py-1 text-xs">{t('Rollback')}</button>}
+              {row.status === 'pending' && <Button disabled={busy != null} onClick={() => void reviewBackfill(row, 'accepted')} size="sm">{t('Apply')}</Button>}
+              {row.status === 'pending' && <Button disabled={busy != null} onClick={() => void reviewBackfill(row, 'rejected')} variant="outline" size="sm">{t('Reject')}</Button>}
+              {row.status === 'applied' && <Button disabled={busy != null} onClick={() => void rollbackBackfill(row)} variant="outline" size="sm">{t('Rollback')}</Button>}
             </div>
           </section>
         ))}
@@ -608,26 +609,26 @@ export function LearningReviewPanel({
         {pendingWindows.map((window) => {
           const edit = windowEdits[window.id] ?? { start: 0, end: 0 };
           return (
-            <section key={window.id} className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-sheet)] p-3">
-              <div className="text-xs font-semibold text-[var(--fg1)]">{t('Meeting boundary')} · {window.boundary_source}</div>
-              <p className="mt-1 text-xs text-[var(--fg3)]">
+            <section key={window.id} className="rounded-lg border border-border bg-background p-3">
+              <div className="text-xs font-semibold text-foreground">{t('Meeting boundary')} · {window.boundary_source}</div>
+              <p className="mt-1 text-xs text-muted-foreground">
                 {t('Review the detected start and end. A split creates two reviewable windows over the same local recording.')}
               </p>
               <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
-                <label>{t('Start, sec')} <input type="number" min={0} step={1} value={Math.round(edit.start)} onChange={(event) => setWindowEdits((current) => ({ ...current, [window.id]: { ...edit, start: Number(event.target.value) } }))} className="ml-1 w-20 rounded border border-[var(--border-strong)] bg-[var(--bg-canvas)] px-2 py-1" /></label>
-                <label>{t('End, sec')} <input type="number" min={0} step={1} value={Math.round(edit.end)} onChange={(event) => setWindowEdits((current) => ({ ...current, [window.id]: { ...edit, end: Number(event.target.value) } }))} className="ml-1 w-20 rounded border border-[var(--border-strong)] bg-[var(--bg-canvas)] px-2 py-1" /></label>
+                <label>{t('Start, sec')} <Input type="number" min={0} step={1} value={Math.round(edit.start)} onChange={(event) => setWindowEdits((current) => ({ ...current, [window.id]: { ...edit, start: Number(event.target.value) } }))} className="ml-1 inline-flex h-8 w-20" /></label>
+                <label>{t('End, sec')} <Input type="number" min={0} step={1} value={Math.round(edit.end)} onChange={(event) => setWindowEdits((current) => ({ ...current, [window.id]: { ...edit, end: Number(event.target.value) } }))} className="ml-1 inline-flex h-8 w-20" /></label>
               </div>
               <div className="mt-2 flex flex-wrap gap-2">
-                <button disabled={busy != null} onClick={() => void reviewWindow(window, 'accepted')} className="rounded-md bg-[var(--gold)] px-2 py-1 text-xs text-[var(--fg-inverse)]">{t('Accept')}</button>
-                <button disabled={busy != null} onClick={() => void splitWindow(window)} className="rounded-md border border-[var(--border-strong)] px-2 py-1 text-xs">{t('Split at midpoint')}</button>
-                <button disabled={busy != null} onClick={() => void reviewWindow(window, 'rejected')} className="rounded-md border border-[var(--border-strong)] px-2 py-1 text-xs">{t('Reject')}</button>
+                <Button disabled={busy != null} onClick={() => void reviewWindow(window, 'accepted')} size="sm">{t('Accept')}</Button>
+                <Button disabled={busy != null} onClick={() => void splitWindow(window)} variant="outline" size="sm">{t('Split at midpoint')}</Button>
+                <Button disabled={busy != null} onClick={() => void reviewWindow(window, 'rejected')} variant="outline" size="sm">{t('Reject')}</Button>
               </div>
             </section>
           );
         })}
 
         {!loadError && totalPending === 0 && (
-          <p className="text-xs text-[var(--fg3)]">{t('Nothing needs review for this meeting.')}</p>
+          <p className="text-xs text-muted-foreground">{t('Nothing needs review for this meeting.')}</p>
         )}
       </div>
     </details>

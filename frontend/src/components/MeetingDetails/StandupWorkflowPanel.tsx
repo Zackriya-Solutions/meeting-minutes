@@ -7,7 +7,7 @@ import { toast } from 'sonner';
 import { useT } from '@/lib/i18n';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Check, ChevronDown, Pencil, RefreshCw, X } from '@/components/memento/LucideCompat';
+import { Check, ChevronDown, Pencil, RefreshCw, X } from '@/components/deslop-icons';
 import { getStandupLiveState, type StandupLiveState } from '@/lib/standupLiveState';
 
 type ReviewStatus = 'pending' | 'accepted' | 'rejected';
@@ -290,10 +290,10 @@ export function StandupWorkflowPanel({
   }[status]);
 
   return (
-    <div className="border-b border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-4 py-3">
+    <div className="border-b border-border bg-muted px-4 py-3">
       {hasPrebrief && (
-        <details className="mb-3 rounded-lg border border-[var(--gold-border)] bg-[var(--gold-soft)] p-3">
-          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 font-medium text-[var(--fg)]">
+        <details className="mb-3 rounded-lg border border-primary/40 bg-primary/10 p-3">
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 font-medium text-foreground">
             <span>{t('Before this standup')} · {prebrief.series.join(', ')}</span>
             <ChevronDown size={16} />
           </summary>
@@ -301,14 +301,14 @@ export function StandupWorkflowPanel({
             <div>
               <h4 className="mb-2 text-sm font-semibold">{t('Open actions')}</h4>
               {prebrief.open_actions.length === 0 ? (
-                <p className="text-sm text-[var(--fg3)]">{t('No accepted open actions')}</p>
+                <p className="text-sm text-muted-foreground">{t('No accepted open actions')}</p>
               ) : prebrief.open_actions.map((action) => (
-                <div key={action.id} className="mb-2 rounded-md bg-[var(--bg-canvas)] p-2 text-sm">
+                <div key={action.id} className="mb-2 rounded-md bg-background p-2 text-sm">
                   <div>{action.text}</div>
-                  <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-[var(--fg3)]">
-                    <button type="button" className="text-[var(--gold)] hover:underline" onClick={() => router.push(sourceHref(action.source_meeting_id, action.source_start_ms))}>
+                  <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                    <Button type="button" variant="link" className="h-auto p-0" onClick={() => router.push(sourceHref(action.source_meeting_id, action.source_start_ms))}>
                       {action.source_meeting_title}
-                    </button>
+                    </Button>
                     {action.owner && <span>{action.owner}</span>}
                     {action.due_date && <span>{action.due_date}</span>}
                     <Button
@@ -326,21 +326,21 @@ export function StandupWorkflowPanel({
             <div>
               <h4 className="mb-2 text-sm font-semibold">{t('Recent accepted blockers')}</h4>
               {prebrief.recent_risks.length === 0 ? (
-                <p className="text-sm text-[var(--fg3)]">{t('None recorded')}</p>
+                <p className="text-sm text-muted-foreground">{t('None recorded')}</p>
               ) : prebrief.recent_risks.map((fact) => (
-                <button type="button" key={fact.record_id} className="mb-2 block w-full rounded-md bg-[var(--bg-canvas)] p-2 text-left text-sm hover:underline" onClick={() => router.push(sourceHref(fact.source_meeting_id, fact.source_start_ms))}>
+                <Button type="button" variant="ghost" key={fact.record_id} className="mb-2 h-auto w-full justify-start p-2 text-left text-sm" onClick={() => router.push(sourceHref(fact.source_meeting_id, fact.source_start_ms))}>
                   {fact.text}
-                </button>
+                </Button>
               ))}
             </div>
             <div>
               <h4 className="mb-2 text-sm font-semibold">{t('Recent accepted decisions')}</h4>
               {prebrief.recent_decisions.length === 0 ? (
-                <p className="text-sm text-[var(--fg3)]">{t('None recorded')}</p>
+                <p className="text-sm text-muted-foreground">{t('None recorded')}</p>
               ) : prebrief.recent_decisions.map((fact) => (
-                <button type="button" key={fact.record_id} className="mb-2 block w-full rounded-md bg-[var(--bg-canvas)] p-2 text-left text-sm hover:underline" onClick={() => router.push(sourceHref(fact.source_meeting_id, fact.source_start_ms))}>
+                <Button type="button" variant="ghost" key={fact.record_id} className="mb-2 h-auto w-full justify-start p-2 text-left text-sm" onClick={() => router.push(sourceHref(fact.source_meeting_id, fact.source_start_ms))}>
                   {fact.text}
-                </button>
+                </Button>
               ))}
             </div>
           </div>
@@ -348,19 +348,19 @@ export function StandupWorkflowPanel({
       )}
 
       {hasLiveState && (
-        <details className="mb-3 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-canvas)] p-3">
-          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 font-medium text-[var(--fg)]">
+        <details className="mb-3 rounded-lg border border-border bg-background p-3">
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 font-medium text-foreground">
             <span>{t('Live standup markers')}</span>
             <ChevronDown size={16} />
           </summary>
-          <p className="mt-2 text-xs text-[var(--fg3)]">
+          <p className="mt-2 text-xs text-muted-foreground">
             {t('Manual facilitation data is local context, not transcript evidence and not a score of any participant.')}
           </p>
-          <div className="mt-3 flex flex-wrap gap-2 text-sm text-[var(--fg2)]">
-            <span className="rounded bg-[var(--bg-elevated)] px-2 py-1">
+          <div className="mt-3 flex flex-wrap gap-2 text-sm text-muted-foreground">
+            <span className="rounded bg-muted px-2 py-1">
               {t('Time-box')}: {liveState.targetMinutes}:00
             </span>
-            <span className="rounded bg-[var(--bg-elevated)] px-2 py-1">
+            <span className="rounded bg-muted px-2 py-1">
               {t('Updates covered')}: {liveState.completedUpdates}
             </span>
           </div>
@@ -371,7 +371,7 @@ export function StandupWorkflowPanel({
                   type="button"
                   key={marker.id}
                   onClick={() => router.push(sourceHref(meetingId, marker.seconds * 1000))}
-                  className="rounded-full border border-[var(--gold-border)] px-2.5 py-1 text-xs text-[var(--gold)] hover:underline"
+                  className="rounded-full border border-primary/40 px-2.5 py-1 text-xs text-primary hover:underline"
                 >
                   {marker.kind === 'parking_lot' ? t('Parking lot') : t('Question')} · {Math.floor(marker.seconds / 60)}:{String(marker.seconds % 60).padStart(2, '0')}
                 </button>
@@ -381,12 +381,12 @@ export function StandupWorkflowPanel({
         </details>
       )}
 
-      <details open={privateNotes.some((note) => note.status === 'open')} className="mb-3 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-canvas)] p-3">
-        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 font-medium text-[var(--fg)]">
+      <details open={privateNotes.some((note) => note.status === 'open')} className="mb-3 rounded-lg border border-border bg-background p-3">
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 font-medium text-foreground">
           <span>{t('Standup preparation and private notes')}</span>
           <ChevronDown size={16} />
         </summary>
-        <p className="mt-2 text-xs text-[var(--fg3)]">
+        <p className="mt-2 text-xs text-muted-foreground">
           {t('These notes stay local and are never treated as transcript evidence or sent to the summary model.')}
         </p>
         <div className="mt-3 flex flex-wrap gap-2">
@@ -430,9 +430,9 @@ export function StandupWorkflowPanel({
         {privateNotes.length > 0 && (
           <div className="mt-3 space-y-2">
             {privateNotes.map((note) => (
-              <div key={note.id} className="flex items-start justify-between gap-3 rounded-md border border-[var(--border-subtle)] p-2 text-sm">
+              <div key={note.id} className="flex items-start justify-between gap-3 rounded-md border border-border p-2 text-sm">
                 <div>
-                  <div className="mb-1 text-xs text-[var(--fg3)]">
+                  <div className="mb-1 text-xs text-muted-foreground">
                     {{
                       planned_update: t('Planned update'),
                       parking_lot: t('Parking lot'),
@@ -440,7 +440,7 @@ export function StandupWorkflowPanel({
                     }[note.kind]}
                     {note.status === 'done' && ` · ${t('Done')}`}
                   </div>
-                  <p className={note.status === 'done' ? 'text-[var(--fg3)] line-through' : 'text-[var(--fg)]'}>{note.text}</p>
+                  <p className={note.status === 'done' ? 'text-muted-foreground line-through' : 'text-foreground'}>{note.text}</p>
                 </div>
                 <div className="flex shrink-0 gap-1">
                   {note.status === 'open' ? (
@@ -463,12 +463,12 @@ export function StandupWorkflowPanel({
       </details>
 
       {records.length > 0 && (
-        <details open={pendingCount > 0} className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-canvas)] p-3">
-          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 font-medium text-[var(--fg)]">
+        <details open={pendingCount > 0} className="rounded-lg border border-border bg-background p-3">
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 font-medium text-foreground">
             <span>{t('Review extracted standup records')} · {pendingCount} {t('pending review')}</span>
             <ChevronDown size={16} />
           </summary>
-          <p className="mt-2 text-xs text-[var(--fg3)]">
+          <p className="mt-2 text-xs text-muted-foreground">
             {t('Only accepted actions are carried into later standups. Evidence always stays attached to the original transcript.')}
           </p>
           <div className="mt-3 space-y-2">
@@ -476,13 +476,13 @@ export function StandupWorkflowPanel({
               const payload = effectivePayload(record);
               const isEditing = editingId === record.id;
               return (
-                <div key={record.id} className="rounded-md border border-[var(--border-subtle)] p-3">
+                <div key={record.id} className="rounded-md border border-border p-3">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="flex items-center gap-2 text-xs">
-                      <span className="rounded bg-[var(--bg-elevated)] px-2 py-1 font-medium">{kindLabel(record.kind)}</span>
+                      <span className="rounded bg-muted px-2 py-1 font-medium">{kindLabel(record.kind)}</span>
                       {payload.participant && <span>{payload.participant}</span>}
-                      {payload.category && <span className="text-[var(--fg3)]">{payload.category}</span>}
-                      <span className={record.review_status === 'accepted' ? 'text-[var(--success)]' : record.review_status === 'rejected' ? 'text-[var(--danger)]' : 'text-[var(--gold)]'}>
+                      {payload.category && <span className="text-muted-foreground">{payload.category}</span>}
+                      <span className={record.review_status === 'accepted' ? 'text-success' : record.review_status === 'rejected' ? 'text-destructive' : 'text-primary'}>
                         {statusLabel(record.review_status)}
                       </span>
                     </div>
@@ -525,9 +525,9 @@ export function StandupWorkflowPanel({
                     </div>
                   ) : (
                     <>
-                      <p className="mt-2 text-sm text-[var(--fg)]">{primaryText(record)}</p>
+                      <p className="mt-2 text-sm text-foreground">{primaryText(record)}</p>
                       {(payload.owner || payload.due_date) && (
-                        <p className="mt-1 text-xs text-[var(--fg3)]">
+                        <p className="mt-1 text-xs text-muted-foreground">
                           {payload.owner ?? t('unknown owner')}{payload.due_date ? ` · ${payload.due_date}` : ''}
                         </p>
                       )}
@@ -538,9 +538,9 @@ export function StandupWorkflowPanel({
                     {evidence(record).map((item, index) => {
                       const href = evidenceHref(record.meeting_id, item.timestamp);
                       return href ? (
-                        <button type="button" key={`${item.timestamp}-${index}`} onClick={() => router.push(href)} title={item.quote ?? undefined} className="text-[var(--gold)] hover:underline">
+                        <Button type="button" variant="link" className="h-auto p-0" key={`${item.timestamp}-${index}`} onClick={() => router.push(href)} title={item.quote ?? undefined}>
                           {item.timestamp}
-                        </button>
+                        </Button>
                       ) : null;
                     })}
                     {record.kind === 'action' && record.action_item_id && (

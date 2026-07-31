@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Download, X, CheckCircle2, AlertCircle, Loader2 } from '@/components/memento/LucideCompat';
+import { Download, X, CheckCircle2, AlertCircle, Loader2 } from '@/components/deslop-icons';
 import {
   Dialog,
   DialogContent,
@@ -191,17 +191,17 @@ export function UpdateDialog({ open, onOpenChange, updateInfo }: UpdateDialogPro
           <DialogTitle className="flex items-center gap-2">
             {isDownloading ? (
               <>
-                <Loader2 className="h-5 w-5 animate-spin text-[var(--gold)]" />
+                <Loader2 className="h-5 w-5 animate-spin text-primary" />
                 {t('Downloading Update')}
               </>
             ) : error ? (
               <>
-                <AlertCircle className="h-5 w-5 text-[var(--danger)]" />
+                <AlertCircle className="h-5 w-5 text-destructive" />
                 {t('Update Error')}
               </>
             ) : (
               <>
-                <Download className="h-5 w-5 text-[var(--gold)]" />
+                <Download className="h-5 w-5 text-primary" />
                 {t('Update Available')}
               </>
             )}
@@ -225,7 +225,7 @@ export function UpdateDialog({ open, onOpenChange, updateInfo }: UpdateDialogPro
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-muted-foreground">{t('New Version:')}</span>
-                  <span className="font-medium text-[var(--gold)]">{updateInfo.version}</span>
+                  <span className="font-medium text-primary">{updateInfo.version}</span>
                 </div>
                 {updateInfo.date && (
                   <div className="flex justify-between text-sm">
@@ -236,8 +236,8 @@ export function UpdateDialog({ open, onOpenChange, updateInfo }: UpdateDialogPro
               </div>
 
               {updateInfo.body && (
-                <div className="bg-[var(--bg-sheet)] rounded-lg p-3 max-h-40 overflow-y-auto">
-                  <p className="text-sm text-[var(--fg2)] whitespace-pre-wrap">
+                <div className="bg-background rounded-lg p-3 max-h-40 overflow-y-auto">
+                  <p className="text-sm text-muted-foreground whitespace-pre-wrap">
                     {updateInfo.body}
                   </p>
                 </div>
@@ -248,13 +248,13 @@ export function UpdateDialog({ open, onOpenChange, updateInfo }: UpdateDialogPro
           {isDownloading && progress && (
             <div className="space-y-2">
               <div className="relative">
-                <div className="w-full bg-[var(--bg-elevated)] rounded-full h-3">
+                <div className="w-full bg-muted rounded-full h-3">
                   <div
-                    className="bg-[var(--gold)] h-3 rounded-full transition-all duration-300 ease-out"
+                    className="bg-primary h-3 rounded-full transition-all duration-300 ease-out"
                     style={{ width: `${Math.min(progress.percentage, 100)}%` }}
                   />
                 </div>
-                <div className="flex justify-between text-xs text-[var(--fg2)] mt-1">
+                <div className="flex justify-between text-xs text-muted-foreground mt-1">
                   <span>{Math.round(progress.percentage)}{t('% complete')}</span>
                   {progress.total > 0 && (
                     <span>
@@ -270,8 +270,8 @@ export function UpdateDialog({ open, onOpenChange, updateInfo }: UpdateDialogPro
           )}
 
           {error && (
-            <div className="bg-[color-mix(in_srgb,var(--danger)_12%,transparent)] border border-[color-mix(in_srgb,var(--danger)_42%,transparent)] rounded-lg p-3">
-              <p className="text-sm text-[var(--danger)]">{error}</p>
+            <div className="bg-destructive/10 border border-destructive/40 rounded-lg p-3">
+              <p className="text-sm text-destructive">{error}</p>
             </div>
           )}
         </div>
@@ -282,7 +282,7 @@ export function UpdateDialog({ open, onOpenChange, updateInfo }: UpdateDialogPro
               <Button variant="outline" onClick={() => handleOpenChange(false)}>
                 {t('Later')}
               </Button>
-              <Button onClick={handleDownloadAndInstall} className="bg-[var(--gold)] hover:bg-[var(--gold-active)]">
+              <Button onClick={handleDownloadAndInstall} className="bg-primary hover:bg-primary/90">
                 <Download className="h-4 w-4 mr-2" />
                 {t('Download & Install')}
               </Button>

@@ -2,7 +2,7 @@ import { VirtualizedTranscriptView } from '@/components/VirtualizedTranscriptVie
 import { PermissionWarning } from '@/components/PermissionWarning';
 import { Button } from '@/components/ui/button';
 import { ButtonGroup } from '@/components/ui/button-group';
-import { Copy, GlobeIcon } from '@/components/memento/LucideCompat';
+import { Copy, GlobeIcon } from '@/components/deslop-icons';
 import { useTranscripts } from '@/contexts/TranscriptContext';
 import { useConfig } from '@/contexts/ConfigContext';
 import { useRecordingState } from '@/contexts/RecordingStateContext';
@@ -11,6 +11,7 @@ import { ModalType } from '@/hooks/useModalState';
 import { useIsLinux } from '@/hooks/usePlatform';
 import { useT } from '@/lib/i18n';
 import { useMemo } from 'react';
+import { HomeMeetingList } from './HomeMeetingList';
 import { UpcomingMeetings } from '@/components/UpcomingMeetings';
 
 /**
@@ -43,6 +44,8 @@ export function TranscriptPanel({
   const { isRecording, isPaused } = useRecordingState();
   const { checkPermissions, isChecking, hasSystemAudio, hasMicrophone } = usePermissionCheck();
   const isLinux = useIsLinux();
+  const showTranscriptActions =
+    transcripts.length > 0 || transcriptModelConfig.provider === 'localWhisper';
 
   // Convert transcripts to segments for virtualized view
   const segments = useMemo(() =>
@@ -52,19 +55,25 @@ export function TranscriptPanel({
       endTime: t.audio_end_time,
       text: t.text,
       confidence: t.confidence,
+      speaker: t.speaker,
+      speaker_id: t.speaker_id,
     })),
     [transcripts]
   );
 
   return (
-    <div ref={transcriptContainerRef} className="w-full border-r border-[var(--border-subtle)] bg-[var(--bg-canvas)] flex flex-col overflow-y-auto">
-      {/* Title area - Sticky header */}
-      <div className="sticky top-0 z-10 bg-[var(--bg-canvas)] p-4 border-[var(--border-subtle)]">
+    <div
+      ref={transcriptContainerRef}
+      data-home-scroll-container
+      className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto bg-background"
+    >
+      {/* Actions only exist once they have something useful to control. */}
+      {showTranscriptActions && <div className="sticky top-0 z-10 border-border bg-background p-4">
         <div className="flex flex-col space-y-3">
           <div className="flex  flex-col space-y-2">
             <div className="flex justify-center  items-center space-x-2">
               <ButtonGroup>
-                {transcripts?.length > 0 && (
+                {transcripts.length > 0 && (
                   <Button
                     variant="outline"
                     size="sm"
@@ -94,10 +103,13 @@ export function TranscriptPanel({
             </div>
           </div>
         </div>
-      </div>
+      </div>}
 
       {/* Permission Warning - Not needed on Linux */}
-      {!isRecording && !isChecking && !isLinux && (
+      {!isRecording &&
+        !isChecking &&
+        !isLinux &&
+        (!hasMicrophone || !hasSystemAudio) && (
         <div className="flex justify-center px-4 pt-4">
           <PermissionWarning
             hasMicrophone={hasMicrophone}
@@ -109,26 +121,35 @@ export function TranscriptPanel({
       )}
 
       {/* Transcript content */}
-      <div className="pb-20">
-        <div className="flex justify-center">
-          <div className="w-2/3 max-w-[750px]">
-            {!isRecording && segments.length === 0 && (
-              <UpcomingMeetings
-                disabled={isRecordingDisabled}
-                onStartMeeting={onStartCalendarMeeting}
+      <div className={segments.length === 0 && !isRecording ? 'min-h-full' : 'pb-20'}>
+        {segments.length === 0 && !isRecording ? (
+          <>
+            {/* Outlook-sourced agenda sits above the app's own meeting list. */}
+            <div className="flex justify-center">
+              <div className="w-2/3 max-w-[750px]">
+                <UpcomingMeetings
+                  disabled={isRecordingDisabled}
+                  onStartMeeting={onStartCalendarMeeting}
+                />
+              </div>
+            </div>
+            <HomeMeetingList animateOnMount={false} />
+          </>
+        ) : (
+          <div className="flex justify-center">
+            <div className="w-2/3 max-w-[750px]">
+              <VirtualizedTranscriptView
+                segments={segments}
+                isRecording={isRecording}
+                isPaused={isPaused}
+                isProcessing={isProcessingStop}
+                isStopping={isStopping}
+                enableStreaming={isRecording}
+                showConfidence={true}
               />
-            )}
-            <VirtualizedTranscriptView
-              segments={segments}
-              isRecording={isRecording}
-              isPaused={isPaused}
-              isProcessing={isProcessingStop}
-              isStopping={isStopping}
-              enableStreaming={isRecording}
-              showConfidence={true}
-            />
+            </div>
           </div>
-        </div>
+        )}
       </div>
     </div>
   );

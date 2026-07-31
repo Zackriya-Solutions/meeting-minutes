@@ -12,7 +12,7 @@ import Analytics from '@/lib/analytics';
 import { useT } from '@/lib/i18n';
 import { useEffect, useRef, useState, RefObject } from 'react';
 import { toast } from 'sonner';
-import { AlertTriangle, Languages, ChevronDown, RefreshCw, Sparkles, X } from '@/components/memento/LucideCompat';
+import { AlertTriangle, Languages, ChevronDown, RefreshCw, Sparkles, X } from '@/components/deslop-icons';
 import type { VisibleTemplateSuggestion } from '@/hooks/meeting-details/useTemplates';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
@@ -261,7 +261,7 @@ export function SummaryPanel({
         >
           <Languages size={18} />
           <span className="hidden lg:inline">{effectiveLangLabel}</span>
-          <ChevronDown size={14} className="text-[var(--fg3)]" />
+          <ChevronDown size={14} className="text-muted-foreground" />
         </Button>
       </PopoverTrigger>
       <PopoverContent
@@ -279,9 +279,9 @@ export function SummaryPanel({
   );
 
   return (
-    <div className="flex min-w-0 flex-1 flex-col overflow-hidden bg-[var(--bg-canvas)]">
+    <div className="flex min-w-0 flex-1 flex-col overflow-hidden bg-background">
       {/* Title area */}
-      <div className="border-b border-[var(--border-subtle)] p-4">
+      <div className="border-b border-border p-4">
         {/* <EditableTitle
           title={meetingTitle}
           isEditing={isEditingTitle}
@@ -336,7 +336,7 @@ export function SummaryPanel({
               />
             </div>
             </div>
-            <p className="text-xs text-[var(--fg3)]">
+            <p className="text-xs text-muted-foreground">
               {t('Saved automatically. The Save button becomes available after manual edits.')}
             </p>
           </div>
@@ -347,13 +347,13 @@ export function SummaryPanel({
         <MeetingContentWindowNotice meetingId={meeting.id} />
       )}
       {aiSummary && speakerAttributionStale && !isSummaryLoading && (
-        <div className="mx-4 mt-3 flex flex-wrap items-center gap-3 rounded-[var(--radius-16)] border border-[var(--gold-border)] bg-[var(--gold-soft)] px-4 py-3">
-          <AlertTriangle className="h-5 w-5 shrink-0 text-[var(--gold)]" />
+        <div className="mx-4 mt-3 flex flex-wrap items-center gap-3 rounded-lg border border-primary/40 bg-primary/10 px-4 py-3">
+          <AlertTriangle className="h-5 w-5 shrink-0 text-primary" />
           <div className="min-w-[220px] flex-1">
-            <p className="text-sm font-semibold text-[var(--fg1)]">
+            <p className="text-sm font-semibold text-foreground">
               {t('Speaker names changed after this summary was created')}
             </p>
-            <p className="mt-0.5 text-xs text-[var(--fg2)]">
+            <p className="mt-0.5 text-xs text-muted-foreground">
               {t('The existing text is kept to protect manual edits. Regenerate the summary to use the current speaker names and attribution.')}
             </p>
           </div>
@@ -361,7 +361,7 @@ export function SummaryPanel({
             type="button"
             size="sm"
             onClick={() => void onRegenerateSummary()}
-            className="shrink-0 bg-[var(--gold)] text-black hover:bg-[var(--gold-active)]"
+            className="shrink-0 bg-primary text-black hover:bg-primary/90"
           >
             <RefreshCw className="h-4 w-4" />
             {t('Regenerate with current names')}
@@ -369,9 +369,9 @@ export function SummaryPanel({
         </div>
       )}
       {aiSummary && summaryLoadError && !isSummaryLoading && (
-        <div className="mx-4 mt-3 flex flex-wrap items-center gap-3 rounded-[var(--radius-16)] border border-[var(--gold-border)] bg-[var(--gold-soft)] px-4 py-3">
-          <AlertTriangle className="h-5 w-5 shrink-0 text-[var(--gold)]" />
-          <p className="min-w-[220px] flex-1 text-xs text-[var(--fg2)]">
+        <div className="mx-4 mt-3 flex flex-wrap items-center gap-3 rounded-lg border border-primary/40 bg-primary/10 px-4 py-3">
+          <AlertTriangle className="h-5 w-5 shrink-0 text-primary" />
+          <p className="min-w-[220px] flex-1 text-xs text-muted-foreground">
             {t('Could not verify the saved summary. The last loaded version is still shown.')}
           </p>
           {onRetrySummary && (
@@ -383,17 +383,17 @@ export function SummaryPanel({
         </div>
       )}
       {templateSuggestion && selectedTemplate !== 'daily_standup' && !isSummaryLoading && (
-        <div className="mx-4 mt-3 flex items-center gap-3 rounded-[var(--radius-16)] border border-[var(--gold-border)] bg-[var(--gold-soft)] px-4 py-3">
-          <Sparkles className="h-5 w-5 shrink-0 text-[var(--gold)]" />
+        <div className="mx-4 mt-3 flex items-center gap-3 rounded-lg border border-primary/40 bg-primary/10 px-4 py-3">
+          <Sparkles className="h-5 w-5 shrink-0 text-primary" />
           <div className="min-w-0 flex-1">
-            <p className="text-sm font-semibold text-[var(--fg1)]">{templateSuggestion.title}</p>
-            <p className="mt-0.5 text-xs text-[var(--fg2)]">{templateSuggestion.description}</p>
+            <p className="text-sm font-semibold text-foreground">{templateSuggestion.title}</p>
+            <p className="mt-0.5 text-xs text-muted-foreground">{templateSuggestion.description}</p>
           </div>
           <Button
             type="button"
             size="sm"
             onClick={() => onTemplateSelect('daily_standup', 'Daily Standup')}
-            className="shrink-0 bg-[var(--gold)] text-black hover:bg-[var(--gold-active)]"
+            className="shrink-0 bg-primary text-black hover:bg-primary/90"
           >
             {t('Use Standup V2')}
           </Button>
@@ -449,8 +449,8 @@ export function SummaryPanel({
           {/* Loading spinner */}
           <div className="flex items-center justify-center flex-1">
             <div className="text-center">
-              <div className="inline-block animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-[var(--gold-border)] mb-4"></div>
-              <p className="text-[var(--fg2)]">{t('Generating AI Summary...')}</p>
+              <div className="inline-block animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary/40 mb-4"></div>
+              <p className="text-muted-foreground">{t('Generating AI Summary...')}</p>
             </div>
           </div>
         </div>
@@ -458,22 +458,22 @@ export function SummaryPanel({
         <div className="flex flex-col h-full">
           {summaryLoadStatus === 'loading' ? (
             <div className="flex flex-1 items-center justify-center">
-              <div className="text-center text-[var(--fg2)]">
-                <RefreshCw className="mx-auto mb-3 h-7 w-7 animate-spin text-[var(--gold)]" />
+              <div className="text-center text-muted-foreground">
+                <RefreshCw className="mx-auto mb-3 h-7 w-7 animate-spin text-primary" />
                 <p className="text-sm font-medium">{t('Loading saved summary...')}</p>
               </div>
             </div>
           ) : summaryLoadError ? (
             <div className="flex flex-1 items-center justify-center p-6">
-              <div className="max-w-md rounded-[var(--radius-16)] border border-[var(--gold-border)] bg-[var(--gold-soft)] p-5 text-center">
-                <AlertTriangle className="mx-auto mb-3 h-7 w-7 text-[var(--gold)]" />
-                <h3 className="text-base font-semibold text-[var(--fg1)]">
+              <div className="max-w-md rounded-lg border border-primary/40 bg-primary/10 p-5 text-center">
+                <AlertTriangle className="mx-auto mb-3 h-7 w-7 text-primary" />
+                <h3 className="text-base font-semibold text-foreground">
                   {t('The saved summary could not be loaded')}
                 </h3>
-                <p className="mt-2 text-sm text-[var(--fg2)]">
+                <p className="mt-2 text-sm text-muted-foreground">
                   {t('The summary was not deleted. Retry loading it instead of creating a replacement.')}
                 </p>
-                <p className="mt-2 break-words text-xs text-[var(--fg3)]">{summaryLoadError}</p>
+                <p className="mt-2 break-words text-xs text-muted-foreground">{summaryLoadError}</p>
                 {onRetrySummary && (
                   <Button type="button" className="mt-4" onClick={() => void onRetrySummary()}>
                     <RefreshCw className="h-4 w-4" />
@@ -515,10 +515,10 @@ export function SummaryPanel({
       ) : transcripts?.length > 0 && (
         <div className="flex-1 overflow-y-auto min-h-0">
           {summaryResponse && (
-            <div className="fixed bottom-0 left-0 right-0 bg-[var(--bg-canvas)] shadow-none p-4 max-h-1/3 overflow-y-auto">
+            <div className="fixed bottom-0 left-0 right-0 bg-background shadow-none p-4 max-h-1/3 overflow-y-auto">
               <h3 className="text-lg font-semibold mb-2">{t('Meeting Summary')}</h3>
               <div className="grid grid-cols-2 gap-4">
-                <div className="bg-[var(--bg-canvas)] p-4 rounded-lg shadow-none">
+                <div className="bg-background p-4 rounded-lg shadow-none">
                   <h4 className="font-medium mb-1">{t('Key Points')}</h4>
                   <ul className="list-disc pl-4">
                     {summaryResponse.summary.key_points.blocks.map((block, i) => (
@@ -526,7 +526,7 @@ export function SummaryPanel({
                     ))}
                   </ul>
                 </div>
-                <div className="bg-[var(--bg-canvas)] p-4 rounded-lg shadow-none mt-4">
+                <div className="bg-background p-4 rounded-lg shadow-none mt-4">
                   <h4 className="font-medium mb-1">{t('Action Items')}</h4>
                   <ul className="list-disc pl-4">
                     {summaryResponse.summary.action_items.blocks.map((block, i) => (
@@ -534,7 +534,7 @@ export function SummaryPanel({
                     ))}
                   </ul>
                 </div>
-                <div className="bg-[var(--bg-canvas)] p-4 rounded-lg shadow-none mt-4">
+                <div className="bg-background p-4 rounded-lg shadow-none mt-4">
                   <h4 className="font-medium mb-1">{t('Decisions')}</h4>
                   <ul className="list-disc pl-4">
                     {summaryResponse.summary.decisions.blocks.map((block, i) => (
@@ -542,7 +542,7 @@ export function SummaryPanel({
                     ))}
                   </ul>
                 </div>
-                <div className="bg-[var(--bg-canvas)] p-4 rounded-lg shadow-none mt-4">
+                <div className="bg-background p-4 rounded-lg shadow-none mt-4">
                   <h4 className="font-medium mb-1">{t('Main Topics')}</h4>
                   <ul className="list-disc pl-4">
                     {summaryResponse.summary.main_topics.blocks.map((block, i) => (
@@ -580,9 +580,9 @@ export function SummaryPanel({
             />
           </div>
           {summaryStatus !== 'idle' && (
-            <div className={`mt-4 p-4 rounded-lg ${summaryStatus === 'error' ? 'bg-[color-mix(in_srgb,var(--danger)_12%,transparent)] text-[var(--danger)]' :
-              summaryStatus === 'completed' ? 'bg-[color-mix(in_srgb,var(--success)_12%,transparent)] text-[var(--success)]' :
-                'bg-[var(--gold-soft)] text-[var(--gold)]'
+            <div className={`mt-4 p-4 rounded-lg ${summaryStatus === 'error' ? 'bg-destructive/10 text-destructive' :
+              summaryStatus === 'completed' ? 'bg-success/10 text-success' :
+                'bg-primary/10 text-primary'
               }`}>
               <p className="text-sm font-medium">{getSummaryStatusMessage(summaryStatus)}</p>
             </div>

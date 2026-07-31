@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
-import { Trash2 } from '@/components/memento/LucideCompat';
+import { Trash2 } from '@/components/deslop-icons';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -104,7 +104,7 @@ export function DeleteMeetingButton({
         type="button"
         size="sm"
         variant="outline"
-        className="xl:px-4 hover:border-[var(--danger)] hover:bg-[color-mix(in_srgb,var(--danger)_12%,transparent)] hover:text-[var(--danger)]"
+        className="xl:px-4 hover:border-destructive hover:bg-destructive/10 hover:text-destructive"
         onClick={() => setOpen(true)}
         title={t('Delete meeting')}
       >
@@ -122,24 +122,24 @@ export function DeleteMeetingButton({
           </DialogHeader>
 
           {meetingFolderPath ? (
-            <label className="flex cursor-pointer items-start gap-3 rounded-2xl border border-[var(--border-strong)] bg-[var(--bg-sheet)] p-4">
+            <label className="flex cursor-pointer items-start gap-3 rounded-2xl border border-border bg-background p-4">
               <input
                 type="checkbox"
                 checked={deleteRecordingFiles}
                 onChange={(event) => setDeleteRecordingFiles(event.target.checked)}
-                className="mt-1 h-4 w-4 accent-[var(--danger)]"
+                className="mt-1 h-4 w-4 accent-destructive"
               />
               <span className="space-y-1">
-                <span className="block text-sm font-semibold text-[var(--fg1)]">
+                <span className="block text-sm font-semibold text-foreground">
                   {t('Also delete the recording folder and audio from this Mac')}
                 </span>
-                <span className="block break-all text-xs leading-relaxed text-[var(--fg2)]">
+                <span className="block break-all text-xs leading-relaxed text-muted-foreground">
                   {meetingFolderPath}
                 </span>
               </span>
             </label>
           ) : (
-            <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-sheet)] p-4 text-sm text-[var(--fg2)]">
+            <div className="rounded-2xl border border-border bg-background p-4 text-sm text-muted-foreground">
               {t('No recording folder is attached to this meeting. Only its data in Memento will be deleted.')}
             </div>
           )}

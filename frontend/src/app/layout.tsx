@@ -1,23 +1,19 @@
 'use client'
 
 import './globals.css'
-import '@/styles/memento-tokens.css'
-import '@fontsource/onest/400.css'
-import '@fontsource/onest/500.css'
-import '@fontsource/onest/600.css'
-import '@fontsource/onest/700.css'
-import '@fontsource/space-grotesk/500.css'
-import '@fontsource/space-grotesk/600.css'
-import Sidebar from '@/components/Sidebar'
+import '@/vendor/deslop/deslop-primitives.css'
 import { LanguageProvider } from '@/lib/i18n'
 import { SidebarProvider } from '@/components/Sidebar/SidebarProvider'
 import MainContent from '@/components/MainContent'
+import { GlobalSettingsButton } from '@/components/GlobalSettingsButton'
 import AnalyticsProvider from '@/components/AnalyticsProvider'
-import { Toaster, toast } from 'sonner'
+import { toast } from 'sonner'
+import { Toaster } from '@/components/ui/sonner'
 import "sonner/dist/styles.css"
 import { useState, useEffect, useCallback } from 'react'
 import { listen, UnlistenFn } from '@tauri-apps/api/event'
-import { invoke } from '@tauri-apps/api/core'
+import { invoke, isTauri } from '@tauri-apps/api/core'
+import { getCurrentWindow } from '@tauri-apps/api/window'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { RecordingStateProvider } from '@/contexts/RecordingStateContext'
 import { OllamaDownloadProvider } from '@/contexts/OllamaDownloadContext'
@@ -33,6 +29,22 @@ import { ImportDialogProvider } from '@/contexts/ImportDialogContext'
 import { isAudioExtension, getAudioFormatsDisplayList } from '@/constants/audioFormats'
 import { ManagedDefaultsMigrationDialog } from '@/components/ManagedDefaultsMigrationDialog'
 import { AutoMeetingDetection } from '@/components/AutoMeetingDetection'
+import { ThemeProvider, useTheme } from 'next-themes'
+import { RecordingNavigationGuard } from '@/components/RecordingNavigationGuard'
+
+function NativeWindowThemeSync() {
+  const { resolvedTheme } = useTheme()
+
+  useEffect(() => {
+    if (!isTauri() || (resolvedTheme !== 'light' && resolvedTheme !== 'dark')) return
+
+    getCurrentWindow().setTheme(resolvedTheme).catch((error) => {
+      console.warn('[Layout] Failed to sync native window theme', error)
+    })
+  }, [resolvedTheme])
+
+  return null
+}
 
 // Module-level component — stable reference across RootLayout re-renders.
 // Defined here (not inside RootLayout) so React never sees a new function type
@@ -71,6 +83,17 @@ export default function RootLayout({
 }) {
   // Managed cloud providers make model-download onboarding unnecessary.
   const showOnboarding = false
+
+  // Tauri's native macOS material lives behind the webview. Keep the regular
+  // opaque canvas in browsers and on other desktop platforms.
+  useEffect(() => {
+    const usesNativeVibrancy = isTauri() && /Macintosh|Mac OS X/i.test(navigator.userAgent)
+    document.documentElement.classList.toggle('native-macos-vibrancy', usesNativeVibrancy)
+
+    return () => {
+      document.documentElement.classList.remove('native-macos-vibrancy')
+    }
+  }, [])
 
   // Import audio state
   const [showDropOverlay, setShowDropOverlay] = useState(false)
@@ -202,54 +225,60 @@ export default function RootLayout({
   }, []);
 
   return (
-    <html lang="en">
+    <html lang="ru" suppressHydrationWarning>
       <body className="antialiased">
-        <LanguageProvider>
-        <AnalyticsProvider>
-          <RecordingStateProvider>
-            <TranscriptProvider>
-              <ConfigProvider>
-                <OllamaDownloadProvider>
-                  <OnboardingProvider>
-                    <UpdateCheckProvider>
-                      <SidebarProvider>
-                        <TooltipProvider>
-                          <RecordingPostProcessingProvider>
-                            <ImportDialogProvider onOpen={handleOpenImportDialog}>
-                              {/* Download progress toast provider - listens for background downloads */}
-                              <DownloadProgressToastProvider />
-                              <ManagedDefaultsMigrationDialog />
-                              <AutoMeetingDetection />
+        <ThemeProvider
+          attribute="class"
+          defaultTheme="light"
+          enableSystem={false}
+          disableTransitionOnChange
+          storageKey="memento-theme"
+        >
+          <NativeWindowThemeSync />
+          <LanguageProvider>
+            <AnalyticsProvider>
+              <RecordingStateProvider>
+                <TranscriptProvider>
+                  <ConfigProvider>
+                    <OllamaDownloadProvider>
+                      <OnboardingProvider>
+                        <UpdateCheckProvider>
+                          <SidebarProvider>
+                            <TooltipProvider>
+                              <RecordingPostProcessingProvider>
+                                <ImportDialogProvider onOpen={handleOpenImportDialog}>
+                                  {/* Download progress toast provider - listens for background downloads */}
+                                  <DownloadProgressToastProvider />
+                                  <ManagedDefaultsMigrationDialog />
+                                  <AutoMeetingDetection />
+                                  <RecordingNavigationGuard />
 
-                              <div className="flex">
-                                <Sidebar />
-                                <MainContent>{children}</MainContent>
-                              </div>
-                              {/* Import audio overlay and dialog */}
-                              <ImportDropOverlay visible={showDropOverlay} />
-                              <ConditionalImportDialog
-                                showImportDialog={showImportDialog}
-                                handleImportDialogClose={handleImportDialogClose}
-                                importFilePath={importFilePath}
-                              />
-                            </ImportDialogProvider>
-                          </RecordingPostProcessingProvider>
-                        </TooltipProvider>
-                      </SidebarProvider>
-                    </UpdateCheckProvider>
-                  </OnboardingProvider>
+                                  <div>
+                                    <GlobalSettingsButton />
+                                    <MainContent>{children}</MainContent>
+                                  </div>
+                                  {/* Import audio overlay and dialog */}
+                                  <ImportDropOverlay visible={showDropOverlay} />
+                                  <ConditionalImportDialog
+                                    showImportDialog={showImportDialog}
+                                    handleImportDialogClose={handleImportDialogClose}
+                                    importFilePath={importFilePath}
+                                  />
+                                </ImportDialogProvider>
+                              </RecordingPostProcessingProvider>
+                            </TooltipProvider>
+                          </SidebarProvider>
+                        </UpdateCheckProvider>
+                      </OnboardingProvider>
+                    </OllamaDownloadProvider>
+                  </ConfigProvider>
+                </TranscriptProvider>
+              </RecordingStateProvider>
+            </AnalyticsProvider>
 
-                </OllamaDownloadProvider>
-              </ConfigProvider>
-            </TranscriptProvider>
-          </RecordingStateProvider>
-        </AnalyticsProvider>
-
-        {/* App is dark-only (:root is dark, no theme toggle). Without theme="dark",
-            Sonner renders light toasts, so toasts whose custom content uses the app's
-            dark-theme --fg vars (e.g. the recording notification) show white-on-white. */}
-        <Toaster position="bottom-center" richColors closeButton theme="dark" />
-        </LanguageProvider>
+            <Toaster position="bottom-center" richColors closeButton />
+          </LanguageProvider>
+        </ThemeProvider>
       </body>
     </html>
   )

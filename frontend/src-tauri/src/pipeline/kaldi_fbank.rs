@@ -53,8 +53,8 @@ fn mel_scale(freq: f32) -> f32 {
 /// Kaldi-compatible fbank featurizer. Precomputes the Povey window and the triangular
 /// mel filterbank once (mirrors [`crate::gigaam_engine::featurizer::Featurizer`]).
 pub struct KaldiFbank {
-    window: Vec<f32>,               // [FRAME_LENGTH] Povey window
-    fbank: Vec<f32>,                // [N_MELS * N_FFT_BINS] row-major: fbank[m * N_FFT_BINS + k]
+    window: Vec<f32>, // [FRAME_LENGTH] Povey window
+    fbank: Vec<f32>,  // [N_MELS * N_FFT_BINS] row-major: fbank[m * N_FFT_BINS + k]
     fft: Arc<dyn RealToComplex<f32>>,
 }
 
@@ -96,7 +96,11 @@ impl KaldiFbank {
         }
 
         let mut planner = RealFftPlanner::<f32>::new();
-        Self { window, fbank, fft: planner.plan_fft_forward(N_FFT) }
+        Self {
+            window,
+            fbank,
+            fft: planner.plan_fft_forward(N_FFT),
+        }
     }
 
     /// Number of frames for `n_samples` with `snip_edges=true` (kaldi semantics):
@@ -212,7 +216,9 @@ mod tests {
         let fb = KaldiFbank::new();
         // 0.5 s sine at 300 Hz.
         let wav: Vec<f32> = (0..8000)
-            .map(|i| 0.3 * (2.0 * std::f32::consts::PI * 300.0 * i as f32 / SAMPLE_RATE as f32).sin())
+            .map(|i| {
+                0.3 * (2.0 * std::f32::consts::PI * 300.0 * i as f32 / SAMPLE_RATE as f32).sin()
+            })
             .collect();
         let feats = fb.compute(&wav);
         assert_eq!(feats.shape(), &[KaldiFbank::num_frames(8000), N_MELS]);
@@ -223,7 +229,9 @@ mod tests {
     fn cmn_zeroes_per_bin_mean() {
         let fb = KaldiFbank::new();
         let wav: Vec<f32> = (0..8000)
-            .map(|i| 0.2 * (2.0 * std::f32::consts::PI * 220.0 * i as f32 / SAMPLE_RATE as f32).sin())
+            .map(|i| {
+                0.2 * (2.0 * std::f32::consts::PI * 220.0 * i as f32 / SAMPLE_RATE as f32).sin()
+            })
             .collect();
         let feats = fb.compute(&wav);
         // After CMN each mel bin's temporal mean is ~0.
@@ -245,7 +253,9 @@ mod tests {
     fn compute_is_compute_raw_minus_temporal_mean() {
         let fb = KaldiFbank::new();
         let wav: Vec<f32> = (0..8000)
-            .map(|i| 0.2 * (2.0 * std::f32::consts::PI * 220.0 * i as f32 / SAMPLE_RATE as f32).sin())
+            .map(|i| {
+                0.2 * (2.0 * std::f32::consts::PI * 220.0 * i as f32 / SAMPLE_RATE as f32).sin()
+            })
             .collect();
         let raw = fb.compute_raw(&wav);
         let cmn = fb.compute(&wav);

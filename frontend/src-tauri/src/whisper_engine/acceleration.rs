@@ -64,10 +64,15 @@ pub fn whisper_context_acceleration_for(
     performance_tier: PerformanceTier,
 ) -> WhisperContextAcceleration {
     let use_gpu = !matches!(compiled_backend, WhisperCompiledBackend::Cpu);
-    let fast_tier = matches!(performance_tier, PerformanceTier::High | PerformanceTier::Ultra);
+    let fast_tier = matches!(
+        performance_tier,
+        PerformanceTier::High | PerformanceTier::Ultra
+    );
     let flash_attn = match compiled_backend {
         WhisperCompiledBackend::Metal | WhisperCompiledBackend::Cuda => fast_tier,
-        WhisperCompiledBackend::Vulkan | WhisperCompiledBackend::HipBlas | WhisperCompiledBackend::Cpu => false,
+        WhisperCompiledBackend::Vulkan
+        | WhisperCompiledBackend::HipBlas
+        | WhisperCompiledBackend::Cpu => false,
     };
 
     WhisperContextAcceleration {

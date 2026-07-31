@@ -6,7 +6,7 @@ import {
   FormLabel,
 } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
-import { Eye, EyeOff } from '@/components/memento/LucideCompat';
+import { Eye, EyeOff } from '@/components/deslop-icons';
 import { Control } from 'react-hook-form'; // Import Control type
 import { Textarea } from '@/components/ui/textarea';
 
@@ -91,7 +91,7 @@ export const FormInputItem = ({
                       accept={accept}
                       className={inputStyle}
                     />
-                    <div className="absolute inset-y-0 right-0 pr-3 flex items-center text-[var(--fg3)] cursor-pointer">
+                    <div className="absolute inset-y-0 right-0 pr-3 flex items-center text-muted-foreground cursor-pointer">
                       {showPassword ? (
                         <EyeOff
                           className="h-6 w-6"

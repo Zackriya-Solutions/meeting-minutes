@@ -71,7 +71,7 @@ export const FormSelectItem = ({
                         <SelectItem
                           key={`${item}+${i}`}
                           value={item.value}
-                          className="cursor-pointer hover:bg-[var(--state-hover-bg)]"
+                          className="cursor-pointer hover:bg-accent"
                         >
                           {item.label}
                         </SelectItem>

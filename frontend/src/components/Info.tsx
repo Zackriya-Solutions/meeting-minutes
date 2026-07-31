@@ -1,5 +1,5 @@
 import React from "react";
-import { Info as InfoIcon } from '@/components/memento/LucideCompat';
+import { Info as InfoIcon } from '@/components/deslop-icons';
 import { Dialog, DialogContent, DialogTitle, DialogTrigger } from "./ui/dialog";
 import { VisuallyHidden } from "./ui/visually-hidden";
 import { About } from "./About";
@@ -18,14 +18,14 @@ const Info = React.forwardRef<HTMLButtonElement, InfoProps>(({ isCollapsed }, re
           ref={ref}
           className={`flex items-center justify-center mb-2 cursor-pointer border-none transition-colors ${
             isCollapsed
-              ? "bg-transparent p-2 hover:bg-[var(--bg-elevated)] rounded-lg"
-              : "w-full px-3 py-1.5 mt-1 text-sm font-medium text-[var(--fg2)] bg-[var(--bg-elevated)] hover:brightness-125 rounded-lg shadow-none"
+              ? "bg-transparent p-2 hover:bg-muted rounded-lg"
+              : "w-full px-3 py-1.5 mt-1 text-sm font-medium text-muted-foreground bg-muted hover:brightness-125 rounded-lg shadow-none"
           }`}
           title={t('About Memento')}
         >
-          <InfoIcon className={`text-[var(--fg2)] ${isCollapsed ? "w-5 h-5" : "w-4 h-4"}`} />
+          <InfoIcon className={`text-muted-foreground ${isCollapsed ? "w-5 h-5" : "w-4 h-4"}`} />
           {!isCollapsed && (
-            <span className="ml-2 text-sm text-[var(--fg2)]">{t('About Memento')}</span>
+            <span className="ml-2 text-sm text-muted-foreground">{t('About Memento')}</span>
           )}
         </button>
       </DialogTrigger>

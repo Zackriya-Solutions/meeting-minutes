@@ -56,21 +56,19 @@ impl JobHandler for ChunkEmbedHandler {
             // Pre-upgrade post-meeting jobs used `{}`. Preserve their historical
             // behavior; archive work created by this build is explicitly tagged false.
             .unwrap_or(true);
-        let source = payload
-            .get("source")
-            .and_then(serde_json::Value::as_str);
+        let source = payload.get("source").and_then(serde_json::Value::as_str);
 
-        let indexing_allowed: Option<i64> = sqlx::query_scalar(
-            "SELECT indexing_allowed FROM meetings WHERE id = ?",
-        )
-        .bind(meeting_id)
-        .fetch_optional(pool)
-        .await?;
-        if indexing_allowed == Some(0) {
-            let old_ids: Vec<i64> = sqlx::query_scalar("SELECT id FROM chunks WHERE meeting_id = ?")
+        let indexing_allowed: Option<i64> =
+            sqlx::query_scalar("SELECT indexing_allowed FROM meetings WHERE id = ?")
                 .bind(meeting_id)
-                .fetch_all(pool)
+                .fetch_optional(pool)
                 .await?;
+        if indexing_allowed == Some(0) {
+            let old_ids: Vec<i64> =
+                sqlx::query_scalar("SELECT id FROM chunks WHERE meeting_id = ?")
+                    .bind(meeting_id)
+                    .fetch_all(pool)
+                    .await?;
             for id in old_ids {
                 let _ = sqlx::query("DELETE FROM chunk_embeddings WHERE chunk_id = ?")
                     .bind(id)
@@ -81,7 +79,9 @@ impl JobHandler for ChunkEmbedHandler {
                 .bind(meeting_id)
                 .execute(pool)
                 .await?;
-            log::info!("[chunk_embed] meeting {meeting_id}: indexing disabled by memory privacy policy");
+            log::info!(
+                "[chunk_embed] meeting {meeting_id}: indexing disabled by memory privacy policy"
+            );
             return if run_analysis {
                 enqueue_analysis_jobs(ctx, meeting_id).await
             } else {
@@ -474,12 +474,11 @@ impl JobHandler for ExtractHandler {
         }
         let pool = &ctx.pool;
 
-        let cloud_processing_allowed: Option<i64> = sqlx::query_scalar(
-            "SELECT cloud_processing_allowed FROM meetings WHERE id = ?",
-        )
-        .bind(meeting_id)
-        .fetch_optional(pool)
-        .await?;
+        let cloud_processing_allowed: Option<i64> =
+            sqlx::query_scalar("SELECT cloud_processing_allowed FROM meetings WHERE id = ?")
+                .bind(meeting_id)
+                .fetch_optional(pool)
+                .await?;
         if cloud_processing_allowed == Some(0) {
             log::info!(
                 "[extract] meeting {meeting_id}: cloud extraction disabled by memory privacy policy"
@@ -589,6 +588,55 @@ pub struct BackfillHandler;
 
 pub struct AudioIdentityBackfillHandler;
 
+pub struct RefineMissingTranscriptHandler;
+
+#[async_trait]
+impl JobHandler for RefineMissingTranscriptHandler {
+    fn kind(&self) -> &'static str {
+        kind::REFINE_MISSING_TRANSCRIPT
+    }
+
+    async fn run(
+        &self,
+        ctx: &JobContext,
+        meeting_id: Option<&str>,
+        payload: &serde_json::Value,
+    ) -> anyhow::Result<()> {
+        let meeting_id = meeting_id
+            .ok_or_else(|| anyhow::anyhow!("refine_missing_transcript requires a meeting_id"))?;
+        let folder_path = match payload
+            .get("folder_path")
+            .and_then(serde_json::Value::as_str)
+            .filter(|path| !path.trim().is_empty())
+        {
+            Some(path) => path.to_string(),
+            None => sqlx::query_scalar::<_, Option<String>>(
+                "SELECT folder_path FROM meetings WHERE id = ?",
+            )
+            .bind(meeting_id)
+            .fetch_optional(&ctx.pool)
+            .await?
+            .flatten()
+            .ok_or_else(|| anyhow::anyhow!("meeting has no recording folder"))?,
+        };
+        let app = crate::pipeline::diarization_commands::app_handle()
+            .ok_or_else(|| anyhow::anyhow!("app handle unavailable"))?;
+
+        crate::audio::refinement::run_post_meeting_refinement(&app, meeting_id, &folder_path)
+            .await?;
+
+        let transcript_count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM transcripts WHERE meeting_id = ?")
+                .bind(meeting_id)
+                .fetch_one(&ctx.pool)
+                .await?;
+        if transcript_count == 0 {
+            anyhow::bail!("refinement completed without producing transcript rows");
+        }
+        Ok(())
+    }
+}
+
 #[async_trait]
 impl JobHandler for AudioIdentityBackfillHandler {
     fn kind(&self) -> &'static str {
@@ -656,11 +704,7 @@ impl JobHandler for BackfillHandler {
         _meeting_id: Option<&str>,
         payload: &serde_json::Value,
     ) -> anyhow::Result<()> {
-        if payload
-            .get("reason")
-            .and_then(serde_json::Value::as_str)
-            == Some("startup")
-        {
+        if payload.get("reason").and_then(serde_json::Value::as_str) == Some("startup") {
             // Builds before this policy change may have persisted an automatic startup
             // backfill. Mark it done without fanning out work across an imported archive.
             log::info!("[backfill] skipped legacy automatic startup archive repair");

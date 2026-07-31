@@ -335,8 +335,8 @@ export function ParakeetModelManager({
     return (
       <div className={`space-y-3 ${className}`}>
         <div className="animate-pulse space-y-3">
-          <div className="h-20 bg-[var(--bg-elevated)] rounded-lg"></div>
-          <div className="h-20 bg-[var(--bg-elevated)] rounded-lg"></div>
+          <div className="h-20 bg-muted rounded-lg"></div>
+          <div className="h-20 bg-muted rounded-lg"></div>
         </div>
       </div>
     );
@@ -344,9 +344,9 @@ export function ParakeetModelManager({
 
   if (error) {
     return (
-      <div className={`bg-[color-mix(in_srgb,var(--danger)_12%,transparent)] border border-[color-mix(in_srgb,var(--danger)_42%,transparent)] rounded-lg p-4 ${className}`}>
-        <p className="text-sm text-[var(--danger)]">{t('Failed to load models')}</p>
-        <p className="text-xs text-[var(--danger)] mt-1">{error}</p>
+      <div className={`bg-destructive/10 border border-destructive/40 rounded-lg p-4 ${className}`}>
+        <p className="text-sm text-destructive">{t('Failed to load models')}</p>
+        <p className="text-xs text-destructive mt-1">{error}</p>
       </div>
     );
   }
@@ -406,7 +406,7 @@ export function ParakeetModelManager({
         <motion.div
           initial={{ opacity: 0, y: -5 }}
           animate={{ opacity: 1, y: 0 }}
-          className="text-xs text-[var(--fg2)] text-center pt-2"
+          className="text-xs text-muted-foreground text-center pt-2"
         >
           {t('Using')} {getModelDisplayName(selectedModel)} {t('for transcription')}
         </motion.div>
@@ -462,10 +462,10 @@ function ModelCard({
       className={`
         relative rounded-lg border-2 transition-all cursor-pointer
         ${isSelected && isAvailable
-          ? 'border-[var(--gold-border)] bg-[var(--gold-soft)]'
+          ? 'border-primary/40 bg-primary/10'
           : isAvailable
-            ? 'border-[var(--border-subtle)] hover:border-[var(--border-strong)] bg-[var(--bg-canvas)]'
-            : 'border-[var(--border-subtle)] bg-[var(--bg-sheet)]'
+            ? 'border-border hover:border-border bg-background'
+            : 'border-border bg-background'
         }
         ${isAvailable ? '' : 'cursor-default'}
       `}
@@ -475,7 +475,7 @@ function ModelCard({
     >
       {/* Recommended Badge */}
       {isRecommended && (
-        <div className="absolute -top-2 -right-2 bg-[var(--gold)] text-[var(--fg-inverse)] text-xs px-2 py-0.5 rounded-full font-medium">
+        <div className="absolute -top-2 -right-2 bg-primary text-primary-foreground text-xs px-2 py-0.5 rounded-full font-medium">
           {t('Recommended')}
         </div>
       )}
@@ -485,13 +485,13 @@ function ModelCard({
           <div className="flex-1">
             {/* Model Name */}
             <div className="flex items-center gap-2 mb-1">
-              <Icon name="spark" size={22} className="text-[var(--fg2)]" />
-              <h3 className="font-semibold text-[var(--fg1)]">{displayName}</h3>
+              <Icon name="spark" size={22} className="text-muted-foreground" />
+              <h3 className="font-semibold text-foreground">{displayName}</h3>
               {isSelected && isAvailable && (
                 <motion.span
                   initial={{ scale: 0 }}
                   animate={{ scale: 1 }}
-                  className="bg-[var(--gold)] text-[var(--fg-inverse)] px-2 py-0.5 rounded-full text-xs font-medium flex items-center gap-1"
+                  className="bg-primary text-primary-foreground px-2 py-0.5 rounded-full text-xs font-medium flex items-center gap-1"
                 >
                   <Icon name="check" size={13} />
                 </motion.span>
@@ -499,15 +499,15 @@ function ModelCard({
             </div>
 
             {/* Tagline */}
-            <p className="text-sm text-[var(--fg2)] ml-9">{tagline}</p>
+            <p className="text-sm text-muted-foreground ml-9">{tagline}</p>
           </div>
 
           {/* Status/Action */}
           <div className="ml-4 flex items-center gap-2">
             {isAvailable && (
               <>
-                <div className="flex items-center gap-1.5 text-[var(--success)]">
-                  <div className="w-2 h-2 bg-[var(--success)] rounded-full"></div>
+                <div className="flex items-center gap-1.5 text-success">
+                  <div className="w-2 h-2 bg-success rounded-full"></div>
                   <span className="text-xs font-medium">{t('Ready')}</span>
                 </div>
                 <AnimatePresence>
@@ -521,12 +521,10 @@ function ModelCard({
                         e.stopPropagation();
                         onDelete();
                       }}
-                      className="text-[var(--fg3)] hover:text-[var(--danger)] transition-colors p-1"
+                      className="text-muted-foreground hover:text-destructive transition-colors p-1"
                       title={t('Delete model to free up space')}
                     >
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                      </svg>
+                      <Icon name="trash" size={16} />
                     </motion.button>
                   )}
                 </AnimatePresence>
@@ -539,7 +537,7 @@ function ModelCard({
                   e.stopPropagation();
                   onDownload();
                 }}
-                className="bg-[var(--gold)] text-[var(--fg-inverse)] px-3 py-1.5 rounded-md text-sm font-medium hover:bg-[var(--gold-active)] transition-colors"
+                className="bg-primary text-primary-foreground px-3 py-1.5 rounded-md text-sm font-medium hover:bg-primary/90 transition-colors"
               >
                 {t('Download')}
               </button>
@@ -551,7 +549,7 @@ function ModelCard({
                   e.stopPropagation();
                   onDownload();
                 }}
-                className="bg-[var(--danger)] text-[var(--fg-inverse)] px-3 py-1.5 rounded-md text-sm font-medium hover:opacity-90 transition-colors"
+                className="bg-destructive text-primary-foreground px-3 py-1.5 rounded-md text-sm font-medium hover:opacity-90 transition-colors"
               >
                 {t('Retry')}
               </button>
@@ -564,7 +562,7 @@ function ModelCard({
                     e.stopPropagation();
                     onDelete();
                   }}
-                  className="bg-[var(--gold)] text-[var(--fg-inverse)] px-3 py-1.5 rounded-md text-sm font-medium hover:bg-[var(--gold-active)] transition-colors"
+                  className="bg-primary text-primary-foreground px-3 py-1.5 rounded-md text-sm font-medium hover:bg-primary/90 transition-colors"
                 >
                   {t('Delete')}
                 </button>
@@ -573,7 +571,7 @@ function ModelCard({
                     e.stopPropagation();
                     onDownload();
                   }}
-                  className="bg-[var(--gold)] text-[var(--fg-inverse)] px-3 py-1.5 rounded-md text-sm font-medium hover:bg-[var(--gold-active)] transition-colors"
+                  className="bg-primary text-primary-foreground px-3 py-1.5 rounded-md text-sm font-medium hover:bg-primary/90 transition-colors"
                 >
                   {t('Re-download')}
                 </button>
@@ -588,33 +586,33 @@ function ModelCard({
             initial={{ opacity: 0, height: 0 }}
             animate={{ opacity: 1, height: 'auto' }}
             exit={{ opacity: 0, height: 0 }}
-            className="mt-3 pt-3 border-t border-[var(--border-subtle)]"
+            className="mt-3 pt-3 border-t border-border"
           >
             <div className="flex items-center justify-between mb-2">
               <div className="flex items-center gap-2">
-                <span className="text-sm font-medium text-[var(--gold)]">{t('Downloading...')}</span>
-                <span className="text-sm font-semibold text-[var(--gold)]">{Math.round(downloadProgress)}%</span>
+                <span className="text-sm font-medium text-primary">{t('Downloading...')}</span>
+                <span className="text-sm font-semibold text-primary">{Math.round(downloadProgress)}%</span>
               </div>
               <button
                 onClick={(e) => {
                   e.stopPropagation();
                   onCancel();
                 }}
-                className="text-xs text-[var(--fg2)] hover:text-[var(--danger)] font-medium transition-colors px-2 py-1 rounded hover:bg-[color-mix(in_srgb,var(--danger)_12%,transparent)]"
+                className="text-xs text-muted-foreground hover:text-destructive font-medium transition-colors px-2 py-1 rounded hover:bg-destructive/10"
                 title={t('Cancel download')}
               >
                 {t('Cancel')}
               </button>
             </div>
-            <div className="w-full h-2 bg-[var(--bg-elevated)] rounded-full overflow-hidden">
+            <div className="w-full h-2 bg-muted rounded-full overflow-hidden">
               <motion.div
-                className="h-full rounded-full bg-[var(--gold)]"
+                className="h-full rounded-full bg-primary"
                 initial={{ width: 0 }}
                 animate={{ width: `${downloadProgress}%` }}
                 transition={{ duration: 0.3, ease: 'easeOut' }}
               />
             </div>
-            <p className="text-xs text-[var(--fg2)] mt-1">
+            <p className="text-xs text-muted-foreground mt-1">
               {model.size_mb ? (
                 <>
                   {formatFileSize(model.size_mb * downloadProgress / 100)} / {formatFileSize(model.size_mb)}

@@ -3,7 +3,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { Search, Download, CheckCircle2, Loader2, AlertTriangle, RotateCw } from '@/components/memento/LucideCompat';
+import { Search, Download, CheckCircle2, Loader2, AlertTriangle, RotateCw } from '@/components/deslop-icons';
 import { useT } from '@/lib/i18n';
 
 // Mirrors the Rust `embedder_status` payload (pipeline::commands).
@@ -158,17 +158,17 @@ export function EmbeddingModelSettings() {
       : 0;
 
   return (
-    <div className="mt-6 max-w-2xl">
-      <div className="rounded-xl border border-[var(--border-subtle)] p-5">
+    <div>
+      <section className="settings-section">
         <div className="flex items-start gap-3">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[var(--gold-soft)]">
-            <Search className="h-5 w-5 text-[var(--gold)]" />
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10">
+            <Search className="h-5 w-5 text-primary" />
           </div>
           <div className="min-w-0 flex-1">
-            <h3 className="text-sm font-semibold text-[var(--fg1)]">{t('Semantic search model')}</h3>
-            <p className="mt-1 text-sm leading-relaxed text-[var(--fg2)]">
+            <h3 className="text-sm font-semibold text-foreground">{t('Semantic search model')}</h3>
+            <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
               {t('Powers meaning-based (vector) search and Chat with archive. Runs fully locally —')}{' '}
-              <span className="font-medium text-[var(--fg2)]">{modelName}</span> ({dim}{' '}
+              <span className="font-medium text-muted-foreground">{modelName}</span> ({dim}{' '}
               {t('dimensions')}, ~{modelDownloadSize(selectedDownloadMb)}).{' '}
               {t('Until it is installed, Search and Chat use keyword (FTS) matching only.')}
             </p>
@@ -184,18 +184,18 @@ export function EmbeddingModelSettings() {
                     onClick={() => model.present ? selectModel(model.id) : download(model.id)}
                     className={`rounded-xl border p-3 text-left transition-colors ${
                       selected
-                        ? 'border-[var(--gold-border)] bg-[var(--gold-soft)]'
-                        : 'border-[var(--border-subtle)] hover:bg-[var(--bg-elevated)]'
+                        ? 'border-primary/40 bg-primary/10'
+                        : 'border-border hover:bg-muted'
                     }`}
                   >
                     <div className="flex items-center justify-between gap-2">
-                      <span className="text-sm font-semibold text-[var(--fg1)]">{model.name}</span>
-                      {selected && <CheckCircle2 className="h-4 w-4 text-[var(--gold)]" />}
+                      <span className="text-sm font-semibold text-foreground">{model.name}</span>
+                      {selected && <CheckCircle2 className="h-4 w-4 text-primary" />}
                     </div>
-                    <p className="mt-1 text-xs text-[var(--fg3)]">
+                    <p className="mt-1 text-xs text-muted-foreground">
                       {model.dim} {t('dimensions')} · ~{modelDownloadSize(model.download_mb)}
                     </p>
-                    <p className="mt-1 text-xs text-[var(--fg2)]">
+                    <p className="mt-1 text-xs text-muted-foreground">
                       {model.id === 'frida'
                         ? t('Russian-first retrieval model. Uses search_query/search_document prefixes and CLS pooling.')
                         : t('Compact multilingual retrieval model. Recommended for most devices.')}
@@ -206,7 +206,7 @@ export function EmbeddingModelSettings() {
             </div>
 
             {modelName === 'frida' && (
-              <div className="mt-3 rounded-lg border border-[var(--gold-border)] bg-[var(--gold-soft)] p-3 text-xs leading-relaxed text-[var(--gold)]">
+              <div className="mt-3 rounded-lg border border-primary/40 bg-primary/10 p-3 text-xs leading-relaxed text-primary">
                 {t('FRIDA is optional and large (~3.3 GB ONNX). Memento downloads a community ONNX conversion of the ai-forever/FRIDA weights. Switching models rebuilds the semantic index in the background; keyword search remains available during reindexing.')}
               </div>
             )}
@@ -214,7 +214,7 @@ export function EmbeddingModelSettings() {
             <div className="mt-4">
               {downloading ? (
                 <div>
-                  <div className="mb-1.5 flex items-center justify-between text-xs text-[var(--fg2)]">
+                  <div className="mb-1.5 flex items-center justify-between text-xs text-muted-foreground">
                     <span className="flex items-center gap-1.5">
                       <Loader2 className="h-3.5 w-3.5 animate-spin" />
                       {t('Downloading')}{progress ? ` ${progress.file}` : '…'}
@@ -225,27 +225,27 @@ export function EmbeddingModelSettings() {
                       </span>
                     )}
                   </div>
-                  <div className="h-2 w-full overflow-hidden rounded-full bg-[var(--bg-elevated)]">
+                  <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
                     <div
-                      className="h-full rounded-full bg-[var(--gold)] transition-all"
+                      className="h-full rounded-full bg-primary transition-all"
                       style={{ width: `${progress?.percent ?? 0}%` }}
                     />
                   </div>
                 </div>
               ) : loaded ? (
-                <div className="flex items-center gap-2 text-sm font-medium text-[var(--success)]">
+                <div className="flex items-center gap-2 text-sm font-medium text-success">
                   <CheckCircle2 className="h-4 w-4" />
                   {t('Active — semantic search enabled')}
                 </div>
               ) : present ? (
                 <div className="flex flex-wrap items-center gap-3">
-                  <span className="flex items-center gap-2 text-sm text-[var(--fg2)]">
-                    <CheckCircle2 className="h-4 w-4 text-[var(--fg3)]" />
+                  <span className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <CheckCircle2 className="h-4 w-4 text-muted-foreground" />
                     {t('Installed — restart the app to activate')}
                   </span>
                   <button
                     onClick={() => download(modelName)}
-                    className="flex items-center gap-1.5 rounded-lg border border-[var(--border-subtle)] px-3 py-1.5 text-xs text-[var(--fg2)] hover:bg-[var(--bg-elevated)]"
+                    className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs text-muted-foreground hover:bg-muted"
                   >
                     <RotateCw className="h-3.5 w-3.5" />
                     {t('Re-download')}
@@ -254,7 +254,7 @@ export function EmbeddingModelSettings() {
               ) : (
                 <button
                   onClick={() => download(modelName)}
-                  className="flex items-center gap-2 rounded-lg bg-[var(--gold)] px-4 py-2 text-sm font-medium text-[var(--fg-inverse)] transition-colors hover:bg-[var(--gold-active)]"
+                  className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
                 >
                   <Download className="h-4 w-4" />
                   {t('Download model')}
@@ -262,31 +262,31 @@ export function EmbeddingModelSettings() {
               )}
 
               {error && (
-                <div className="mt-3 flex items-start gap-1.5 text-sm text-[var(--danger)]">
+                <div className="mt-3 flex items-start gap-1.5 text-sm text-destructive">
                   <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
                   <span>{error}</span>
                 </div>
               )}
             </div>
 
-            <div className="mt-5 border-t border-[var(--border-subtle)] pt-5">
+            <div className="mt-5 border-t border-border pt-5">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
-                  <h4 className="text-sm font-semibold text-[var(--fg1)]">{t('Archive search index')}</h4>
+                  <h4 className="text-sm font-semibold text-foreground">{t('Archive search index')}</h4>
                   {indexStatus ? (
-                    <p className="mt-1 text-xs leading-relaxed text-[var(--fg3)]">
+                    <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
                       {indexStatus.chunked_meetings} {t('of')} {indexStatus.indexable_meetings}{' '}
                       {t('meetings searchable')} · {indexStatus.embeddings_done} {t('of')}{' '}
                       {indexStatus.chunks_total} {t('semantic chunks ready')}
                     </p>
                   ) : (
-                    <p className="mt-1 text-xs text-[var(--fg3)]">{t('Index status unavailable')}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">{t('Index status unavailable')}</p>
                   )}
                 </div>
                 <button
                   onClick={repairIndex}
                   disabled={repairing || activeJobs > 0}
-                  className="flex items-center gap-1.5 rounded-lg border border-[var(--border-subtle)] px-3 py-1.5 text-xs text-[var(--fg2)] hover:bg-[var(--bg-elevated)] disabled:cursor-not-allowed disabled:opacity-50"
+                  className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs text-muted-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <RotateCw className={`h-3.5 w-3.5 ${repairing || activeJobs > 0 ? 'animate-spin' : ''}`} />
                   {repairing || activeJobs > 0 ? t('Repairing index…') : t('Check and repair index')}
@@ -295,13 +295,13 @@ export function EmbeddingModelSettings() {
 
               {indexStatus && (
                 <>
-                  <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-[var(--bg-elevated)]">
+                  <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-muted">
                     <div
-                      className="h-full rounded-full bg-[var(--gold)] transition-all"
+                      className="h-full rounded-full bg-primary transition-all"
                       style={{ width: `${loaded ? semanticCoverage : 0}%` }}
                     />
                   </div>
-                  <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-[var(--fg3)]">
+                  <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
                     {loaded ? (
                       <span>{semanticCoverage}% {t('semantic coverage')}</span>
                     ) : (
@@ -311,18 +311,18 @@ export function EmbeddingModelSettings() {
                       <span>{indexStatus.embeddings_pending} {t('pending')}</span>
                     )}
                     {indexStatus.embeddings_failed > 0 && (
-                      <span className="text-[var(--danger)]">
+                      <span className="text-destructive">
                         {indexStatus.embeddings_failed} {t('failed')}
                       </span>
                     )}
                     {activeJobs > 0 && <span>{activeJobs} {t('background jobs active')}</span>}
                     {indexStatus.unresolved_failed_jobs > 0 && (
-                      <span className="text-[var(--danger)]">
+                      <span className="text-destructive">
                         {indexStatus.unresolved_failed_jobs} {t('jobs need retry')}
                       </span>
                     )}
                     {!indexStatus.needs_repair && activeJobs === 0 && (
-                      <span className="text-[var(--success)]">{t('Index is healthy')}</span>
+                      <span className="text-success">{t('Index is healthy')}</span>
                     )}
                   </div>
                 </>
@@ -330,9 +330,9 @@ export function EmbeddingModelSettings() {
             </div>
           </div>
         </div>
-      </div>
+      </section>
 
-      <p className="mt-3 px-1 text-xs text-[var(--fg3)]">
+      <p className="mt-3 px-1 text-xs text-muted-foreground">
         {t('Embeddings and search stay on-device. Only summaries, extraction, and chat prompts are sent to your configured LLM provider (GigaChat / DeepSeek).')}
       </p>
     </div>

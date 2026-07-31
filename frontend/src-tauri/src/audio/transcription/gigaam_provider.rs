@@ -4,7 +4,7 @@
 // (crate::gigaam_engine). Unlike Whisper/Parakeet (which hold an Arc<Engine>), GigaAM
 // uses a global model, so this provider is stateless.
 
-use super::provider::{TranscriptionError, TranscriptionProvider, TranscriptResult};
+use super::provider::{TranscriptResult, TranscriptionError, TranscriptionProvider};
 use async_trait::async_trait;
 
 /// GigaAM v3 e2e-CTC provider (Russian ASR, punctuated output).

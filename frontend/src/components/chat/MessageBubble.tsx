@@ -4,16 +4,18 @@ import { motion } from 'framer-motion';
 import { Icon } from '@/components/memento/Icon';
 import { cn } from '@/lib/utils';
 import { useT } from '@/lib/i18n';
+import { avatarGradients } from '@/vendor/deslop/primitives/tokens.js';
+import { Bubble, BubbleContent } from '@/components/ui/bubble';
+import { Message, MessageAvatar, MessageContent, MessageHeader } from '@/components/ui/message';
 import { ChatMarkdown } from './ChatMarkdown';
 import type { ChatMessage, Citation, RetrievalDiagnostics } from '@/hooks/useMeetingChat';
 
 /**
  * Chat primitives shared by the archive/collection chat page and the embedded
- * meeting conversation. Variant 3a: the user keeps a gold bubble; the assistant
- * answer flows as plain content (no card, no border) rendered as Markdown + LaTeX,
- * with muted (neutral, not gold) citation chips. The citation click handler is
- * injected — the archive page routes to `/meeting-details`, the meeting screen
- * expands the transcript pin and scrolls to the cited segment in place.
+ * meeting conversation. Uses the official shadcn Message composition: avatar,
+ * sender header, and a visible Bubble surface for both sides. The citation click
+ * handler is injected — the archive page routes to `/meeting-details`, the meeting
+ * screen expands the transcript pin and scrolls to the cited segment in place.
  */
 
 export function MessageBubble({
@@ -30,60 +32,76 @@ export function MessageBubble({
   const t = useT();
   const isUser = msg.role === 'user';
   const notFound = msg.role === 'assistant' && msg.found === false && !msg.error;
-
-  if (isUser) {
-    return (
-      <motion.div
-        initial={{ opacity: 0, y: 6 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.18 }}
-        className="max-w-[78%] self-end whitespace-pre-wrap rounded-[16px_16px_4px_16px] bg-[var(--gold)] px-[15px] py-[11px] text-[14px] leading-[1.5] text-[var(--fg-inverse)]"
-      >
-        {msg.content}
-      </motion.div>
-    );
-  }
+  const senderName = isUser ? t('You') : 'Memento';
+  const avatarGradient = avatarGradients[isUser ? 0 : 2];
+  const avatarInitials = isUser ? senderName.slice(0, 1).toUpperCase() : 'M';
 
   return (
     <motion.div
       initial={{ opacity: 0, y: 6 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.18 }}
-      className={cn('text-[14.5px] leading-[1.65]', msg.error ? 'text-[var(--danger)]' : 'text-[var(--fg1)]')}
+      className="w-full"
     >
-      {notFound && (
-        <div className="mb-1 flex items-center gap-1.5 text-xs font-medium text-[var(--fg2)]">
-          <Icon name="search" size={14} />
-          {t('Not found in your meetings')}
-        </div>
-      )}
-
-      {msg.error ? <div className="whitespace-pre-wrap">{msg.content}</div> : <ChatMarkdown content={msg.content} />}
-
-      {notFound && msg.diagnostics && <RetrievalExplanation diagnostics={msg.diagnostics} />}
-
-      {msg.warning && (
-        <div className="mt-2 flex items-center gap-1.5 text-xs text-[var(--gold)]">
-          <Icon name="alert" size={14} />
-          {msg.warning}
-        </div>
-      )}
-
-      {!!msg.citations?.length && (
-        <div className="mt-2.5 flex flex-wrap gap-1.5">
-          {msg.citations.map((c) => (
-            <button
-              key={c.index}
-              onClick={() => onCite(c)}
-              title={t('Open the meeting at this moment')}
-              className="mm-numeric inline-flex items-center gap-1 rounded-md bg-[var(--bg-elevated)] px-2 py-0.5 text-[11px] font-semibold text-[var(--fg2)] transition-colors hover:text-[var(--fg1)]"
+      <Message align={isUser ? 'end' : 'start'}>
+        <MessageAvatar
+          aria-label={senderName}
+          title={senderName}
+          className="h-8 w-8 text-xs font-bold text-white"
+          style={{
+            background: `linear-gradient(180deg, ${avatarGradient.top} 0%, ${avatarGradient.bottom} 100%)`,
+          }}
+        >
+          <span aria-hidden="true">{avatarInitials}</span>
+        </MessageAvatar>
+        <MessageContent>
+          <MessageHeader>{senderName}</MessageHeader>
+          <Bubble
+            align={isUser ? 'end' : 'start'}
+            variant={msg.error ? 'destructive' : isUser ? 'default' : 'muted'}
+          >
+            <BubbleContent
+              className={cn(isUser && 'whitespace-pre-wrap')}
             >
-              <span>[{c.index}]</span>
-              {showMeetingLabel && <span className="max-w-[160px] truncate font-normal">{meetingTitle(c.meeting_id)}</span>}
-            </button>
-          ))}
-        </div>
-      )}
+              {notFound && (
+                <div className="mb-1 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                  <Icon name="search" size={14} />
+                  {t('Not found in your meetings')}
+                </div>
+              )}
+
+              {isUser || msg.error
+                ? <div className="whitespace-pre-wrap">{msg.content}</div>
+                : <ChatMarkdown content={msg.content} />}
+
+              {notFound && msg.diagnostics && <RetrievalExplanation diagnostics={msg.diagnostics} />}
+
+              {msg.warning && (
+                <div className="mt-2 flex items-center gap-1.5 text-xs text-primary">
+                  <Icon name="alert" size={14} />
+                  {msg.warning}
+                </div>
+              )}
+
+              {!!msg.citations?.length && (
+                <div className="mt-2.5 flex flex-wrap gap-1.5">
+                  {msg.citations.map((c) => (
+                    <button
+                      key={c.index}
+                      onClick={() => onCite(c)}
+                      title={t('Open the meeting at this moment')}
+                      className="mm-numeric inline-flex items-center gap-1 rounded-md bg-muted px-2 py-0.5 text-[11px] font-semibold text-muted-foreground transition-colors hover:text-foreground"
+                    >
+                      <span>[{c.index}]</span>
+                      {showMeetingLabel && <span className="max-w-[160px] truncate font-normal">{meetingTitle(c.meeting_id)}</span>}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </BubbleContent>
+          </Bubble>
+        </MessageContent>
+      </Message>
     </motion.div>
   );
 }
@@ -106,7 +124,7 @@ export function RetrievalExplanation({ diagnostics }: { diagnostics: RetrievalDi
   }
 
   return (
-    <div className="mt-2 rounded-lg bg-[var(--bg-elevated)] px-3 py-2 text-xs leading-relaxed text-[var(--fg3)]">
+    <div className="mt-2 rounded-lg bg-muted px-3 py-2 text-xs leading-relaxed text-muted-foreground">
       <p>{explanation}</p>
       {!diagnostics.semantic_available && diagnostics.indexable_meetings > 0 && (
         <p className="mt-1">{t('Semantic search was unavailable; keyword and typo-tolerant search were used.')}</p>
@@ -119,17 +137,35 @@ export function RetrievalExplanation({ diagnostics }: { diagnostics: RetrievalDi
 }
 
 export function TypingIndicator() {
+  const t = useT();
+  const avatarGradient = avatarGradients[2];
+
   return (
-    <div className="self-start">
-      <div className="flex items-center gap-1">
-        {[0, 1, 2].map((i) => (
-          <span
-            key={i}
-            className="h-2 w-2 animate-bounce rounded-full bg-[var(--fg3)]"
-            style={{ animationDelay: `${i * 0.15}s` }}
-          />
-        ))}
-      </div>
-    </div>
+    <Message align="start" role="status" aria-label={t('Assistant is typing')}>
+      <MessageAvatar
+        aria-label="Memento"
+        title="Memento"
+        className="h-8 w-8 text-xs font-bold text-white"
+        style={{
+          background: `linear-gradient(180deg, ${avatarGradient.top} 0%, ${avatarGradient.bottom} 100%)`,
+        }}
+      >
+        <span aria-hidden="true">M</span>
+      </MessageAvatar>
+      <MessageContent>
+        <MessageHeader>Memento</MessageHeader>
+        <Bubble variant="muted">
+          <BubbleContent className="flex items-center gap-1">
+            {[0, 1, 2].map((i) => (
+              <span
+                key={i}
+                className="h-2 w-2 animate-bounce rounded-full bg-muted-foreground"
+                style={{ animationDelay: `${i * 0.15}s` }}
+              />
+            ))}
+          </BubbleContent>
+        </Bubble>
+      </MessageContent>
+    </Message>
   );
 }

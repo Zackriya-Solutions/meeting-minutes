@@ -73,12 +73,12 @@ export function PrivacySettings() {
   );
 
   if (loading) {
-    return <div className="mt-6 text-sm text-[var(--fg3)]">{t('Loading privacy settings…')}</div>;
+    return <div className="mt-6 text-sm text-muted-foreground">{t('Loading privacy settings…')}</div>;
   }
 
   return (
     <div className="mt-6 max-w-2xl space-y-5">
-      <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-canvas)] p-6">
+      <div className="rounded-lg border border-border bg-background p-6">
         <SettingRow
           title={t('Keep meeting content on this device')}
           description={t(
@@ -89,18 +89,18 @@ export function PrivacySettings() {
           onCheckedChange={(enabled) => update('localOnly', 'privacy.local_only', enabled)}
         />
         {settings.localOnly && (
-          <p className="mt-4 rounded-md bg-[var(--gold-soft)] p-3 text-xs text-[var(--gold)]">
+          <p className="mt-4 rounded-md bg-primary/10 p-3 text-xs text-primary">
             {t('Local-only mode is active. Choose an on-device transcription engine and a local summary model.')}
           </p>
         )}
       </div>
 
-      <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-canvas)] p-6">
-        <h3 className="mb-1 text-lg font-semibold text-[var(--fg1)]">{t('Remote AI permissions')}</h3>
-        <p className="mb-5 text-sm text-[var(--fg2)]">
+      <div className="rounded-lg border border-border bg-background p-6">
+        <h3 className="mb-1 text-lg font-semibold text-foreground">{t('Remote AI permissions')}</h3>
+        <p className="mb-5 text-sm text-muted-foreground">
           {t('These permissions apply only when local-only mode is off. Summary generation remains controlled by the selected local or cloud provider.')}
         </p>
-        <div className="divide-y divide-[var(--border-subtle)]">
+        <div className="divide-y divide-border">
           <SettingRow
             title={t('Entity and action extraction')}
             description={t('Allow meeting text to be sent to the configured provider to identify people, topics, and action items.')}
@@ -121,11 +121,11 @@ export function PrivacySettings() {
         </div>
       </div>
 
-      <p className="text-xs text-[var(--fg3)]">
+      <p className="text-xs text-muted-foreground">
         {t('Provider credentials are stored locally and are never returned to the app interface after saving.')}
       </p>
       {error && (
-        <p role="alert" className="text-sm text-[var(--danger)]">
+        <p role="alert" className="text-sm text-destructive">
           {error}
         </p>
       )}
@@ -151,8 +151,8 @@ function SettingRow({
   return (
     <div className={`flex items-start justify-between gap-6 ${className}`}>
       <div>
-        <h4 className="font-medium text-[var(--fg1)]">{title}</h4>
-        <p className="mt-1 text-sm leading-5 text-[var(--fg2)]">{description}</p>
+        <h4 className="font-medium text-foreground">{title}</h4>
+        <p className="mt-1 text-sm leading-5 text-muted-foreground">{description}</p>
       </div>
       <Switch
         checked={checked}

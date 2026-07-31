@@ -2,29 +2,49 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
-import { Copy, Languages, Loader2, Save, Send, Settings, Trash2 } from '@/components/memento/LucideCompat';
+import {
+  Copy,
+  Languages,
+  Loader2,
+  MoreHorizontal,
+  Pencil,
+  Save,
+  Send,
+  Settings,
+  Trash2,
+} from '@/components/deslop-icons';
+import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { ModelSettingsModal, type ModelConfig } from '@/components/ModelSettingsModal';
 import { LanguagePickerPopover } from '@/components/LanguagePickerPopover';
 import { readMeetingSummaryLanguage, saveMeetingSummaryLanguage } from '@/lib/summary-language-preferences';
 import { labelForCode } from '@/lib/summary-languages';
 import { useT } from '@/lib/i18n';
-import { cn } from '@/lib/utils';
+import { useMeetingDrawer } from '@/contexts/MeetingDrawerContext';
 
 /**
- * The "⋯" menu for the meeting conversation (variant 2a), matching the delivery
- * prototype: Копировать саммари · Сохранить в заметку · Язык саммари · AI-модель ·
- * — · Удалить встречу (danger). Built as a plain anchored dropdown with a click-away
- * overlay (as in the prototype), not a component library menu, so the language
- * picker and model dialog compose cleanly.
+ * The "⋯" menu for the meeting conversation. Composed from shadcn DropdownMenu
+ * primitives so focus management, keyboard navigation, positioning, and dismissal
+ * follow the same accessible interaction model as the rest of the application.
+ *
+ * The language picker and model settings open as dialogs rather than swapping the
+ * menu's contents in place: a dropdown that resizes under the pointer fights the
+ * primitive's focus management, and both are self-contained editors anyway.
  */
 
 interface MeetingOverflowMenuProps {
   meetingId: string;
   hasSummary: boolean;
   onCopySummary: () => Promise<void> | void;
+  onRenameMeeting: () => void;
   onSaveSummary: () => Promise<void> | void;
   /** Omitted (along with `canShareToTelegram`) when Telegram sharing is unavailable. */
   onShareSummaryToTelegram?: () => Promise<void> | void;
@@ -34,44 +54,11 @@ interface MeetingOverflowMenuProps {
   onSaveModelConfig: (config?: ModelConfig) => Promise<void>;
 }
 
-function MenuRow({
-  icon,
-  label,
-  right,
-  onClick,
-  disabled = false,
-  danger = false,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  right?: React.ReactNode;
-  onClick: () => void;
-  disabled?: boolean;
-  danger?: boolean;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      className={cn(
-        'flex w-full items-center gap-2.5 rounded-[9px] px-2.5 py-[9px] text-left text-[13px] transition-colors disabled:opacity-40',
-        danger
-          ? 'text-[var(--danger)] hover:bg-[color-mix(in_srgb,var(--danger)_12%,transparent)]'
-          : 'text-[var(--fg1)] hover:bg-[var(--state-hover-bg)]',
-      )}
-    >
-      <span className={cn('shrink-0', danger ? 'text-[var(--danger)]' : 'text-[var(--fg2)]')}>{icon}</span>
-      <span className="flex-1">{label}</span>
-      {right && <span className="text-[11px] text-[var(--fg3)]">{right}</span>}
-    </button>
-  );
-}
-
 export function MeetingOverflowMenu({
   meetingId,
   hasSummary,
   onCopySummary,
+  onRenameMeeting,
   onSaveSummary,
   onShareSummaryToTelegram,
   canShareToTelegram = false,
@@ -80,10 +67,10 @@ export function MeetingOverflowMenu({
   onSaveModelConfig,
 }: MeetingOverflowMenuProps) {
   const t = useT();
-  const router = useRouter();
+  const meetingDrawer = useMeetingDrawer();
   const [open, setOpen] = useState(false);
-  const [view, setView] = useState<'menu' | 'language'>('menu');
   const [modelOpen, setModelOpen] = useState(false);
+  const [languageOpen, setLanguageOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [language, setLanguage] = useState<string | null>(null);
 
@@ -96,18 +83,17 @@ export function MeetingOverflowMenu({
     return () => { active = false; };
   }, [open, meetingId]);
 
-  const closeMenu = () => { setOpen(false); setView('menu'); };
+  const closeMenu = () => setOpen(false);
 
   const handleLanguageChange = useCallback(async (code: string | null) => {
     setLanguage(code);
     try {
       const saved = await saveMeetingSummaryLanguage(meetingId, code);
       setLanguage(saved.language);
-    } catch (e) {
+    } catch {
       toast.error(t('Failed to save summary language'));
     }
-    setView('menu');
-    setOpen(false);
+    setLanguageOpen(false);
   }, [meetingId, t]);
 
   const handleDelete = useCallback(async () => {
@@ -119,77 +105,124 @@ export function MeetingOverflowMenu({
       await invoke('api_delete_meeting', { meetingId, deleteRecordingFiles: false });
       toast.success(t('Meeting deleted'));
       closeMenu();
-      router.push('/');
+      meetingDrawer?.close();
     } catch (e) {
       console.error('Failed to delete meeting:', e);
       toast.error(`${t('Failed to delete meeting')}: ${String(e)}`);
     } finally {
       setDeleting(false);
     }
-  }, [deleting, meetingId, router, t]);
+  }, [deleting, meetingDrawer, meetingId, t]);
 
   const languageLabel = language ? labelForCode(language) : t('Auto');
   const modelLabel = modelConfig.model || modelConfig.provider || '—';
 
   return (
-    <div className="relative">
-      <button
-        type="button"
-        onClick={() => (open ? closeMenu() : setOpen(true))}
-        aria-label={t('More actions')}
-        title={t('More actions')}
-        className="inline-flex h-[38px] w-[38px] items-center justify-center rounded-full border border-[var(--border-strong)] bg-transparent text-[var(--fg1)] transition-colors hover:bg-[var(--state-hover-bg)]"
-      >
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-          <circle cx="5" cy="12" r="1.7" />
-          <circle cx="12" cy="12" r="1.7" />
-          <circle cx="19" cy="12" r="1.7" />
-        </svg>
-      </button>
-
-      {open && (
-        <>
-          <div className="fixed inset-0 z-30" onClick={closeMenu} />
-          <div
-            className={cn(
-              'absolute right-0 top-[44px] z-40 rounded-[14px] border border-[var(--border-strong)] bg-[var(--bg-elevated)] p-1.5 shadow-[0_18px_44px_rgba(0,0,0,0.55)]',
-              view === 'language' ? 'w-[300px]' : 'w-[248px]',
-            )}
+    <div className="no-drag relative z-[1]">
+      <DropdownMenu open={open} onOpenChange={setOpen}>
+        <DropdownMenuTrigger asChild>
+          <Button
+            type="button"
+            variant="outline"
+            size="icon"
+            aria-label={t('More actions')}
+            title={t('More actions')}
+            className="h-[38px] w-[38px] rounded-full bg-transparent shadow-none"
           >
-            {view === 'menu' ? (
-              <div className="flex flex-col gap-0.5">
-                <MenuRow icon={<Copy size={16} />} label={t('Copy summary')} disabled={!hasSummary} onClick={() => { void onCopySummary(); closeMenu(); }} />
-                <MenuRow icon={<Save size={16} />} label={t('Save to note')} disabled={!hasSummary} onClick={() => { void onSaveSummary(); closeMenu(); }} />
-                {canShareToTelegram && onShareSummaryToTelegram && (
-                  <MenuRow
-                    icon={<Send size={16} />}
-                    label={t('Send to Telegram')}
-                    disabled={!hasSummary}
-                    onClick={() => { void onShareSummaryToTelegram(); closeMenu(); }}
-                  />
-                )}
-                <MenuRow icon={<Languages size={16} />} label={t('Summary language')} right={languageLabel} onClick={() => setView('language')} />
-                <MenuRow icon={<Settings size={16} />} label={t('AI Model')} right={modelLabel} onClick={() => { setModelOpen(true); closeMenu(); }} />
-                <div className="mx-1.5 my-1 h-px bg-[var(--border-subtle)]" />
-                <MenuRow
-                  icon={deleting ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
-                  label={t('Delete meeting')}
-                  danger
-                  disabled={deleting}
-                  onClick={() => void handleDelete()}
-                />
-              </div>
-            ) : (
-              <LanguagePickerPopover
-                value={language}
-                onChange={handleLanguageChange}
-                onClose={() => setView('menu')}
-                autoSubtitle={t('Uses dominant transcript language')}
-              />
-            )}
-          </div>
-        </>
-      )}
+            <MoreHorizontal size={18} />
+          </Button>
+        </DropdownMenuTrigger>
+
+        <DropdownMenuContent
+          align="end"
+          sideOffset={6}
+          className="w-[248px] rounded-[14px] p-1.5"
+        >
+          <DropdownMenuItem
+            onSelect={onRenameMeeting}
+            className="rounded-[9px] px-2.5 py-[9px]"
+          >
+            <Pencil size={16} />
+            <span>{t('Rename meeting')}</span>
+          </DropdownMenuItem>
+
+          <DropdownMenuSeparator className="mx-1.5 my-1" />
+
+          <DropdownMenuItem
+            disabled={!hasSummary}
+            onSelect={() => void onCopySummary()}
+            className="rounded-[9px] px-2.5 py-[9px]"
+          >
+            <Copy size={16} />
+            <span>{t('Copy summary')}</span>
+          </DropdownMenuItem>
+
+          <DropdownMenuItem
+            disabled={!hasSummary}
+            onSelect={() => void onSaveSummary()}
+            className="rounded-[9px] px-2.5 py-[9px]"
+          >
+            <Save size={16} />
+            <span>{t('Save to note')}</span>
+          </DropdownMenuItem>
+
+          {canShareToTelegram && onShareSummaryToTelegram && (
+            <DropdownMenuItem
+              disabled={!hasSummary}
+              onSelect={() => void onShareSummaryToTelegram()}
+              className="rounded-[9px] px-2.5 py-[9px]"
+            >
+              <Send size={16} />
+              <span>{t('Send to Telegram')}</span>
+            </DropdownMenuItem>
+          )}
+
+          <DropdownMenuItem
+            onSelect={() => setLanguageOpen(true)}
+            className="rounded-[9px] px-2.5 py-[9px]"
+          >
+            <Languages size={16} />
+            <span className="flex-1">{t('Summary language')}</span>
+            <span className="text-[11px] text-[var(--fg3)]">{languageLabel}</span>
+          </DropdownMenuItem>
+
+          <DropdownMenuItem
+            onSelect={() => setModelOpen(true)}
+            className="rounded-[9px] px-2.5 py-[9px]"
+          >
+            <Settings size={16} />
+            <span className="flex-1">{t('AI Model')}</span>
+            <span className="text-[11px] text-[var(--fg3)]">{modelLabel}</span>
+          </DropdownMenuItem>
+
+          <DropdownMenuSeparator className="mx-1.5 my-1" />
+
+          <DropdownMenuItem
+            disabled={deleting}
+            onSelect={(event) => {
+              // Deleting is async and goes through window.confirm(); keep the menu
+              // mounted so the spinner has somewhere to render.
+              event.preventDefault();
+              void handleDelete();
+            }}
+            className="rounded-[9px] px-2.5 py-[9px] text-[var(--danger)] focus:text-[var(--danger)]"
+          >
+            {deleting ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
+            <span>{t('Delete meeting')}</span>
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+
+      <Dialog open={languageOpen} onOpenChange={setLanguageOpen}>
+        <DialogContent className="max-w-[320px] p-1.5">
+          <LanguagePickerPopover
+            value={language}
+            onChange={handleLanguageChange}
+            onClose={() => setLanguageOpen(false)}
+            autoSubtitle={t('Uses dominant transcript language')}
+          />
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={modelOpen} onOpenChange={setModelOpen}>
         <DialogContent className="max-w-lg">

@@ -135,9 +135,7 @@ pub async fn recover_running(pool: &SqlitePool) -> Result<u64, sqlx::Error> {
 /// legitimate work already queued before startup has a lower id than the startup
 /// backfill, while its archive fan-out has a higher id and points at meetings created
 /// before that startup. Meetings recorded after startup are preserved as well.
-pub async fn retire_legacy_startup_backfill_fanout(
-    pool: &SqlitePool,
-) -> Result<u64, sqlx::Error> {
+pub async fn retire_legacy_startup_backfill_fanout(pool: &SqlitePool) -> Result<u64, sqlx::Error> {
     let mut tx = pool.begin().await?;
     let fanout = sqlx::query(
         "UPDATE jobs AS j \

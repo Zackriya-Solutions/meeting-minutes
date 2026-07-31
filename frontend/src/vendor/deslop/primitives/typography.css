@@ -1,0 +1,101 @@
+/* stylelint-disable custom-property-empty-line-before */
+
+@font-face {
+    font-family: "SB Sans Interface";
+    src: url("./fonts/SBSansUI-Regular.otf") format("opentype");
+    font-weight: 400;
+    font-style: normal;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: "SB Sans Interface";
+    src: url("./fonts/SBSansUI-Semibold.otf") format("opentype");
+    font-weight: 600;
+    font-style: normal;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: "SB Sans Interface";
+    src: url("./fonts/SBSansUI-Bold.otf") format("opentype");
+    font-weight: 700;
+    font-style: normal;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: "SB Sans Interface Caps";
+    src: url("./fonts/SBSansUI-Caps.otf") format("opentype");
+    font-weight: 400;
+    font-style: normal;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: "SB Sans Text Mono";
+    src: url("./fonts/SBSansTextMono-Regular.otf") format("opentype");
+    font-weight: 400;
+    font-style: normal;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: "SB Sans Text Mono";
+    src: url("./fonts/SBSansTextMono-Bold.otf") format("opentype");
+    font-weight: 700;
+    font-style: normal;
+    font-display: swap;
+}
+
+:root {
+    --ui-font-interface: "SB Sans Interface", system-ui, sans-serif;
+    --ui-font-interface-caps: "SB Sans Interface Caps", system-ui, sans-serif;
+    --ui-font-mono: "SB Sans Text Mono", ui-monospace, monospace;
+
+    --ui-title-67-font-size: 67px;
+    --ui-title-67-line-height: 60px;
+    --ui-title-67-font-weight: 700;
+    --ui-title-67-letter-spacing: -0.01em;
+
+    --ui-title-52-font-size: 52px;
+    --ui-title-52-line-height: 50px;
+    --ui-title-52-font-weight: 700;
+    --ui-title-52-letter-spacing: -0.01em;
+
+    --ui-title-40-font-size: 40px;
+    --ui-title-40-line-height: 40px;
+    --ui-title-40-font-weight: 700;
+    --ui-title-40-letter-spacing: -0.01em;
+
+    --ui-title-32-font-size: 32px;
+    --ui-title-32-line-height: 32px;
+    --ui-title-32-font-weight: 700;
+    --ui-title-32-letter-spacing: -0.01em;
+
+    --ui-title-24-font-size: 24px;
+    --ui-title-24-line-height: 28px;
+    --ui-title-24-font-weight: 700;
+    --ui-title-24-letter-spacing: -0.01em;
+
+    --ui-title-20-font-size: 20px;
+    --ui-title-20-line-height: 24px;
+    --ui-title-20-font-weight: 700;
+    --ui-title-20-letter-spacing: -0.01em;
+
+    --ui-body-font-size: 16px;
+    --ui-body-line-height: 20px;
+    --ui-body-font-weight: 400;
+    --ui-body-letter-spacing: 0;
+
+    --ui-subtitle-font-size: 13px;
+    --ui-subtitle-line-height: 18px;
+    --ui-subtitle-font-weight: 400;
+    --ui-subtitle-letter-spacing: 0;
+
+    --ui-caption-font-size: 11px;
+    --ui-caption-line-height: 13px;
+    --ui-caption-font-weight: 400;
+    --ui-caption-letter-spacing: 0;
+    --ui-caption-text-transform: uppercase;
+}

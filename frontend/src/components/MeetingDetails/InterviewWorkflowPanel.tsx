@@ -8,7 +8,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
-import { Check, ChevronDown, Download, RefreshCw, Shield, X } from '@/components/memento/LucideCompat';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Check, ChevronDown, Download, RefreshCw, Shield, X } from '@/components/deslop-icons';
 
 type ReviewStatus = 'pending' | 'accepted' | 'rejected';
 
@@ -246,17 +247,17 @@ export function InterviewWorkflowPanel({
   };
 
   return (
-    <section className="mx-1 mb-4 rounded-xl border border-[var(--gold-border)] bg-[var(--bg-elevated)]/70">
-      <button className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left" onClick={() => setOpen((value) => !value)}>
+    <section className="mx-1 mb-4 rounded-xl border border-primary/40 bg-muted/70">
+      <Button variant="ghost" className="h-auto w-full justify-between gap-3 px-4 py-3 text-left" onClick={() => setOpen((value) => !value)}>
         <span>
-          <span className="block font-semibold text-[var(--fg1)]">{t('Interview Memory')}</span>
-          <span className="text-xs text-[var(--fg3)]">{pendingCount} {t('records need review')} · {t('sensitive by default')}</span>
+          <span className="block font-semibold text-foreground">{t('Interview Memory')}</span>
+          <span className="text-xs text-muted-foreground">{pendingCount} {t('records need review')} · {t('sensitive by default')}</span>
         </span>
         <ChevronDown size={18} className={open ? 'rotate-180 transition-transform' : 'transition-transform'} />
-      </button>
+      </Button>
 
       {open && config && privacy && (
-        <div className="space-y-5 border-t border-[var(--border-subtle)] p-4">
+        <div className="space-y-5 border-t border-border p-4">
           <div className="space-y-3">
             <h3 className="text-sm font-semibold">{t('Preparation and rubric')}</h3>
             <div className="grid gap-2 md:grid-cols-3">
@@ -275,7 +276,7 @@ export function InterviewWorkflowPanel({
             <Button disabled={busy} onClick={() => void saveConfig()}>{busy ? <RefreshCw className="animate-spin" size={16} /> : <Check size={16} />}{t('Save preparation')}</Button>
           </div>
 
-          <div className="space-y-3 rounded-lg border border-[var(--border-subtle)] p-3">
+          <div className="space-y-3 rounded-lg border border-border p-3">
             <h3 className="flex items-center gap-2 text-sm font-semibold"><Shield size={16} />{t('Sensitive memory controls')}</h3>
             {([
               ['cloudProcessingAllowed', 'Allow cloud processing for this memory'],
@@ -295,15 +296,15 @@ export function InterviewWorkflowPanel({
 
           <div className="space-y-3">
             <div className="flex items-center justify-between"><h3 className="text-sm font-semibold">{t('Evidence review')}</h3><Button size="sm" variant="ghost" onClick={() => void load()}><RefreshCw size={15} /></Button></div>
-            {records.length === 0 ? <p className="text-sm text-[var(--fg3)]">{t('Generate Interview Memory to create reviewable records.')}</p> : records.map((record) => {
+            {records.length === 0 ? <p className="text-sm text-muted-foreground">{t('Generate Interview Memory to create reviewable records.')}</p> : records.map((record) => {
               const payload = effectivePayload(record);
               const field = primaryField(record.kind);
               const refs = Array.isArray(payload.evidence) ? payload.evidence : [];
               return (
-                <div key={record.id} className="space-y-2 rounded-lg border border-[var(--border-subtle)] p-3">
-                  <div className="flex items-center justify-between gap-2"><span className="text-xs uppercase text-[var(--fg3)]">{record.kind.replaceAll('_', ' ')}</span><span className="text-xs">{t(record.review_status)}</span></div>
+                <div key={record.id} className="space-y-2 rounded-lg border border-border p-3">
+                  <div className="flex items-center justify-between gap-2"><span className="text-xs uppercase text-muted-foreground">{record.kind.replaceAll('_', ' ')}</span><span className="text-xs">{t(record.review_status)}</span></div>
                   <Input value={drafts[record.id] ?? payload[field] ?? ''} onChange={(e) => setDrafts({ ...drafts, [record.id]: e.target.value })} />
-                  <div className="flex flex-wrap gap-2 text-xs">{refs.map((ref: any) => { const href = evidenceHref(meetingId, ref.timestamp); return href ? <a className="text-[var(--gold)] underline" key={ref.timestamp + ref.quote} href={href}>{ref.timestamp} {ref.quote}</a> : null; })}</div>
+                  <div className="flex flex-wrap gap-2 text-xs">{refs.map((ref: any) => { const href = evidenceHref(meetingId, ref.timestamp); return href ? <a className="text-primary underline" key={ref.timestamp + ref.quote} href={href}>{ref.timestamp} {ref.quote}</a> : null; })}</div>
                   <div className="flex gap-2"><Button size="sm" onClick={() => void review(record, 'accepted')}><Check size={14} />{t('Accept')}</Button><Button size="sm" variant="outline" onClick={() => void review(record, 'rejected')}><X size={14} />{t('Reject')}</Button></div>
                 </div>
               );
@@ -316,9 +317,17 @@ export function InterviewWorkflowPanel({
             <Textarea value={strengths} placeholder={t('Job-relevant strengths with evidence')} onChange={(e) => setStrengths(e.target.value)} />
             <Textarea value={concerns} placeholder={t('Concerns and missing evidence')} onChange={(e) => setConcerns(e.target.value)} />
             <Textarea value={openQuestions} placeholder={t('Questions for the next stage')} onChange={(e) => setOpenQuestions(e.target.value)} />
-            <select className="memento-input w-full" value={recommendation} onChange={(e) => setRecommendation(e.target.value)}><option value="pending">pending</option><option value="advance">advance</option><option value="hold">hold</option><option value="decline">decline</option></select>
+            <Select value={recommendation} onValueChange={setRecommendation}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="pending">Решение не принято</SelectItem>
+                <SelectItem value="advance">Перейти дальше</SelectItem>
+                <SelectItem value="hold">Отложить</SelectItem>
+                <SelectItem value="decline">Отказать</SelectItem>
+              </SelectContent>
+            </Select>
             <Button disabled={!reviewerName.trim()} onClick={() => void saveDebrief()}>{t('Save my debrief')}</Button>
-            {debriefs.length > 0 && <p className="text-xs text-[var(--fg3)]">{debriefs.length} {t('debriefs saved; individual opinions stay hidden during independent review')}</p>}
+            {debriefs.length > 0 && <p className="text-xs text-muted-foreground">{debriefs.length} {t('debriefs saved; individual opinions stay hidden during independent review')}</p>}
           </div>
 
           <div className="space-y-2">
@@ -327,7 +336,7 @@ export function InterviewWorkflowPanel({
             <Button variant="outline" onClick={() => void createTrack()}>{t('Create process')}</Button>
             <div className="grid gap-2 sm:grid-cols-3"><Input value={trackId} placeholder={t('Process ID')} onChange={(e) => setTrackId(e.target.value)} /><Input type="number" value={stageOrder} onChange={(e) => setStageOrder(e.target.value)} /><Input value={stageName} placeholder={t('Stage name')} onChange={(e) => setStageName(e.target.value)} /></div>
             <Button variant="outline" disabled={!trackId} onClick={() => void assignStage()}>{t('Link this stage')}</Button>
-            {handoff && handoff.open_questions.length > 0 && <div className="rounded-lg bg-[var(--bg-subtle)] p-3"><p className="text-xs font-semibold">{t('Handoff from previous stages')}</p>{handoff.open_questions.map((item, index) => <p className="mt-1 text-xs" key={`${item.question}-${index}`}>• {item.question} · {item.source_meeting_title}</p>)}</div>}
+            {handoff && handoff.open_questions.length > 0 && <div className="rounded-lg bg-muted p-3"><p className="text-xs font-semibold">{t('Handoff from previous stages')}</p>{handoff.open_questions.map((item, index) => <p className="mt-1 text-xs" key={`${item.question}-${index}`}>• {item.question} · {item.source_meeting_title}</p>)}</div>}
           </div>
 
           <div className="flex flex-wrap gap-2">

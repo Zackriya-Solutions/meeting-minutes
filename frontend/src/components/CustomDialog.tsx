@@ -1,5 +1,5 @@
 import React from "react";
-import { Settings } from '@/components/memento/LucideCompat';
+import { Settings } from '@/components/deslop-icons';
 import { Dialog, DialogContent, DialogTitle, DialogTrigger, DialogFooter } from "./ui/dialog";
 import { VisuallyHidden } from "./ui/visually-hidden";
 import { SettingTabs } from "./SettingTabs";

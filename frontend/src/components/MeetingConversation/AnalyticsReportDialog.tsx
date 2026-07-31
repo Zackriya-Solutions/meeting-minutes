@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { AlertCircle, Check, CheckCircle, Circle, FolderOpen, Loader2, RefreshCw } from '@/components/memento/LucideCompat';
+import { AlertCircle, Check, CheckCircle, Circle, FolderOpen, Loader2, RefreshCw } from '@/components/deslop-icons';
 import { useT } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { localizeSpeakerLabel } from '@/types';
@@ -115,17 +115,17 @@ function RunningView({
             <li key={i} className="flex items-center gap-2.5 text-sm">
               <span className="flex h-5 w-5 shrink-0 items-center justify-center">
                 {done ? (
-                  <Check size={16} className="text-[var(--success)]" />
+                  <Check size={16} className="text-success" />
                 ) : current ? (
-                  <Loader2 size={16} className="animate-spin text-[var(--gold)]" />
+                  <Loader2 size={16} className="animate-spin text-primary" />
                 ) : (
-                  <Circle size={12} className="text-[var(--fg3)]" />
+                  <Circle size={12} className="text-muted-foreground" />
                 )}
               </span>
               <span
                 className={cn(
                   'truncate',
-                  current ? 'font-semibold text-[var(--fg1)]' : done ? 'text-[var(--fg2)]' : 'text-[var(--fg3)]',
+                  current ? 'font-semibold text-foreground' : done ? 'text-muted-foreground' : 'text-muted-foreground',
                 )}
               >
                 {label}
@@ -134,7 +134,7 @@ function RunningView({
           );
         })}
       </ol>
-      <DialogDescription className="text-xs text-[var(--fg3)]">
+      <DialogDescription className="text-xs text-muted-foreground">
         {t('Generation continues in background')}
       </DialogDescription>
     </>
@@ -487,12 +487,12 @@ function QuestionsView({ report }: { report: UseAnalyticsReportResult }) {
           return (
             <div
               key={q.id}
-              className="flex flex-col gap-2.5 rounded-[14px] border border-[var(--border-subtle)] bg-[var(--bg-canvas)] p-3.5"
+              className="flex flex-col gap-2.5 rounded-[14px] border border-border bg-background p-3.5"
             >
-              <p className="text-sm font-semibold text-[var(--fg1)]">{q.text}</p>
+              <p className="text-sm font-semibold text-foreground">{q.text}</p>
 
               {q.quote && (
-                <blockquote className="border-l-2 border-[var(--border-strong)] pl-3 text-[13px] italic text-[var(--fg2)]">
+                <blockquote className="border-l-2 border-border pl-3 text-[13px] italic text-muted-foreground">
                   {q.quote}
                 </blockquote>
               )}
@@ -508,8 +508,8 @@ function QuestionsView({ report }: { report: UseAnalyticsReportResult }) {
                       className={cn(
                         'rounded-full border px-3 py-1 text-[13px] transition-colors',
                         active
-                          ? 'border-[var(--gold-border)] bg-[var(--gold)] text-[var(--fg-inverse)]'
-                          : 'border-[var(--border-strong)] bg-transparent text-[var(--fg1)] hover:bg-[var(--state-hover-bg)]',
+                          ? 'border-primary/40 bg-primary text-primary-foreground'
+                          : 'border-border bg-transparent text-foreground hover:bg-accent',
                       )}
                     >
                       {option}
@@ -524,12 +524,12 @@ function QuestionsView({ report }: { report: UseAnalyticsReportResult }) {
                   value={otherText[q.id] ?? ''}
                   onChange={(e) => setOtherText((prev) => ({ ...prev, [q.id]: e.target.value }))}
                   placeholder={otherLabel}
-                  className="w-full rounded-[10px] border border-[var(--border-strong)] bg-[var(--bg-elevated)] px-3 py-1.5 text-sm text-[var(--fg1)] outline-none focus:border-[var(--gold-border)]"
+                  className="w-full rounded-[10px] border border-border bg-muted px-3 py-1.5 text-sm text-foreground outline-none focus:border-primary/40"
                 />
               )}
 
               {q.affects && (
-                <p className="text-[11px] text-[var(--fg3)]">
+                <p className="text-[11px] text-muted-foreground">
                   {t('Affects')}: {q.affects}
                 </p>
               )}
@@ -545,7 +545,7 @@ function QuestionsView({ report }: { report: UseAnalyticsReportResult }) {
         <Button
           variant="outline"
           size="sm"
-          className="border-[var(--gold-border)] bg-[var(--gold)] text-[var(--fg-inverse)] hover:bg-[var(--gold-active)]"
+          className="border-primary/40 bg-primary text-primary-foreground hover:bg-primary/90"
           onClick={() => void submitAnswers(buildAnswers())}
         >
           {t('Answer and continue')}
@@ -562,7 +562,7 @@ function CompletedView({ report }: { report: UseAnalyticsReportResult }) {
     <>
       <DialogTitle>{t('Report ready')}</DialogTitle>
       <div className="flex flex-col items-center gap-3 py-2 text-center">
-        <CheckCircle size={40} className="text-[var(--success)]" />
+        <CheckCircle size={40} className="text-success" />
         <DialogDescription>{t('Report ready')}</DialogDescription>
       </div>
       <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
@@ -573,7 +573,7 @@ function CompletedView({ report }: { report: UseAnalyticsReportResult }) {
         <Button
           variant="outline"
           size="sm"
-          className="border-[var(--gold-border)] bg-[var(--gold)] text-[var(--fg-inverse)] hover:bg-[var(--gold-active)]"
+          className="border-primary/40 bg-primary text-primary-foreground hover:bg-primary/90"
           onClick={() => void revealReport()}
         >
           <FolderOpen size={16} />
@@ -590,14 +590,14 @@ function FailedView({ report, error }: { report: UseAnalyticsReportResult; error
     <>
       <DialogTitle>{t('Report failed')}</DialogTitle>
       <div className="flex flex-col items-center gap-3 py-2 text-center">
-        <AlertCircle size={40} className="text-[var(--danger)]" />
+        <AlertCircle size={40} className="text-destructive" />
         {error && <DialogDescription className="break-words">{error}</DialogDescription>}
       </div>
       <div className="flex justify-end">
         <Button
           variant="outline"
           size="sm"
-          className="border-[var(--gold-border)] bg-[var(--gold)] text-[var(--fg-inverse)] hover:bg-[var(--gold-active)]"
+          className="border-primary/40 bg-primary text-primary-foreground hover:bg-primary/90"
           onClick={() => void report.generate()}
         >
           <RefreshCw size={16} />

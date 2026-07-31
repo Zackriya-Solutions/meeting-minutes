@@ -1,37 +1,30 @@
 import { useT } from '@/lib/i18n';
+import { LoaderCircle } from '@/components/deslop-icons';
+import { Card } from '@/components/ui/card';
 
 interface StatusOverlaysProps {
   // Status flags
   isProcessing: boolean;      // Processing transcription after recording stops
   isSaving: boolean;          // Saving transcript to database
-
-  // Layout
-  sidebarCollapsed: boolean;  // For responsive margin calculation
 }
 
 // Internal reusable component for individual status overlays
 interface StatusOverlayProps {
   show: boolean;
   message: string;
-  sidebarCollapsed: boolean;
 }
 
-function StatusOverlay({ show, message, sidebarCollapsed }: StatusOverlayProps) {
+function StatusOverlay({ show, message }: StatusOverlayProps) {
   if (!show) return null;
 
   return (
     <div className="fixed bottom-4 left-0 right-0 z-10">
-      <div
-        className="flex justify-center pl-8 transition-[margin] duration-300"
-        style={{
-          marginLeft: sidebarCollapsed ? '4rem' : '16rem'
-        }}
-      >
+      <div className="flex justify-center">
         <div className="w-2/3 max-w-[750px] flex justify-center">
-          <div className="bg-[var(--bg-canvas)] rounded-lg shadow-none px-4 py-2 flex items-center space-x-2">
-            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-[var(--border-strong)]"></div>
-            <span className="text-sm text-[var(--fg2)]">{message}</span>
-          </div>
+          <Card className="flex items-center gap-2 px-4 py-2">
+            <LoaderCircle className="size-4 animate-spin" />
+            <span className="text-sm text-muted-foreground">{message}</span>
+          </Card>
         </div>
       </div>
     </div>
@@ -41,8 +34,7 @@ function StatusOverlay({ show, message, sidebarCollapsed }: StatusOverlayProps) 
 // Main exported component - renders multiple status overlays
 export function StatusOverlays({
   isProcessing,
-  isSaving,
-  sidebarCollapsed
+  isSaving
 }: StatusOverlaysProps) {
   const t = useT();
   return (
@@ -51,14 +43,12 @@ export function StatusOverlays({
       <StatusOverlay
         show={isProcessing}
         message={t('Finalizing transcription...')}
-        sidebarCollapsed={sidebarCollapsed}
       />
 
       {/* Saving status overlay - shown while saving transcript to database */}
       <StatusOverlay
         show={isSaving}
         message={t('Saving transcript...')}
-        sidebarCollapsed={sidebarCollapsed}
       />
     </>
   );

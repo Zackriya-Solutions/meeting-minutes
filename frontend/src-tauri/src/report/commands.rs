@@ -43,9 +43,7 @@ pub async fn generate_analytics_report<R: Runtime>(
             .await
             .map_err(|e| format!("Failed to check existing reports: {e}"))?
     {
-        log::info!(
-            "[report] reusing in-flight report {existing} for meeting {meeting_id}"
-        );
+        log::info!("[report] reusing in-flight report {existing} for meeting {meeting_id}");
         return Ok(GenerateAnalyticsReportResponse {
             report_id: existing,
         });
@@ -58,22 +56,14 @@ pub async fn generate_analytics_report<R: Runtime>(
         .await
         .map_err(|e| format!("Failed to create report: {e}"))?;
 
-    log::info!(
-        "[report] queued report {report_id} for meeting {meeting_id} (model {model})"
-    );
+    log::info!("[report] queued report {report_id} for meeting {meeting_id} (model {model})");
 
     let app_clone = app.clone();
     let report_id_task = report_id.clone();
     let meeting_id_task = meeting_id.clone();
     tauri::async_runtime::spawn(async move {
-        pipeline::run_report_pipeline(
-            app_clone,
-            pool,
-            report_id_task,
-            meeting_id_task,
-            model,
-        )
-        .await;
+        pipeline::run_report_pipeline(app_clone, pool, report_id_task, meeting_id_task, model)
+            .await;
     });
 
     Ok(GenerateAnalyticsReportResponse { report_id })

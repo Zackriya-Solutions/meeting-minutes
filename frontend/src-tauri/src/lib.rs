@@ -131,21 +131,6 @@ async fn start_recording<R: Runtime>(
 
             log_info!("Recording started successfully");
 
-            // Show recording started notification through NotificationManager
-            // This respects user's notification preferences
-            let notification_manager_state = app.state::<NotificationManagerState<R>>();
-            if let Err(e) = notifications::commands::show_recording_started_notification(
-                &app,
-                &notification_manager_state,
-                meeting_name.clone(),
-            )
-            .await
-            {
-                log_error!("Failed to show recording started notification: {}", e);
-            } else {
-                log_info!("Successfully showed recording started notification");
-            }
-
             Ok(())
         }
         Err(e) => {
@@ -188,20 +173,6 @@ async fn stop_recording<R: Runtime>(app: AppHandle<R>, args: RecordingArgs) -> R
                         return Err(err_msg);
                     }
                 }
-            }
-
-            // Show recording stopped notification through NotificationManager
-            // This respects user's notification preferences
-            let notification_manager_state = app.state::<NotificationManagerState<R>>();
-            if let Err(e) = notifications::commands::show_recording_stopped_notification(
-                &app,
-                &notification_manager_state,
-            )
-            .await
-            {
-                log_error!("Failed to show recording stopped notification: {}", e);
-            } else {
-                log_info!("Successfully showed recording stopped notification");
             }
 
             Ok(())
@@ -316,9 +287,6 @@ async fn start_recording_with_devices_and_meeting<R: Runtime>(
     log_info!("🚀 CALLED start_recording_with_devices_and_meeting - Mic: {:?}, System: {:?}, Meeting: {:?}",
              mic_device_name, system_device_name, meeting_name);
 
-    // Clone meeting_name for notification use later
-    let meeting_name_for_notification = meeting_name.clone();
-
     // Call the recording module functions that support meeting names
     let recording_result = match (mic_device_name.clone(), system_device_name.clone()) {
         (None, None) => {
@@ -349,19 +317,6 @@ async fn start_recording_with_devices_and_meeting<R: Runtime>(
     match recording_result {
         Ok(_) => {
             log_info!("Recording started successfully via tauri command");
-
-            // Show recording started notification through NotificationManager
-            // This respects user's notification preferences
-            let notification_manager_state = app.state::<NotificationManagerState<R>>();
-            if let Err(e) = notifications::commands::show_recording_started_notification(
-                &app,
-                &notification_manager_state,
-                meeting_name_for_notification.clone(),
-            )
-            .await
-            {
-                log_error!("Failed to show recording started notification: {}", e);
-            }
 
             Ok(())
         }
@@ -471,7 +426,7 @@ pub fn run() {
 
                 // Start the privacy-preserving process/microphone signal detector. On platforms
                 // with a strong microphone-session signal it can request the normal recording
-                // lifecycle when auto-listening is enabled.
+                // lifecycle for supported native meeting clients.
                 _app
                     .state::<meeting_detection::AutoMeetingDetectionState>()
                     .start(_app.handle().clone());
@@ -584,6 +539,21 @@ pub fn run() {
                         .map(std::path::PathBuf::from);
                     tauri::async_runtime::spawn(async move {
                         gigaam_engine::commands::init_gigaam_at_startup(&app_handle).await;
+                        if let Some(state) = app_handle.try_state::<state::AppState>() {
+                            match jobs::enqueue_missing_transcript_refinement(
+                                state.db_manager.pool(),
+                            )
+                            .await
+                            {
+                                Ok(0) => {}
+                                Ok(count) => log::info!(
+                                    "Queued {count} completed recording transcript repair job(s)"
+                                ),
+                                Err(error) => log::warn!(
+                                    "Could not queue completed recording transcript repairs: {error}"
+                                ),
+                            }
+                        }
                         #[cfg(debug_assertions)]
                         if let Some(folder) = batch_folder {
                             log::info!(
@@ -623,6 +593,42 @@ pub fn run() {
                 summary::templates::set_bundled_templates_dir(templates_dir);
             } else {
                 log::warn!("Failed to resolve resource directory for templates");
+            }
+
+            // Recover summaries that older builds never started. The automatic version
+            // marker prevents a failed provider from being retried on every launch.
+            if !corpus_mode {
+                let app_handle = _app.handle().clone();
+                if let Some(state) = _app.try_state::<state::AppState>() {
+                    let pool = state.db_manager.pool().clone();
+                    tauri::async_runtime::spawn(async move {
+                        match pipeline::speaker_names::backfill_existing_speaker_names(&pool).await {
+                            Ok((checked, 0)) => log::info!(
+                                "Checked automatic speaker names for {checked} diarized meeting(s)"
+                            ),
+                            Ok((checked, applied)) => log::info!(
+                                "Checked {checked} diarized meeting(s) and applied {applied} automatic speaker name(s)"
+                            ),
+                            Err(error) => {
+                                log::warn!("Could not backfill automatic speaker names: {error}")
+                            }
+                        }
+                        match summary::commands::backfill_missing_automatic_summaries(
+                            app_handle,
+                            pool,
+                        )
+                        .await
+                        {
+                            Ok(0) => {}
+                            Ok(count) => {
+                                log::info!("Started {count} missing automatic meeting summary job(s)")
+                            }
+                            Err(error) => {
+                                log::warn!("Could not backfill automatic meeting summaries: {error}")
+                            }
+                        }
+                    });
+                }
             }
 
             // Explicit local corpus automation. It is inert unless meeting IDs are supplied;
@@ -728,6 +734,7 @@ pub fn run() {
             learning::reconciliation::review_reconciliation_suggestion,
             learning::reconciliation::rollback_reconciliation_suggestion,
             pipeline::speaker_names::scan_speaker_name_candidates,
+            pipeline::speaker_names::infer_meeting_speaker_names,
             pipeline::speaker_names::list_speaker_name_candidates,
             pipeline::speaker_names::review_speaker_name_candidate,
             gigaam_engine::commands::gigaam_status,

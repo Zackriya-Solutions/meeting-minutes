@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { Globe } from '@/components/memento/LucideCompat';
+import { Globe } from '@/components/deslop-icons';
 import Analytics from '@/lib/analytics';
 import { toast } from 'sonner';
 import { useConfig } from '@/contexts/ConfigContext';
 import { useT } from '@/lib/i18n';
+import { getLanguageDisplayName } from '@/constants/languages';
 
 export interface Language {
   code: string;
@@ -156,7 +157,7 @@ export function LanguageSelection({
       });
 
       // Show success toast
-      const languageName = selectedLang?.name || languageCode;
+      const languageName = getLanguageDisplayName(languageCode);
       toast.success(t("Language preference saved"), {
         description: `${t('Transcription language set to')} ${languageName}`
       });
@@ -171,16 +172,17 @@ export function LanguageSelection({
   };
 
   // Find the selected language name for display
-  const selectedLanguageName = LANGUAGES.find(
+  const selectedLanguageCode = LANGUAGES.find(
     lang => lang.code === selectedLanguage
-  )?.name || 'Auto Detect (Original Language)';
+  )?.code;
+  const selectedLanguageName = getLanguageDisplayName(selectedLanguageCode || 'auto');
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <Globe className="h-4 w-4 text-[var(--fg2)]" />
-          <h4 className="text-sm font-medium text-[var(--fg1)]">{t('Transcription Language')}</h4>
+          <Globe className="h-4 w-4 text-muted-foreground" />
+          <h4 className="text-sm font-medium text-foreground">{t('Transcription Language')}</h4>
         </div>
       </div>
 
@@ -189,11 +191,11 @@ export function LanguageSelection({
           value={selectedLanguage}
           onChange={(e) => handleLanguageChange(e.target.value)}
           disabled={disabled || saving}
-          className="w-full px-3 py-2 text-sm bg-[var(--bg-canvas)] border border-[var(--border-strong)] rounded-md shadow-none focus:outline-none focus:ring-1 focus:ring-[var(--gold-ring)] focus:border-[var(--gold-border)] disabled:bg-[var(--bg-sheet)] disabled:text-[var(--fg2)]"
+          className="w-full px-3 py-2 text-sm bg-background border border-border rounded-md shadow-none focus:outline-none focus:ring-1 focus:ring-ring focus:border-primary/40 disabled:bg-background disabled:text-muted-foreground"
         >
           {availableLanguages.map((language) => (
             <option key={language.code} value={language.code}>
-              {language.name}
+              {getLanguageDisplayName(language.code)}
               {language.code !== 'auto' && language.code !== 'auto-translate' && ` (${language.code})`}
             </option>
           ))}
@@ -201,7 +203,7 @@ export function LanguageSelection({
 
         {/* Parakeet language limitation warning */}
         {isParakeet && (
-          <div className="rounded border border-[var(--gold-border)] bg-[var(--gold-soft)] p-2 text-[var(--gold)]">
+          <div className="rounded border border-primary/40 bg-primary/10 p-2 text-primary">
             <p className="font-medium">{t('ℹ️ Parakeet Language Support')}</p>
             <p className="mt-1 text-xs">{t('Parakeet currently only supports automatic language detection. Manual language selection is not available. Use Whisper if you need to specify a particular language.')}</p>
           </div>
@@ -209,23 +211,23 @@ export function LanguageSelection({
 
         {/* Info text */}
         <div className="text-xs space-y-2 pt-2">
-          <p className="text-[var(--fg2)]">
+          <p className="text-muted-foreground">
             <strong>{t('Current:')}</strong> {selectedLanguageName}
           </p>
           {selectedLanguage === 'auto' && (
-            <div className="p-2 bg-[var(--gold-soft)] border border-[var(--gold-border)] rounded text-[var(--gold)]">
+            <div className="p-2 bg-primary/10 border border-primary/40 rounded text-primary">
               <p className="font-medium">{t('⚠️ Auto Detect may produce incorrect results')}</p>
               <p className="mt-1">{t('For best accuracy, select your specific language (e.g., English, Spanish, etc.)')}</p>
             </div>
           )}
           {selectedLanguage === 'auto-translate' && (
-            <div className="p-2 bg-[var(--gold-soft)] border border-[var(--gold-border)] rounded text-[var(--gold)]">
+            <div className="p-2 bg-primary/10 border border-primary/40 rounded text-primary">
               <p className="font-medium">{t('🌐 Translation Mode Active')}</p>
               <p className="mt-1">{t('All audio will be automatically translated to English. Best for multilingual meetings where you need English output.')}</p>
             </div>
           )}
           {selectedLanguage !== 'auto' && selectedLanguage !== 'auto-translate' && (
-            <p className="text-[var(--fg2)]">
+            <p className="text-muted-foreground">
               {t('Transcription will be optimized for')} <strong>{selectedLanguageName}</strong>
             </p>
           )}

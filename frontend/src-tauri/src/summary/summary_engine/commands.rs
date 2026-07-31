@@ -187,7 +187,7 @@ pub async fn builtin_ai_download_model<R: Runtime>(
                 }),
             );
             Ok(())
-        },
+        }
         Err(e) => {
             let error_msg = e.to_string();
 
@@ -271,7 +271,7 @@ pub async fn builtin_ai_is_model_ready<R: Runtime>(
     app: AppHandle<R>,
     state: State<'_, ModelManagerState>,
     model_name: String,
-    refresh: Option<bool>,  // NEW: Optional refresh parameter
+    refresh: Option<bool>, // NEW: Optional refresh parameter
 ) -> Result<bool, String> {
     let manager = {
         // Ensure manager is initialized
@@ -343,7 +343,12 @@ pub async fn builtin_ai_get_available_summary_model<R: Runtime>(
     // Find first available summary model
     let available = all_models
         .iter()
-        .filter(|m| matches!(m.status, crate::summary::summary_engine::model_manager::ModelStatus::Available))
+        .filter(|m| {
+            matches!(
+                m.status,
+                crate::summary::summary_engine::model_manager::ModelStatus::Available
+            )
+        })
         .max_by_key(|m| summary_model_priority(&m.name))
         .map(|m| m.name.clone());
 
@@ -355,9 +360,7 @@ pub async fn builtin_ai_get_available_summary_model<R: Runtime>(
 // Startup Initialization & Utility Commands
 // ============================================================================
 
-pub async fn init_model_manager_at_startup<R: Runtime>(
-    app: &AppHandle<R>,
-) -> Result<(), String> {
+pub async fn init_model_manager_at_startup<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
     let models_dir = app
         .path()
         .app_data_dir()
@@ -380,7 +383,6 @@ pub async fn init_model_manager_at_startup<R: Runtime>(
     log::info!("ModelManager initialized at startup");
     Ok(())
 }
-
 
 /// Get recommended summary model based on platform and system RAM.
 /// macOS → qwen3.5:4b

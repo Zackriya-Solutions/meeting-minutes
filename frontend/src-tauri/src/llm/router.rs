@@ -55,17 +55,26 @@ mod tests {
 
     #[test]
     fn extraction_always_synthesis() {
-        assert_eq!(route(Purpose::Extract, Scope::SingleMeeting, 10), RouteTarget::Synthesis);
+        assert_eq!(
+            route(Purpose::Extract, Scope::SingleMeeting, 10),
+            RouteTarget::Synthesis
+        );
     }
 
     #[test]
     fn single_meeting_short_chat_is_fast() {
-        assert_eq!(route(Purpose::Chat, Scope::SingleMeeting, 20), RouteTarget::Fast);
+        assert_eq!(
+            route(Purpose::Chat, Scope::SingleMeeting, 20),
+            RouteTarget::Fast
+        );
     }
 
     #[test]
     fn archive_or_long_chat_is_synthesis() {
-        assert_eq!(route(Purpose::Chat, Scope::Archive, 20), RouteTarget::Synthesis);
+        assert_eq!(
+            route(Purpose::Chat, Scope::Archive, 20),
+            RouteTarget::Synthesis
+        );
         assert_eq!(
             route(Purpose::Chat, Scope::SingleMeeting, 500),
             RouteTarget::Synthesis,

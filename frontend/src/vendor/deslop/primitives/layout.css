@@ -1,0 +1,43 @@
+/* Generated from layout.json. Do not edit directly. */
+
+:root {
+    --ui-space-2: 2px;
+    --ui-space-3: 3px;
+    --ui-space-4: 4px;
+    --ui-space-6: 6px;
+    --ui-space-7: 7px;
+    --ui-space-8: 8px;
+    --ui-space-9: 9px;
+    --ui-space-10: 10px;
+    --ui-space-11: 11px;
+    --ui-space-12: 12px;
+    --ui-space-14: 14px;
+    --ui-space-16: 16px;
+    --ui-space-20: 20px;
+    --ui-space-22: 22px;
+    --ui-space-24: 24px;
+    --ui-space-32: 32px;
+    --ui-space-44: 44px;
+    --ui-radius-4: 4px;
+    --ui-radius-5: 5px;
+    --ui-radius-6: 6px;
+    --ui-radius-8: 8px;
+    --ui-radius-10: 10px;
+    --ui-radius-11: 11px;
+    --ui-radius-12: 12px;
+    --ui-radius-13: 13px;
+    --ui-radius-14: 14px;
+    --ui-radius-16: 16px;
+    --ui-radius-18: 18px;
+    --ui-radius-20: 20px;
+    --ui-radius-22: 22px;
+    --ui-radius-25: 25px;
+    --ui-radius-26: 26px;
+    --ui-radius-34: 34px;
+    --ui-radius-36: 36px;
+    --ui-radius-full: 9999px;
+    --ui-layout-content-inset: var(--ui-space-16);
+    --ui-layout-section-gap: var(--ui-space-24);
+    --ui-layout-control-gap: var(--ui-space-8);
+    --ui-layout-compact-gap: var(--ui-space-4);
+}

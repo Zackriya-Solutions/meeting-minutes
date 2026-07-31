@@ -615,19 +615,15 @@ pub async fn suggest_meeting_series(
 
     let meeting_details: HashMap<String, (String, String)> = rows
         .iter()
-        .map(|(id, title, occurred_at)| {
-            (id.clone(), (title.clone(), occurred_at.clone()))
-        })
+        .map(|(id, title, occurred_at)| (id.clone(), (title.clone(), occurred_at.clone())))
         .collect();
     let meetings: Vec<MeetingRef> = rows
         .into_iter()
         .filter_map(|(id, title, occurred_at)| {
             // occurred_at may be a full datetime; take the leading YYYY-MM-DD.
-            let date = chrono::NaiveDate::parse_from_str(
-                occurred_at.get(0..10).unwrap_or(""),
-                "%Y-%m-%d",
-            )
-            .ok()?;
+            let date =
+                chrono::NaiveDate::parse_from_str(occurred_at.get(0..10).unwrap_or(""), "%Y-%m-%d")
+                    .ok()?;
             Some(MeetingRef { id, title, date })
         })
         .collect();
@@ -640,13 +636,13 @@ pub async fn suggest_meeting_series(
                 .meeting_ids
                 .iter()
                 .filter_map(|id| {
-                    meeting_details.get(id).map(|(title, occurred_at)| {
-                        SeriesSuggestionMeetingOut {
+                    meeting_details
+                        .get(id)
+                        .map(|(title, occurred_at)| SeriesSuggestionMeetingOut {
                             id: id.clone(),
                             title: title.clone(),
                             occurred_at: occurred_at.clone(),
-                        }
-                    })
+                        })
                 })
                 .collect(),
             meeting_ids: suggestion.meeting_ids,

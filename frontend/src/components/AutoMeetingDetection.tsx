@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
 import { usePathname, useRouter } from 'next/navigation';
@@ -8,6 +8,10 @@ import { toast } from 'sonner';
 import { useRecordingState } from '@/contexts/RecordingStateContext';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
 import { useT } from '@/lib/i18n';
+import {
+  MeetingDetectionBanner,
+  type MeetingDetectionBannerState,
+} from '@/components/MeetingDetectionBanner';
 
 type MeetingApp =
   | 'zoom'
@@ -43,16 +47,43 @@ const AUTO_LISTENING_SESSION_KEY = 'autoListeningSessionId';
 const AUTO_LISTENING_REPORTED_KEY = 'autoListeningStartReported';
 const AUTO_LISTENING_STOP_KEY = 'autoStopRecordingSessionId';
 
+interface DetectionBannerData {
+  apps: MeetingApp[];
+  state: MeetingDetectionBannerState;
+}
+
 export function AutoMeetingDetection() {
   const pathname = usePathname();
   const router = useRouter();
   const recordingState = useRecordingState();
   const { refetchMeetings } = useSidebar();
   const t = useT();
+  const [banner, setBanner] = useState<DetectionBannerData | null>(null);
+
+  const appName = (app: MeetingApp): string => {
+    switch (app) {
+      case 'zoom': return 'Zoom';
+      case 'microsoft_teams': return 'Microsoft Teams';
+      case 'telegram': return 'Telegram';
+      case 'yandex_telemost': return t('Yandex Telemost');
+      case 'salute_jazz': return 'SaluteJazz';
+      case 'browser_call': return 'браузере';
+    }
+  };
+
+  const startRecording = () => {
+    setBanner((current) => current ? { ...current, state: 'starting' } : current);
+    if (pathname === '/') {
+      window.dispatchEvent(new CustomEvent('start-recording-from-sidebar'));
+    } else {
+      sessionStorage.setItem('autoStartRecording', 'true');
+      router.push('/');
+    }
+  };
 
   useEffect(() => {
     if (recordingState.isRecording) {
-      toast.dismiss(TOAST_ID);
+      setBanner((current) => current ? { ...current, state: 'recording' } : current);
       const sessionId = sessionStorage.getItem(AUTO_LISTENING_SESSION_KEY);
       const alreadyReported = sessionStorage.getItem(AUTO_LISTENING_REPORTED_KEY) === sessionId;
       if (sessionId && !alreadyReported) {
@@ -62,9 +93,6 @@ export function AutoMeetingDetection() {
         }).catch((error) => {
           console.warn('Failed to persist auto-listening start:', error);
         });
-        toast.success(t('Auto-listening started recording'), {
-          description: t('Memento will stop and save this meeting after the call signal ends.'),
-        });
       }
     }
   }, [recordingState.isRecording, t]);
@@ -73,48 +101,9 @@ export function AutoMeetingDetection() {
     let disposed = false;
     const unlisteners: Array<() => void> = [];
 
-    const appName = (app: MeetingApp): string => {
-      switch (app) {
-        case 'zoom': return 'Zoom';
-        case 'microsoft_teams': return 'Microsoft Teams';
-        case 'telegram': return 'Telegram';
-        case 'yandex_telemost': return t('Yandex Telemost');
-        case 'salute_jazz': return 'SaluteJazz';
-        case 'browser_call': return t('browser call');
-      }
-    };
-
-    const startRecording = () => {
-      toast.dismiss(TOAST_ID);
-      if (pathname === '/') {
-        window.dispatchEvent(new CustomEvent('start-recording-from-sidebar'));
-      } else {
-        sessionStorage.setItem('autoStartRecording', 'true');
-        router.push('/');
-      }
-    };
-
     listen<MeetingDetectedEvent>('auto-meeting-detected', (event) => {
       if (recordingState.isRecording) return;
-
-      const apps = Array.from(new Set(event.payload.apps.map(appName))).join(', ');
-      toast.info(t('Meeting detected'), {
-        id: TOAST_ID,
-        description: apps
-          ? `${t('Active call signal')}: ${apps}. ${t('Start recording?')}`
-          : t('Start recording?'),
-        action: {
-          label: t('Start recording'),
-          onClick: startRecording,
-        },
-        cancel: {
-          label: t('Not now'),
-          onClick: () => undefined,
-        },
-        // A call is normally detected while the browser owns focus. Keep the in-app prompt
-        // until the user makes a choice so it is still present when they return to Memento.
-        duration: Infinity,
-      });
+      setBanner({ apps: event.payload.apps, state: 'suggestion' });
     }).then((unsubscribe) => {
       if (disposed) unsubscribe();
       else unlisteners.push(unsubscribe);
@@ -128,7 +117,7 @@ export function AutoMeetingDetection() {
       sessionStorage.setItem(AUTO_LISTENING_SESSION_KEY, sessionId);
       sessionStorage.removeItem(AUTO_LISTENING_REPORTED_KEY);
       sessionStorage.setItem('autoListeningStart', 'true');
-      toast.info(t('Meeting detected — starting auto-listening'), { duration: 5000 });
+      setBanner({ apps: event.payload.apps, state: 'starting' });
 
       if (pathname === '/') {
         sessionStorage.removeItem('autoStartRecording');
@@ -168,6 +157,7 @@ export function AutoMeetingDetection() {
     listen<AutoListeningStopEvent>('auto-listening-stop-requested', (event) => {
       const sessionId = event.payload.session_id;
       if (sessionStorage.getItem(AUTO_LISTENING_SESSION_KEY) !== sessionId) return;
+      setBanner(null);
       sessionStorage.setItem(AUTO_LISTENING_STOP_KEY, sessionId);
       if (pathname === '/') {
         window.dispatchEvent(new CustomEvent('stop-recording-from-auto-listening'));
@@ -187,5 +177,13 @@ export function AutoMeetingDetection() {
     };
   }, [pathname, recordingState.isRecording, refetchMeetings, router, t]);
 
-  return null;
+  return (
+    <MeetingDetectionBanner
+      open={banner !== null}
+      state={banner?.state ?? 'suggestion'}
+      appNames={banner ? Array.from(new Set(banner.apps.map(appName))) : []}
+      onPrimaryAction={banner?.state === 'recording' ? () => router.push('/recording') : startRecording}
+      onDismiss={() => setBanner(null)}
+    />
+  );
 }

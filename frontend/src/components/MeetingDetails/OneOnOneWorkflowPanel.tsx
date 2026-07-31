@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
-import { Check, ChevronDown, RefreshCw, X } from '@/components/memento/LucideCompat';
+import { Check, ChevronDown, RefreshCw, X } from '@/components/deslop-icons';
 
 type ReviewStatus = 'pending' | 'accepted' | 'rejected';
 
@@ -323,14 +323,14 @@ export function OneOnOneWorkflowPanel({
   };
 
   return (
-    <section className="mx-1 mb-4 rounded-xl border border-[var(--gold-border)] bg-[var(--bg-elevated)]/70">
+    <section className="mx-1 mb-4 rounded-xl border border-primary/40 bg-muted/70">
       <button
         className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
         onClick={() => setOpen((value) => !value)}
       >
         <span>
-          <span className="block font-semibold text-[var(--fg1)]">{t('One-on-One Memory')}</span>
-          <span className="text-xs text-[var(--fg3)]">
+          <span className="block font-semibold text-foreground">{t('One-on-One Memory')}</span>
+          <span className="text-xs text-muted-foreground">
             {pendingCount} {t('records need review')} · {t('sensitive by default')}
           </span>
         </span>
@@ -338,11 +338,11 @@ export function OneOnOneWorkflowPanel({
       </button>
 
       {open && config && (
-        <div className="space-y-5 border-t border-[var(--border-subtle)] p-4">
+        <div className="space-y-5 border-t border-border p-4">
           <div className="space-y-3">
             <div>
-              <h3 className="text-sm font-semibold text-[var(--fg1)]">{t('Participants and shared agenda')}</h3>
-              <p className="mt-1 text-xs text-[var(--fg3)]">
+              <h3 className="text-sm font-semibold text-foreground">{t('Participants and shared agenda')}</h3>
+              <p className="mt-1 text-xs text-muted-foreground">
                 {t('Roles are user-provided context, never inferred from the transcript.')}
               </p>
             </div>
@@ -375,7 +375,7 @@ export function OneOnOneWorkflowPanel({
               rows={4}
             />
             <div className="grid gap-2 md:grid-cols-2">
-              <label className="text-xs text-[var(--fg3)]">
+              <label className="text-xs text-muted-foreground">
                 {t('Confirmed meeting date')}
                 <Input
                   className="mt-1"
@@ -384,7 +384,7 @@ export function OneOnOneWorkflowPanel({
                   onChange={(event) => setConfig({ ...config, occurredAt: event.target.value, occurredAtConfirmed: false })}
                 />
               </label>
-              <label className="flex items-center justify-between gap-3 rounded-md border border-[var(--border-subtle)] px-3 text-sm">
+              <label className="flex items-center justify-between gap-3 rounded-md border border-border px-3 text-sm">
                 <span>{t('I confirm this date')}</span>
                 <Switch
                   checked={config.occurredAtConfirmed}
@@ -416,9 +416,9 @@ export function OneOnOneWorkflowPanel({
             </div>
           </div>
 
-          <div className="space-y-3 rounded-lg border border-[var(--border-subtle)] p-3">
-            <h3 className="text-sm font-semibold text-[var(--fg1)]">{t('Sensitive memory controls')}</h3>
-            <p className="text-xs text-[var(--fg3)]">{t('Both options require explicit consent. Private notes are never exported or sent to the summary model.')}</p>
+          <div className="space-y-3 rounded-lg border border-border p-3">
+            <h3 className="text-sm font-semibold text-foreground">{t('Sensitive memory controls')}</h3>
+            <p className="text-xs text-muted-foreground">{t('Both options require explicit consent. Private notes are never exported or sent to the summary model.')}</p>
             {([
               ['cloudProcessingAllowed', 'Allow cloud processing for this memory'],
               ['indexingAllowed', 'Include in search and Memento chat'],
@@ -430,39 +430,39 @@ export function OneOnOneWorkflowPanel({
             ))}
           </div>
 
-          <div className="space-y-3 rounded-lg border border-[var(--border-subtle)] p-3">
-            <h3 className="text-sm font-semibold text-[var(--fg1)]">{t('Series pre-brief')}</h3>
+          <div className="space-y-3 rounded-lg border border-border p-3">
+            <h3 className="text-sm font-semibold text-foreground">{t('Series pre-brief')}</h3>
             {!prebrief?.ready ? (
-              <p className="text-sm text-[var(--fg3)]">{t(prebrief?.reason ?? 'Confirm both participants and the meeting date to enable series memory')}</p>
+              <p className="text-sm text-muted-foreground">{t(prebrief?.reason ?? 'Confirm both participants and the meeting date to enable series memory')}</p>
             ) : (
               <>
                 {prebrief.previousMeeting && (
-                  <a className="text-sm text-[var(--gold)] hover:underline" href={`/meeting-details?id=${encodeURIComponent(prebrief.previousMeeting.meetingId)}`}>
+                  <a className="text-sm text-primary hover:underline" href={`/meeting-details?id=${encodeURIComponent(prebrief.previousMeeting.meetingId)}`}>
                     {t('Previous one-on-one')}: {prebrief.previousMeeting.title} · {prebrief.previousMeeting.occurredAt}
                   </a>
                 )}
-                <p className="text-xs text-[var(--fg3)]">{t('Only accepted records from confirmed earlier meetings are carried forward.')}</p>
+                <p className="text-xs text-muted-foreground">{t('Only accepted records from confirmed earlier meetings are carried forward.')}</p>
                 {prebrief.openCommitments.map((item) => (
-                  <div key={`carry-${item.id}`} className="rounded-md bg-[var(--bg-base)] p-2 text-sm">
+                  <div key={`carry-${item.id}`} className="rounded-md bg-background p-2 text-sm">
                     {item.task} · {item.owner ?? t('unknown owner')} · {item.due_date ?? t('due date not stated')}
                     {isDueBefore(item.due_date, config.occurredAt) && (
-                      <p className="mt-1 text-xs text-[var(--fg3)]">{t('Worth checking in on this still-open commitment; its stated date has passed.')}</p>
+                      <p className="mt-1 text-xs text-muted-foreground">{t('Worth checking in on this still-open commitment; its stated date has passed.')}</p>
                     )}
                   </div>
                 ))}
                 {prebrief.acceptedCarry.map((item, index) => (
-                  <a key={`${item.sourceMeetingId}-${index}`} href={`/meeting-details?id=${encodeURIComponent(item.sourceMeetingId)}`} className="block text-xs text-[var(--fg2)] hover:underline">
+                  <a key={`${item.sourceMeetingId}-${index}`} href={`/meeting-details?id=${encodeURIComponent(item.sourceMeetingId)}`} className="block text-xs text-muted-foreground hover:underline">
                     {item.sourceOccurredAt} · {t(item.kind)} · {String(item.payload.topic ?? item.payload.observation ?? '')}
                   </a>
                 ))}
                 {prebrief.changesSincePrevious.length > 0 && (
-                  <div className="space-y-1 border-t border-[var(--border-subtle)] pt-2">
-                    <p className="text-xs font-semibold text-[var(--fg2)]">{t('Changed since the previous one-on-one')}</p>
+                  <div className="space-y-1 border-t border-border pt-2">
+                    <p className="text-xs font-semibold text-muted-foreground">{t('Changed since the previous one-on-one')}</p>
                     {prebrief.changesSincePrevious.map((item, index) => (
-                      <div key={`${item.sourceMeetingId}-${item.state}-${index}`} className="text-xs text-[var(--fg2)]">
+                      <div key={`${item.sourceMeetingId}-${item.state}-${index}`} className="text-xs text-muted-foreground">
                         {t(item.state)} · {String(item.payload.task ?? item.payload.topic ?? item.payload.text ?? item.payload.observation ?? '')}{' · '}
-                        <a className="text-[var(--gold)] hover:underline" href={`/meeting-details?id=${encodeURIComponent(item.sourceMeetingId)}`}>{t('source')}</a>{' ↔ '}
-                        <a className="text-[var(--gold)] hover:underline" href={`/meeting-details?id=${encodeURIComponent(item.comparisonMeetingId)}`}>{t('comparison')}</a>
+                        <a className="text-primary hover:underline" href={`/meeting-details?id=${encodeURIComponent(item.sourceMeetingId)}`}>{t('source')}</a>{' ↔ '}
+                        <a className="text-primary hover:underline" href={`/meeting-details?id=${encodeURIComponent(item.comparisonMeetingId)}`}>{t('comparison')}</a>
                       </div>
                     ))}
                   </div>
@@ -473,14 +473,14 @@ export function OneOnOneWorkflowPanel({
             {config.pairId && <Button size="sm" variant="destructive" onClick={() => void deleteSeriesMemory()}>{t('Delete pair memory')}</Button>}
           </div>
 
-          <div className="space-y-3 rounded-lg border border-[var(--border-subtle)] p-3">
+          <div className="space-y-3 rounded-lg border border-border p-3">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <h3 className="text-sm font-semibold text-[var(--fg1)]">{t('Private notes')}</h3>
-                <p className="text-xs text-[var(--fg3)]">{t('Stored separately and never used as transcript evidence.')}</p>
+                <h3 className="text-sm font-semibold text-foreground">{t('Private notes')}</h3>
+                <p className="text-xs text-muted-foreground">{t('Stored separately and never used as transcript evidence.')}</p>
               </div>
               <select
-                className="rounded-md border border-[var(--border-subtle)] bg-[var(--bg-base)] px-2 py-1 text-sm"
+                className="rounded-md border border-border bg-background px-2 py-1 text-sm"
                 value={noteSlot}
                 onChange={(event) => setNoteSlot(event.target.value as 'participant_a' | 'participant_b')}
               >
@@ -490,7 +490,7 @@ export function OneOnOneWorkflowPanel({
             </div>
             <div className="flex gap-2">
               <select
-                className="rounded-md border border-[var(--border-subtle)] bg-[var(--bg-base)] px-2 text-sm"
+                className="rounded-md border border-border bg-background px-2 text-sm"
                 value={privateKind}
                 onChange={(event) => setPrivateKind(event.target.value as 'agenda_draft' | 'scratchpad')}
               >
@@ -501,7 +501,7 @@ export function OneOnOneWorkflowPanel({
               <Button size="sm" onClick={() => void addPrivateNote()}>{t('Add')}</Button>
             </div>
             {privateNotes.map((note) => (
-              <div key={note.id} className="flex items-start justify-between gap-3 rounded-md bg-[var(--bg-base)] p-2 text-sm">
+              <div key={note.id} className="flex items-start justify-between gap-3 rounded-md bg-background p-2 text-sm">
                 <span>{note.content}</span>
                 <div className="flex shrink-0 gap-1">
                   {note.note_kind === 'agenda_draft' && !note.shared_to_agenda && (
@@ -514,10 +514,10 @@ export function OneOnOneWorkflowPanel({
           </div>
 
           {config.facilitationEnabled && (
-            <div className="space-y-3 rounded-lg border border-[var(--gold-border)] p-3">
+            <div className="space-y-3 rounded-lg border border-primary/40 p-3">
               <div>
-                <h3 className="text-sm font-semibold text-[var(--fg1)]">{t('Live facilitation')}</h3>
-                <p className="text-xs text-[var(--fg3)]">
+                <h3 className="text-sm font-semibold text-foreground">{t('Live facilitation')}</h3>
+                <p className="text-xs text-muted-foreground">
                   {String(Math.floor(elapsedSeconds / 60)).padStart(2, '0')}:{String(elapsedSeconds % 60).padStart(2, '0')} / {config.targetMinutes}:00 · {t('Leave time for mutual feedback and next steps. No tone or speaking-time analysis is performed.')}
                 </p>
               </div>
@@ -531,17 +531,17 @@ export function OneOnOneWorkflowPanel({
           )}
 
           <div className="space-y-2">
-            <h3 className="text-sm font-semibold text-[var(--fg1)]">{t('Evidence review')}</h3>
+            <h3 className="text-sm font-semibold text-foreground">{t('Evidence review')}</h3>
             {records.length === 0 && (
-              <p className="text-sm text-[var(--fg3)]">{t('Generate One-on-One Memory to create reviewable records.')}</p>
+              <p className="text-sm text-muted-foreground">{t('Generate One-on-One Memory to create reviewable records.')}</p>
             )}
             {records.map((record) => {
               const payload = effectivePayload(record);
               const field = primaryField(record.kind);
               const evidence = Array.isArray(payload.evidence) ? payload.evidence : [];
               return (
-                <div key={record.id} className="rounded-lg border border-[var(--border-subtle)] p-3">
-                  <div className="mb-2 flex items-center justify-between gap-2 text-xs text-[var(--fg3)]">
+                <div key={record.id} className="rounded-lg border border-border p-3">
+                  <div className="mb-2 flex items-center justify-between gap-2 text-xs text-muted-foreground">
                     <span>{t(record.kind)}</span>
                     <span>{t(record.review_status)}</span>
                   </div>
@@ -554,7 +554,7 @@ export function OneOnOneWorkflowPanel({
                     {evidence.map((item: any, index: number) => {
                       const href = evidenceHref(meetingId, String(item.timestamp ?? ''));
                       return href ? (
-                        <a key={`${record.id}-${index}`} href={href} className="text-xs text-[var(--gold)] hover:underline">
+                        <a key={`${record.id}-${index}`} href={href} className="text-xs text-primary hover:underline">
                           {item.timestamp} · {item.quote}
                         </a>
                       ) : null;
@@ -580,12 +580,12 @@ export function OneOnOneWorkflowPanel({
 
           {commitments.length > 0 && (
             <div className="space-y-2">
-              <h3 className="text-sm font-semibold text-[var(--fg1)]">{t('Accepted commitments')}</h3>
+              <h3 className="text-sm font-semibold text-foreground">{t('Accepted commitments')}</h3>
               {commitments.map((commitment) => (
-                <div key={commitment.id} className="flex items-center justify-between gap-3 rounded-lg border border-[var(--border-subtle)] p-3">
+                <div key={commitment.id} className="flex items-center justify-between gap-3 rounded-lg border border-border p-3">
                   <div className="min-w-0">
-                    <p className="text-sm text-[var(--fg1)]">{commitment.task}</p>
-                    <p className="text-xs text-[var(--fg3)]">
+                    <p className="text-sm text-foreground">{commitment.task}</p>
+                    <p className="text-xs text-muted-foreground">
                       {commitment.owner ?? t('unknown owner')} · {commitment.due_date ?? t('due date not stated')} · {t(commitment.status)}
                     </p>
                   </div>
@@ -601,10 +601,10 @@ export function OneOnOneWorkflowPanel({
 
           {recurring.length > 0 && (
             <div className="space-y-2">
-              <h3 className="text-sm font-semibold text-[var(--fg1)]">{t('Possible recurring topics')}</h3>
-              <p className="text-xs text-[var(--fg3)]">{t('Memento only suggests exact repeats in accepted records. Nothing is linked until you confirm it.')}</p>
+              <h3 className="text-sm font-semibold text-foreground">{t('Possible recurring topics')}</h3>
+              <p className="text-xs text-muted-foreground">{t('Memento only suggests exact repeats in accepted records. Nothing is linked until you confirm it.')}</p>
               {recurring.map((suggestion) => (
-                <div key={suggestion.canonicalTopic} className="flex items-center justify-between gap-3 rounded-lg border border-[var(--border-subtle)] p-3">
+                <div key={suggestion.canonicalTopic} className="flex items-center justify-between gap-3 rounded-lg border border-border p-3">
                   <span className="text-sm">{suggestion.canonicalTopic} · {suggestion.occurrences}</span>
                   <Button size="sm" variant="outline" onClick={() => void confirmRecurring(suggestion)}>{t('Confirm recurring topic')}</Button>
                 </div>

@@ -203,12 +203,6 @@ export function useSummaryGeneration({
         await Analytics.trackCustomPromptUsed(customPrompt.trim().length);
       }
 
-      // Show toast notification for generation start
-      toast.info(isRegeneration ? t('Regenerating summary...') : t('Generating summary...'), {
-        description: `${t('Using')} ${modelConfig.provider}/${modelConfig.model}`,
-        duration: 3000,
-      });
-
       // Resolve explicit metadata override first; Auto detects the transcript language.
       const summaryLanguage = await resolveSummaryLanguage(
         meeting.id,
@@ -329,12 +323,6 @@ export function useSummaryGeneration({
             setAiSummary(pollingResult.data as any);
             setSummaryStatus('completed');
 
-            // Show success toast
-            toast.success(t('Summary generated successfully!'), {
-              description: t('Your meeting summary is ready'),
-              duration: 4000,
-            });
-
             // Refresh persisted meeting data even when the model did not return a
             // new title. This makes a summary generated while the user is on
             // another screen visible immediately when they return.
@@ -405,12 +393,6 @@ export function useSummaryGeneration({
 
           setAiSummary(formattedSummary);
           setSummaryStatus('completed');
-
-          // Show success toast
-          toast.success(t('Summary generated successfully!'), {
-            description: t('Your meeting summary is ready'),
-            duration: 4000,
-          });
 
           await Analytics.trackSummaryGenerationCompleted(
             modelConfig.provider,
@@ -518,7 +500,6 @@ export function useSummaryGeneration({
     // Check if model config is still loading
     if (isModelConfigLoading) {
       console.log('⏳ Model configuration is still loading, please wait...');
-      toast.info(t('Loading model configuration, please wait...'));
       return;
     }
 
@@ -614,10 +595,6 @@ export function useSummaryGeneration({
             const status = modelInfo.status;
 
             if (status.type === 'downloading') {
-              toast.info(t('Model download in progress'), {
-                description: `${selectedModel} ${t('is downloading')} (${status.progress}%). ${t('Please wait until download completes.')}`,
-                duration: 5000,
-              });
               return;
             }
 
@@ -717,11 +694,6 @@ export function useSummaryGeneration({
     setSummaryStatus('idle');
     setSummaryError(null);
 
-    // Show toast notification
-    toast.info(t('Summary generation stopped'), {
-      description: t('You can generate a new summary anytime'),
-      duration: 3000,
-    });
   }, [meeting.id, stopSummaryPolling]);
 
   return {

@@ -1,6 +1,6 @@
 //! Privacy-preserving meeting detection.
 //!
-//! Process/audio evidence stays in memory. When auto-listening is enabled, a strong OS-level
+//! Process/audio evidence stays in memory. When meeting detection is enabled, a strong OS-level
 //! microphone-session signal may request the existing recording pipeline to start and stop;
 //! raw process names, browser URLs, and window titles are never persisted.
 
@@ -265,7 +265,7 @@ impl DetectionSession {
 }
 
 /// A process launch is useful evidence, but only for a bounded interval. Long-lived apps
-/// such as Telegram must not keep the detector permanently active after one launch.
+/// must not keep the detector permanently active after one launch.
 #[derive(Debug, Default)]
 struct ProcessLaunchEvidence {
     previous_apps: Option<BTreeSet<MeetingApp>>,
@@ -526,7 +526,7 @@ fn select_detection_signal(
         return (microphone_apps, Some(DetectionSource::MicrophoneActivity));
     }
     // On macOS we can observe actual microphone use. A process launch alone is too weak:
-    // opening Telegram, Teams, or Zoom does not mean a meeting has started. Platforms that do
+    // opening Teams or Zoom does not mean a meeting has started. Platforms that do
     // not yet expose a microphone-session observer keep the bounded process-launch fallback.
     if !microphone_signal_supported && !launched_apps.is_empty() {
         return (launched_apps, Some(DetectionSource::NativeProcess));
@@ -1575,16 +1575,17 @@ mod tests {
             Some(MeetingApp::MicrosoftTeams)
         );
         assert_eq!(
-            classify_native_process("Telegram"),
-            Some(MeetingApp::Telegram)
-        );
-        assert_eq!(
             classify_native_process("Yandex.Telemost"),
             Some(MeetingApp::YandexTelemost)
         );
         assert_eq!(
             classify_native_process("Jazz"),
             Some(MeetingApp::SaluteJazz)
+        );
+
+        assert_eq!(
+            classify_native_process("Telegram"),
+            Some(MeetingApp::Telegram)
         );
 
         assert_eq!(classify_native_process("zoomautoupdater"), None);
@@ -1614,17 +1615,21 @@ mod tests {
             classify_audio_process("com.microsoft.VSCode", "Code Helper"),
             None
         );
+        assert_eq!(
+            classify_audio_process("org.telegram.desktop", "Telegram"),
+            Some(MeetingApp::Telegram)
+        );
     }
 
     #[test]
     fn macos_requires_microphone_evidence_instead_of_process_launch_only() {
         let (candidates, source) =
-            select_detection_signal(apps(&[MeetingApp::Telegram]), BTreeSet::new(), true);
+            select_detection_signal(apps(&[MeetingApp::Zoom]), BTreeSet::new(), true);
         assert!(candidates.is_empty());
         assert_eq!(source, None);
 
         let (candidates, source) = select_detection_signal(
-            apps(&[MeetingApp::Telegram]),
+            apps(&[MeetingApp::Zoom]),
             apps(&[MeetingApp::BrowserCall]),
             true,
         );
@@ -1916,16 +1921,16 @@ mod tests {
         let mut evidence = ProcessLaunchEvidence::default();
 
         assert!(evidence
-            .observe(&apps(&[MeetingApp::Telegram]), now)
+            .observe(&apps(&[MeetingApp::MicrosoftTeams]), now)
             .is_empty());
         let launched = evidence.observe(
-            &apps(&[MeetingApp::Telegram, MeetingApp::Zoom]),
+            &apps(&[MeetingApp::MicrosoftTeams, MeetingApp::Zoom]),
             now + Duration::from_secs(1),
         );
         assert_eq!(launched, apps(&[MeetingApp::Zoom]));
 
         let expired = evidence.observe(
-            &apps(&[MeetingApp::Telegram, MeetingApp::Zoom]),
+            &apps(&[MeetingApp::MicrosoftTeams, MeetingApp::Zoom]),
             now + PROCESS_LAUNCH_EVIDENCE_TTL + Duration::from_secs(2),
         );
         assert!(expired.is_empty());

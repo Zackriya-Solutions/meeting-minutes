@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef } from "react"
 import { Switch } from "./ui/switch"
-import { FolderOpen } from '@/components/memento/LucideCompat'
+import { FolderOpen } from '@/components/deslop-icons'
 import { invoke } from "@tauri-apps/api/core"
 import Analytics from "@/lib/analytics"
 import AnalyticsConsentSwitch from "./AnalyticsConsentSwitch"
@@ -276,7 +276,7 @@ export function PreferenceSettings() {
   return (
     <div className="space-y-6">
       {/* Уведомления Section */}
-      <div className="bg-[var(--bg-canvas)] rounded-lg border border-[var(--border-subtle)] p-6 shadow-none">
+      <div className="settings-section">
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
             <h3 className="text-lg font-semibold text-[var(--fg1)] mb-2">{t('Notifications')}</h3>
@@ -289,7 +289,7 @@ export function PreferenceSettings() {
       {/* One choice instead of three toggles: detection, auto-listening and background
           capture only ever described four behaviours. Detection evidence stays in
           memory; only the normalized capture lifecycle is stored. */}
-      <div className="bg-[var(--bg-canvas)] rounded-lg border border-[var(--border-subtle)] p-6 shadow-none">
+      <div className="settings-section">
         <h3 className="text-lg font-semibold text-[var(--fg1)] mb-2">{t('When a call is detected')}</h3>
         <p className="text-sm text-[var(--fg2)]">
           {t('Memento recognizes calls in Zoom, Teams, Telemost, SberJazz, Telegram, and your browser by watching locally which app is using the microphone. Process names, window titles, and URLs are never stored.')}
@@ -344,7 +344,7 @@ export function PreferenceSettings() {
 
       {/* Hidden in local-only mode: handing a summary to Telegram takes it off this machine. */}
       {!capturePolicy?.local_only && (
-        <div className="bg-[var(--bg-canvas)] rounded-lg border border-[var(--border-subtle)] p-6 shadow-none">
+        <div className="settings-section">
           <div className="flex items-start justify-between gap-4 sm:gap-6">
             <div className="min-w-0">
               <h3 className="text-lg font-semibold text-[var(--fg1)] mb-2">{t('Open Telegram after a summary is generated')}</h3>
@@ -361,7 +361,7 @@ export function PreferenceSettings() {
         </div>
       )}
 
-      <div className="bg-[var(--bg-canvas)] rounded-lg border border-[var(--border-subtle)] p-6 shadow-none">
+      <div className="settings-section">
         <h3 className="text-lg font-semibold text-[var(--fg1)] mb-2">{t('Local learning and retention')}</h3>
         <p className="text-sm text-[var(--fg2)]">
           {t('Voice profiles, corrections, and capture evidence stay local. Predictions never become training examples without an explicit confirmation.')}
@@ -413,7 +413,7 @@ export function PreferenceSettings() {
       </div>
 
       {/* Хранение данных Section */}
-      <div className="bg-[var(--bg-canvas)] rounded-lg border border-[var(--border-subtle)] p-6 shadow-none">
+      <div className="settings-section">
         <h3 className="text-lg font-semibold text-[var(--fg1)] mb-4">{t('Data Storage Locations')}</h3>
         <p className="text-sm text-[var(--fg2)] mb-6">
           {t('View and access where Memento stores your data')}
@@ -474,7 +474,7 @@ export function PreferenceSettings() {
       </div>
 
       {/* Analytics Section */}
-      <div className="bg-[var(--bg-canvas)] rounded-lg border border-[var(--border-subtle)] p-6 shadow-none">
+      <div className="settings-section">
         <AnalyticsConsentSwitch />
       </div>
     </div>

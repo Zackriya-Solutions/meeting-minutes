@@ -85,7 +85,7 @@ impl Default for NotificationSettings {
             auto_meeting_detection: true,
             auto_listening: true,
             background_auto_recording: false,
-            recording_notifications: true,
+            recording_notifications: false,
             time_based_reminders: true,
             meeting_reminders: true,
             respect_do_not_disturb: true,
@@ -109,8 +109,8 @@ const fn default_auto_listening() -> bool {
 impl Default for NotificationPreferences {
     fn default() -> Self {
         Self {
-            show_recording_started: true,
-            show_recording_stopped: true,
+            show_recording_started: false,
+            show_recording_stopped: false,
             show_recording_paused: true,
             show_recording_resumed: true,
             show_transcription_complete: true,
@@ -342,7 +342,10 @@ mod tests {
         assert!(settings.auto_meeting_detection);
         assert!(settings.auto_listening);
         assert!(!settings.background_auto_recording);
-        assert!(settings.notification_preferences.show_recording_started);
-        assert!(settings.notification_preferences.show_recording_stopped);
+        // The redesign turns start/stop recording toasts off by default; the recording
+        // UI shows that state inline instead.
+        assert!(!settings.recording_notifications);
+        assert!(!settings.notification_preferences.show_recording_started);
+        assert!(!settings.notification_preferences.show_recording_stopped);
     }
 }

@@ -1,5 +1,5 @@
 import React from 'react';
-import { AlertTriangle, Mic, Speaker, RefreshCw } from '@/components/memento/LucideCompat';
+import { AlertTriangle, Mic, Speaker, RefreshCw } from '@/components/deslop-icons';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { invoke } from '@tauri-apps/api/core';
 import { useIsLinux } from '@/hooks/usePlatform';
@@ -57,9 +57,9 @@ export function PermissionWarning({
     <div className="max-w-md mb-4 space-y-3">
       {/* Combined Permission Warning - Show when either permission is missing */}
       {(!hasMicrophone || !hasSystemAudio) && (
-        <Alert variant="destructive" className="border-[var(--gold-border)] bg-[var(--gold-soft)]">
-          <AlertTriangle className="h-5 w-5 text-[var(--gold)]" />
-          <AlertTitle className="font-semibold text-[var(--fg1)]">
+        <Alert variant="destructive" className="border-primary/40 bg-primary/10">
+          <AlertTriangle className="h-5 w-5 text-primary" />
+          <AlertTitle className="font-semibold text-foreground">
             <div className="flex items-center gap-2">
               {!hasMicrophone && <Mic className="h-4 w-4" />}
               {!hasSystemAudio && <Speaker className="h-4 w-4" />}
@@ -71,7 +71,7 @@ export function PermissionWarning({
             {isMacOS && !hasMicrophone && (
               <button
                 onClick={openMicrophoneSettings}
-                className="inline-flex items-center gap-2 rounded-full bg-[var(--gold)] px-4 py-2 text-sm font-medium text-[var(--fg-inverse)] transition-colors hover:bg-[var(--gold-active)]"
+                className="inline-flex items-center gap-2 rounded-full bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
               >
                 <Mic className="h-4 w-4" />
                 {t('Open Microphone Settings')}
@@ -80,7 +80,7 @@ export function PermissionWarning({
             {isMacOS && !hasSystemAudio && (
               <button
                 onClick={openScreenRecordingSettings}
-                className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-[var(--fg-inverse)] bg-[var(--gold)] hover:bg-[var(--gold-active)] rounded-md transition-colors"
+                className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-primary-foreground bg-primary hover:bg-primary/90 rounded-md transition-colors"
               >
                 <Speaker className="h-4 w-4" />
                 {t('Open Screen Recording Settings')}
@@ -89,13 +89,13 @@ export function PermissionWarning({
             <button
               onClick={onRecheck}
               disabled={isRechecking}
-              className="inline-flex items-center gap-2 rounded-full border border-[var(--border-strong)] bg-[var(--bg-elevated)] px-4 py-2 text-sm font-medium text-[var(--fg1)] transition-colors hover:bg-[var(--state-hover-bg)] disabled:opacity-50"
+              className="inline-flex items-center gap-2 rounded-full border border-border bg-muted px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-accent disabled:opacity-50"
             >
               <RefreshCw className={`h-4 w-4 ${isRechecking ? 'animate-spin' : ''}`} />
               {t('Recheck')}
             </button>
           </div>
-          <AlertDescription className="mt-2 text-[var(--fg2)]">
+          <AlertDescription className="mt-2 text-muted-foreground">
             {/* Microphone Warning */}
             {!hasMicrophone && (
               <>

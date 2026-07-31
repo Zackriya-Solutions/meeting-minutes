@@ -20,7 +20,6 @@ interface SectionProps {
   onTitleChange?: (sectionKey: string, title: string) => void;
   onSectionDelete?: (sectionKey: string) => void;
   onBlockDelete: (blockId: string, mergeContent?: string) => void;
-  onContextMenu: (e: React.MouseEvent) => void;
   onBlockNavigate?: (blockId: string, direction: 'up' | 'down', cursorPosition: number) => void;
   onCreateNewBlock?: (blockId: string, newBlockContent: string, blockType: Block['type']) => void;
 }
@@ -38,7 +37,6 @@ export const Section: React.FC<SectionProps> = ({
   onTitleChange,
   onSectionDelete,
   onBlockDelete,
-  onContextMenu,
   onBlockNavigate,
   onCreateNewBlock,
 }) => {
@@ -77,7 +75,7 @@ export const Section: React.FC<SectionProps> = ({
         {onSectionDelete && (
           <button
             onClick={() => onSectionDelete(sectionKey)}
-            className="text-[var(--fg3)] hover:text-[var(--fg2)]"
+            className="text-muted-foreground hover:text-muted-foreground"
           >
             {t('Delete')}
           </button>
@@ -112,7 +110,6 @@ export const Section: React.FC<SectionProps> = ({
                 const mergeContent = textarea?.dataset.mergeContent;
                 onBlockDelete(block.id, mergeContent);
               }}
-              onContextMenu={onContextMenu}
               onNavigate={onBlockNavigate ? 
                 (direction, cursorPosition) => onBlockNavigate(block.id, direction, cursorPosition)
                 : undefined}

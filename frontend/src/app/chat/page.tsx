@@ -3,25 +3,26 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useRouter } from 'next/navigation';
-import { Loader2 } from '@/components/memento/LucideCompat';
-import { cn } from '@/lib/utils';
+import { Loader2 } from '@/components/deslop-icons';
 import { Icon } from '@/components/memento/Icon';
-import { Button } from '@/components/memento/Button';
-import { getCollectionDisplayText } from '@/lib/collectionDisplay';
+import { PromptInput } from '@/components/ui/prompt-input';
 import { useT } from '@/lib/i18n';
 import { KnowledgeReadinessCard } from '@/components/KnowledgeReadinessCard';
 import { useMeetingChat, type Citation, type ScopeKind } from '@/hooks/useMeetingChat';
 import { MessageBubble, TypingIndicator } from '@/components/chat/MessageBubble';
+import {
+  MessageScroller,
+  MessageScrollerButton,
+  MessageScrollerContent,
+  MessageScrollerItem,
+  MessageScrollerProvider,
+  MessageScrollerViewport,
+} from '@/components/ui/message-scroller';
+import { ChatDrawerShell } from './chat-drawer-shell';
 
 interface MeetingRef {
   id: string;
   title: string;
-}
-interface CollectionRef {
-  id: number;
-  name: string;
-  kind: 'manual' | 'series';
-  system_key?: string | null;
 }
 
 const SUGGESTIONS = [
@@ -38,10 +39,7 @@ export default function ChatPage() {
   const [scopeKind, setScopeKind] = useState<ScopeKind>('archive');
   const [collectionId, setCollectionId] = useState<number | null>(null);
   const [meetingId, setMeetingId] = useState<string | null>(null);
-  const [returnCollectionId, setReturnCollectionId] = useState<number | null>(null);
-
   const [meetings, setMeetings] = useState<MeetingRef[]>([]);
-  const [collections, setCollections] = useState<CollectionRef[]>([]);
 
   const pendingQuestion = useRef<string | null>(null);
   const submittedPendingQuestion = useRef(false);
@@ -52,16 +50,13 @@ export default function ChatPage() {
     meetingId,
     enabled: scopeInitialized,
   });
-  const { messages, input, setInput, sending, loadingHistory, send, onKeyDown, startNewChat, scrollRef, inputRef } = chat;
+  const { messages, input, setInput, sending, loadingHistory, send, onKeyDown, inputRef } = chat;
 
   // Load scope options.
   useEffect(() => {
     invoke<MeetingRef[]>('api_get_meetings')
       .then((m) => setMeetings(Array.isArray(m) ? m : []))
       .catch(() => setMeetings([]));
-    invoke<CollectionRef[]>('list_collections')
-      .then((c) => setCollections(Array.isArray(c) ? c : []))
-      .catch(() => setCollections([]));
   }, []);
 
   // Collection and meeting workspaces deep-link here with the scope already selected.
@@ -85,10 +80,8 @@ export default function ChatPage() {
       if (Number.isInteger(requestedCollectionId) && requestedCollectionId > 0) {
         setScopeKind('collection');
         setCollectionId(requestedCollectionId);
-        setReturnCollectionId(requestedCollectionId);
       } else {
         setScopeKind('archive');
-        setReturnCollectionId(null);
       }
     } else if (scope === 'meeting') {
       const requestedMeetingId = params.get('meetingId')?.trim();
@@ -100,17 +93,9 @@ export default function ChatPage() {
       }
     } else {
       setScopeKind('archive');
-      setReturnCollectionId(null);
     }
     setScopeInitialized(true);
   }, []);
-
-  // Changing scope restores the latest session for that scope (handled by the hook).
-  const changeScope = (kind: ScopeKind) => {
-    setScopeKind(kind);
-    if (kind !== 'collection') setCollectionId(null);
-    if (kind !== 'meeting') setMeetingId(null);
-  };
 
   const openCitation = useCallback(
     (c: Citation) => {
@@ -130,141 +115,81 @@ export default function ChatPage() {
   }, [loadingHistory, scopeInitialized, send, sending]);
 
   const meetingTitle = (id: string) => meetings.find((m) => m.id === id)?.title ?? id.slice(0, 8);
-  const selectedCollection = collections.find((collection) => collection.id === collectionId);
-  const selectedCollectionName = selectedCollection ? getCollectionDisplayText(selectedCollection, t).name : null;
-  const backToContext = () => {
-    if (returnCollectionId != null) {
-      router.push(`/collections?collectionId=${returnCollectionId}`);
-      return;
-    }
-    router.push('/');
-  };
-
   return (
-    <div className="mm-page">
+    <ChatDrawerShell>
+    <div className="mm-page drawer-elevation-surface !h-full !px-0">
       {/* Header */}
-      <div className="mm-page-header">
-        <button
-          onClick={backToContext}
-          className="mm-icon-button mm-hover"
-          aria-label={returnCollectionId != null ? t('Back to collection') : t('Back')}
-          title={returnCollectionId != null ? t('Back to collection') : t('Back')}
-        >
-          <Icon name="back" />
-        </button>
-        <Icon name="library" size={24} className="text-[var(--gold)]" />
-        <div className="min-w-0">
-          <h1 className="mm-page-title">
-            {scopeKind === 'collection' ? t('Chat with collection') : t('Chat with archive')}
-          </h1>
-          {scopeKind === 'collection' && selectedCollectionName && (
-            <p className="mt-0.5 truncate text-xs text-[var(--fg3)]">{selectedCollectionName}</p>
-          )}
-        </div>
-
-        <div className="ml-auto flex items-center gap-2">
-          {/* Scope selector */}
-          <select
-            value={scopeKind}
-            onChange={(e) => changeScope(e.target.value as ScopeKind)}
-            className="mm-select"
-          >
-            <option value="archive">{t('Entire archive')}</option>
-            <option value="collection">{t('Collection')}</option>
-            <option value="meeting">{t('Meeting')}</option>
-          </select>
-
-          {scopeKind === 'collection' && (
-            <select
-              value={collectionId ?? ''}
-              onChange={(e) => setCollectionId(e.target.value ? Number(e.target.value) : null)}
-              className="mm-select max-w-[200px]"
-            >
-              <option value="">{t('Select a collection…')}</option>
-              {collections.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {getCollectionDisplayText(c, t).name}
-                </option>
-              ))}
-            </select>
-          )}
-
-          {scopeKind === 'meeting' && (
-            <select
-              value={meetingId ?? ''}
-              onChange={(e) => setMeetingId(e.target.value || null)}
-              className="mm-select max-w-[220px]"
-            >
-              <option value="">{t('Select a meeting…')}</option>
-              {meetings.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.title}
-                </option>
-              ))}
-            </select>
-          )}
-
-          <Button
-            onClick={startNewChat}
-            disabled={loadingHistory}
-            variant="secondary"
-            size="sm"
-            icon={<Icon name="plus" size={16} />}
-          >
-            {t('New chat')}
-          </Button>
-        </div>
+      <div className="mm-page-header px-[var(--drawer-content-inset)]">
+        <h1 className="memento-screen-title truncate text-foreground">
+          {scopeKind === 'collection' ? t('Chat with collection') : t('Chat with archive')}
+        </h1>
       </div>
 
       {/* Messages */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto py-6">
-        {!loadingHistory && messages.length === 0 && <KnowledgeReadinessCard mode="chat" />}
-        {loadingHistory ? (
-          <div className="flex h-full items-center justify-center text-[var(--fg3)]">
-            <Loader2 className="h-5 w-5 animate-spin" />
-          </div>
-        ) : messages.length === 0 ? (
-          <EmptyState onPick={(s) => send(s)} disabled={sending} />
-        ) : (
-          <div className="mx-auto flex max-w-3xl flex-col gap-5">
-            {messages.map((msg, i) => (
-              <MessageBubble key={i} msg={msg} meetingTitle={meetingTitle} onCite={openCitation} />
-            ))}
-            {sending && <TypingIndicator />}
-          </div>
-        )}
-      </div>
+      <MessageScrollerProvider
+        key={`${scopeKind}-${collectionId ?? 'all'}-${meetingId ?? 'all'}-${loadingHistory ? 'loading' : 'ready'}`}
+        autoScroll
+        defaultScrollPosition="last-anchor"
+        scrollPreviousItemPeek={48}
+      >
+        <MessageScroller className="min-h-0 flex-1">
+          <MessageScrollerViewport className="px-[var(--drawer-content-inset)] py-6">
+            <MessageScrollerContent className="mx-auto w-full max-w-3xl gap-5">
+              {loadingHistory ? (
+                <MessageScrollerItem className="flex min-h-[240px] items-center justify-center text-muted-foreground">
+                  <Loader2 className="h-5 w-5 animate-spin" />
+                </MessageScrollerItem>
+              ) : messages.length === 0 ? (
+                <>
+                  <MessageScrollerItem messageId="knowledge-readiness">
+                    <KnowledgeReadinessCard mode="chat" />
+                  </MessageScrollerItem>
+                  <MessageScrollerItem messageId="knowledge-empty-state">
+                    <EmptyState onPick={(s) => send(s)} disabled={sending} />
+                  </MessageScrollerItem>
+                </>
+              ) : (
+                <>
+                  {messages.map((msg, i) => (
+                    <MessageScrollerItem
+                      key={`${msg.role}-${i}`}
+                      messageId={`knowledge-chat-${i}`}
+                      scrollAnchor={msg.role === 'user'}
+                    >
+                      <MessageBubble msg={msg} meetingTitle={meetingTitle} onCite={openCitation} />
+                    </MessageScrollerItem>
+                  ))}
+                  {sending && (
+                    <MessageScrollerItem messageId="knowledge-chat-typing">
+                      <TypingIndicator />
+                    </MessageScrollerItem>
+                  )}
+                </>
+              )}
+            </MessageScrollerContent>
+          </MessageScrollerViewport>
+          <MessageScrollerButton />
+        </MessageScroller>
+      </MessageScrollerProvider>
 
       {/* Composer */}
-      <div className="border-t border-[var(--border-subtle)] py-4">
-        <div className="mx-auto flex max-w-3xl items-end gap-2">
-          <textarea
-            ref={inputRef}
+      <div className="px-[var(--drawer-content-inset)] pt-4">
+        <div className="mx-auto max-w-3xl">
+          <PromptInput
+            inputRef={inputRef}
             value={input}
             disabled={loadingHistory}
-            onChange={(e) => setInput(e.target.value)}
+            sending={sending}
+            onValueChange={setInput}
             onKeyDown={onKeyDown}
-            rows={1}
+            onSubmit={() => send(input)}
             placeholder={t('Ask about your meetings…')}
-            className="mm-field max-h-40 min-h-[48px] flex-1 resize-none py-3 text-sm outline-none"
+            sendLabel={t('Send')}
           />
-          <button
-            onClick={() => send(input)}
-            disabled={loadingHistory || sending || !input.trim()}
-            className={cn(
-              'flex h-11 w-11 items-center justify-center rounded-xl text-[var(--fg-inverse)] transition-colors',
-              loadingHistory || sending || !input.trim() ? 'cursor-not-allowed bg-[var(--bg-elevated)]' : 'bg-[var(--gold)] hover:bg-[var(--gold-active)]',
-            )}
-            aria-label={t('Send')}
-          >
-            {sending ? <Loader2 className="h-5 w-5 animate-spin" /> : <Icon name="send" />}
-          </button>
         </div>
-        <p className="mx-auto mt-2 max-w-3xl text-center text-xs text-[var(--fg3)]">
-          {t('Answers are drawn only from your recordings, with links to the sources.')}
-        </p>
       </div>
     </div>
+    </ChatDrawerShell>
   );
 }
 
@@ -275,8 +200,8 @@ function EmptyState({ onPick, disabled }: { onPick: (s: string) => void; disable
       <div className="mm-empty-icon mb-4">
         <Icon name="library" size={28} />
       </div>
-      <h2 className="text-xl font-semibold text-[var(--fg1)]">{t('Ask your meeting archive')}</h2>
-      <p className="mt-2 text-sm text-[var(--fg2)]">
+      <h2 className="text-xl font-semibold text-foreground">{t('Ask your meeting archive')}</h2>
+      <p className="mt-2 text-sm text-muted-foreground">
         {t('Ask questions in natural language — answers come with links to specific moments in your recordings.')}
       </p>
       <div className="mt-8 flex w-full flex-col gap-2">
@@ -285,7 +210,7 @@ function EmptyState({ onPick, disabled }: { onPick: (s: string) => void; disable
             key={s}
             disabled={disabled}
             onClick={() => onPick(t(s))}
-            className="rounded-xl border border-[var(--border-subtle)] px-4 py-3 text-left text-sm text-[var(--fg2)] transition-colors hover:border-[var(--gold-border)] hover:bg-[var(--gold-soft)] disabled:opacity-50"
+            className="rounded-xl border border-border px-4 py-3 text-left text-sm text-muted-foreground transition-colors hover:border-primary/40 hover:bg-primary/10 disabled:opacity-50"
           >
             {t(s)}
           </button>

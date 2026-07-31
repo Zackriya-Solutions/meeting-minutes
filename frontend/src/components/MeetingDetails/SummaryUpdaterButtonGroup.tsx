@@ -2,7 +2,7 @@
 
 import { Button } from '@/components/ui/button';
 import { ButtonGroup } from '@/components/ui/button-group';
-import { Copy, Save, Loader2, MessageSquare } from '@/components/memento/LucideCompat';
+import { Copy, Save, Loader2, MessageSquare } from '@/components/deslop-icons';
 import Analytics from '@/lib/analytics';
 import { useT } from '@/lib/i18n';
 
@@ -34,7 +34,7 @@ export function SummaryUpdaterButtonGroup({
       <Button
         variant="outline"
         size="sm"
-        className={`${isDirty ? 'bg-[color-mix(in_srgb,var(--success)_12%,transparent)]' : ""}`}
+        className={`${isDirty ? 'bg-success/10' : ""}`}
         title={
           isSaving
             ? t('Saving')

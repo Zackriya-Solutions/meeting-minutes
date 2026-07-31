@@ -1,12 +1,12 @@
+use anyhow::{anyhow, Result};
+use log::{debug, error, info, warn};
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use tokio::sync::{RwLock, mpsc, Semaphore};
+use tokio::sync::{mpsc, RwLock, Semaphore};
 use tokio::task::JoinHandle;
-use anyhow::{Result, anyhow};
-use log::{info, warn, error, debug};
-use serde::{Serialize, Deserialize};
 
-use super::whisper_engine::WhisperEngine;
 use super::system_monitor::SystemMonitor;
+use super::whisper_engine::WhisperEngine;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AudioChunk {
@@ -50,23 +50,23 @@ pub enum ProcessingEvent {
 /// Safe parallel processing configuration
 #[derive(Debug, Clone)]
 pub struct ParallelConfig {
-    pub max_workers: usize,          // Never exceed 4 workers (safety limit)
-    pub memory_budget_mb: u64,       // Memory budget per worker
-    pub max_retries: u32,            // Max retries per chunk (default: 3)
-    pub retry_delay_ms: u64,         // Delay between retries
+    pub max_workers: usize,              // Never exceed 4 workers (safety limit)
+    pub memory_budget_mb: u64,           // Memory budget per worker
+    pub max_retries: u32,                // Max retries per chunk (default: 3)
+    pub retry_delay_ms: u64,             // Delay between retries
     pub resource_check_interval_ms: u64, // How often to check system resources
-    pub enable_fallback_mode: bool,  // Fall back to sequential processing on failures
+    pub enable_fallback_mode: bool,      // Fall back to sequential processing on failures
 }
 
 impl Default for ParallelConfig {
     fn default() -> Self {
         Self {
-            max_workers: 2,              // Conservative default
-            memory_budget_mb: 512,       // 512MB per worker
+            max_workers: 2,        // Conservative default
+            memory_budget_mb: 512, // 512MB per worker
             max_retries: 3,
-            retry_delay_ms: 1000,        // 1 second retry delay
+            retry_delay_ms: 1000,              // 1 second retry delay
             resource_check_interval_ms: 10000, // Check resources every 10 seconds
-            enable_fallback_mode: true,  // Always enable fallback for safety
+            enable_fallback_mode: true,        // Always enable fallback for safety
         }
     }
 }
@@ -108,8 +108,10 @@ impl ParallelProcessor {
         // Safety check: Never exceed 4 workers
         let safe_max_workers = std::cmp::min(config.max_workers, 4);
         if safe_max_workers != config.max_workers {
-            warn!("Limiting workers from {} to {} for system safety",
-                  config.max_workers, safe_max_workers);
+            warn!(
+                "Limiting workers from {} to {} for system safety",
+                config.max_workers, safe_max_workers
+            );
         }
 
         let mut safe_config = config.clone();
@@ -126,7 +128,10 @@ impl ParallelProcessor {
             semaphore: Arc::new(Semaphore::new(safe_max_workers)),
         };
 
-        info!("Parallel processor initialized with {} workers", safe_max_workers);
+        info!(
+            "Parallel processor initialized with {} workers",
+            safe_max_workers
+        );
         Ok((processor, event_receiver))
     }
 
@@ -135,8 +140,10 @@ impl ParallelProcessor {
         let worker_count = self.system_monitor.calculate_safe_worker_count().await?;
         let safe_count = std::cmp::min(worker_count, self.config.max_workers);
 
-        info!("Calculated safe worker count: {} (system: {}, config: {})",
-              safe_count, worker_count, self.config.max_workers);
+        info!(
+            "Calculated safe worker count: {} (system: {}, config: {})",
+            safe_count, worker_count, self.config.max_workers
+        );
 
         Ok(safe_count)
     }
@@ -147,15 +154,21 @@ impl ParallelProcessor {
         chunks: Vec<AudioChunk>,
         model_name: String,
     ) -> Result<()> {
-        info!("Starting parallel processing of {} chunks with model {}",
-              chunks.len(), model_name);
+        info!(
+            "Starting parallel processing of {} chunks with model {}",
+            chunks.len(),
+            model_name
+        );
 
         // Check system resources before starting
         let resource_status = self.system_monitor.check_resource_constraints().await?;
         if !resource_status.can_proceed {
-            return Err(anyhow!("Cannot start processing: {}",
-                             resource_status.get_primary_constraint()
-                             .unwrap_or_else(|| "Resource constraints violated".to_string())));
+            return Err(anyhow!(
+                "Cannot start processing: {}",
+                resource_status
+                    .get_primary_constraint()
+                    .unwrap_or_else(|| "Resource constraints violated".to_string())
+            ));
         }
 
         // Calculate safe worker count
@@ -181,7 +194,10 @@ impl ParallelProcessor {
         // Start resource monitoring task
         self.start_resource_monitoring().await;
 
-        info!("Parallel processing started with {} workers", safe_worker_count);
+        info!(
+            "Parallel processing started with {} workers",
+            safe_worker_count
+        );
         Ok(())
     }
 
@@ -189,7 +205,9 @@ impl ParallelProcessor {
         self.workers.clear();
 
         for worker_id in 0..worker_count {
-            let worker = self.create_worker(worker_id as u32, model_name.clone()).await?;
+            let worker = self
+                .create_worker(worker_id as u32, model_name.clone())
+                .await?;
             self.workers.push(worker);
         }
 
@@ -214,7 +232,10 @@ impl ParallelProcessor {
         // Spawn worker task
         let handle = tokio::spawn(async move {
             // Acquire semaphore permit (limits concurrent workers)
-            let _permit = semaphore.acquire().await.map_err(|e| anyhow!("Failed to acquire worker permit: {}", e))?;
+            let _permit = semaphore
+                .acquire()
+                .await
+                .map_err(|e| anyhow!("Failed to acquire worker permit: {}", e))?;
 
             info!("Worker {} started", worker_id);
             let _ = event_sender.send(ProcessingEvent::WorkerStarted(worker_id));
@@ -222,8 +243,12 @@ impl ParallelProcessor {
             // Load model for this worker
             {
                 let mut engine_guard = engine_ref.write().await;
-                let engine = WhisperEngine::new().map_err(|e| anyhow!("Failed to create WhisperEngine: {}", e))?;
-                engine.load_model(&model_name).await.map_err(|e| anyhow!("Failed to load model {}: {}", model_name, e))?;
+                let engine = WhisperEngine::new()
+                    .map_err(|e| anyhow!("Failed to create WhisperEngine: {}", e))?;
+                engine
+                    .load_model(&model_name)
+                    .await
+                    .map_err(|e| anyhow!("Failed to load model {}: {}", model_name, e))?;
                 *engine_guard = Some(engine);
                 info!("Worker {} loaded model {}", worker_id, model_name);
             }
@@ -263,8 +288,9 @@ impl ParallelProcessor {
                             &engine_ref,
                             chunk.clone(),
                             &model_name,
-                            worker_id
-                        ).await;
+                            worker_id,
+                        )
+                        .await;
 
                         // Handle result
                         let mut queue = chunk_queue.write().await;
@@ -273,7 +299,8 @@ impl ParallelProcessor {
                         match result {
                             Ok(transcription) => {
                                 queue.completed.insert(chunk.id, transcription.clone());
-                                let _ = event_sender.send(ProcessingEvent::ChunkCompleted(transcription));
+                                let _ = event_sender
+                                    .send(ProcessingEvent::ChunkCompleted(transcription));
                             }
                             Err(e) => {
                                 let error = ProcessingError {
@@ -287,13 +314,20 @@ impl ParallelProcessor {
                                     // Add to retry queue with delay
                                     let chunk_id = chunk.id;
                                     queue.retry_queue.push((chunk, retry_count + 1));
-                                    warn!("Worker {} failed chunk {}, queued for retry {}/{}",
-                                          worker_id, chunk_id, retry_count + 1, config.max_retries);
+                                    warn!(
+                                        "Worker {} failed chunk {}, queued for retry {}/{}",
+                                        worker_id,
+                                        chunk_id,
+                                        retry_count + 1,
+                                        config.max_retries
+                                    );
                                 } else {
                                     // Mark as permanently failed
                                     queue.failed.insert(chunk.id, error.clone());
-                                    error!("Worker {} permanently failed chunk {} after {} retries",
-                                           worker_id, chunk.id, retry_count);
+                                    error!(
+                                        "Worker {} permanently failed chunk {} after {} retries",
+                                        worker_id, chunk.id, retry_count
+                                    );
                                 }
 
                                 let _ = event_sender.send(ProcessingEvent::ChunkFailed(error));
@@ -303,7 +337,10 @@ impl ParallelProcessor {
                     None => {
                         // No work available, check if we're done
                         let queue = chunk_queue.read().await;
-                        if queue.pending.is_empty() && queue.retry_queue.is_empty() && queue.processing.is_empty() {
+                        if queue.pending.is_empty()
+                            && queue.retry_queue.is_empty()
+                            && queue.processing.is_empty()
+                        {
                             break; // All work completed
                         }
 
@@ -333,11 +370,16 @@ impl ParallelProcessor {
     ) -> Result<TranscriptionResult> {
         let start_time = std::time::Instant::now();
 
-        debug!("Worker {} processing chunk {} ({:.1}s audio)",
-               worker_id, chunk.id, chunk.duration_ms / 1000.0);
+        debug!(
+            "Worker {} processing chunk {} ({:.1}s audio)",
+            worker_id,
+            chunk.id,
+            chunk.duration_ms / 1000.0
+        );
 
         let engine_guard = engine_ref.read().await;
-        let engine = engine_guard.as_ref()
+        let engine = engine_guard
+            .as_ref()
             .ok_or_else(|| anyhow!("WhisperEngine not loaded for worker {}", worker_id))?;
 
         // Get language preference
@@ -363,8 +405,10 @@ impl ParallelProcessor {
             confidence_score: None, // TODO: Add confidence scoring if available
         };
 
-        debug!("Worker {} completed chunk {} in {}ms",
-               worker_id, chunk.id, processing_time);
+        debug!(
+            "Worker {} completed chunk {} in {}ms",
+            worker_id, chunk.id, processing_time
+        );
 
         Ok(result)
     }
@@ -386,11 +430,13 @@ impl ParallelProcessor {
                 match system_monitor.check_resource_constraints().await {
                     Ok(status) => {
                         if !status.can_proceed && last_warning.elapsed() > WARNING_COOLDOWN {
-                            let constraint = status.get_primary_constraint()
+                            let constraint = status
+                                .get_primary_constraint()
                                 .unwrap_or_else(|| "Resource constraints violated".to_string());
 
                             warn!("Resource constraint detected: {}", constraint);
-                            let _ = event_sender.send(ProcessingEvent::ResourceConstraint(constraint));
+                            let _ =
+                                event_sender.send(ProcessingEvent::ResourceConstraint(constraint));
 
                             // Auto-pause processing to prevent system damage
                             *is_paused.write().await = true;
@@ -444,7 +490,10 @@ impl ParallelProcessor {
     pub async fn get_processing_status(&self) -> ProcessingStatus {
         let queue = self.chunk_queue.read().await;
         ProcessingStatus {
-            total_chunks: queue.pending.len() + queue.processing.len() + queue.completed.len() + queue.failed.len(),
+            total_chunks: queue.pending.len()
+                + queue.processing.len()
+                + queue.completed.len()
+                + queue.failed.len(),
             pending_chunks: queue.pending.len(),
             processing_chunks: queue.processing.len(),
             completed_chunks: queue.completed.len(),

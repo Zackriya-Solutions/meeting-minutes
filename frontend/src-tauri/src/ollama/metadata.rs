@@ -1,11 +1,11 @@
+use once_cell::sync::Lazy;
+use regex::Regex;
+use reqwest::Client;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
-use serde::{Deserialize, Serialize};
-use reqwest::Client;
-use regex::Regex;
-use once_cell::sync::Lazy;
 
 /// Model metadata containing context size and other details
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -158,9 +158,15 @@ async fn fetch_model_info(
         .await
         .map_err(|e| {
             if e.is_timeout() {
-                format!("Request timed out while fetching metadata for {}", model_name)
+                format!(
+                    "Request timed out while fetching metadata for {}",
+                    model_name
+                )
             } else if e.is_connect() {
-                format!("Cannot connect to {}. Ollama server may not be running.", base_url)
+                format!(
+                    "Cannot connect to {}. Ollama server may not be running.",
+                    base_url
+                )
             } else {
                 format!("Network error: {}", e)
             }
@@ -177,7 +183,8 @@ async fn fetch_model_info(
         .map_err(|e| format!("Failed to parse API response: {}", e))?;
 
     // Try to get context size from model_info (verbose mode) first
-    let mut context_size = extract_context_from_model_info(&show_response.model_info, &show_response.details.family);
+    let mut context_size =
+        extract_context_from_model_info(&show_response.model_info, &show_response.details.family);
 
     // If not found in model_info, try parsing modelfile
     if context_size == ULTIMATE_FALLBACK {
@@ -256,9 +263,8 @@ fn extract_context_from_model_info(
 /// Context size in tokens, defaults to 4000 if not found
 fn parse_num_ctx_from_modelfile(modelfile: &str) -> usize {
     // Regex to match: PARAMETER num_ctx <number>
-    static RE: Lazy<Regex> = Lazy::new(|| {
-        Regex::new(r"PARAMETER\s+num_ctx\s+(\d+)").expect("Invalid regex pattern")
-    });
+    static RE: Lazy<Regex> =
+        Lazy::new(|| Regex::new(r"PARAMETER\s+num_ctx\s+(\d+)").expect("Invalid regex pattern"));
 
     RE.captures(modelfile)
         .and_then(|caps| caps.get(1))

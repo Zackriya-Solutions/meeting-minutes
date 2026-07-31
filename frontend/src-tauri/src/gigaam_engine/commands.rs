@@ -95,7 +95,12 @@ impl Drop for DownloadGuard {
     }
 }
 
-async fn download_file<R: Runtime>(app: &AppHandle<R>, url: &str, dest: &Path, label: &str) -> Result<(), String> {
+async fn download_file<R: Runtime>(
+    app: &AppHandle<R>,
+    url: &str,
+    dest: &Path,
+    label: &str,
+) -> Result<(), String> {
     if dest.exists() {
         return Ok(());
     }
@@ -132,10 +137,7 @@ async fn download_file<R: Runtime>(app: &AppHandle<R>, url: &str, dest: &Path, l
                 if let Ok(mut current) = DOWNLOAD_PROGRESS.lock() {
                     *current = Some(progress.clone());
                 }
-                let _ = app.emit(
-                    "gigaam-download-progress",
-                    progress,
-                );
+                let _ = app.emit("gigaam-download-progress", progress);
             }
         }
     }
@@ -185,13 +187,19 @@ pub async fn gigaam_status<R: Runtime>(app: AppHandle<R>) -> Result<serde_json::
 /// (and emit `gigaam-ready`); otherwise the frontend will prompt a download. The
 /// previously loaded model is left running until the new one is ready.
 #[tauri::command]
-pub async fn gigaam_select_variant<R: Runtime>(app: AppHandle<R>, variant: String) -> Result<(), String> {
+pub async fn gigaam_select_variant<R: Runtime>(
+    app: AppHandle<R>,
+    variant: String,
+) -> Result<(), String> {
     if DOWNLOAD_IN_PROGRESS.load(Ordering::SeqCst) {
         return Err("Wait for the current GigaAM model download to finish".to_string());
     }
-    let v = GigaamVariant::from_id(&variant).ok_or_else(|| format!("unknown GigaAM variant: {variant}"))?;
+    let v = GigaamVariant::from_id(&variant)
+        .ok_or_else(|| format!("unknown GigaAM variant: {variant}"))?;
     if !OFFERED_VARIANTS.contains(&v) {
-        return Err(format!("GigaAM variant {variant} is not offered in this build"));
+        return Err(format!(
+            "GigaAM variant {variant} is not offered in this build"
+        ));
     }
     let dir = gigaam_dir(&app)?;
     write_selected(&dir, v)?;

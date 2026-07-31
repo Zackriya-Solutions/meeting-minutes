@@ -3,7 +3,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { toast } from 'sonner';
-import { X, Download, Check, Loader2, ArrowBigDownDash } from '@/components/memento/LucideCompat';
+import { X, Download, Check, Loader2, ArrowBigDownDash } from '@/components/deslop-icons';
 import { getDownloadTotalMb } from '@/lib/onboarding-summary-model';
 import { useT } from '@/lib/i18n';
 
@@ -63,48 +63,48 @@ function DownloadToastContent({
   const unitLabel = download.unitLabel ?? 'MB';
 
   return (
-    <div className="flex items-center gap-3 w-full max-w-sm bg-[var(--bg-canvas)] rounded-lg shadow-none border border-[var(--border-subtle)] p-3 relative">
+    <div className="flex items-center gap-3 w-full max-w-sm bg-background rounded-lg shadow-none border border-border p-3 relative">
 
       {/* Icon */}
-      <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${isComplete ? 'bg-[color-mix(in_srgb,var(--success)_12%,transparent)]' : hasError ? 'bg-[color-mix(in_srgb,var(--danger)_12%,transparent)]' : isCancelled ? 'bg-[var(--bg-elevated)]' : 'bg-[var(--bg-elevated)]'
+      <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${isComplete ? 'bg-success/10' : hasError ? 'bg-destructive/10' : isCancelled ? 'bg-muted' : 'bg-muted'
         }`}>
         {isComplete ? (
-          <Check className="w-4 h-4 text-[var(--success)]" />
+          <Check className="w-4 h-4 text-success" />
         ) : hasError ? (
-          <X className="w-4 h-4 text-[var(--danger)]" />
+          <X className="w-4 h-4 text-destructive" />
         ) : isCancelled ? (
-          <X className="w-4 h-4 text-[var(--fg2)]" />
+          <X className="w-4 h-4 text-muted-foreground" />
         ) : (
-          <ArrowBigDownDash className="size-5 text-[var(--fg2)] " />
+          <ArrowBigDownDash className="size-5 text-muted-foreground " />
         )}
       </div>
 
       {/* Content */}
       <div className="flex-1 min-w-0">
         <div className="flex items-center justify-between gap-2 mb-1">
-          <p className="text-sm font-medium text-[var(--fg1)] truncate">
+          <p className="text-sm font-medium text-foreground truncate">
             {download.displayName}
           </p>
         </div>
 
         {hasError ? (
-          <p className="text-xs text-[var(--danger)]">{download.error || t('Download failed')}</p>
+          <p className="text-xs text-destructive">{download.error || t('Download failed')}</p>
         ) : isComplete ? (
-          <p className="text-xs text-[var(--success)]">{t('Download complete')}</p>
+          <p className="text-xs text-success">{t('Download complete')}</p>
         ) : isCancelled ? (
-          <p className="text-xs text-[var(--fg2)]">{t('Download cancelled')}</p>
+          <p className="text-xs text-muted-foreground">{t('Download cancelled')}</p>
         ) : (
           <>
             {/* Progress bar */}
-            <div className="w-full h-1.5 bg-[var(--bg-elevated)] rounded-full overflow-hidden mb-1.5">
+            <div className="w-full h-1.5 bg-muted rounded-full overflow-hidden mb-1.5">
               <div
-                className="h-full bg-[var(--fg3)] rounded-full transition-all duration-300"
+                className="h-full bg-muted-foreground rounded-full transition-all duration-300"
                 style={{ width: `${download.progress}%` }}
               />
             </div>
 
             {/* Progress text */}
-            <div className="flex items-center justify-between text-xs text-[var(--fg2)]">
+            <div className="flex items-center justify-between text-xs text-muted-foreground">
               <span>
                 {download.downloadedMb.toFixed(1)} / {download.totalMb.toFixed(1)} {unitLabel}
               </span>
@@ -112,7 +112,7 @@ function DownloadToastContent({
                 {download.speedMbps > 0 && (
                   <span>{download.speedMbps.toFixed(1)} {unitLabel}/s</span>
                 )}
-                <span className="text-[var(--fg1)] font-medium">
+                <span className="text-foreground font-medium">
                   {Math.round(download.progress)}%
                 </span>
               </span>

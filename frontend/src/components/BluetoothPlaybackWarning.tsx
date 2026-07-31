@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { Speaker, X } from '@/components/memento/LucideCompat';
+import { Speaker, X } from '@/components/deslop-icons';
 import { Button } from '@/components/ui/button';
 
 interface AudioOutputInfo {
@@ -64,29 +64,28 @@ export function BluetoothPlaybackWarning({
 
   return (
     <Alert
-      className="mb-4 border-[var(--gold-border)] bg-[var(--gold-soft)] text-[var(--gold)]"
+      className="mb-4 border-primary/40 bg-primary/10 text-primary"
       role="alert"
       aria-live="polite"
     >
-      <Speaker className="h-4 w-4 text-[var(--gold)]" />
+      <Speaker className="h-4 w-4 text-primary" />
       <div className="flex items-start justify-between w-full">
         <div className="flex-1">
-          <AlertTitle className="text-[var(--gold)] font-semibold">
-            Bluetooth Playback Detected
+          <AlertTitle className="text-primary font-semibold">
+            Обнаружено воспроизведение через Bluetooth
           </AlertTitle>
-          <AlertDescription className="text-[var(--gold)] mt-1">
-            You're using <strong>{deviceName}</strong> for playback.
-            Recordings may sound distorted or sped up through Bluetooth devices.
-            For accurate review, please use <strong>computer speakers</strong> or{' '}
-            <strong>wired headphones</strong>.
+          <AlertDescription className="text-primary mt-1">
+            Звук воспроизводится через <strong>{deviceName}</strong>.
+            Bluetooth может искажать или ускорять запись. Для проверки используйте{' '}
+            <strong>динамики компьютера</strong> или <strong>проводные наушники</strong>.
             <br />
             <a
               href="https://github.com/your-org/meetily/blob/main/BLUETOOTH_PLAYBACK_NOTICE.md"
               target="_blank"
               rel="noopener noreferrer"
-              className="underline hover:text-[var(--gold)] font-medium mt-2 inline-block"
+              className="underline hover:text-primary font-medium mt-2 inline-block"
             >
-              Learn why this happens →
+              Почему так происходит →
             </a>
           </AlertDescription>
         </div>
@@ -94,8 +93,8 @@ export function BluetoothPlaybackWarning({
           variant="ghost"
           size="icon"
           onClick={() => setIsDismissed(true)}
-          className="ml-4 h-6 w-6 text-[var(--gold)] hover:text-[var(--gold-active)] hover:bg-[var(--gold-soft)]"
-          aria-label="Dismiss warning"
+          className="ml-4 h-6 w-6 text-primary hover:text-primary/90 hover:bg-primary/10"
+          aria-label="Закрыть предупреждение"
         >
           <X className="h-4 w-4" />
         </Button>

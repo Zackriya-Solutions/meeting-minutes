@@ -31,9 +31,9 @@ export function AudioLevelMeter({
 
   // Color coding based on level
   const getLevelColor = (level: number) => {
-    if (level < 0.3) return 'bg-[var(--success)]';
-    if (level < 0.7) return 'bg-[var(--gold)]';
-    return 'bg-[var(--danger)]';
+    if (level < 0.3) return 'bg-success';
+    if (level < 0.7) return 'bg-primary';
+    return 'bg-destructive';
   };
 
   const rmsColor = getLevelColor(logRms);
@@ -64,13 +64,13 @@ export function AudioLevelMeter({
     <div className={`flex items-center space-x-2 ${className}`}>
       {/* Device activity indicator */}
       <div className={`w-2 h-2 rounded-full ${
-        isActive ? 'bg-[var(--success)] animate-pulse' : 'bg-[var(--bg-elevated)]'
+        isActive ? 'bg-success animate-pulse' : 'bg-muted'
       }`} title={`${deviceName} - ${isActive ? 'Active' : 'Inactive'}`} />
 
       {/* Level meter container */}
       <div className={`flex-1 ${sizes.container} relative`}>
         {/* Background */}
-        <div className="w-full h-full bg-[var(--bg-elevated)] rounded-sm overflow-hidden">
+        <div className="w-full h-full bg-muted rounded-sm overflow-hidden">
           {/* RMS level bar (main level) */}
           <div
             className={`${sizes.meter} ${rmsColor} transition-all duration-150 ease-out rounded-sm`}
@@ -89,16 +89,16 @@ export function AudioLevelMeter({
         {/* Level markers */}
         <div className="absolute inset-0 flex justify-between items-center px-1 pointer-events-none">
           {/* 25% marker */}
-          <div className="w-px h-full bg-[var(--fg3)] opacity-30" style={{ marginLeft: '25%' }} />
+          <div className="w-px h-full bg-muted-foreground opacity-30" style={{ marginLeft: '25%' }} />
           {/* 50% marker */}
-          <div className="w-px h-full bg-[var(--fg3)] opacity-30" style={{ marginLeft: '50%' }} />
+          <div className="w-px h-full bg-muted-foreground opacity-30" style={{ marginLeft: '50%' }} />
           {/* 75% marker */}
-          <div className="w-px h-full bg-[var(--fg3)] opacity-30" style={{ marginLeft: '75%' }} />
+          <div className="w-px h-full bg-muted-foreground opacity-30" style={{ marginLeft: '75%' }} />
         </div>
       </div>
 
       {/* Level percentage display */}
-      <div className={`${sizes.text} text-[var(--fg2)] font-mono min-w-[3rem] text-right`}>
+      <div className={`${sizes.text} text-muted-foreground font-mono min-w-[3rem] text-right`}>
         {rmsPercent}%
       </div>
     </div>
@@ -124,20 +124,20 @@ export function CompactAudioLevelMeter({
   const rmsPercent = Math.round(logRms * 100);
 
   const getLevelColor = (level: number) => {
-    if (level < 0.3) return 'bg-[var(--success)]';
-    if (level < 0.7) return 'bg-[var(--gold)]';
-    return 'bg-[var(--danger)]';
+    if (level < 0.3) return 'bg-success';
+    if (level < 0.7) return 'bg-primary';
+    return 'bg-destructive';
   };
 
   return (
     <div className={`flex items-center space-x-1 ${className}`}>
       {/* Activity dot */}
       <div className={`w-1.5 h-1.5 rounded-full ${
-        isActive ? 'bg-[var(--success)]' : 'bg-[var(--bg-elevated)]'
+        isActive ? 'bg-success' : 'bg-muted'
       }`} />
 
       {/* Mini meter */}
-      <div className="w-8 h-1.5 bg-[var(--bg-elevated)] rounded-sm overflow-hidden">
+      <div className="w-8 h-1.5 bg-muted rounded-sm overflow-hidden">
         <div
           className={`h-full ${getLevelColor(logRms)} transition-all duration-150`}
           style={{ width: `${rmsPercent}%` }}

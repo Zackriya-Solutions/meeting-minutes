@@ -258,9 +258,9 @@ pub async fn indexing_status(state: tauri::State<'_, AppState>) -> Result<Indexi
         "SELECT COUNT(DISTINCT c.meeting_id) FROM chunks c \
          JOIN meetings m ON m.id=c.meeting_id WHERE m.indexing_allowed=1",
     )
-        .fetch_one(pool)
-        .await
-        .map_err(|e| e.to_string())?;
+    .fetch_one(pool)
+    .await
+    .map_err(|e| e.to_string())?;
     let (chunks_total, embeddings_done, embeddings_pending, embeddings_failed): (
         i64,
         i64,

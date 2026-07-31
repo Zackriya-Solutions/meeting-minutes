@@ -9,7 +9,10 @@ use sqlx::sqlite::SqlitePoolOptions;
 use sqlx::SqlitePool;
 
 use super::runner::{run_one_for_test, RunnerConfig};
-use super::{kind, store, JobContext, JobHandler};
+use super::{
+    enqueue_missing_diarization, enqueue_missing_transcript_refinement, kind, store, JobContext,
+    JobHandler,
+};
 
 /// In-memory pool pinned to a single connection so all queries share one DB.
 async fn test_pool() -> SqlitePool {
@@ -285,12 +288,10 @@ async fn recover_running_requeues_interrupted_jobs() {
 #[tokio::test]
 async fn startup_cleanup_retires_only_legacy_archive_fanout() {
     let pool = test_pool().await;
-    sqlx::query(
-        "CREATE TABLE meetings (id TEXT PRIMARY KEY, created_at TEXT NOT NULL)",
-    )
-    .execute(&pool)
-    .await
-    .unwrap();
+    sqlx::query("CREATE TABLE meetings (id TEXT PRIMARY KEY, created_at TEXT NOT NULL)")
+        .execute(&pool)
+        .await
+        .unwrap();
     for (id, created_at) in [
         ("old-legitimate", "2026-07-20 10:00:00"),
         ("old-archive", "2026-07-20 10:00:00"),
@@ -370,10 +371,16 @@ async fn startup_cleanup_retires_only_legacy_archive_fanout() {
 async fn chunk_embed_creates_chunks_and_chains_diarize_and_extract() {
     let pool = test_pool().await;
     // Tables the chunk_embed handler touches.
-    sqlx::query("CREATE TABLE meetings (id TEXT PRIMARY KEY, indexing_allowed INTEGER NOT NULL DEFAULT 1)")
-        .execute(&pool).await.unwrap();
+    sqlx::query(
+        "CREATE TABLE meetings (id TEXT PRIMARY KEY, indexing_allowed INTEGER NOT NULL DEFAULT 1)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
     sqlx::query("INSERT INTO meetings(id) VALUES('m1')")
-        .execute(&pool).await.unwrap();
+        .execute(&pool)
+        .await
+        .unwrap();
     sqlx::query("CREATE TABLE transcripts (id TEXT PRIMARY KEY, meeting_id TEXT, transcript TEXT, audio_start_time REAL, audio_end_time REAL)")
         .execute(&pool).await.unwrap();
     sqlx::query("CREATE TABLE chunks (id INTEGER PRIMARY KEY, meeting_id TEXT, first_segment_id TEXT, last_segment_id TEXT, start_ms INTEGER, end_ms INTEGER, text TEXT, token_count INTEGER, embedding_status TEXT DEFAULT 'pending')")
@@ -466,13 +473,19 @@ async fn chunk_embed_creates_chunks_and_chains_diarize_and_extract() {
     .fetch_one(&pool)
     .await
     .unwrap();
-    assert_eq!(analysis_jobs, 2, "legacy post-meeting analysis is preserved");
+    assert_eq!(
+        analysis_jobs, 2,
+        "legacy post-meeting analysis is preserved"
+    );
     let archived_chunks: i64 =
         sqlx::query_scalar("SELECT COUNT(*) FROM chunks WHERE meeting_id='m2'")
             .fetch_one(&pool)
             .await
             .unwrap();
-    assert!(archived_chunks > 0, "legacy post-meeting indexing is preserved");
+    assert!(
+        archived_chunks > 0,
+        "legacy post-meeting indexing is preserved"
+    );
 }
 
 #[tokio::test]
@@ -508,18 +521,20 @@ async fn private_memory_skips_indexing_but_still_chains_analysis() {
         .await
         .unwrap();
 
-    let chunk_count: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM chunks WHERE meeting_id='m1'")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+    let chunk_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM chunks WHERE meeting_id='m1'")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
     assert_eq!(chunk_count, 0, "private memory must not remain indexed");
 
     let kinds: Vec<String> = sqlx::query_scalar("SELECT DISTINCT kind FROM jobs ORDER BY kind")
         .fetch_all(&pool)
         .await
         .unwrap();
-    assert_eq!(kinds, vec![kind::DIARIZE.to_string(), kind::EXTRACT.to_string()]);
+    assert_eq!(
+        kinds,
+        vec![kind::DIARIZE.to_string(), kind::EXTRACT.to_string()]
+    );
 }
 
 #[tokio::test]
@@ -562,6 +577,152 @@ async fn private_memory_blocks_cloud_extraction_handler() {
 }
 
 #[tokio::test]
+async fn missing_diarization_backfill_queues_each_eligible_meeting_once() {
+    let pool = test_pool().await;
+    sqlx::query(
+        "CREATE TABLE meetings (
+            id TEXT PRIMARY KEY,
+            folder_path TEXT,
+            diarization_enabled INTEGER,
+            occurred_at TEXT,
+            created_at TEXT NOT NULL
+        )",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "CREATE TABLE transcripts (
+            id TEXT PRIMARY KEY,
+            meeting_id TEXT NOT NULL,
+            speaker_id INTEGER
+        )",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO meetings(id, folder_path, diarization_enabled, created_at) VALUES
+            ('eligible', '/recordings/eligible', NULL, datetime('now')),
+            ('already-diarized', '/recordings/done', 1, datetime('now')),
+            ('disabled', '/recordings/disabled', 0, datetime('now')),
+            ('empty', '/recordings/empty', 1, datetime('now'))",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO transcripts(id, meeting_id, speaker_id) VALUES
+            ('t1', 'eligible', NULL),
+            ('t2', 'already-diarized', 7),
+            ('t3', 'disabled', NULL)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    assert_eq!(enqueue_missing_diarization(&pool).await.unwrap(), 1);
+    let queued: (String, String) = sqlx::query_as(
+        "SELECT meeting_id, json_extract(payload, '$.source')
+         FROM jobs WHERE kind='diarize'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(queued.0, "eligible");
+    assert_eq!(queued.1, "automatic_diarization_backfill_v1");
+
+    sqlx::query("UPDATE jobs SET status='done'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(enqueue_missing_diarization(&pool).await.unwrap(), 0);
+}
+
+#[tokio::test]
+async fn missing_transcript_repair_requires_completed_two_minute_recording() {
+    let pool = test_pool().await;
+    sqlx::query(
+        "CREATE TABLE meetings (
+            id TEXT PRIMARY KEY,
+            folder_path TEXT,
+            diarization_enabled INTEGER,
+            occurred_at TEXT,
+            created_at TEXT NOT NULL
+        )",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query("CREATE TABLE transcripts (id TEXT PRIMARY KEY, meeting_id TEXT NOT NULL)")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let root = tempfile::tempdir().unwrap();
+    let completed = root.path().join("completed");
+    let too_short = root.path().join("too-short");
+    let unfinished = root.path().join("unfinished");
+    std::fs::create_dir_all(&completed).unwrap();
+    std::fs::create_dir_all(&too_short).unwrap();
+    std::fs::create_dir_all(&unfinished).unwrap();
+    std::fs::write(
+        completed.join("metadata.json"),
+        r#"{"status":"completed","duration_seconds":120.5}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        too_short.join("metadata.json"),
+        r#"{"status":"completed","duration_seconds":119.9}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        unfinished.join("metadata.json"),
+        r#"{"status":"recording","duration_seconds":180.0}"#,
+    )
+    .unwrap();
+
+    for (id, folder) in [
+        ("completed", completed),
+        ("too-short", too_short),
+        ("unfinished", unfinished),
+    ] {
+        sqlx::query(
+            "INSERT INTO meetings(id, folder_path, diarization_enabled, created_at)
+             VALUES (?, ?, 1, datetime('now'))",
+        )
+        .bind(id)
+        .bind(folder.to_string_lossy().as_ref())
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+
+    assert_eq!(
+        enqueue_missing_transcript_refinement(&pool).await.unwrap(),
+        1
+    );
+    let queued: (String, String) = sqlx::query_as(
+        "SELECT meeting_id, json_extract(payload, '$.source')
+         FROM jobs WHERE kind='refine_missing_transcript'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(queued.0, "completed");
+    assert_eq!(queued.1, "automatic_transcript_repair_v1");
+
+    sqlx::query("UPDATE jobs SET status='done'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        enqueue_missing_transcript_refinement(&pool).await.unwrap(),
+        0
+    );
+}
+
+#[tokio::test]
 async fn backfill_skips_empty_meetings_and_deduplicates_active_work() {
     let pool = test_pool().await;
     sqlx::query("CREATE TABLE meetings (id TEXT PRIMARY KEY)")
@@ -593,19 +754,17 @@ async fn backfill_skips_empty_meetings_and_deduplicates_active_work() {
     .execute(&pool)
     .await
     .unwrap();
-    sqlx::query("INSERT INTO chunks(id, meeting_id, embedding_status) VALUES(1, 'indexed', 'done')")
-        .execute(&pool)
-        .await
-        .unwrap();
+    sqlx::query(
+        "INSERT INTO chunks(id, meeting_id, embedding_status) VALUES(1, 'indexed', 'done')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
 
     let handler = super::handlers::BackfillHandler;
     let context = ctx(&pool);
     handler
-        .run(
-            &context,
-            None,
-            &serde_json::json!({ "reason": "startup" }),
-        )
+        .run(&context, None, &serde_json::json!({ "reason": "startup" }))
         .await
         .unwrap();
     let startup_jobs: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM jobs")
@@ -644,5 +803,8 @@ async fn backfill_skips_empty_meetings_and_deduplicates_active_work() {
             .fetch_one(&pool)
             .await
             .unwrap();
-    assert_eq!(repaired_status, "pending", "missing vector row is repairable");
+    assert_eq!(
+        repaired_status, "pending",
+        "missing vector row is repairable"
+    );
 }

@@ -4,7 +4,8 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
-import { Button } from '@/components/memento/Button';
+import { Button } from '@/components/ui/button';
+import { PromptInput } from '@/components/ui/prompt-input';
 import { Icon } from '@/components/memento/Icon';
 import {
   Dialog,
@@ -116,14 +117,14 @@ function DigestSection({ title, items }: { title: string; items: SeriesDigestIte
   const t = useT();
   if (items.length === 0) return null;
   return (
-    <section className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-sheet)] p-4">
-      <h4 className="text-xs font-medium uppercase tracking-[.12em] text-[var(--fg3)]">{title}</h4>
+    <section className="rounded-2xl border border-border bg-background p-4">
+      <h4 className="text-xs font-medium uppercase tracking-[.12em] text-muted-foreground">{title}</h4>
       <div className="mt-3 grid gap-2">
         {items.map((item) => {
           const content = (
             <>
             {item.category ? (
-              <span className="mb-1 inline-flex rounded-full bg-[var(--gold-soft)] px-2 py-0.5 text-[10px] font-medium uppercase tracking-[.08em] text-[var(--gold)]">
+              <span className="mb-1 inline-flex rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-[.08em] text-primary">
                 {item.category === 'blockers'
                   ? t('Blocker')
                   : item.category === 'next'
@@ -131,11 +132,11 @@ function DigestSection({ title, items }: { title: string; items: SeriesDigestIte
                     : t('Completed')}
               </span>
             ) : null}
-            <span className="block text-[var(--fg1)]">
+            <span className="block text-foreground">
               {item.participant ? <strong>{item.participant}: </strong> : null}
               {item.text}
             </span>
-            <span className="mt-1 block text-xs text-[var(--fg3)]">
+            <span className="mt-1 block text-xs text-muted-foreground">
               {[item.owner, item.due_date, item.source_meeting_title].filter(Boolean).join(' · ')}
             </span>
             </>
@@ -144,7 +145,7 @@ function DigestSection({ title, items }: { title: string; items: SeriesDigestIte
             return (
               <div
                 key={item.record_id}
-                className="rounded-xl bg-[var(--bg-elevated)] px-3 py-2.5 text-left text-sm"
+                className="rounded-xl bg-muted px-3 py-2.5 text-left text-sm"
               >
                 {content}
               </div>
@@ -155,7 +156,7 @@ function DigestSection({ title, items }: { title: string; items: SeriesDigestIte
               type="button"
               key={item.record_id}
               onClick={() => router.push(digestSourceHref(item))}
-              className="rounded-xl bg-[var(--bg-elevated)] px-3 py-2.5 text-left text-sm hover:ring-1 hover:ring-[var(--gold-border)]"
+              className="rounded-xl bg-muted px-3 py-2.5 text-left text-sm hover:ring-1 hover:ring-primary/40"
             >
               {content}
             </button>
@@ -184,34 +185,34 @@ function InsightSection({ insights }: { insights: StandupSeriesInsight[] }) {
     low: t('Low priority'),
   };
   return (
-    <section className="rounded-2xl border border-[var(--gold-border)] bg-[var(--gold-soft)] p-4 lg:col-span-2">
-      <h4 className="text-xs font-medium uppercase tracking-[.12em] text-[var(--fg3)]">
+    <section className="rounded-2xl border border-primary/40 bg-primary/10 p-4 lg:col-span-2">
+      <h4 className="text-xs font-medium uppercase tracking-[.12em] text-muted-foreground">
         {t('Suggested follow-ups')}
       </h4>
-      <p className="mt-1 text-xs text-[var(--fg3)]">
+      <p className="mt-1 text-xs text-muted-foreground">
         {t('Derived locally from accepted records. Nothing is sent or changed automatically.')}
       </p>
       <div className="mt-3 grid gap-2 sm:grid-cols-2">
         {insights.map((insight, index) => {
           const source = insight.sources[0];
           const priorityClass = insight.priority === 'high'
-            ? 'bg-[color-mix(in_srgb,var(--danger)_12%,transparent)] text-[var(--danger)]'
+            ? 'bg-destructive/10 text-destructive'
             : insight.priority === 'medium'
-              ? 'bg-[var(--gold-soft)] text-[var(--gold)]'
-              : 'bg-[var(--bg-sheet)] text-[var(--fg3)]';
+              ? 'bg-primary/10 text-primary'
+              : 'bg-background text-muted-foreground';
           const content = (
             <>
               <span className="flex items-center justify-between gap-2">
-                <span className="block text-xs font-medium text-[var(--gold)]">
+                <span className="block text-xs font-medium text-primary">
                   {labels[insight.kind] ?? t('Review accepted fact')}
                 </span>
                 <span className={cn('shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide', priorityClass)}>
                   {priorityLabels[insight.priority]}
                 </span>
               </span>
-              <span className="mt-1 block text-sm text-[var(--fg1)]">{insight.text}</span>
+              <span className="mt-1 block text-sm text-foreground">{insight.text}</span>
               {source ? (
-                <span className="mt-1 block text-xs text-[var(--fg3)]">
+                <span className="mt-1 block text-xs text-muted-foreground">
                   {source.source_meeting_title}
                   {insight.sources.length > 1 ? ` · ${t('sources')}: ${insight.sources.length}` : ''}
                 </span>
@@ -223,12 +224,12 @@ function InsightSection({ insights }: { insights: StandupSeriesInsight[] }) {
               type="button"
               key={`${insight.kind}-${source.record_id}-${index}`}
               onClick={() => router.push(digestSourceHref(source))}
-              className="rounded-xl bg-[var(--bg-elevated)] px-3 py-2.5 text-left hover:ring-1 hover:ring-[var(--gold-border)]"
+              className="rounded-xl bg-muted px-3 py-2.5 text-left hover:ring-1 hover:ring-primary/40"
             >
               {content}
             </button>
           ) : (
-            <div key={`${insight.kind}-${index}`} className="rounded-xl bg-[var(--bg-elevated)] px-3 py-2.5">
+            <div key={`${insight.kind}-${index}`} className="rounded-xl bg-muted px-3 py-2.5">
               {content}
             </div>
           );
@@ -285,14 +286,14 @@ export default function CollectionsPage() {
     [meetings],
   );
   const normalizeSearch = (value: string) =>
-    value.toLocaleLowerCase(lang === 'ru' ? 'ru-RU' : 'en-US').trim();
+    value.toLocaleLowerCase('ru-RU').trim();
   const filteredCollections = useMemo(() => {
     const query = normalizeSearch(collectionSearch);
     if (!query) return collections;
     return collections.filter((collection) => {
       const displayName = getCollectionDisplayText(collection, t).name;
       return `${displayName} ${collection.name}`
-        .toLocaleLowerCase(lang === 'ru' ? 'ru-RU' : 'en-US')
+        .toLocaleLowerCase('ru-RU')
         .includes(query);
     });
   }, [collectionSearch, collections, lang, t]);
@@ -307,7 +308,7 @@ export default function CollectionsPage() {
         folderPath: meeting.folder_path,
       }, lang);
       return `${meeting.title} ${display.title} ${display.dateLabel}`
-        .toLocaleLowerCase(lang === 'ru' ? 'ru-RU' : 'en-US')
+        .toLocaleLowerCase('ru-RU')
         .includes(query);
     });
   }, [meetingSearch, selectedMeetings, lang]);
@@ -322,7 +323,7 @@ export default function CollectionsPage() {
         folderPath: meeting.folder_path,
       }, lang);
       return `${meeting.title} ${display.title} ${display.dateLabel}`
-        .toLocaleLowerCase(lang === 'ru' ? 'ru-RU' : 'en-US')
+        .toLocaleLowerCase('ru-RU')
         .includes(query);
     });
   }, [manageSearch, meetings, lang]);
@@ -637,26 +638,27 @@ export default function CollectionsPage() {
     <div className="mm-page min-w-0">
       <header className="mm-page-header justify-between">
         <div className="flex min-w-0 items-center gap-3">
-          <button onClick={() => router.push('/')} className="mm-icon-button" aria-label={t('Back')}>
+          <Button variant="ghost" size="icon" onClick={() => router.push('/')} aria-label={t('Back')}>
             <Icon name="back" />
-          </button>
+          </Button>
           <div className="min-w-0">
             <h1 className="mm-page-title">{t('Collections')}</h1>
-            <p className="mt-1 text-sm text-[var(--fg3)]">{t('Group recurring or related meetings, search inside them, and ask questions using only their content.')}</p>
+            <p className="mt-1 text-sm text-muted-foreground">{t('Group recurring or related meetings, search inside them, and ask questions using only their content.')}</p>
           </div>
         </div>
-        <Button onClick={openCreate} icon={<Icon name="plus" size={17} />}>
+        <Button onClick={openCreate}>
+          <Icon name="plus" size={17} />
           {t('New collection')}
         </Button>
       </header>
 
       <div className="grid min-h-0 flex-1 grid-cols-[minmax(220px,280px)_minmax(0,1fr)] gap-5 pt-5 max-[820px]:grid-cols-1">
-        <aside className="flex min-h-0 flex-col gap-4 overflow-y-auto rounded-3xl border border-[var(--border-subtle)] bg-[var(--bg-sheet)] p-3">
-          <div className="px-2 pt-1 text-xs font-medium uppercase tracking-[.14em] text-[var(--fg3)]">
+        <aside className="flex min-h-0 flex-col gap-4 overflow-y-auto rounded-3xl border border-border bg-background p-3">
+          <div className="px-2 pt-1 text-xs font-medium uppercase tracking-[.14em] text-muted-foreground">
             {t('Your collections')}
           </div>
           <label className="relative block">
-            <Icon name="search" size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--fg3)]" />
+            <Icon name="search" size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
             <input
               value={collectionSearch}
               onChange={(event) => setCollectionSearch(event.target.value)}
@@ -666,13 +668,13 @@ export default function CollectionsPage() {
           </label>
           <div className="flex flex-col gap-1">
             {loading ? (
-              <div className="px-3 py-6 text-sm text-[var(--fg3)]">{t('Loading…')}</div>
+              <div className="px-3 py-6 text-sm text-muted-foreground">{t('Loading…')}</div>
             ) : collections.length === 0 ? (
-              <div className="rounded-2xl border border-dashed border-[var(--border-subtle)] px-4 py-5 text-sm leading-relaxed text-[var(--fg3)]">
+              <div className="rounded-2xl border border-dashed border-border px-4 py-5 text-sm leading-relaxed text-muted-foreground">
                 {t('Create a collection to group meetings by project, client, or topic.')}
               </div>
             ) : filteredCollections.length === 0 ? (
-              <div className="px-3 py-6 text-sm text-[var(--fg3)]">{t('No collections found')}</div>
+              <div className="px-3 py-6 text-sm text-muted-foreground">{t('No collections found')}</div>
             ) : (
               filteredCollections.map((collection) => {
                 const display = getCollectionDisplayText(collection, t);
@@ -683,16 +685,16 @@ export default function CollectionsPage() {
                     className={cn(
                       'flex items-center gap-3 rounded-2xl px-3 py-3 text-left transition-colors',
                       selectedId === collection.id
-                        ? 'bg-[var(--gold-soft)] text-[var(--fg1)]'
-                        : 'text-[var(--fg2)] hover:bg-[var(--bg-elevated)]',
+                        ? 'bg-primary/10 text-foreground'
+                        : 'text-muted-foreground hover:bg-muted',
                     )}
                   >
-                    <span className={cn('flex h-9 w-9 items-center justify-center rounded-xl', selectedId === collection.id ? 'bg-[var(--gold-soft-strong)] text-[var(--gold)]' : 'bg-[var(--bg-elevated)]')}>
+                    <span className={cn('flex h-9 w-9 items-center justify-center rounded-xl', selectedId === collection.id ? 'bg-primary/20 text-primary' : 'bg-muted')}>
                       <Icon name={collection.kind === 'series' ? 'refresh' : 'folder'} size={18} />
                     </span>
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-sm font-medium">{display.name}</span>
-                      <span className="mt-0.5 block text-xs text-[var(--fg3)]">
+                      <span className="mt-0.5 block text-xs text-muted-foreground">
                         {collection.meeting_count} {t('meetings')}
                         {collection.kind === 'series' && collection.auto_add ? ` · ${t('auto')}` : ''}
                       </span>
@@ -704,19 +706,19 @@ export default function CollectionsPage() {
           </div>
 
           {visibleSuggestions.length > 0 && (
-            <div className="mt-auto border-t border-[var(--border-subtle)] pt-4">
-              <div className="mb-2 flex items-center gap-2 px-2 text-xs font-medium uppercase tracking-[.14em] text-[var(--fg3)]">
+            <div className="mt-auto border-t border-border pt-4">
+              <div className="mb-2 flex items-center gap-2 px-2 text-xs font-medium uppercase tracking-[.14em] text-muted-foreground">
                 <Icon name="spark" size={15} />
                 {t('Suggested series')}
               </div>
-              <p className="mb-3 px-2 text-xs leading-relaxed text-[var(--fg3)]">
+              <p className="mb-3 px-2 text-xs leading-relaxed text-muted-foreground">
                 {t('Memento found recurring meetings. Nothing is created until you confirm.')}
               </p>
               <div className="flex flex-col gap-2">
                 {visibleSuggestions.map((suggestion) => (
-                  <div key={suggestion.suggested_name} className="rounded-2xl border border-[var(--gold-border)] bg-[var(--gold-soft)] p-3">
-                    <div className="text-sm font-medium text-[var(--fg1)]">{suggestion.suggested_name}</div>
-                    <div className="mt-1 text-xs text-[var(--fg3)]">
+                  <div key={suggestion.suggested_name} className="rounded-2xl border border-primary/40 bg-primary/10 p-3">
+                    <div className="text-sm font-medium text-foreground">{suggestion.suggested_name}</div>
+                    <div className="mt-1 text-xs text-muted-foreground">
                       {suggestion.meeting_ids.length} {t('meetings')} · {t(suggestion.cadence)}
                     </div>
                     <button
@@ -728,7 +730,7 @@ export default function CollectionsPage() {
                         return next;
                       })}
                       aria-expanded={expandedSuggestions.has(suggestion.suggested_name)}
-                      className="mt-2 flex w-full items-center justify-between rounded-xl px-2 py-1.5 text-left text-xs font-medium text-[var(--fg2)] transition-colors hover:bg-[var(--gold-soft-strong)] hover:text-[var(--fg1)]"
+                      className="mt-2 flex w-full items-center justify-between rounded-xl px-2 py-1.5 text-left text-xs font-medium text-muted-foreground transition-colors hover:bg-primary/20 hover:text-foreground"
                     >
                       <span className="flex items-center gap-1.5">
                         <Icon name="eye" size={14} />
@@ -740,7 +742,7 @@ export default function CollectionsPage() {
                       />
                     </button>
                     {expandedSuggestions.has(suggestion.suggested_name) && (
-                      <div className="mt-2 max-h-56 space-y-1 overflow-y-auto rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-sheet)] p-1.5" role="list">
+                      <div className="mt-2 max-h-56 space-y-1 overflow-y-auto rounded-xl border border-border bg-background p-1.5" role="list">
                         {suggestion.meetings.map((meeting) => {
                           const display = getMeetingDisplayInfo({
                             title: meeting.title,
@@ -752,10 +754,10 @@ export default function CollectionsPage() {
                               role="listitem"
                               className="rounded-lg px-2 py-2 text-left"
                             >
-                              <div className="break-words text-xs font-medium leading-snug text-[var(--fg1)]">
+                              <div className="break-words text-xs font-medium leading-snug text-foreground">
                                 {display.title}
                               </div>
-                              <div className="mt-0.5 flex items-center gap-1 text-[11px] text-[var(--fg3)]">
+                              <div className="mt-0.5 flex items-center gap-1 text-[11px] text-muted-foreground">
                                 <Icon name="calendar" size={12} />
                                 {display.dateLabel}
                               </div>
@@ -787,74 +789,76 @@ export default function CollectionsPage() {
           )}
         </aside>
 
-        <main className="min-h-0 min-w-0 overflow-y-auto rounded-3xl border border-[var(--border-subtle)] bg-[var(--bg-surface)]">
+        <main className="min-h-0 min-w-0 overflow-y-auto rounded-3xl border border-border bg-card">
           {!selected ? (
             <div className="flex h-full min-h-[360px] flex-col items-center justify-center px-8 text-center">
               <div className="mm-empty-icon"><Icon name="folder" size={26} /></div>
               <h2 className="mt-4 text-xl font-semibold">{t('No collection selected')}</h2>
-              <p className="mt-2 max-w-sm text-sm leading-relaxed text-[var(--fg3)]">
+              <p className="mt-2 max-w-sm text-sm leading-relaxed text-muted-foreground">
                 {t('Create a collection and add meetings to build a focused knowledge space.')}
               </p>
-              <Button className="mt-5" onClick={openCreate} icon={<Icon name="plus" size={17} />}>
+              <Button className="mt-5" onClick={openCreate}>
+                <Icon name="plus" size={17} />
                 {t('New collection')}
               </Button>
             </div>
           ) : (
             <>
-              <div className="flex flex-wrap items-start justify-between gap-4 border-b border-[var(--border-subtle)] p-6">
+              <div className="flex flex-wrap items-start justify-between gap-4 border-b border-border p-6">
                 <div className="min-w-0">
-                  <div className="mb-2 flex items-center gap-2 text-xs uppercase tracking-[.12em] text-[var(--fg3)]">
+                  <div className="mb-2 flex items-center gap-2 text-xs uppercase tracking-[.12em] text-muted-foreground">
                     <Icon name={selected.system_key === 'inbox' ? 'spark' : selected.kind === 'series' ? 'refresh' : 'folder'} size={14} />
                     {selectedDisplay?.category}
                   </div>
                   <h2 className="truncate text-3xl font-semibold tracking-[-.04em]">{selectedDisplay?.name}</h2>
-                  <p className="mt-2 text-sm text-[var(--fg3)]">
+                  <p className="mt-2 text-sm text-muted-foreground">
                     {selected.meeting_count} {t('meetings in this collection')}
                   </p>
-                  <p className="mt-2 max-w-2xl text-sm leading-relaxed text-[var(--fg2)]">
+                  <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted-foreground">
                     {selectedDisplay?.description}
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                  {!selected.is_system && <Button variant="secondary" onClick={openMembership} icon={<Icon name="plus" size={16} />}>
+                  {!selected.is_system && <Button variant="secondary" onClick={openMembership}>
+                    <Icon name="plus" size={16} />
                     {t('Manage meetings')}
                   </Button>}
                   {!selected.is_system && selected.kind === 'manual' && selected.meeting_count >= 3 && (
                     <Button
                       variant="secondary"
                       onClick={() => setConvertOpen(true)}
-                      icon={<Icon name="refresh" size={16} />}
                     >
+                      <Icon name="refresh" size={16} />
                       {t('Make recurring')}
                     </Button>
                   )}
                   <Button
                     variant="secondary"
                     onClick={() => router.push(`/search?collectionId=${selected.id}`)}
-                    icon={<Icon name="search" size={16} />}
                   >
+                    <Icon name="search" size={16} />
                     {t('Search collection content')}
                   </Button>
-                  {!selected.is_system && <button onClick={openRename} className="mm-icon-button" aria-label={t('Rename collection')}>
+                  {!selected.is_system && <Button variant="ghost" size="icon" onClick={openRename} aria-label={t('Rename collection')}>
                     <Icon name="edit" size={17} />
-                  </button>}
-                  {!selected.is_system && <button onClick={() => setDeleteOpen(true)} className="mm-icon-button hover:text-[var(--danger)]" aria-label={t('Delete collection')}>
+                  </Button>}
+                  {!selected.is_system && <Button variant="ghost" size="icon" onClick={() => setDeleteOpen(true)} className="hover:text-destructive" aria-label={t('Delete collection')}>
                     <Icon name="trash" size={17} />
-                  </button>}
+                  </Button>}
                 </div>
               </div>
 
               {selected.kind === 'series' && (
-                <div className="border-b border-[var(--border-subtle)] p-6">
-                  <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-sheet)] p-4">
+                <div className="border-b border-border p-6">
+                  <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-border bg-background p-4">
                     <div className="min-w-0">
-                      <h3 className="text-sm font-semibold text-[var(--fg1)]">{t('Add future matching meetings automatically')}</h3>
-                      <p className="mt-1 max-w-2xl text-sm leading-relaxed text-[var(--fg3)]">
+                      <h3 className="text-sm font-semibold text-foreground">{t('Add future matching meetings automatically')}</h3>
+                      <p className="mt-1 max-w-2xl text-sm leading-relaxed text-muted-foreground">
                         {selected.auto_add
                           ? `${t('Enabled. Memento compares new or renamed meeting titles with this rule')}: “${selected.match_rule || selected.name}”.`
                           : t('Disabled. This series will keep its current meetings until you add more manually.')}
                       </p>
-                      <p className="mt-1 text-xs text-[var(--fg3)]">
+                      <p className="mt-1 text-xs text-muted-foreground">
                         {t('No collection is ever created automatically. Memento only suggests a series; you decide whether to create it.')}
                       </p>
                     </div>
@@ -869,16 +873,16 @@ export default function CollectionsPage() {
               )}
 
               {selected.kind === 'series' && (
-                <div className="border-b border-[var(--border-subtle)] p-6">
+                <div className="border-b border-border p-6">
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
-                      <h3 className="text-base font-semibold text-[var(--fg1)]">{t('Standup series digest')}</h3>
-                      <p className="mt-1 text-sm text-[var(--fg3)]">
+                      <h3 className="text-base font-semibold text-foreground">{t('Standup series digest')}</h3>
+                      <p className="mt-1 text-sm text-muted-foreground">
                         {t('Built only from accepted records, with links back to transcript evidence.')}
                       </p>
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
-                      <div className="flex rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-sheet)] p-1">
+                      <div className="flex rounded-xl border border-border bg-background p-1">
                         {[
                           { label: '7d', value: 7 },
                           { label: '14d', value: 14 },
@@ -891,8 +895,8 @@ export default function CollectionsPage() {
                             className={cn(
                               'rounded-lg px-2.5 py-1.5 text-xs transition-colors',
                               digestWindowDays === option.value
-                                ? 'bg-[var(--gold-soft-strong)] text-[var(--fg1)]'
-                                : 'text-[var(--fg3)] hover:text-[var(--fg1)]',
+                                ? 'bg-primary/20 text-foreground'
+                                : 'text-muted-foreground hover:text-foreground',
                             )}
                           >
                             {option.label}
@@ -904,29 +908,29 @@ export default function CollectionsPage() {
                         variant="secondary"
                         onClick={copySeriesDigest}
                         disabled={!seriesDigest?.markdown}
-                        icon={<Icon name="copy" size={15} />}
                       >
+                        <Icon name="copy" size={15} />
                         {t('Copy digest')}
                       </Button>
                     </div>
                   </div>
 
                   {loadingDigest ? (
-                    <div className="py-8 text-center text-sm text-[var(--fg3)]">{t('Building digest…')}</div>
+                    <div className="py-8 text-center text-sm text-muted-foreground">{t('Building digest…')}</div>
                   ) : seriesDigest ? (
                     <div className="mt-5">
                       <div className="grid gap-2 sm:grid-cols-3">
-                        <div className="rounded-2xl bg-[var(--bg-sheet)] p-3">
+                        <div className="rounded-2xl bg-background p-3">
                           <div className="text-2xl font-semibold">{seriesDigest.meeting_count}</div>
-                          <div className="mt-1 text-xs text-[var(--fg3)]">{t('meetings in window')}</div>
+                          <div className="mt-1 text-xs text-muted-foreground">{t('meetings in window')}</div>
                         </div>
-                        <div className="rounded-2xl bg-[var(--bg-sheet)] p-3">
+                        <div className="rounded-2xl bg-background p-3">
                           <div className="text-2xl font-semibold">{seriesDigest.meetings_with_accepted_records}</div>
-                          <div className="mt-1 text-xs text-[var(--fg3)]">{t('reviewed meetings')}</div>
+                          <div className="mt-1 text-xs text-muted-foreground">{t('reviewed meetings')}</div>
                         </div>
-                        <div className={cn('rounded-2xl p-3', seriesDigest.pending_review_count > 0 ? 'bg-[var(--gold-soft)]' : 'bg-[var(--bg-sheet)]')}>
+                        <div className={cn('rounded-2xl p-3', seriesDigest.pending_review_count > 0 ? 'bg-primary/10' : 'bg-background')}>
                           <div className="text-2xl font-semibold">{seriesDigest.pending_review_count}</div>
-                          <div className="mt-1 text-xs text-[var(--fg3)]">{t('records pending review')}</div>
+                          <div className="mt-1 text-xs text-muted-foreground">{t('records pending review')}</div>
                         </div>
                       </div>
 
@@ -940,7 +944,7 @@ export default function CollectionsPage() {
                         seriesDigest.deep_dives,
                         seriesDigest.parking_lot,
                       ].every((items) => items.length === 0) ? (
-                        <div className="mt-3 rounded-2xl border border-dashed border-[var(--border-strong)] px-4 py-5 text-sm text-[var(--fg3)]">
+                        <div className="mt-3 rounded-2xl border border-dashed border-border px-4 py-5 text-sm text-muted-foreground">
                           {t('Review extracted records inside standup meetings to make the series digest trustworthy.')}
                         </div>
                       ) : (
@@ -963,9 +967,9 @@ export default function CollectionsPage() {
 
               <div className="p-6">
                 <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                  <h3 className="text-sm font-medium uppercase tracking-[.12em] text-[var(--fg3)]">{t('Meetings')}</h3>
+                  <h3 className="text-sm font-medium uppercase tracking-[.12em] text-muted-foreground">{t('Meetings')}</h3>
                   <label className="relative min-w-[240px] max-w-sm flex-1 sm:flex-none">
-                    <Icon name="search" size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--fg3)]" />
+                    <Icon name="search" size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
                     <input
                       value={meetingSearch}
                       onChange={(event) => setMeetingSearch(event.target.value)}
@@ -975,15 +979,15 @@ export default function CollectionsPage() {
                   </label>
                 </div>
                 {loadingMeetings ? (
-                  <div className="py-12 text-center text-sm text-[var(--fg3)]">{t('Loading…')}</div>
+                  <div className="py-12 text-center text-sm text-muted-foreground">{t('Loading…')}</div>
                 ) : selectedMeetings.length === 0 ? (
-                  <button onClick={openMembership} className="flex w-full flex-col items-center rounded-3xl border border-dashed border-[var(--border-strong)] px-8 py-14 text-center hover:bg-[var(--bg-elevated)]">
+                  <Button variant="outline" onClick={openMembership} className="h-auto w-full flex-col rounded-3xl border-dashed px-8 py-14 text-center">
                     <span className="mm-empty-icon"><Icon name="plus" size={24} /></span>
-                    <span className="mt-4 text-base font-medium text-[var(--fg1)]">{t('Add meetings')}</span>
-                    <span className="mt-1 max-w-sm text-sm text-[var(--fg3)]">{t('Choose recordings that belong to this project, client, or recurring series.')}</span>
-                  </button>
+                    <span className="mt-4 text-base font-medium text-foreground">{t('Add meetings')}</span>
+                    <span className="mt-1 max-w-sm text-sm text-muted-foreground">{t('Choose recordings that belong to this project, client, or recurring series.')}</span>
+                  </Button>
                 ) : filteredSelectedMeetings.length === 0 ? (
-                  <div className="rounded-2xl border border-dashed border-[var(--border-strong)] px-4 py-10 text-center text-sm text-[var(--fg3)]">
+                  <div className="rounded-2xl border border-dashed border-border px-4 py-10 text-center text-sm text-muted-foreground">
                     {t('No meetings found in this collection')}
                   </div>
                 ) : (
@@ -996,38 +1000,38 @@ export default function CollectionsPage() {
                         folderPath: meeting.folder_path,
                       }, lang);
                       return (
-                      <div key={meeting.id} className="group flex items-center gap-3 rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-sheet)] p-3 hover:border-[var(--gold-border)]">
+                      <div key={meeting.id} className="group flex items-center gap-3 rounded-2xl border border-border bg-background p-3 hover:border-primary/40">
                         <button
                           onClick={() => router.push(`/meeting-details?id=${encodeURIComponent(meeting.id)}`)}
                           className="flex min-w-0 flex-1 items-center gap-3 text-left"
                         >
-                          <span className="flex h-10 w-10 flex-none items-center justify-center rounded-xl bg-[var(--bg-elevated)] text-[var(--gold)]">
-                            <Icon name="transcript" size={18} />
+                          <span className="flex h-10 w-10 flex-none items-center justify-center rounded-xl bg-muted text-primary">
+                            <Icon name="meeting" size={18} />
                           </span>
                           <span className="min-w-0 flex-1">
-                            <span className="block truncate text-sm font-medium text-[var(--fg1)]">{display.title}</span>
-                            <span className="mt-1 block text-xs text-[var(--fg3)]">{display.dateLabel}</span>
+                            <span className="block truncate text-sm font-medium text-foreground">{display.title}</span>
+                            <span className="mt-1 block text-xs text-muted-foreground">{display.dateLabel}</span>
                           </span>
-                          <Icon name="chevron-right" size={17} className="text-[var(--fg3)]" />
+                          <Icon name="chevron-right" size={17} className="text-muted-foreground" />
                         </button>
-                        <button onClick={() => removeMeeting(meeting.id)} className="mm-icon-button h-9 w-9 opacity-0 group-hover:opacity-100" aria-label={t('Remove from collection')}>
+                        <Button variant="ghost" size="icon" onClick={() => removeMeeting(meeting.id)} className="opacity-0 group-hover:opacity-100" aria-label={t('Remove from collection')}>
                           <Icon name="close" size={15} />
-                        </button>
+                        </Button>
                       </div>
                       );
                     })}
                   </div>
                 )}
 
-                <section className="mt-6 rounded-3xl border border-[var(--gold-border)] bg-[var(--gold-soft)] p-5">
+                <section className="mt-6 rounded-3xl border border-primary/40 bg-primary/10 p-5">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="flex min-w-0 items-start gap-3">
-                      <span className="flex h-10 w-10 flex-none items-center justify-center rounded-xl bg-[var(--gold-soft-strong)] text-[var(--gold)]">
+                      <span className="flex h-10 w-10 flex-none items-center justify-center rounded-xl bg-primary/20 text-primary">
                         <Icon name="chat" size={18} />
                       </span>
                       <div className="min-w-0">
-                        <h3 className="text-base font-semibold text-[var(--fg1)]">{t('Ask this collection')}</h3>
-                        <p className="mt-1 text-sm leading-relaxed text-[var(--fg3)]">
+                        <h3 className="text-base font-semibold text-foreground">{t('Ask this collection')}</h3>
+                        <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
                           {t('The answer will use only meetings from this collection and include links to source moments.')}
                         </p>
                       </div>
@@ -1036,40 +1040,19 @@ export default function CollectionsPage() {
                       size="sm"
                       variant="ghost"
                       onClick={() => openCollectionChat()}
-                      icon={<Icon name="chat" size={15} />}
                     >
+                      <Icon name="chat" size={15} />
                       {t('Open previous conversation')}
                     </Button>
                   </div>
-                  <div className="mt-4 flex items-end gap-2">
-                    <textarea
-                      value={collectionQuestion}
-                      onChange={(event) => setCollectionQuestion(event.target.value)}
-                      onKeyDown={(event) => {
-                        if (event.key === 'Enter' && !event.shiftKey) {
-                          event.preventDefault();
-                          submitCollectionQuestion();
-                        }
-                      }}
-                      rows={1}
-                      placeholder={t('Ask about this collection…')}
-                      className="mm-field max-h-40 min-h-[48px] flex-1 resize-none bg-[var(--bg-surface)] py-3 text-sm outline-none"
-                    />
-                    <button
-                      type="button"
-                      onClick={submitCollectionQuestion}
-                      disabled={!collectionQuestion.trim()}
-                      className={cn(
-                        'flex h-11 w-11 flex-none items-center justify-center rounded-xl text-[var(--fg-inverse)] transition-colors',
-                        collectionQuestion.trim()
-                          ? 'bg-[var(--gold)] hover:bg-[var(--gold-active)]'
-                          : 'cursor-not-allowed bg-[var(--bg-elevated)]',
-                      )}
-                      aria-label={t('Ask this collection')}
-                    >
-                      <Icon name="send" size={18} />
-                    </button>
-                  </div>
+                  <PromptInput
+                    value={collectionQuestion}
+                    onValueChange={setCollectionQuestion}
+                    onSubmit={submitCollectionQuestion}
+                    containerClassName="mt-4"
+                    placeholder={t('Ask about this collection…')}
+                    sendLabel={t('Ask this collection')}
+                  />
                 </section>
               </div>
             </>
@@ -1110,7 +1093,7 @@ export default function CollectionsPage() {
             </DialogDescription>
           </DialogHeader>
           <label className="relative block">
-            <Icon name="search" size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--fg3)]" />
+            <Icon name="search" size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
             <input
               value={manageSearch}
               onChange={(event) => setManageSearch(event.target.value)}
@@ -1118,11 +1101,11 @@ export default function CollectionsPage() {
               placeholder={t('Find a meeting to add')}
             />
           </label>
-          <div className="min-h-0 overflow-y-auto rounded-2xl border border-[var(--border-subtle)]">
+          <div className="min-h-0 overflow-y-auto rounded-2xl border border-border">
             {meetings.length === 0 ? (
-              <div className="p-8 text-center text-sm text-[var(--fg3)]">{t('There are no recorded meetings yet.')}</div>
+              <div className="p-8 text-center text-sm text-muted-foreground">{t('There are no recorded meetings yet.')}</div>
             ) : filteredManageMeetings.length === 0 ? (
-              <div className="p-8 text-center text-sm text-[var(--fg3)]">{t('No meetings found')}</div>
+              <div className="p-8 text-center text-sm text-muted-foreground">{t('No meetings found')}</div>
             ) : filteredManageMeetings.map((meeting) => {
               const display = getMeetingDisplayInfo({
                 title: meeting.title,
@@ -1131,16 +1114,16 @@ export default function CollectionsPage() {
                 folderPath: meeting.folder_path,
               }, lang);
               return (
-              <label key={meeting.id} className="flex cursor-pointer items-center gap-3 border-b border-[var(--border-subtle)] px-4 py-3 last:border-b-0 hover:bg-[var(--bg-sheet)]">
+              <label key={meeting.id} className="flex cursor-pointer items-center gap-3 border-b border-border px-4 py-3 last:border-b-0 hover:bg-background">
                 <input
                   type="checkbox"
                   checked={membershipDraft.has(meeting.id)}
                   onChange={() => toggleMeeting(meeting.id)}
-                  className="h-4 w-4 accent-[var(--gold)]"
+                  className="h-4 w-4 accent-primary"
                 />
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm text-[var(--fg1)]">{display.title}</span>
-                  <span className="mt-0.5 block text-xs text-[var(--fg3)]">{display.dateLabel}</span>
+                  <span className="block truncate text-sm text-foreground">{display.title}</span>
+                  <span className="mt-0.5 block text-xs text-muted-foreground">{display.dateLabel}</span>
                 </span>
               </label>
               );
@@ -1165,7 +1148,7 @@ export default function CollectionsPage() {
           </DialogHeader>
           <DialogFooter>
             <Button variant="ghost" onClick={() => setDeleteOpen(false)}>{t('Cancel')}</Button>
-            <Button onClick={deleteSelected} disabled={deleting} className="bg-[var(--danger)] hover:bg-[var(--danger)]">
+            <Button onClick={deleteSelected} disabled={deleting} className="bg-destructive hover:bg-destructive">
               {deleting ? t('Deleting…') : t('Delete collection')}
             </Button>
           </DialogFooter>

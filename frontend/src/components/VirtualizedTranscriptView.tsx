@@ -1,17 +1,24 @@
 'use client';
 
-import { useCallback, useRef, useReducer, startTransition, useEffect, useState, memo } from "react";
-import { useVirtualizer } from "@tanstack/react-virtual";
-import { useAutoScroll } from "@/hooks/useAutoScroll";
+import { useCallback, useRef, useEffect, useState, memo } from "react";
 import { useTranscriptStreaming } from "@/hooks/useTranscriptStreaming";
-import { ConfidenceIndicator } from "./ConfidenceIndicator";
-import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
-import { RecordingStatusBar } from "./RecordingStatusBar";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion } from "framer-motion";
 import { TranscriptSegmentData, localizeSpeakerLabel, resolveSpeakerLabel } from "@/types";
 import { SpeakerRenameDialog } from "./MeetingDetails/SpeakerRenameDialog";
 import { useT } from "@/lib/i18n";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "./ui/dialog";
+import { Bubble, BubbleContent } from "./ui/bubble";
+import { Message, MessageAvatar, MessageContent, MessageHeader } from "./ui/message";
+import {
+    MessageScroller,
+    MessageScrollerButton,
+    MessageScrollerContent,
+    MessageScrollerItem,
+    MessageScrollerProvider,
+    MessageScrollerViewport,
+} from "./ui/message-scroller";
+import { cn } from "@/lib/utils";
+import { avatarGradients } from "@/vendor/deslop/primitives/tokens.js";
 
 export interface VirtualizedTranscriptViewProps {
     /** Transcript segments to display */
@@ -30,6 +37,8 @@ export interface VirtualizedTranscriptViewProps {
     showConfidence?: boolean;
     /** Completely disable auto-scroll behavior (for meeting details page) */
     disableAutoScroll?: boolean;
+    /** Optional spacing override for the scroll viewport. */
+    viewportClassName?: string;
 
     // Pagination props (infinite scroll)
     hasMore?: boolean;
@@ -53,20 +62,6 @@ export interface VirtualizedTranscriptViewProps {
     playbackTime?: number | null;
     /** Persist a reviewed correction while retaining the original ASR text. */
     onCorrectTranscript?: (transcriptId: string, correctedText: string) => Promise<void> | void;
-}
-
-// Threshold for enabling virtualization (below this, use simple rendering)
-const VIRTUALIZATION_THRESHOLD = 10;
-
-// Helper function to format seconds as recording-relative time [MM:SS]
-function formatRecordingTime(seconds: number | undefined): string {
-    if (seconds === undefined) return '[--:--]';
-
-    const totalSeconds = Math.floor(seconds);
-    const minutes = Math.floor(totalSeconds / 60);
-    const secs = totalSeconds % 60;
-
-    return `[${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}]`;
 }
 
 function isPlaybackSegmentActive(
@@ -96,22 +91,30 @@ function cleanStopWords(text: string): string {
     return cleanedText.replace(/\s+/g, ' ').trim();
 }
 
+function speakerInitials(label: string): string {
+    const words = label.trim().split(/\s+/).filter(Boolean);
+    if (words.length === 0) return '?';
+
+    if (words.length === 1) {
+        return Array.from(words[0]).slice(0, 2).join('').toLocaleUpperCase();
+    }
+
+    return `${Array.from(words[0])[0] ?? ''}${Array.from(words.at(-1) ?? '')[0] ?? ''}`
+        .toLocaleUpperCase();
+}
+
 // Memoized transcript segment component
 const TranscriptSegment = memo(function TranscriptSegment({
     id,
-    timestamp,
     text,
-    confidence,
     isStreaming,
-    showConfidence,
     highlight = false,
     speakerLabel = null,
     speakerId = null,
     speakerRenamable = false,
     onSpeakerClick,
-    onPlayTimestamp,
     playbackActive = false,
-    onEdit,
+    isOwn = false,
 }: {
     id: string;
     timestamp: number;
@@ -127,91 +130,98 @@ const TranscriptSegment = memo(function TranscriptSegment({
     onPlayTimestamp?: (timestamp: number) => void;
     playbackActive?: boolean;
     onEdit?: () => void;
+    isOwn?: boolean;
 }) {
     const t = useT();
     const displayText = cleanStopWords(text) || (text.trim() === '' ? t('[Silence]') : text);
 
+    const align = isOwn ? 'end' : 'start';
+    const avatarLabel = speakerLabel ?? t('Speaker');
+    const avatarInitials = speakerInitials(avatarLabel);
+    // IlyaGrshin/wallet_animations InitialsAvatar assigns one of seven colors by
+    // `userId % 7`. Diarized speaker ids preserve that mapping; channel-only
+    // transcripts use stable ids for the local and remote sides.
+    const avatarUserId = speakerId ?? (isOwn ? 0 : 1);
+    const avatarGradient = avatarGradients[
+        ((Math.trunc(avatarUserId) % avatarGradients.length) + avatarGradients.length)
+        % avatarGradients.length
+    ];
+
     return (
-        <div
+        <Message
             id={`segment-${id}`}
-            className={`mb-3 rounded-lg border-l-2 transition-colors duration-300 ${
-                highlight
-                    ? 'border-[var(--gold)] bg-[var(--gold-soft)] ring-2 ring-[var(--gold-ring)] -mx-2 px-2 py-1'
-                    : playbackActive
-                      ? 'border-[var(--gold)] bg-[var(--gold-soft)] -mx-2 px-2 py-1'
-                      : 'border-transparent'
-            }`}
+            align={align}
+            role="listitem"
+            className={cn(
+                'mb-3 rounded-lg px-1 py-0.5 transition-colors duration-300',
+                highlight && 'bg-primary/10 ring-2 ring-ring',
+                playbackActive && !highlight && 'bg-primary/10',
+            )}
         >
-            <div className="flex items-start gap-2">
-                <div className="flex flex-col items-start flex-shrink-0 min-w-[50px] mt-1">
-                    {speakerLabel && (
-                        speakerRenamable && speakerId != null && onSpeakerClick ? (
+            <MessageAvatar
+                aria-label={avatarLabel}
+                title={avatarLabel}
+                style={{
+                    background: `linear-gradient(180deg, ${avatarGradient.top} 0%, ${avatarGradient.bottom} 100%)`,
+                }}
+                className={cn(
+                    'h-8 w-8 text-sm font-bold text-white',
+                    isOwn ? 'ml-2' : 'mr-2',
+                )}
+            >
+                <span aria-hidden="true">{avatarInitials}</span>
+            </MessageAvatar>
+            <MessageContent className={cn('gap-1', isOwn ? 'items-end' : 'items-start')}>
+                {speakerLabel && (
+                    <MessageHeader
+                        className={cn(
+                            'gap-2 px-1 text-muted-foreground',
+                            isOwn && 'flex-row-reverse',
+                        )}
+                    >
+                        {speakerRenamable && speakerId != null && onSpeakerClick ? (
                             <button
                                 type="button"
                                 onClick={() => onSpeakerClick(speakerId)}
                                 title={t('Rename speaker')}
-                                className="text-[10px] font-medium uppercase tracking-wide text-[var(--fg3)] hover:text-[var(--gold)] leading-tight text-left focus:outline-none"
+                                className="text-[10px] font-medium uppercase leading-tight tracking-wide text-muted-foreground hover:text-primary focus:outline-none"
                             >
                                 {speakerLabel}
                             </button>
                         ) : (
-                            <span className="text-[10px] font-medium uppercase tracking-wide text-[var(--fg3)] leading-tight">
+                            <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground leading-tight">
                                 {speakerLabel}
                             </span>
-                        )
+                        )}
+                    </MessageHeader>
+                )}
+
+                <Bubble
+                    align={align}
+                    variant={isOwn || isStreaming ? 'muted' : 'secondary'}
+                    className={cn(
+                        'max-w-[82%]',
+                        isOwn
+                            ? 'rounded-[16px_16px_4px_16px]'
+                            : 'rounded-[16px_16px_16px_4px]',
                     )}
-                    <Tooltip>
-                        <TooltipTrigger>
-                            <button
-                                type="button"
-                                onClick={() => onPlayTimestamp?.(timestamp)}
-                                disabled={!onPlayTimestamp}
-                                aria-label={onPlayTimestamp ? t('Play audio from this moment') : undefined}
-                                className={`text-xs ${onPlayTimestamp ? 'cursor-pointer text-[var(--fg3)] underline-offset-2 hover:text-[var(--gold)] hover:underline' : 'text-[var(--fg3)]'}`}
-                            >
-                                {formatRecordingTime(timestamp)}
-                            </button>
-                        </TooltipTrigger>
-                        <TooltipContent>
-                            {onPlayTimestamp && <span>{t('Play audio from this moment')}</span>}
-                            {confidence !== undefined && showConfidence && (
-                                <ConfidenceIndicator confidence={confidence} showIndicator={showConfidence} />
-                            )}
-                        </TooltipContent>
-                    </Tooltip>
-                </div>
-                <div className="group/text flex-1">
-                    {isStreaming ? (
-                        <div className="bg-[var(--bg-elevated)] border border-[var(--border-subtle)] rounded-lg px-3 py-2">
-                            <p className="text-base text-[var(--fg1)] leading-relaxed">{displayText}</p>
-                        </div>
-                    ) : (
-                        <p className="text-base text-[var(--fg1)] leading-relaxed">{displayText}</p>
-                    )}
-                    {onEdit && !isStreaming && (
-                        <button
-                            type="button"
-                            onClick={onEdit}
-                            className="mt-1 text-[10px] text-[var(--fg3)] opacity-0 transition-opacity hover:text-[var(--gold)] group-hover/text:opacity-100 focus:opacity-100"
-                        >
-                            {t('Correct transcript')}
-                        </button>
-                    )}
-                </div>
-            </div>
-        </div>
+                >
+                    <BubbleContent className="whitespace-pre-wrap px-[15px] py-[11px] text-base leading-relaxed">
+                        {displayText}
+                    </BubbleContent>
+                </Bubble>
+            </MessageContent>
+        </Message>
     );
 });
 
 export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps> = ({
     segments,
     isRecording = false,
-    isPaused = false,
-    isProcessing = false,
-    isStopping = false,
     enableStreaming = false,
     showConfidence = true,
     disableAutoScroll = false,
+    viewportClassName,
     hasMore = false,
     isLoadingMore = false,
     totalCount = 0,
@@ -225,8 +235,6 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
     onCorrectTranscript,
 }) => {
     const t = useT();
-    // Create scroll ref first - shared between virtualizer and auto-scroll hook
-    const scrollRef = useRef<HTMLDivElement>(null);
     // Segment id to briefly highlight after a jump-to-timestamp.
     const [highlightedId, setHighlightedId] = useState<string | null>(null);
     // Diarized speaker being renamed (null when the rename dialog is closed).
@@ -242,33 +250,6 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
     const seekConsumedRef = useRef<number | null>(null);
     // Ref for infinite scroll trigger element
     const loadMoreTriggerRef = useRef<HTMLDivElement>(null);
-
-    // Force re-render without flushSync (avoids React warning)
-    const [, rerender] = useReducer((x: number) => x + 1, 0);
-
-    // Setup virtualizer for efficient rendering of large lists
-    const virtualizer = useVirtualizer({
-        count: segments.length,
-        getScrollElement: () => scrollRef.current,
-        estimateSize: () => 60, // Estimated height per segment
-        overscan: 10, // Render extra items above/below viewport
-        onChange: () => {
-            startTransition(() => {
-                rerender();
-            });
-        },
-    });
-
-    // Custom hook for auto-scrolling (supports both virtualized and non-virtualized)
-    useAutoScroll({
-        scrollRef,
-        segments,
-        isRecording,
-        isPaused,
-        virtualizer,
-        virtualizationThreshold: VIRTUALIZATION_THRESHOLD,
-        disableAutoScroll,
-    });
 
     // Streaming text effect hook (typewriter animation for new transcripts)
     const { streamingSegmentId, getDisplayText } = useTranscriptStreaming(
@@ -293,16 +274,11 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
         const target = segments[idx];
         if (!target) return;
 
-        const useVirt = segments.length >= VIRTUALIZATION_THRESHOLD;
         // Small delay so the list has laid out before we scroll.
         const scrollTimer = setTimeout(() => {
-            if (useVirt) {
-                virtualizer.scrollToIndex(idx, { align: 'center' });
-            } else {
-                document
-                    .getElementById(`segment-${target.id}`)
-                    ?.scrollIntoView({ block: 'center', behavior: 'smooth' });
-            }
+            document
+                .getElementById(`segment-${target.id}`)
+                ?.scrollIntoView({ block: 'center', behavior: 'smooth' });
             setHighlightedId(target.id);
         }, 150);
         const clearTimer = setTimeout(() => {
@@ -312,7 +288,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
             clearTimeout(scrollTimer);
             clearTimeout(clearTimer);
         };
-    }, [scrollToTimestamp, segments, virtualizer]);
+    }, [scrollToTimestamp, segments]);
 
     // Infinite scroll: IntersectionObserver to trigger loading more
     useEffect(() => {
@@ -341,175 +317,52 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
         return () => observer.disconnect();
     }, [hasMore, isLoadingMore, onLoadMore, isRecording, segments.length]);
 
-    // Scroll-based fallback for fast scrolling
-    useEffect(() => {
-        if (!onLoadMore || !hasMore || isLoadingMore || isRecording) return;
-
-        const scrollElement = scrollRef.current;
-        if (!scrollElement) return;
-
-        let ticking = false;
-
-        const handleScroll = () => {
-            if (ticking || isLoadingMore || !hasMore) return;
-
-            ticking = true;
-            requestAnimationFrame(() => {
-                const { scrollTop, scrollHeight, clientHeight } = scrollElement;
-                const scrollBottom = scrollHeight - scrollTop - clientHeight;
-
-                // Trigger load when within 200px of bottom
-                if (scrollBottom < 200 && hasMore && !isLoadingMore) {
-                    onLoadMore();
-                }
-                ticking = false;
-            });
-        };
-
-        scrollElement.addEventListener('scroll', handleScroll, { passive: true });
-        return () => scrollElement.removeEventListener('scroll', handleScroll);
-    }, [onLoadMore, hasMore, isLoadingMore, isRecording]);
-
-    // Use simple rendering for small lists, virtualization for large lists
-    const useVirtualization = segments.length >= VIRTUALIZATION_THRESHOLD;
-
     return (
-        <div ref={scrollRef} className="flex flex-col h-full overflow-y-auto px-4 py-2">
-            {/* Recording Status Bar - Sticky at top, always visible when recording */}
-            <AnimatePresence>
-                {isRecording && (
-                    <div className="sticky top-0 z-10 bg-[var(--bg-canvas)] pb-2">
-                        <RecordingStatusBar isPaused={isPaused} />
-                    </div>
-                )}
-            </AnimatePresence>
-
-            {/* Content - add padding when recording to prevent overlap */}
-            <div className={isRecording ? 'pt-2' : ''}>
+        <>
+        <MessageScrollerProvider
+            autoScroll={!disableAutoScroll}
+            defaultScrollPosition={isRecording ? 'end' : 'start'}
+            scrollPreviousItemPeek={48}
+        >
+        <MessageScroller className="h-full">
+        <MessageScrollerViewport className={cn("px-4 py-2", viewportClassName)}>
+        <MessageScrollerContent className="gap-0">
+            <div>
             {segments.length === 0 ? (
-                // Empty state
-                <motion.div
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    className="text-center text-[var(--fg2)] mt-8"
-                >
-                    {isRecording ? (
-                        <>
-                            <div className="flex items-center justify-center mb-3">
-                                <div className={`w-3 h-3 rounded-full ${isPaused ? 'bg-[var(--gold)]' : 'bg-[var(--gold)] animate-pulse'}`}></div>
-                            </div>
-                            <p className="text-sm text-[var(--fg2)]">
-                                {isPaused ? t('Recording paused') : t('Listening for speech...')}
-                            </p>
-                            <p className="text-xs mt-1 text-[var(--fg3)]">
-                                {isPaused ? t('Click resume to continue recording') : t('Speak to see live transcription')}
-                            </p>
-                        </>
-                    ) : (
-                        <>
-                            <p className="text-lg font-semibold">{t('Welcome to Memento')}</p>
-                            <p className="text-xs mt-1">{t('Select a meeting in the sidebar or start a new recording')}</p>
-                            <p className="mx-auto mt-2 max-w-md text-xs text-[var(--fg3)]">
-                              {t('For a standup summary: open a meeting, choose Improve → Template → Daily Standup, then generate the summary.')}
-                            </p>
-                        </>
-                    )}
-                </motion.div>
-            ) : useVirtualization ? (
-                // Virtualized rendering for large lists
-                <>
-                    <div
-                        style={{
-                            height: virtualizer.getTotalSize(),
-                            width: "100%",
-                            position: "relative",
-                        }}
-                    >
-                        {virtualizer.getVirtualItems().map((virtualRow) => {
-                            const segment = segments[virtualRow.index];
-                            const isStreaming = streamingSegmentId === segment.id;
-
-                            return (
-                                <div
-                                    key={segment.id}
-                                    data-index={virtualRow.index}
-                                    ref={virtualizer.measureElement}
-                                    style={{
-                                        position: "absolute",
-                                        top: 0,
-                                        left: 0,
-                                        width: "100%",
-                                        transform: `translateY(${virtualRow.start}px)`,
-                                    }}
-                                >
-                                    <TranscriptSegment
-                                        id={segment.id}
-                                        timestamp={segment.timestamp}
-                                        text={getDisplayText(segment)}
-                                        confidence={segment.confidence}
-                                        isStreaming={isStreaming}
-                                        showConfidence={showConfidence}
-                                        highlight={highlightedId === segment.id}
-                                        speakerLabel={localizeSpeakerLabel(resolveSpeakerLabel(segment, speakersById), t)}
-                                        speakerId={segment.speaker_id}
-                                        speakerRenamable={
-                                            !!onRenameSpeaker &&
-                                            segment.speaker_id != null &&
-                                            !!speakersById?.has(segment.speaker_id)
-                                        }
-                                        onSpeakerClick={handleSpeakerClick}
-                                        onPlayTimestamp={onPlayTimestamp}
-                                        playbackActive={isPlaybackSegmentActive(segment, playbackTime)}
-                                        onEdit={onCorrectTranscript ? () => setEditingSegment({ id: segment.id, text: segment.text }) : undefined}
-                                    />
-                                </div>
-                            );
-                        })}
-                    </div>
-
-                    {/* Infinite scroll trigger and loading indicator */}
-                    {(hasMore || isLoadingMore) && !isRecording && segments.length > 0 && (
-                        <div ref={loadMoreTriggerRef} className="flex justify-center items-center py-4 mt-2">
-                            {isLoadingMore ? (
-                                <div className="flex items-center gap-2 text-[var(--fg2)]">
-                                    <div className="w-4 h-4 border-2 border-[var(--border-strong)] border-t-[var(--fg2)] rounded-full animate-spin" />
-                                    <span className="text-sm">{t('Loading more...')}</span>
-                                </div>
-                            ) : hasMore && totalCount > 0 ? (
-                                <span className="text-sm text-[var(--fg3)]">
-                                    {t('Showing')} {loadedCount} {t('of')} {totalCount} {t('segments')}
-                                </span>
-                            ) : null}
+                isRecording ? null : (
+                    <MessageScrollerItem messageId="transcript-empty">
+                        <div className="flex min-h-40 items-center justify-center px-6 text-center text-sm text-muted-foreground">
+                            {t('No speech was recognized in this recording')}
                         </div>
-                    )}
-
-                    {/* Listening indicator when recording */}
-                    {!isStopping && isRecording && !isPaused && !isProcessing && segments.length > 0 && (
-                        <motion.div
-                            initial={{ opacity: 0 }}
-                            animate={{ opacity: 1 }}
-                            exit={{ opacity: 0 }}
-                            className="flex items-center gap-2 mt-4 text-[var(--fg2)]"
-                        >
-                            <div className="w-2 h-2 bg-[var(--gold)] rounded-full animate-pulse"></div>
-                            <span className="text-sm">{t('Listening...')}</span>
-                        </motion.div>
-                    )}
-                </>
+                    </MessageScrollerItem>
+                )
             ) : (
-                // Simple rendering for small lists (better animations)
                 <>
-                    <div className="space-y-1">
+                    <div className="space-y-1" role="list">
                         {segments.map((segment) => {
                             const isStreaming = streamingSegmentId === segment.id;
+                            // Live chunks from older/in-flight recorder sessions can arrive
+                            // before the backend has attached the mic/system channel tag.
+                            // In an active recording the safe UI fallback is the local mic:
+                            // otherwise the user's own speech is rendered as an incoming
+                            // anonymous speaker message until the recording is finalized.
+                            const isOwnSegment = segment.speaker === 'mic'
+                                || (isRecording && segment.speaker == null);
+                            const speakerLabel = isOwnSegment
+                                ? t('You')
+                                : localizeSpeakerLabel(resolveSpeakerLabel(segment, speakersById), t);
 
                             return (
-                                <motion.div
+                                <MessageScrollerItem
                                     key={segment.id}
+                                    messageId={segment.id}
+                                    scrollAnchor={isRecording && segment.id === segments.at(-1)?.id}
+                                >
+                                  <motion.div
                                     initial={{ opacity: 0, y: 5 }}
                                     animate={{ opacity: 1, y: 0 }}
                                     transition={{ duration: 0.15 }}
-                                >
+                                  >
                                     <TranscriptSegment
                                         id={segment.id}
                                         timestamp={segment.timestamp}
@@ -518,7 +371,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                         isStreaming={isStreaming}
                                         showConfidence={showConfidence}
                                         highlight={highlightedId === segment.id}
-                                        speakerLabel={localizeSpeakerLabel(resolveSpeakerLabel(segment, speakersById), t)}
+                                        speakerLabel={speakerLabel}
                                         speakerId={segment.speaker_id}
                                         speakerRenamable={
                                             !!onRenameSpeaker &&
@@ -529,8 +382,10 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                         onPlayTimestamp={onPlayTimestamp}
                                         playbackActive={isPlaybackSegmentActive(segment, playbackTime)}
                                         onEdit={onCorrectTranscript ? () => setEditingSegment({ id: segment.id, text: segment.text }) : undefined}
+                                        isOwn={isOwnSegment}
                                     />
-                                </motion.div>
+                                  </motion.div>
+                                </MessageScrollerItem>
                             );
                         })}
                     </div>
@@ -539,33 +394,25 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                     {(hasMore || isLoadingMore) && !isRecording && segments.length > 0 && (
                         <div ref={loadMoreTriggerRef} className="flex justify-center items-center py-4 mt-2">
                             {isLoadingMore ? (
-                                <div className="flex items-center gap-2 text-[var(--fg2)]">
-                                    <div className="w-4 h-4 border-2 border-[var(--border-strong)] border-t-[var(--fg2)] rounded-full animate-spin" />
+                                <div className="flex items-center gap-2 text-muted-foreground">
+                                    <div className="w-4 h-4 border-2 border-border border-t-muted-foreground rounded-full animate-spin" />
                                     <span className="text-sm">{t('Loading more...')}</span>
                                 </div>
                             ) : hasMore && totalCount > 0 ? (
-                                <span className="text-sm text-[var(--fg3)]">
+                                <span className="text-sm text-muted-foreground">
                                     {t('Showing')} {loadedCount} {t('of')} {totalCount} {t('segments')}
                                 </span>
                             ) : null}
                         </div>
                     )}
-
-                    {/* Listening indicator when recording */}
-                    {!isStopping && isRecording && !isPaused && !isProcessing && segments.length > 0 && (
-                        <motion.div
-                            initial={{ opacity: 0 }}
-                            animate={{ opacity: 1 }}
-                            exit={{ opacity: 0 }}
-                            className="flex items-center gap-2 mt-4 text-[var(--fg2)]"
-                        >
-                            <div className="w-2 h-2 bg-[var(--gold)] rounded-full animate-pulse"></div>
-                            <span className="text-sm">{t('Listening...')}</span>
-                        </motion.div>
-                    )}
                 </>
             )}
             </div>
+        </MessageScrollerContent>
+        </MessageScrollerViewport>
+        {segments.length > 0 && <MessageScrollerButton />}
+        </MessageScroller>
+        </MessageScrollerProvider>
 
             {/* Rename affordance for diarized speakers (saved meetings only). */}
             {onRenameSpeaker && renamingSpeaker && (
@@ -585,9 +432,9 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                         value={editingSegment?.text ?? ''}
                         onChange={(event) => setEditingSegment((current) => current ? { ...current, text: event.target.value } : current)}
                         rows={7}
-                        className="w-full resize-y rounded-lg border border-[var(--border-strong)] bg-[var(--bg-canvas)] p-3 text-sm text-[var(--fg1)] outline-none focus:border-[var(--gold-border)]"
+                        className="w-full resize-y rounded-lg border border-border bg-background p-3 text-sm text-foreground outline-none focus:border-primary/40"
                     />
-                    <p className="text-xs text-[var(--fg3)]">
+                    <p className="text-xs text-muted-foreground">
                         {t('The original ASR text is preserved. Repeated corrections may become reviewable terminology suggestions.')}
                     </p>
                     <DialogFooter>
@@ -595,7 +442,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                             type="button"
                             disabled={isSavingCorrection}
                             onClick={() => setEditingSegment(null)}
-                            className="rounded-md border border-[var(--border-strong)] px-3 py-2 text-sm"
+                            className="rounded-md border border-border px-3 py-2 text-sm"
                         >
                             {t('Cancel')}
                         </button>
@@ -616,13 +463,13 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                     setIsSavingCorrection(false);
                                 }
                             }}
-                            className="rounded-md bg-[var(--gold)] px-3 py-2 text-sm text-[var(--fg-inverse)] disabled:opacity-50"
+                            className="rounded-md bg-primary px-3 py-2 text-sm text-primary-foreground disabled:opacity-50"
                         >
                             {isSavingCorrection ? t('Saving...') : t('Save correction')}
                         </button>
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
-        </div>
+        </>
     );
 };

@@ -239,17 +239,14 @@ pub async fn initialize_fresh_database(app: AppHandle) -> Result<(), String> {
         db_manager: db_manager.clone(),
     });
 
-    // Set default model configuration for fresh installs. Managed pilot defaults:
-    // cloud DeepSeek (summary) + SaluteSpeech (transcription), both via the Memento
-    // gateway — no local models or API keys required. Users can switch to local
-    // providers (builtin-ai / parakeet / gigaam) in Settings.
+    // Set default model configuration for fresh installs.
     let pool = db_manager.pool();
 
-    // Default Summary Model: managed DeepSeek (cloud)
+    // Default Summary Model: OpenRouter rolling Sonnet alias.
     if let Err(e) = crate::database::repositories::setting::SettingsRepository::save_model_config(
         pool,
-        "deepseek",
-        crate::llm::providers::deepseek::DEFAULT_MODEL,
+        "openrouter",
+        crate::llm::providers::openrouter::DEFAULT_MODEL,
         "large-v3", // Default whisper model (unused for cloud but column is required)
         None,
     )

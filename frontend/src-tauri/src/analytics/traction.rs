@@ -53,7 +53,12 @@ pub struct TractionSink {
 impl TractionSink {
     pub fn new() -> Option<Arc<Self>> {
         let endpoint = std::env::var("MEMENTO_STATS_URL").unwrap_or_else(|_| {
-            if cfg!(debug_assertions) { DEV_INGEST_URL } else { PROD_INGEST_URL }.to_string()
+            if cfg!(debug_assertions) {
+                DEV_INGEST_URL
+            } else {
+                PROD_INGEST_URL
+            }
+            .to_string()
         });
         // Release builds require build-time injection. A client credential is
         // only ingest spam protection, but committing the live value prevents
@@ -144,11 +149,17 @@ impl TractionSink {
         let restore = match req.send().await {
             Ok(resp) if resp.status().is_success() => false,
             Ok(resp) if retryable_status(resp.status()) => {
-                log::warn!("Traction ingest temporarily rejected batch: {}", resp.status());
+                log::warn!(
+                    "Traction ingest temporarily rejected batch: {}",
+                    resp.status()
+                );
                 true
             }
             Ok(resp) => {
-                log::warn!("Traction ingest permanently rejected batch: {}", resp.status());
+                log::warn!(
+                    "Traction ingest permanently rejected batch: {}",
+                    resp.status()
+                );
                 false
             }
             Err(e) => {
@@ -185,8 +196,14 @@ mod tests {
 
         sink.track("device", "meeting_ended", props).await;
         let queue = sink.queue.lock().await;
-        assert_eq!(queue[0].properties.get("event_id"), Some(&"event-123".to_string()));
-        assert_eq!(queue[0].properties.get("duration_seconds"), Some(&"42".to_string()));
+        assert_eq!(
+            queue[0].properties.get("event_id"),
+            Some(&"event-123".to_string())
+        );
+        assert_eq!(
+            queue[0].properties.get("duration_seconds"),
+            Some(&"42".to_string())
+        );
         assert!(!queue[0].properties.contains_key("meeting_title"));
         assert!(!queue[0].properties.contains_key("error_message"));
     }
@@ -213,6 +230,9 @@ mod tests {
         props.insert("total_duration_seconds".to_string(), "42".to_string());
         sink.track("user_e2e_test", "meeting_ended", props).await;
         sink.flush().await;
-        assert!(sink.queue.lock().await.is_empty(), "flush must drain the queue on success");
+        assert!(
+            sink.queue.lock().await.is_empty(),
+            "flush must drain the queue on success"
+        );
     }
 }

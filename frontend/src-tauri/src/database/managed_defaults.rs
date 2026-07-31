@@ -12,7 +12,10 @@ const MARKER: &str = "migration.managed_pilot_defaults.v1";
 const PENDING_TRANSCRIPTION: &str = "pending_confirmation:transcription";
 const PENDING_SUMMARY: &str = "pending_confirmation:summary";
 const PENDING_BOTH: &str = "pending_confirmation:transcription,summary";
+const OPENROUTER_MODEL: &str = crate::llm::providers::openrouter::DEFAULT_MODEL;
+#[cfg(test)]
 const DEEPSEEK_MODEL: &str = crate::llm::providers::deepseek::DEFAULT_MODEL;
+#[cfg(test)]
 const SALUTESPEECH_MODEL: &str = "salutespeech-stream-v2";
 
 #[derive(Debug, Default, PartialEq, Eq, Serialize)]
@@ -213,8 +216,7 @@ pub async fn resolve(pool: &SqlitePool, accept: bool) -> Result<MigrationReport,
     if accept {
         // Transcription no longer migrates to the cloud (see is_legacy_transcription);
         // only the summary target's availability can block acceptance of a stale marker.
-        let (_, summary_available) =
-            managed_targets_available(pool, false, pending_summary).await;
+        let (_, summary_available) = managed_targets_available(pool, false, pending_summary).await;
         if !summary_available {
             return Err(sqlx::Error::Protocol(
                 "managed providers are unavailable; local providers remain unchanged".to_string(),
@@ -281,10 +283,10 @@ pub async fn resolve(pool: &SqlitePool, accept: bool) -> Result<MigrationReport,
             let model: String = row.try_get("model")?;
             if is_legacy_summary(&provider, &model) {
                 let updated = sqlx::query(
-                    "UPDATE settings SET provider='deepseek', model=? \
+                    "UPDATE settings SET provider='openrouter', model=? \
                      WHERE id='1' AND provider=? AND model=?",
                 )
-                .bind(DEEPSEEK_MODEL)
+                .bind(OPENROUTER_MODEL)
                 .bind(provider)
                 .bind(model)
                 .execute(&mut *tx)
@@ -367,12 +369,11 @@ mod tests {
             }
         );
 
-        let marker: String =
-            sqlx::query_scalar("SELECT value FROM app_settings_kv WHERE key = ?")
-                .bind(MARKER)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+        let marker: String = sqlx::query_scalar("SELECT value FROM app_settings_kv WHERE key = ?")
+            .bind(MARKER)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
         assert_eq!(marker, "applied");
     }
 
@@ -421,7 +422,7 @@ mod tests {
         );
         assert_eq!(
             values(&pool, "settings").await,
-            ("deepseek".into(), DEEPSEEK_MODEL.into())
+            ("openrouter".into(), OPENROUTER_MODEL.into())
         );
         assert!(migrate(&pool).await.unwrap().already_applied);
     }

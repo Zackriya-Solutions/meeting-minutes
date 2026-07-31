@@ -26,7 +26,12 @@ impl CtcModel {
         let vocab = load_vocab(vocab_path)?;
         let blank = find_blank_idx(&vocab);
         let session = build_session(model_path)?;
-        Ok(Self { session, featurizer: Featurizer::new(), vocab, blank })
+        Ok(Self {
+            session,
+            featurizer: Featurizer::new(),
+            vocab,
+            blank,
+        })
     }
 
     /// Transcribe a 16 kHz mono waveform to punctuated Russian text.
@@ -58,7 +63,9 @@ impl CtcModel {
             let value = outputs
                 .get("log_probs")
                 .ok_or_else(|| anyhow!("model output 'log_probs' missing"))?;
-            let log_probs = value.try_extract_array::<f32>().map_err(|e| anyhow!("ort extract: {e}"))?;
+            let log_probs = value
+                .try_extract_array::<f32>()
+                .map_err(|e| anyhow!("ort extract: {e}"))?;
             let shape = log_probs.shape(); // [1, T', V]
             let frames = shape[1];
             let classes = shape[2];
@@ -111,8 +118,8 @@ pub(super) fn find_blank_idx(vocab: &[String]) -> usize {
 /// Parse a `token id` per-line vocab (id is the last whitespace-separated field, so BPE
 /// tokens containing no spaces parse cleanly, e.g. `▁с 21`, `. 2`, `<blk> 256`).
 pub(super) fn load_vocab(path: &Path) -> Result<Vec<String>> {
-    let content = std::fs::read_to_string(path)
-        .map_err(|e| anyhow!("read vocab {}: {e}", path.display()))?;
+    let content =
+        std::fs::read_to_string(path).map_err(|e| anyhow!("read vocab {}: {e}", path.display()))?;
     let mut entries: Vec<(usize, String)> = Vec::new();
     let mut max_id = 0usize;
     for line in content.lines() {
@@ -123,7 +130,10 @@ pub(super) fn load_vocab(path: &Path) -> Result<Vec<String>> {
         let (tok, id) = line
             .rsplit_once(char::is_whitespace)
             .ok_or_else(|| anyhow!("bad vocab line: {line:?}"))?;
-        let id: usize = id.trim().parse().map_err(|_| anyhow!("bad vocab id: {line:?}"))?;
+        let id: usize = id
+            .trim()
+            .parse()
+            .map_err(|_| anyhow!("bad vocab id: {line:?}"))?;
         max_id = max_id.max(id);
         entries.push((id, tok.to_string()));
     }

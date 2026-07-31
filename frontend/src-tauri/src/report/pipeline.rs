@@ -118,7 +118,10 @@ pub fn submit_answers(report_id: &str, answers: Vec<ClarifyAnswer>) {
 /// Register a waiter and block until answers arrive, the run is cancelled, or the wait
 /// times out. Returns `None` only on cancellation (caller then finishes as cancelled);
 /// `Some(answers)` on submission (or an empty vec on timeout / dropped sender).
-async fn wait_for_answers(report_id: &str, token: &CancellationToken) -> Option<Vec<ClarifyAnswer>> {
+async fn wait_for_answers(
+    report_id: &str,
+    token: &CancellationToken,
+) -> Option<Vec<ClarifyAnswer>> {
     let (tx, rx) = oneshot::channel::<Vec<ClarifyAnswer>>();
     if let Ok(mut reg) = ANSWER_REGISTRY.lock() {
         reg.insert(report_id.to_string(), tx);
@@ -176,14 +179,16 @@ pub fn cancel_report(report_id: &str) -> bool {
 
 /// The DeepSeek model this run will use: `deepseek.model` setting, else the provider default.
 pub async fn resolve_model(pool: &SqlitePool) -> String {
-    sqlx::query_scalar::<_, String>("SELECT value FROM app_settings_kv WHERE key = 'deepseek.model'")
-        .fetch_optional(pool)
-        .await
-        .ok()
-        .flatten()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| deepseek::DEFAULT_MODEL.to_string())
+    sqlx::query_scalar::<_, String>(
+        "SELECT value FROM app_settings_kv WHERE key = 'deepseek.model'",
+    )
+    .fetch_optional(pool)
+    .await
+    .ok()
+    .flatten()
+    .map(|s| s.trim().to_string())
+    .filter(|s| !s.is_empty())
+    .unwrap_or_else(|| deepseek::DEFAULT_MODEL.to_string())
 }
 
 /// Reconcile reports orphaned by an app restart. The pipeline and its interactive
@@ -668,7 +673,8 @@ async fn start_stage<R: Runtime>(
 ) {
     let (id, label) = STAGE_META[pos];
     let stage_index = (pos + 1) as i64;
-    if let Err(e) = AnalyticsReportsRepository::update_stage(pool, report_id, id, stage_index).await {
+    if let Err(e) = AnalyticsReportsRepository::update_stage(pool, report_id, id, stage_index).await
+    {
         log::warn!("[report] failed to persist stage {id} for {report_id}: {e}");
     }
     let _ = app.emit(
@@ -732,7 +738,9 @@ async fn attempt<T: DeserializeOwned>(
     system: &str,
     user: &str,
 ) -> Result<T, String> {
-    let raw = client.complete_json(system, user, STAGE_TEMPERATURE).await?;
+    let raw = client
+        .complete_json(system, user, STAGE_TEMPERATURE)
+        .await?;
     let cleaned = strip_json_fences(&raw);
     serde_json::from_str::<T>(&cleaned).map_err(|e| format!("JSON parse failed: {e}"))
 }
@@ -765,7 +773,13 @@ async fn run_stage<T: DeserializeOwned>(
 
 fn sanitize_component(id: &str) -> String {
     id.chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect()
 }
 
@@ -859,12 +873,26 @@ pub async fn run_report_pipeline<R: Runtime>(
     let mut segments = match SpeakersRepository::meeting_transcript_segments(&pool, &meeting_id).await {
         Ok(s) => s,
         Err(e) => {
-            fail(&app, &pool, &report_id, &meeting_id, &format!("Не удалось прочитать транскрипт: {e}")).await;
+            fail(
+                &app,
+                &pool,
+                &report_id,
+                &meeting_id,
+                &format!("Не удалось прочитать транскрипт: {e}"),
+            )
+            .await;
             return;
         }
     };
     if segments.is_empty() {
-        fail(&app, &pool, &report_id, &meeting_id, "В этой встрече нет транскрипта.").await;
+        fail(
+            &app,
+            &pool,
+            &report_id,
+            &meeting_id,
+            "В этой встрече нет транскрипта.",
+        )
+        .await;
         return;
     }
 
@@ -1053,9 +1081,12 @@ pub async fn run_report_pipeline<R: Runtime>(
             }
             let questions_json =
                 serde_json::to_string(&clarify_questions).unwrap_or_else(|_| "[]".to_string());
-            if let Err(e) =
-                AnalyticsReportsRepository::set_questions_waiting(&pool, &report_id, &questions_json)
-                    .await
+            if let Err(e) = AnalyticsReportsRepository::set_questions_waiting(
+                &pool,
+                &report_id,
+                &questions_json,
+            )
+            .await
             {
                 log::warn!("[report] failed to persist clarify questions for {report_id}: {e}");
             }
@@ -1093,9 +1124,14 @@ pub async fn run_report_pipeline<R: Runtime>(
     // ---- stage 5: topics ----
     start_stage(&app, &pool, &report_id, &meeting_id, 4).await;
     let (sys, usr) = prompts::topics(&transcript, &meeting_type);
-    let topics: Option<Topics> =
-        run_stage(&client, &sys, &prompts::with_context(&usr, &answers_block), "topics", &mut failed)
-            .await;
+    let topics: Option<Topics> = run_stage(
+        &client,
+        &sys,
+        &prompts::with_context(&usr, &answers_block),
+        "topics",
+        &mut failed,
+    )
+    .await;
     if token.is_cancelled() {
         finish_cancelled(&pool, &report_id).await;
         return;

@@ -17,7 +17,6 @@
                 "height": 700,
                 "resizable": true,
                 "fullscreen": false,
-                "theme": "Dark",
                 "decorations": true
             }
         ],
@@ -56,6 +55,9 @@
                         "core:path:default",
                         "core:event:default",
                         "core:window:default",
+                        "core:window:allow-set-theme",
+                        "core:window:allow-set-background-color",
+                        "core:window:allow-set-effects",
                         "core:app:default",
                         "core:resources:default",
                         "core:menu:default",

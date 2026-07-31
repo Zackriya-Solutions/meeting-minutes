@@ -423,16 +423,18 @@ pub fn fmt_mmss(secs: f64) -> String {
 
 /// Build the numbered transcript passed to extraction stages:
 /// `[{index}|{mm:ss}] {speaker}: {text}`. `timed` and `segments` are parallel.
-pub fn format_transcript(
-    timed: &[TimedSegment],
-    labels: &[String],
-    texts: &[String],
-) -> String {
+pub fn format_transcript(timed: &[TimedSegment], labels: &[String], texts: &[String]) -> String {
     let mut out = String::new();
     for (i, text) in texts.iter().enumerate() {
         let ts = timed.get(i).map(|t| t.start).unwrap_or(0.0);
         let speaker = labels.get(i).map(String::as_str).unwrap_or("Спикер");
-        out.push_str(&format!("[{}|{}] {}: {}\n", i, fmt_mmss(ts), speaker, text.trim()));
+        out.push_str(&format!(
+            "[{}|{}] {}: {}\n",
+            i,
+            fmt_mmss(ts),
+            speaker,
+            text.trim()
+        ));
     }
     out
 }
@@ -445,7 +447,8 @@ pub fn truncate_transcript(transcript: &str) -> String {
     }
     // Cut on char boundaries near the byte targets.
     let head_end = floor_char_boundary(transcript, TRANSCRIPT_HEAD);
-    let tail_start = ceil_char_boundary(transcript, transcript.len().saturating_sub(TRANSCRIPT_TAIL));
+    let tail_start =
+        ceil_char_boundary(transcript, transcript.len().saturating_sub(TRANSCRIPT_TAIL));
     let mut out = String::with_capacity(TRANSCRIPT_HEAD + TRANSCRIPT_TAIL + 64);
     out.push_str(&transcript[..head_end]);
     out.push_str("\n[… середина встречи пропущена для экономии контекста …]\n");
@@ -680,7 +683,8 @@ pub fn roles(transcript: &str) -> (String, String) {
 
 /// Insights: fed the compact artifact JSON + fast facts, NOT the raw transcript.
 pub fn insights(artifacts_json: &str, fast_facts: &str) -> (String, String) {
-    let schema = "{ \"insights\": [ { \"title\": заголовок наблюдения, \"body\": развёрнутое объяснение, \
+    let schema =
+        "{ \"insights\": [ { \"title\": заголовок наблюдения, \"body\": развёрнутое объяснение, \
 \"severity\": \"info\"|\"warn\"|\"serious\"|\"crit\", \"category\": короткая категория, \
 \"segs\": [номера сегментов-подтверждений] } ], \
 \"verdict\": строка (одно предложение — вердикт по встрече), \
@@ -731,8 +735,16 @@ mod tests {
     #[test]
     fn transcript_is_numbered_with_timestamps() {
         let timed = vec![
-            TimedSegment { start: 5.0, end: 7.0, speaker_key: "a".into() },
-            TimedSegment { start: 65.0, end: 66.0, speaker_key: "b".into() },
+            TimedSegment {
+                start: 5.0,
+                end: 7.0,
+                speaker_key: "a".into(),
+            },
+            TimedSegment {
+                start: 65.0,
+                end: 66.0,
+                speaker_key: "b".into(),
+            },
         ];
         let labels = vec!["Аня".to_string(), "Боря".to_string()];
         let texts = vec!["Привет".to_string(), "Здравствуй".to_string()];

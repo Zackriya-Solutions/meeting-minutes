@@ -65,16 +65,16 @@ export function MeetingContentWindowNotice({ meetingId }: { meetingId: string })
 
   if (!suggestion) return null;
   return (
-    <div className="mx-4 mt-3 rounded-xl border border-[var(--gold-border)] bg-[var(--gold-soft)] px-3 py-2.5 text-sm">
+    <div className="mx-4 mt-3 rounded-xl border border-primary/40 bg-primary/10 px-3 py-2.5 text-sm">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0">
-          <p className="font-medium text-[var(--fg1)]">{t('Possible trailing recording fragments')}</p>
-          <p className="mt-0.5 text-xs text-[var(--fg3)]">
+          <p className="font-medium text-foreground">{t('Possible trailing recording fragments')}</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">
             {t('A long quiet gap separates the main meeting from a few later transcript fragments.')}{' '}
             {t('Suggested summary window')}: {timeLabel(suggestion.primaryStartMs)}–{timeLabel(suggestion.primaryEndMs)} ·{' '}
             {suggestion.excludedSegmentCount} {t('later fragments')}
           </p>
-          <p className="mt-1 text-xs text-[var(--fg3)]">
+          <p className="mt-1 text-xs text-muted-foreground">
             {t('The transcript and audio are never deleted. This choice only changes future summary input.')}
           </p>
         </div>

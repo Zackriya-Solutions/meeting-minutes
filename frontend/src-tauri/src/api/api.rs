@@ -37,6 +37,7 @@ pub struct Meeting {
     pub folder_path: Option<String>,
     pub memory_type: String,
     pub sensitivity: String,
+    pub duration_seconds: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -168,7 +169,11 @@ pub struct MeetingMetadata {
     pub created_at: String,
     pub updated_at: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub occurred_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub folder_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub duration_seconds: Option<f64>,
 }
 
 /// Paginated transcripts response with total count
@@ -371,6 +376,7 @@ pub async fn api_get_meetings<R: Runtime>(
                     folder_path: m.folder_path,
                     memory_type: m.memory_type.unwrap_or_else(|| "general".to_string()),
                     sensitivity: m.sensitivity.unwrap_or_else(|| "standard".to_string()),
+                    duration_seconds: m.duration_seconds,
                 })
                 .collect();
             Ok(result)
@@ -614,10 +620,10 @@ pub async fn api_get_model_config<R: Runtime>(
             }
         }
         Ok(None) => {
-            log_info!("No model config found, returning managed DeepSeek default");
+            log_info!("No model config found, returning OpenRouter Sonnet default");
             Ok(Some(ModelConfig {
-                provider: "deepseek".to_string(),
-                model: crate::llm::providers::deepseek::DEFAULT_MODEL.to_string(),
+                provider: "openrouter".to_string(),
+                model: crate::llm::providers::openrouter::DEFAULT_MODEL.to_string(),
                 whisper_model: "large-v3".to_string(),
                 api_key: None,
                 ollama_endpoint: None,
@@ -1036,7 +1042,9 @@ pub async fn api_get_meeting_metadata<R: Runtime>(
                 title: meeting.title,
                 created_at: meeting.created_at.0.to_rfc3339(),
                 updated_at: meeting.updated_at.0.to_rfc3339(),
+                occurred_at: meeting.occurred_at,
                 folder_path: meeting.folder_path,
+                duration_seconds: meeting.duration_seconds,
             })
         }
         Ok(None) => {
@@ -1248,6 +1256,14 @@ pub async fn api_save_transcript<R: Runtime>(
                     folder,
                 );
             }
+
+            // Summary generation is a property of a saved meeting, not of a particular
+            // screen. This fallback covers ordinary recordings and recovery saves; the
+            // frontend may start it sooner after persisting the language preference.
+            crate::summary::commands::spawn_automatic_summary_for_meeting(
+                app.clone(),
+                meeting_id.clone(),
+            );
 
             Ok(serde_json::json!({
                 "status": "success",

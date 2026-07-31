@@ -151,11 +151,23 @@ fn transcript_has_status_round_handoff(transcript: &str) -> bool {
 fn transcript_one_on_one_categories(transcript: &str) -> usize {
     let transcript = transcript.to_lowercase();
     [
-        contains_any(&transcript, &["как ты", "как дела", "how are you", "check-in"]),
+        contains_any(
+            &transcript,
+            &["как ты", "как дела", "how are you", "check-in"],
+        ),
         contains_any(&transcript, &["обратная связь", "фидбек", "feedback"]),
-        contains_any(&transcript, &["чем помочь", "нужна помощь", "поддерж", "support"]),
-        contains_any(&transcript, &["развит", "карьер", "грейд", "growth", "career"]),
-        contains_any(&transcript, &["в прошлый раз", "договаривал", "follow-up", "last time"]),
+        contains_any(
+            &transcript,
+            &["чем помочь", "нужна помощь", "поддерж", "support"],
+        ),
+        contains_any(
+            &transcript,
+            &["развит", "карьер", "грейд", "growth", "career"],
+        ),
+        contains_any(
+            &transcript,
+            &["в прошлый раз", "договаривал", "follow-up", "last time"],
+        ),
     ]
     .into_iter()
     .filter(|present| *present)
@@ -176,7 +188,12 @@ fn suggest_from_signals(signals: SuggestionSignals) -> TemplateSuggestion {
         }
         return TemplateSuggestion {
             template_id: ONE_ON_ONE_TEMPLATE.to_string(),
-            confidence: if signals.one_on_one_categories >= 3 { "high" } else { "medium" }.to_string(),
+            confidence: if signals.one_on_one_categories >= 3 {
+                "high"
+            } else {
+                "medium"
+            }
+            .to_string(),
             score: signals.one_on_one_categories as i32 + 4,
             reasons,
             confirmation_required: true,
@@ -353,7 +370,16 @@ async fn suggestion_for_meeting(
         reviewed_one_on_one_history,
         contrast_title: contains_any(
             &title,
-            &["pair programming", "парное программирование", "technical deep dive", "технический разбор", "interview", "собесед", "project status", "статус проекта"],
+            &[
+                "pair programming",
+                "парное программирование",
+                "technical deep dive",
+                "технический разбор",
+                "interview",
+                "собесед",
+                "project status",
+                "статус проекта",
+            ],
         ),
     }))
 }
@@ -519,7 +545,12 @@ mod tests {
 
     #[test]
     fn one_on_one_contrasts_are_never_suggested() {
-        for _contrast in ["pair programming", "technical deep dive", "interview", "project status"] {
+        for _contrast in [
+            "pair programming",
+            "technical deep dive",
+            "interview",
+            "project status",
+        ] {
             let suggestion = suggest_from_signals(SuggestionSignals {
                 one_on_one_title: true,
                 one_on_one_categories: 5,
@@ -532,9 +563,11 @@ mod tests {
 
     #[test]
     fn one_on_one_content_categories_require_distinct_product_signals() {
-        assert!(transcript_one_on_one_categories(
-            "Как ты? Нужна помощь? Давай обсудим обратную связь и карьерное развитие."
-        ) >= 3);
+        assert!(
+            transcript_one_on_one_categories(
+                "Как ты? Нужна помощь? Давай обсудим обратную связь и карьерное развитие."
+            ) >= 3
+        );
         assert_eq!(
             transcript_one_on_one_categories("Разобрали архитектуру сервиса и написали код."),
             0

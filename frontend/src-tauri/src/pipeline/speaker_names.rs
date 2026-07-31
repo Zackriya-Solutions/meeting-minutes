@@ -5,7 +5,7 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use sqlx::{FromRow, SqlitePool};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::state::AppState;
 
@@ -22,6 +22,18 @@ static EXPLICIT_INTRO: Lazy<Regex> = Lazy::new(|| {
 static DIRECT_ADDRESS: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"(?iu)^\s*(?:(?:так|ну|слушай|смотри)\s*,\s*)?([\p{L}][\p{L}'’\-]{1,31})\s*[,!]")
         .expect("valid direct-address regex")
+});
+static STRONG_DIRECT_ADDRESS: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(
+        r"(?iu)^\s*(?:(?:так|ну|слушай|смотри)\s*,\s*)?([\p{L}][\p{L}'’\-]{1,31})\s*[,!]\s*(?:ты|вы|тебе|вам|к\s+тебе|к\s+вам|давай|давайте|расскажи|расскажите|скажи|скажите|подскажи|подскажите|можешь|можете|посмотри|посмотрите|продолжай|продолжайте|думаешь|думаете|слышишь|слышите|что|ч[её]|где|как|you|can\s+you|could\s+you)\b",
+    )
+    .expect("valid strong direct-address regex")
+});
+static CONTEXTUAL_DIRECT_ADDRESS: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(
+        r"(?iu)[.!?]\s+([\p{L}][\p{L}'’\-]{1,31})\s*[,!]\s*(?:ты|вы|тебе|вам|к\s+тебе|к\s+вам|давай|давайте|расскажи|расскажите|скажи|скажите|подскажи|подскажите|можешь|можете|посмотри|посмотрите|продолжай|продолжайте|думаешь|думаете|слышишь|слышите|что|ч[её]|где|как|you|can\s+you|could\s+you)\b",
+    )
+    .expect("valid contextual direct-address regex")
 });
 static GREETING_ADDRESS: Lazy<Regex> = Lazy::new(|| {
     Regex::new(
@@ -71,9 +83,16 @@ const BLOCKED_EXACT: &[&str] = &[
     "подожди",
     "подождите",
     "давай",
+    "расскажи",
+    "расскажите",
+    "скажи",
+    "скажите",
+    "подскажи",
+    "подскажите",
     "будет",
     "может",
     "просто",
+    "типа",
     "кстати",
     "короче",
     "например",
@@ -299,17 +318,18 @@ fn address_candidate(
     segments: &[Segment],
     index: usize,
     candidate_text: String,
+    confidence: f64,
 ) -> ExtractedCandidate {
     let segment = &segments[index];
-    let next = segment.speaker_id.and_then(|addressing_speaker_id| {
-        segments.iter().skip(index + 1).find(|next| {
-            next.speaker_id.is_some()
-                && next.speaker_id != Some(addressing_speaker_id)
-                && match (segment.start_ms, next.start_ms) {
-                    (Some(start), Some(end)) => (0..=15_000).contains(&(end - start)),
-                    _ => false,
-                }
-        })
+    let next = segments.iter().skip(index + 1).find(|next| {
+        next.speaker_id.is_some()
+            && segment.speaker_id.map_or(true, |addressing_speaker_id| {
+                next.speaker_id != Some(addressing_speaker_id)
+            })
+            && match (segment.start_ms, next.start_ms) {
+                (Some(start), Some(end)) => (0..=15_000).contains(&(end - start)),
+                _ => false,
+            }
     });
     if let Some(next) = next {
         ExtractedCandidate {
@@ -318,7 +338,7 @@ fn address_candidate(
             evidence_kind: "direct_address",
             evidence_quote: segment.text.clone(),
             start_ms: segment.start_ms,
-            confidence: 0.60,
+            confidence,
         }
     } else {
         // The name itself is useful evidence even when diarization cannot safely determine
@@ -360,12 +380,34 @@ fn extract_candidates(segments: &[Segment]) -> Vec<ExtractedCandidate> {
                 confidence: 0.75,
             });
         }
+        for capture in STRONG_DIRECT_ADDRESS.captures_iter(&segment.text) {
+            if !has_name_like_capitalization(&capture[1]) {
+                continue;
+            }
+            extracted.push(address_candidate(
+                segments,
+                index,
+                display_name(&capture[1]),
+                0.85,
+            ));
+        }
         for capture in DIRECT_ADDRESS.captures_iter(&segment.text) {
             if !has_name_like_capitalization(&capture[1]) {
                 continue;
             }
             let candidate_text = display_name(&capture[1]);
-            extracted.push(address_candidate(segments, index, candidate_text));
+            extracted.push(address_candidate(segments, index, candidate_text, 0.60));
+        }
+        for capture in CONTEXTUAL_DIRECT_ADDRESS.captures_iter(&segment.text) {
+            if !has_name_like_capitalization(&capture[1]) {
+                continue;
+            }
+            extracted.push(address_candidate(
+                segments,
+                index,
+                display_name(&capture[1]),
+                0.85,
+            ));
         }
         for capture in GREETING_ADDRESS.captures_iter(&segment.text) {
             if !has_name_like_capitalization(&capture[1]) {
@@ -375,6 +417,7 @@ fn extract_candidates(segments: &[Segment]) -> Vec<ExtractedCandidate> {
                 segments,
                 index,
                 display_name(&capture[1]),
+                0.70,
             ));
         }
     }
@@ -619,12 +662,178 @@ pub async fn scan_candidates(pool: &SqlitePool, meeting_id: &str) -> Result<usiz
     Ok(inserted)
 }
 
+/// Find speaker names from explicit transcript evidence and apply only unambiguous mappings.
+///
+/// This is deliberately local and provisional: it never marks a speaker as user-confirmed.
+/// A confirmed/manual name always wins. Automatic mappings are limited to self-introductions
+/// and direct addresses followed by a response from one diarized voice; if one voice has
+/// multiple possible names, or one name points at multiple voices, nothing is applied.
+pub async fn infer_and_apply_names(pool: &SqlitePool, meeting_id: &str) -> Result<usize, String> {
+    scan_candidates(pool, meeting_id).await?;
+
+    type CandidateRow = (i64, i64, String, String, String, f64, i64);
+    let rows: Vec<CandidateRow> = sqlx::query_as(
+        "SELECT id, proposed_speaker_id, candidate_text, normalized_name, evidence_kind, \
+                confidence, occurrence_count \
+         FROM speaker_name_candidates \
+         WHERE meeting_id=? AND status='pending' AND proposed_speaker_id IS NOT NULL \
+           AND candidate_text IS NOT NULL AND normalized_name IS NOT NULL",
+    )
+    .bind(meeting_id)
+    .fetch_all(pool)
+    .await
+    .map_err(|error| error.to_string())?;
+
+    let eligible = rows
+        .into_iter()
+        .filter(|row| match row.4.as_str() {
+            "self_introduction" => row.5 >= 0.90,
+            "direct_address" => row.5 >= 0.80,
+            _ => false,
+        })
+        .collect::<Vec<_>>();
+
+    let mut names_by_speaker: HashMap<i64, HashSet<String>> = HashMap::new();
+    let mut speakers_by_name: HashMap<String, HashSet<i64>> = HashMap::new();
+    for (_, speaker_id, _, normalized_name, _, _, _) in &eligible {
+        names_by_speaker
+            .entry(*speaker_id)
+            .or_default()
+            .insert(normalized_name.clone());
+        speakers_by_name
+            .entry(normalized_name.clone())
+            .or_default()
+            .insert(*speaker_id);
+    }
+
+    let mut selected = Vec::new();
+    for (speaker_id, names) in names_by_speaker {
+        if names.len() != 1 {
+            continue;
+        }
+        let Some(normalized_name) = names.into_iter().next() else {
+            continue;
+        };
+        if speakers_by_name
+            .get(&normalized_name)
+            .is_some_and(|speakers| speakers.len() != 1)
+        {
+            continue;
+        }
+
+        let best = eligible
+            .iter()
+            .filter(|row| row.1 == speaker_id && row.3 == normalized_name)
+            .max_by(|left, right| {
+                let left_self_intro = left.4 == "self_introduction";
+                let right_self_intro = right.4 == "self_introduction";
+                left_self_intro
+                    .cmp(&right_self_intro)
+                    .then_with(|| left.6.cmp(&right.6))
+                    .then_with(|| left.5.total_cmp(&right.5))
+            });
+        if let Some(candidate) = best {
+            selected.push((
+                candidate.0,
+                speaker_id,
+                candidate.2.clone(),
+                normalized_name,
+            ));
+        }
+    }
+
+    let mut transaction = pool.begin().await.map_err(|error| error.to_string())?;
+    let mut applied = 0;
+    for (candidate_id, speaker_id, candidate_text, normalized_name) in selected {
+        let current: Option<(String, i64)> =
+            sqlx::query_as("SELECT display_name, is_confirmed FROM speakers WHERE id=?")
+                .bind(speaker_id)
+                .fetch_optional(&mut *transaction)
+                .await
+                .map_err(|error| error.to_string())?;
+        let Some((current_name, is_confirmed)) = current else {
+            continue;
+        };
+        if is_confirmed != 0
+            || (!crate::database::repositories::speaker::is_automatic_speaker_name(&current_name)
+                && current_name != candidate_text)
+        {
+            continue;
+        }
+
+        let result =
+            sqlx::query("UPDATE speakers SET display_name=? WHERE id=? AND is_confirmed=0")
+                .bind(&candidate_text)
+                .bind(speaker_id)
+                .execute(&mut *transaction)
+                .await
+                .map_err(|error| error.to_string())?;
+        if result.rows_affected() == 0 {
+            continue;
+        }
+
+        sqlx::query(
+            "INSERT OR IGNORE INTO speaker_aliases \
+             (speaker_id, alias, normalized_alias, source_candidate_id, is_confirmed) \
+             VALUES(?, ?, ?, ?, 0)",
+        )
+        .bind(speaker_id)
+        .bind(&candidate_text)
+        .bind(&normalized_name)
+        .bind(candidate_id)
+        .execute(&mut *transaction)
+        .await
+        .map_err(|error| error.to_string())?;
+        sqlx::query(
+            "UPDATE speaker_name_candidates SET status='accepted', updated_at=datetime('now') \
+             WHERE id=? AND status='pending'",
+        )
+        .bind(candidate_id)
+        .execute(&mut *transaction)
+        .await
+        .map_err(|error| error.to_string())?;
+        applied += 1;
+    }
+    transaction
+        .commit()
+        .await
+        .map_err(|error| error.to_string())?;
+    Ok(applied)
+}
+
+/// Re-run the local, conservative name resolver for every already-diarized meeting.
+/// New meetings call the same resolver at the end of diarization; this sweep only repairs
+/// archives created before automatic naming existed or interrupted between the two passes.
+pub async fn backfill_existing_speaker_names(pool: &SqlitePool) -> Result<(usize, usize), String> {
+    let meeting_ids: Vec<String> = sqlx::query_scalar(
+        "SELECT DISTINCT meeting_id FROM transcripts \
+         WHERE speaker_id IS NOT NULL ORDER BY meeting_id",
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|error| error.to_string())?;
+
+    let mut applied = 0usize;
+    for meeting_id in &meeting_ids {
+        applied += infer_and_apply_names(pool, meeting_id).await?;
+    }
+    Ok((meeting_ids.len(), applied))
+}
+
 #[tauri::command]
 pub async fn scan_speaker_name_candidates(
     state: tauri::State<'_, AppState>,
     meeting_id: String,
 ) -> Result<usize, String> {
     scan_candidates(state.db_manager.pool(), &meeting_id).await
+}
+
+#[tauri::command]
+pub async fn infer_meeting_speaker_names(
+    state: tauri::State<'_, AppState>,
+    meeting_id: String,
+) -> Result<usize, String> {
+    infer_and_apply_names(state.db_manager.pool(), &meeting_id).await
 }
 
 async fn list_candidates(
@@ -792,6 +1001,8 @@ mod tests {
             validate_candidate("разработчик"),
             Err("role_or_generic_word")
         );
+        assert_eq!(validate_candidate("Расскажи"), Err("role_or_generic_word"));
+        assert_eq!(validate_candidate("Типа"), Err("role_or_generic_word"));
         assert_eq!(validate_candidate("мудак"), Err("abusive_or_profane"));
         assert_eq!(validate_candidate("Говно"), Err("abusive_or_profane"));
         assert_eq!(validate_candidate("Дерьмо"), Err("abusive_or_profane"));
@@ -832,21 +1043,83 @@ mod tests {
     }
 
     #[test]
-    fn extraction_does_not_link_direct_address_from_unattributed_turn() {
+    fn extraction_links_direct_address_from_unattributed_turn_to_the_response() {
         let rows = vec![
             segment("Иван, расскажи про релиз", None, 5_000),
             segment("Сборка готова", Some(8), 7_000),
         ];
 
         let extracted = extract_candidates(&rows);
-        assert!(extracted
-            .iter()
-            .all(|item| item.evidence_kind != "direct_address"));
         assert!(extracted.iter().any(|item| {
             item.text == "Иван"
-                && item.speaker_id.is_none()
-                && item.evidence_kind == "direct_address_unassigned"
+                && item.speaker_id == Some(8)
+                && item.evidence_kind == "direct_address"
         }));
+    }
+
+    #[test]
+    fn extraction_links_contextual_address_to_the_response() {
+        let rows = vec![
+            segment(
+                "Это отличная идея. Андрей, ты нас слышишь? Всё хорошо?",
+                None,
+                21_210,
+            ),
+            segment("Да-да, слышно", Some(4), 27_480),
+        ];
+
+        assert!(extract_candidates(&rows).iter().any(|item| {
+            item.text == "Андрей"
+                && item.speaker_id == Some(4)
+                && item.evidence_kind == "direct_address"
+        }));
+    }
+
+    #[tokio::test]
+    async fn automatic_inference_applies_one_unambiguous_provisional_name() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        for ddl in [
+            "CREATE TABLE app_settings_kv(key TEXT PRIMARY KEY, value TEXT, updated_at TEXT)",
+            "CREATE TABLE transcripts(id TEXT PRIMARY KEY, meeting_id TEXT, transcript TEXT, speaker_id INTEGER, audio_start_time REAL)",
+            "CREATE TABLE speakers(id INTEGER PRIMARY KEY, display_name TEXT, is_confirmed INTEGER)",
+            "CREATE TABLE speaker_name_candidates(id INTEGER PRIMARY KEY, meeting_id TEXT, proposed_speaker_id INTEGER, proposed_speaker_key INTEGER NOT NULL, candidate_text TEXT, normalized_name TEXT, candidate_hash TEXT, evidence_kind TEXT, evidence_quote TEXT, evidence_start_ms INTEGER, confidence REAL, occurrence_count INTEGER DEFAULT 1, status TEXT DEFAULT 'pending', created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP, UNIQUE(meeting_id,candidate_hash,proposed_speaker_key,evidence_kind))",
+            "CREATE TABLE speaker_aliases(id INTEGER PRIMARY KEY, speaker_id INTEGER, alias TEXT, normalized_alias TEXT, source_candidate_id INTEGER, is_confirmed INTEGER DEFAULT 1, created_at TEXT DEFAULT CURRENT_TIMESTAMP, UNIQUE(speaker_id,normalized_alias))",
+            "CREATE TABLE rejected_speaker_name_fingerprints(candidate_hash TEXT PRIMARY KEY, reason TEXT, occurrence_count INTEGER DEFAULT 1, last_seen_at TEXT DEFAULT CURRENT_TIMESTAMP)",
+            "CREATE TABLE rejected_speaker_name_observations(meeting_id TEXT, candidate_hash TEXT, evidence_start_ms INTEGER, evidence_kind TEXT, PRIMARY KEY(meeting_id,candidate_hash,evidence_start_ms,evidence_kind))",
+            "CREATE TABLE rejected_speaker_name_candidate_instances(meeting_id TEXT, candidate_hash TEXT, proposed_speaker_key INTEGER, evidence_kind TEXT, occurrence_count INTEGER DEFAULT 1, last_seen_at TEXT DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(meeting_id,candidate_hash,proposed_speaker_key,evidence_kind))",
+        ] {
+            sqlx::query(ddl).execute(&pool).await.unwrap();
+        }
+        sqlx::query("INSERT INTO speakers VALUES(4,'Speaker 4',0)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO transcripts VALUES \
+             ('t1','m1','Это отличная идея. Андрей, ты нас слышишь?',NULL,21.21), \
+             ('t2','m1','Да-да, слышно',4,27.48)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        assert_eq!(infer_and_apply_names(&pool, "m1").await.unwrap(), 1);
+        let speaker: (String, i64) =
+            sqlx::query_as("SELECT display_name, is_confirmed FROM speakers WHERE id=4")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(speaker, ("Андрей".into(), 0));
+        let alias: (String, i64) =
+            sqlx::query_as("SELECT alias, is_confirmed FROM speaker_aliases WHERE speaker_id=4")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(alias, ("Андрей".into(), 0));
     }
 
     #[test]

@@ -1,7 +1,7 @@
 /**
  * Best-effort conversion of a persisted meeting summary (a markdown blob, BlockNote
- * JSON, or a legacy section map) into Markdown, plus a TL;DR/details split for the
- * 3a summary layout (a prominent lead + a collapsible "Подробнее" section).
+ * JSON, or a legacy section map) into Markdown, plus the read-first overview and
+ * bounded agreements used by the meeting drawer.
  *
  * Real summaries are markdown where section titles are bold lines (**Краткое
  * содержание**, **Ключевые решения**, **Задачи** …). We normalize those to real
@@ -100,25 +100,173 @@ export function splitSummaryLead(markdown: string): { lead: string; details: str
   const md = (markdown || '').trim();
   if (!md) return { lead: '', details: '' };
 
-  const blocks = md.split(/\n{2,}/).map((s) => s.trim()).filter(Boolean);
-  const isHeading = (b: string) => /^#{1,6}\s/.test(b);
-  const isListOrTable = (b: string) => /^([-*]\s|\d+\.\s|\||- \[)/.test(b);
-  const headingIdxs = blocks.map((b, i) => (isHeading(b) ? i : -1)).filter((i) => i >= 0);
+  const lines = md.split('\n');
+  const headings = lines.flatMap((line, index) => {
+    const match = line.trim().match(/^(#{1,6})\s+(.+)$/);
+    return match ? [{ index, level: match[1].length, title: match[2].trim() }] : [];
+  });
 
-  if (headingIdxs.length === 0) {
-    const leadIdx = blocks.findIndex((b) => !isListOrTable(b));
-    if (leadIdx === -1) return { lead: '', details: md };
-    return { lead: blocks[leadIdx], details: blocks.filter((_, i) => i !== leadIdx).join('\n\n') };
+  if (headings.length === 0) {
+    const blocks = md.split(/\n{2,}/).map((block) => block.trim()).filter(Boolean);
+    return { lead: blocks[0] ?? '', details: blocks.slice(1).join('\n\n') };
   }
 
-  const first = headingIdxs[0];
-  const second = headingIdxs[1] ?? blocks.length;
-  const overview = blocks
-    .slice(first + 1, second)
-    .filter((b) => !isHeading(b) && !isListOrTable(b));
-  const lead = overview.join('\n\n').trim();
-  const details = blocks.slice(second).join('\n\n').trim();
+  const summaryHeading = headings.find(({ title }) => {
+    const normalized = normalizeSectionTitle(title);
+    return normalized === 'summary'
+      || normalized === 'overview'
+      || normalized === 'краткое содержание'
+      || normalized === 'о чем встреча'
+      || normalized === 'саммари';
+  }) ?? headings.find(({ level }) => level > 1) ?? headings[0];
 
-  if (!lead) return { lead: '', details: blocks.slice(first).join('\n\n').trim() };
+  const nextHeading = headings.find(({ index }) => index > summaryHeading.index);
+  const sectionEnd = nextHeading?.index ?? lines.length;
+  const lead = lines.slice(summaryHeading.index + 1, sectionEnd).join('\n').trim();
+  const details = nextHeading ? lines.slice(nextHeading.index).join('\n').trim() : '';
+
   return { lead, details };
+}
+
+interface MarkdownSection {
+  title: string;
+  body: string;
+}
+
+function normalizeSectionTitle(value: string): string {
+  return value
+    .toLocaleLowerCase('ru-RU')
+    .replace(/ё/g, 'е')
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim();
+}
+
+function markdownSections(markdown: string): MarkdownSection[] {
+  const sections: MarkdownSection[] = [];
+  let active: MarkdownSection | null = null;
+
+  for (const line of markdown.split('\n')) {
+    const heading = line.trim().match(/^#{1,6}\s+(.+)$/);
+    if (heading) {
+      active = { title: heading[1].trim(), body: '' };
+      sections.push(active);
+      continue;
+    }
+    if (active) active.body += `${active.body ? '\n' : ''}${line}`;
+  }
+
+  return sections;
+}
+
+function isEmptyAgreement(value: string): boolean {
+  const normalized = normalizeSectionTitle(value);
+  return !normalized
+    || /^(нет|не зафиксировано|не было|отсутствуют|none|not specified|no agreements|no decisions|no action items)$/.test(normalized)
+    || ((normalized.includes('договоренност') || normalized.includes('решени'))
+      && (normalized.includes('не зафиксирован') || normalized.includes('отсутству')))
+    || (/^no\s/.test(normalized) && /(agreement|decision|commitment|action item)/.test(normalized));
+}
+
+function tableCells(line: string): string[] {
+  return line
+    .replace(/^\|/, '')
+    .replace(/\|$/, '')
+    .split('|')
+    .map((cell) => cell.trim().replace(/^\*\*(.*?)\*\*$/, '$1'));
+}
+
+function sectionItems(section: MarkdownSection, kind: 'participant' | 'agreement' | 'decision' | 'action'): string[] {
+  const items: string[] = [];
+  const lines = section.body.split('\n').map((line) => line.trim()).filter(Boolean);
+
+  for (const line of lines) {
+    const listItem = line.match(/^[-+*]\s+(?:\[[ xX]\]\s+)?(.+)$/)?.[1];
+    if (listItem) {
+      if (!isEmptyAgreement(listItem)) items.push(listItem.trim());
+      continue;
+    }
+
+    if (line.startsWith('|')) {
+      if (/^\|?\s*:?-{3,}/.test(line)) continue;
+      const cells = tableCells(line);
+      const normalizedCells = cells.map(normalizeSectionTitle);
+      const isHeader = normalizedCells.some((cell) =>
+        ['owner', 'task', 'due', 'decision', 'ответственный', 'задача', 'срок', 'решение'].includes(cell),
+      );
+      if (isHeader) continue;
+
+      const item = kind === 'action' && cells.length > 1 ? cells[1] : cells[0];
+      if (item && !isEmptyAgreement(item)) items.push(item);
+      continue;
+    }
+
+    if (!isEmptyAgreement(line)) items.push(line);
+  }
+
+  return items;
+}
+
+function uniqueMarkdownList(items: string[]): string {
+  return items.filter((item, index) => {
+    const normalized = normalizeSectionTitle(item);
+    return normalized && items.findIndex((candidate) => normalizeSectionTitle(candidate) === normalized) === index;
+  }).map((item) => `- ${item}`).join('\n');
+}
+
+/** Return the explicitly identified speakers from the generated attendee section. */
+export function extractSummaryParticipants(markdown: string): string {
+  if (!markdown.trim()) return '';
+
+  const participants = markdownSections(markdown)
+    .filter(({ title }) => {
+      const normalized = normalizeSectionTitle(title);
+      return normalized.includes('участник')
+        || normalized.includes('attendee')
+        || normalized.includes('participant')
+        || normalized === 'attendance';
+    })
+    .flatMap((section) => sectionItems(section, 'participant'));
+
+  return uniqueMarkdownList(participants);
+}
+
+/**
+ * Return a short, display-ready list of explicit agreements. New summaries contain a
+ * dedicated section; older summaries fall back to their decisions and assigned actions.
+ */
+export function extractSummaryAgreements(markdown: string): string {
+  if (!markdown.trim()) return '';
+
+  const sections = markdownSections(markdown);
+  const classified = sections.map((section) => {
+    const title = normalizeSectionTitle(section.title);
+    const agreement = title.includes('договоренност') || title.includes('agreement') || title.includes('commitment');
+    const decision = title.includes('решени') || title.includes('decision');
+    const action = title.includes('задач')
+      || title.includes('action item')
+      || title.includes('следующие шаги')
+      || title.includes('next steps')
+      || title.includes('согласованные результаты')
+      || title.includes('agreed deliverables');
+    return { section, agreement, decision, action };
+  });
+
+  const explicit = classified
+    .filter(({ agreement }) => agreement)
+    .flatMap(({ section }) => sectionItems(section, 'agreement'));
+  if (explicit.length > 0) return uniqueMarkdownList(explicit);
+
+  const decisions = classified
+    .filter(({ decision }) => decision)
+    .flatMap(({ section }) => sectionItems(section, 'decision'));
+  const actions = classified
+    .filter(({ action }) => action)
+    .flatMap(({ section }) => sectionItems(section, 'action'));
+  const combined: string[] = [];
+  for (let index = 0; index < Math.max(decisions.length, actions.length); index += 1) {
+    if (decisions[index]) combined.push(decisions[index]);
+    if (actions[index]) combined.push(actions[index]);
+  }
+
+  return uniqueMarkdownList(combined);
 }

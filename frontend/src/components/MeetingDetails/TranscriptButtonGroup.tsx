@@ -3,7 +3,7 @@
 import { useState, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { ButtonGroup } from '@/components/ui/button-group';
-import { Copy, Loader2, Pause, Play, RefreshCw } from '@/components/memento/LucideCompat';
+import { Copy, Loader2, Pause, Play, RefreshCw } from '@/components/deslop-icons';
 import Analytics from '@/lib/analytics';
 import { RetranscribeDialog } from './RetranscribeDialog';
 import { DetectSpeakersButton } from './DetectSpeakersButton';
@@ -93,7 +93,7 @@ export function TranscriptButtonGroup({
           <Button
             size="sm"
             variant="outline"
-            className="border-[var(--gold-border)] bg-[var(--gold)] hover:bg-[var(--gold-active)] xl:px-4"
+            className="border-primary/40 bg-primary hover:bg-primary/90 xl:px-4"
             onClick={() => {
               Analytics.trackButtonClick('enhance_transcript', 'meeting_details');
               setShowRetranscribeDialog(true);

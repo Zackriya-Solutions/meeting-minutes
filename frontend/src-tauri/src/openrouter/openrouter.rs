@@ -1,6 +1,6 @@
+use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use tauri::command;
-use reqwest::blocking::Client;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct OpenRouterModel {
@@ -47,7 +47,10 @@ pub fn get_openrouter_models() -> Result<Vec<OpenRouterModel>, String> {
         .map_err(|e| format!("Failed to make HTTP request: {}", e))?;
 
     if !response.status().is_success() {
-        return Err(format!("HTTP request failed with status: {}", response.status()));
+        return Err(format!(
+            "HTTP request failed with status: {}",
+            response.status()
+        ));
     }
 
     let api_response: OpenRouterResponse = response
@@ -60,7 +63,8 @@ pub fn get_openrouter_models() -> Result<Vec<OpenRouterModel>, String> {
         .map(|m| OpenRouterModel {
             id: m.id,
             name: m.name.unwrap_or_else(|| "Unknown".to_string()),
-            context_length: m.top_provider
+            context_length: m
+                .top_provider
                 .as_ref()
                 .and_then(|tp| tp.context_length)
                 .or(m.context_length),

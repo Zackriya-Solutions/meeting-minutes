@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { RefreshCw, Globe, Loader2, AlertCircle, CheckCircle2, X, Cpu } from '@/components/memento/LucideCompat';
+import { RefreshCw, Globe, Loader2, AlertCircle, CheckCircle2, X, Cpu } from '@/components/deslop-icons';
 import {
   Dialog,
   DialogContent,
@@ -20,7 +20,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen, UnlistenFn } from '@tauri-apps/api/event';
 import { toast } from 'sonner';
 import { useConfig } from '@/contexts/ConfigContext';
-import { LANGUAGES } from '@/constants/languages';
+import { getLanguageDisplayName, LANGUAGES } from '@/constants/languages';
 import { useTranscriptionModels, ModelOption } from '@/hooks/useTranscriptionModels';
 import Analytics from '@/lib/analytics';
 import { useT } from '@/lib/i18n';
@@ -311,17 +311,17 @@ export function RetranscribeDialog({
           <DialogTitle className="flex items-center gap-2">
             {isProcessing ? (
               <>
-                <Loader2 className="h-5 w-5 animate-spin text-[var(--gold)]" />
+                <Loader2 className="h-5 w-5 animate-spin text-primary" />
                 {t('Retranscribing...')}
               </>
             ) : error ? (
               <>
-                <AlertCircle className="h-5 w-5 text-[var(--danger)]" />
+                <AlertCircle className="h-5 w-5 text-destructive" />
                 {t('Retranscription Failed')}
               </>
             ) : (
               <>
-                <RefreshCw className="h-5 w-5 text-[var(--gold)]" />
+                <RefreshCw className="h-5 w-5 text-primary" />
                 {t('Retranscribe Meeting')}
               </>
             )}
@@ -337,29 +337,29 @@ export function RetranscribeDialog({
 
         <div className="space-y-4 py-4">
           {!isProcessing && !error && (
-            <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-3">
-              <p className="text-xs font-medium uppercase tracking-wide text-[var(--fg3)]">
+            <div className="rounded-lg border border-border bg-muted p-3">
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                 {t('Current transcript')}
               </p>
               {loadingProvenance ? (
-                <p className="mt-1 flex items-center gap-2 text-sm text-[var(--fg2)]">
+                <p className="mt-1 flex items-center gap-2 text-sm text-muted-foreground">
                   <Loader2 className="h-4 w-4 animate-spin" /> {t('Loading transcription details...')}
                 </p>
               ) : provenance?.known ? (
                 <>
-                  <p className="mt-1 text-sm font-medium text-[var(--fg)]">
+                  <p className="mt-1 text-sm font-medium text-foreground">
                     {provenance.provider} · {provenance.model}
                     {provenance.language && provenance.language !== 'auto' ? ` · ${provenance.language}` : ''}
                   </p>
                   {usesSameModel && (
-                    <p className="mt-2 flex items-start gap-2 text-xs text-[var(--success)]">
+                    <p className="mt-2 flex items-start gap-2 text-xs text-success">
                       <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
                       {t('This transcript already uses the selected model. Repeat only to change language or retry recognition quality.')}
                     </p>
                   )}
                 </>
               ) : (
-                <p className="mt-1 text-sm text-[var(--fg2)]">
+                <p className="mt-1 text-sm text-muted-foreground">
                   {t('The original model is unknown because this meeting was created before model history was stored.')}
                 </p>
               )}
@@ -380,7 +380,7 @@ export function RetranscribeDialog({
                   <SelectContent className="max-h-60">
                     {LANGUAGES.map((lang) => (
                       <SelectItem key={lang.code} value={lang.code}>
-                        {lang.name}
+                        {getLanguageDisplayName(lang.code)}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -434,13 +434,13 @@ export function RetranscribeDialog({
           {isProcessing && progress && (
             <div className="space-y-2">
               <div className="relative">
-                <div className="w-full bg-[var(--bg-elevated)] rounded-full h-3">
+                <div className="w-full bg-muted rounded-full h-3">
                   <div
-                    className="bg-[var(--gold)] h-3 rounded-full transition-all duration-300 ease-out"
+                    className="bg-primary h-3 rounded-full transition-all duration-300 ease-out"
                     style={{ width: `${Math.min(progress.progress_percentage, 100)}%` }}
                   />
                 </div>
-                <div className="flex justify-between text-xs text-[var(--fg2)] mt-1">
+                <div className="flex justify-between text-xs text-muted-foreground mt-1">
                   <span>{progress.stage}</span>
                   <span>{Math.round(progress.progress_percentage)}%</span>
                 </div>
@@ -452,8 +452,8 @@ export function RetranscribeDialog({
           )}
 
           {error && (
-            <div className="bg-[color-mix(in_srgb,var(--danger)_12%,transparent)] border border-[color-mix(in_srgb,var(--danger)_42%,transparent)] rounded-lg p-3">
-              <p className="text-sm text-[var(--danger)]">{error}</p>
+            <div className="bg-destructive/10 border border-destructive/40 rounded-lg p-3">
+              <p className="text-sm text-destructive">{error}</p>
             </div>
           )}
         </div>
@@ -466,7 +466,7 @@ export function RetranscribeDialog({
               </Button>
               <Button
                 onClick={handleStartRetranscription}
-                className="bg-[var(--gold)] hover:bg-[var(--gold-active)]"
+                className="bg-primary hover:bg-primary/90"
                 disabled={!meetingFolderPath}
               >
                 <RefreshCw className="h-4 w-4 mr-2" />

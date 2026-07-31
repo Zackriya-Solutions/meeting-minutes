@@ -1,5 +1,5 @@
 import React from 'react';
-import { Clock, Users, Calendar, Tag } from '@/components/memento/LucideCompat';
+import { Clock, Users, Calendar, Tag } from '@/components/deslop-icons';
 
 interface PageProps {
   params: {
@@ -135,9 +135,9 @@ Quarterly product review session with stakeholders.
   return (
     <div className="p-8 max-w-4xl mx-auto">
       <div className="mb-8">
-        <h1 className="text-3xl font-bold mb-4">{note.title}</h1>
+        <h1 className="memento-screen-title mb-4">{note.title}</h1>
         
-        <div className="flex flex-wrap gap-4 text-[var(--fg2)]">
+        <div className="flex flex-wrap gap-4 text-muted-foreground">
           {note.date && (
             <div className="flex items-center gap-1">
               <Calendar className="w-4 h-4" />
@@ -162,7 +162,7 @@ Quarterly product review session with stakeholders.
 
         <div className="flex gap-2 mt-4">
           {note.tags.map((tag) => (
-            <div key={tag} className="flex items-center gap-1 bg-[var(--gold-soft)] text-[var(--gold)] px-2 py-1 rounded-full text-sm">
+            <div key={tag} className="flex items-center gap-1 bg-primary/10 text-primary px-2 py-1 rounded-full text-sm">
               <Tag className="w-3 h-3" />
               {tag}
             </div>

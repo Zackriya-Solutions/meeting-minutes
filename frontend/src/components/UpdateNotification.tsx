@@ -1,5 +1,5 @@
 import React from 'react';
-import { Download } from '@/components/memento/LucideCompat';
+import { Download } from '@/components/deslop-icons';
 import { toast } from 'sonner';
 import { UpdateInfo } from '@/services/updateService';
 import { translate } from '@/lib/i18n';
@@ -35,7 +35,7 @@ export function showUpdateNotification(updateInfo: UpdateInfo, onUpdateClick?: (
           e.stopPropagation();
           handleClick();
         }}
-        className="text-sm font-medium text-[var(--gold)] hover:text-[var(--gold-active)] underline"
+        className="text-sm font-medium text-primary hover:text-primary/90 underline"
       >
         {translate('View Details')}
       </button>
