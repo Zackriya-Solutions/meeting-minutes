@@ -14,13 +14,38 @@ interface MeetingCacheEntry {
 const meetingCache = new Map<number, MeetingCacheEntry>();
 const inFlightRequests = new Map<number, Promise<LocalOutlookMeeting[]>>();
 
+export type LocalOutlookPermission = 'none' | 'automation' | 'accessibility';
+export type LocalOutlookPermissionState = 'granted' | 'denied' | 'undetermined' | 'unknown';
+
 export interface LocalOutlookCalendarStatus {
   supported: boolean;
   installed: boolean;
   running: boolean;
-  accessibility_granted: boolean;
-  provider: 'local-classic-outlook' | 'macos-outlook-accessibility';
+  /** Which consent the active connector needs. */
+  permission: LocalOutlookPermission;
+  /** `unknown` means macOS cannot answer yet, not that access is blocked. */
+  permission_state: LocalOutlookPermissionState;
+  /** Only Accessibility needs an administrator; Automation never does. */
+  requires_admin: boolean;
+  provider: 'local-classic-outlook' | 'macos-outlook-automation' | 'macos-outlook-accessibility';
   detail: string;
+}
+
+/**
+ * Whether a read can be attempted. `unknown` counts as usable: it only means
+ * macOS cannot resolve the permission until Outlook runs, and the read starts
+ * Outlook itself.
+ */
+export function canReadOutlookCalendar(status: LocalOutlookCalendarStatus): boolean {
+  if (!status.supported || !status.installed) return false;
+  if (status.permission === 'none') return true;
+  return status.permission_state === 'granted' || status.permission_state === 'unknown';
+}
+
+/** True while the user still has to approve something for reads to succeed. */
+export function needsOutlookPermission(status: LocalOutlookCalendarStatus): boolean {
+  if (!status.supported || !status.installed || status.permission === 'none') return false;
+  return status.permission_state === 'denied' || status.permission_state === 'undetermined';
 }
 
 export interface LocalOutlookMeeting {
@@ -42,8 +67,8 @@ export async function getLocalOutlookCalendarStatus(): Promise<LocalOutlookCalen
   return invoke<LocalOutlookCalendarStatus>('local_outlook_calendar_status');
 }
 
-export async function requestOutlookAccessibilityPermission(): Promise<LocalOutlookCalendarStatus> {
-  return invoke<LocalOutlookCalendarStatus>('request_outlook_accessibility_permission');
+export async function requestOutlookCalendarPermission(): Promise<LocalOutlookCalendarStatus> {
+  return invoke<LocalOutlookCalendarStatus>('request_outlook_calendar_permission');
 }
 
 export async function getUpcomingLocalOutlookMeetings(

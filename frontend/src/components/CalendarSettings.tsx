@@ -13,7 +13,9 @@ import {
   LocalOutlookMeeting,
   OUTLOOK_CALENDAR_EMPTY_RETRY_INTERVAL_MS,
   OUTLOOK_CALENDAR_REFRESH_INTERVAL_MS,
-  requestOutlookAccessibilityPermission,
+  needsOutlookPermission,
+  canReadOutlookCalendar,
+  requestOutlookCalendarPermission,
   setLocalOutlookCalendarEnabled,
 } from '@/lib/localOutlookCalendar';
 
@@ -111,11 +113,9 @@ export function CalendarSettings() {
   }, [refreshPreview, t]);
 
   const isMacAccessibility = status?.provider === 'macos-outlook-accessibility';
-  const canEnable = Boolean(
-    status?.supported
-      && status.installed
-      && (!isMacAccessibility || status.accessibility_granted),
-  );
+  const isMacAutomation = status?.permission === 'automation';
+  const permissionMissing = Boolean(status && needsOutlookPermission(status));
+  const canEnable = Boolean(status && canReadOutlookCalendar(status));
   const calendarReady = enabled && canEnable;
 
   useEffect(() => {
@@ -173,12 +173,14 @@ export function CalendarSettings() {
     return <div className="p-6 text-sm text-[var(--fg3)]">{t('Loading…')}</div>;
   }
 
-  const statusTitle = canEnable
-    ? isMacAccessibility
-      ? t('Outlook Accessibility is ready')
-      : t(status?.running ? 'Classic Outlook is running' : 'Classic Outlook is installed')
-    : isMacAccessibility && status?.installed && !status.accessibility_granted
-      ? t('Accessibility permission is required')
+  const statusTitle = permissionMissing
+    ? t(isMacAccessibility
+      ? 'Accessibility permission is required'
+      : 'Permission to read Outlook is required')
+    : canEnable
+      ? isMacAccessibility
+        ? t('Outlook Accessibility is ready')
+        : t(status?.running ? 'Classic Outlook is running' : 'Classic Outlook is installed')
       : t('Local Outlook is unavailable');
 
   return (
@@ -218,18 +220,27 @@ export function CalendarSettings() {
               <p className="mt-1 text-xs leading-relaxed text-[var(--fg3)]">
                 {status?.detail ? t(status.detail) : t('Local Outlook is unavailable')}
               </p>
-              {isMacAccessibility && status?.installed && !status.accessibility_granted && (
+              {permissionMissing && (
                 <button
                   type="button"
                   disabled={requestingPermission}
                   onClick={async () => {
                     setRequestingPermission(true);
                     try {
-                      const nextStatus = await requestOutlookAccessibilityPermission();
+                      const nextStatus = await requestOutlookCalendarPermission();
                       setStatus(nextStatus);
-                      toast.info(t('Allow Memento in Accessibility settings, then return and refresh.'));
+                      if (nextStatus.permission_state === 'granted') {
+                        toast.success(t('Memento can now read the Outlook calendar'));
+                        await refreshPreview(true).catch(() => {
+                          // The preview shows the error and retries automatically.
+                        });
+                      } else {
+                        toast.info(t(isMacAccessibility
+                          ? 'Allow Memento in Accessibility settings, then return and refresh.'
+                          : 'Confirm the macOS request so Memento can read Outlook, then refresh.'));
+                      }
                     } catch (error) {
-                      toast.error(t('Could not request Accessibility permission'), {
+                      toast.error(t('Could not request permission to read Outlook'), {
                         description: String(error),
                       });
                     } finally {
@@ -238,12 +249,22 @@ export function CalendarSettings() {
                   }}
                   className="mm-button mm-button-secondary mt-3 px-3 py-2 text-xs disabled:opacity-50"
                 >
-                  {t(requestingPermission ? 'Opening settings…' : 'Allow Accessibility')}
+                  {t(requestingPermission
+                    ? 'Waiting for your approval…'
+                    : isMacAccessibility
+                      ? 'Allow Accessibility'
+                      : 'Allow Outlook access')}
                 </button>
               )}
             </div>
           </div>
         </div>
+
+        {isMacAutomation && (
+          <div className="mt-4 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-sheet)] p-4 text-xs leading-relaxed text-[var(--fg3)]">
+            {t('Memento asks Outlook for your meetings over macOS Automation. You approve it once with a single click, without an administrator password, and Outlook stays in the background.')}
+          </div>
+        )}
 
         {isMacAccessibility && (
           <div className="mt-4 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-sheet)] p-4 text-xs leading-relaxed text-[var(--fg3)]">

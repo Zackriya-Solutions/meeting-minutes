@@ -6,6 +6,7 @@ import { Icon } from '@/components/memento/Icon';
 import { useLanguage } from '@/lib/i18n';
 import {
   getLocalOutlookCalendarStatus,
+  needsOutlookPermission,
   getUpcomingLocalOutlookMeetings,
   isLocalOutlookCalendarEnabled,
   LocalOutlookMeeting,
@@ -66,8 +67,10 @@ export function UpcomingMeetings({ disabled, onStartMeeting }: UpcomingMeetingsP
           setError(t('Outlook is not available.'));
           return;
         }
-        if (status.provider === 'macos-outlook-accessibility' && !status.accessibility_granted) {
-          setError(t('Accessibility permission is required'));
+        if (needsOutlookPermission(status)) {
+          setError(t(status.permission === 'accessibility'
+            ? 'Accessibility permission is required'
+            : 'Permission to read Outlook is required'));
           return;
         }
         const events = await getUpcomingLocalOutlookMeetings(7, { force });

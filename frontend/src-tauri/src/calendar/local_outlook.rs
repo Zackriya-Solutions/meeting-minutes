@@ -3,9 +3,10 @@
 //! This integration intentionally has no HTTP client, OAuth flow, or cloud
 //! fallback. On Windows it reads the calendar through the Outlook Object Model
 //! exposed by the locally installed classic Outlook application. On macOS it
-//! reads only visible Outlook calendar Accessibility labels after explicit user
-//! approval. Events live only in the command response and are not persisted by
-//! this module.
+//! asks Outlook itself over Apple Events, which a standard user can approve
+//! without an administrator password; the older Accessibility connector stays
+//! as a fallback. Events live only in the command response and are not
+//! persisted by this module.
 
 use serde::Serialize;
 
@@ -18,10 +19,24 @@ pub struct LocalOutlookCalendarStatus {
     pub supported: bool,
     pub installed: bool,
     pub running: bool,
-    pub accessibility_granted: bool,
+    /// Which consent the active connector needs: `none`, `automation`, or
+    /// `accessibility`.
+    pub permission: &'static str,
+    /// `granted`, `denied`, `undetermined`, or `unknown`. `unknown` means macOS
+    /// cannot answer yet (Outlook is not running) and is not a failure.
+    pub permission_state: &'static str,
+    /// True only when granting that consent needs an administrator password,
+    /// which is the case for Accessibility but never for Automation.
+    pub requires_admin: bool,
     pub provider: &'static str,
     pub detail: String,
 }
+
+pub const PERMISSION_NONE: &str = "none";
+pub const PERMISSION_GRANTED: &str = "granted";
+pub const PERMISSION_DENIED: &str = "denied";
+pub const PERMISSION_UNDETERMINED: &str = "undetermined";
+pub const PERMISSION_UNKNOWN: &str = "unknown";
 
 #[derive(Debug, Clone, Serialize)]
 pub struct LocalOutlookMeeting {
@@ -50,7 +65,7 @@ pub async fn local_outlook_calendar_status() -> Result<LocalOutlookCalendarStatu
 
     #[cfg(target_os = "macos")]
     {
-        return tauri::async_runtime::spawn_blocking(super::macos_outlook::status)
+        return tauri::async_runtime::spawn_blocking(super::macos_provider::status)
             .await
             .map_err(|error| format!("local Outlook status task failed: {error}"));
     }
@@ -60,22 +75,25 @@ pub async fn local_outlook_calendar_status() -> Result<LocalOutlookCalendarStatu
         supported: false,
         installed: false,
         running: false,
-        accessibility_granted: false,
+        permission: PERMISSION_NONE,
+        permission_state: PERMISSION_GRANTED,
+        requires_admin: false,
         provider: "local-classic-outlook",
         detail: UNSUPPORTED_MESSAGE.to_string(),
     })
 }
 
+/// Ask macOS for the consent the active connector needs.
+///
+/// On the default macOS path this shows the Automation consent alert, which a
+/// standard user approves with one click; it never requires an administrator.
 #[tauri::command]
-pub async fn request_outlook_accessibility_permission() -> Result<LocalOutlookCalendarStatus, String>
-{
+pub async fn request_outlook_calendar_permission() -> Result<LocalOutlookCalendarStatus, String> {
     #[cfg(target_os = "macos")]
     {
-        return tauri::async_runtime::spawn_blocking(
-            super::macos_outlook::request_accessibility_permission,
-        )
-        .await
-        .map_err(|error| format!("Accessibility permission task failed: {error}"))?;
+        return tauri::async_runtime::spawn_blocking(super::macos_provider::request_permission)
+            .await
+            .map_err(|error| format!("Outlook permission task failed: {error}"))?;
     }
 
     #[cfg(not(target_os = "macos"))]
@@ -100,7 +118,7 @@ pub async fn get_upcoming_local_outlook_meetings(
     #[cfg(target_os = "macos")]
     {
         return tauri::async_runtime::spawn_blocking(move || {
-            super::macos_outlook::upcoming_meetings(days)
+            super::macos_provider::upcoming_meetings(days)
         })
         .await
         .map_err(|error| format!("local Outlook calendar task failed: {error}"))?;

@@ -734,7 +734,7 @@ pub fn run() {
             salutespeech::salutespeech_is_configured,
             salutespeech::salutespeech_can_be_selected,
             calendar::local_outlook::local_outlook_calendar_status,
-            calendar::local_outlook::request_outlook_accessibility_permission,
+            calendar::local_outlook::request_outlook_calendar_permission,
             calendar::local_outlook::get_upcoming_local_outlook_meetings,
             collections::commands::create_collection,
             collections::commands::rename_collection,

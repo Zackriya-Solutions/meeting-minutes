@@ -13,8 +13,14 @@ Classic Outlook local profile / OST
             ↓ Tauri command response
        Upcoming meetings UI
 
+Outlook for Mac local calendar store
+            ↓ Apple Events / AppleScript Calendar Suite   ← default on macOS
+       Memento Rust process
+            ↓ Tauri command response
+       Upcoming meetings UI
+
 Outlook for Mac visible Calendar UI
-            ↓ macOS AXUIElement (Accessibility)
+            ↓ macOS AXUIElement (Accessibility)           ← fallback only
        Memento Rust process
             ↓ Tauri command response
        Upcoming meetings UI
@@ -32,11 +38,10 @@ while visible. When the calendar is empty or a read fails, Memento retries every
 minute. Manual refresh remains available, and concurrent reads are coalesced so
 the two screens cannot trigger duplicate Outlook automation.
 
-On macOS, the user must additionally approve Memento under **System Settings →
-Privacy & Security → Accessibility**. Memento then opens Outlook, navigates to
-Calendar and Today where the installed Outlook exposes those controls, attempts
-to select Week view, and parses only visible VoiceOver labels. It does not use
-AppleScript as a calendar data source.
+On macOS, the user approves one **Automation** consent alert ("Memento wants
+access to control Microsoft Outlook"). Memento then starts Outlook in the
+background and asks it for the calendar over Apple Events. Outlook is never
+brought to the front and its window layout is never changed.
 
 ## Data minimization
 
@@ -68,16 +73,53 @@ surfaces that failure and does not attempt a bypass.
 
 ## macOS compatibility
 
-The macOS connector uses the public Accessibility API and therefore works
-independently of Exchange, Graph, OWA, and Outlook's AppleScript dictionary. It
-supports Russian and English event labels and is intentionally best-effort:
-Microsoft can change the accessibility hierarchy or localized label wording in
-an Outlook update.
+### Why Automation and not Accessibility
 
-Only events exposed in the visible Calendar view can be returned. Hidden
-calendars, events outside the currently rendered week, and details omitted from
-the VoiceOver label are not available. If corporate policy blocks Accessibility
-control, Memento reports the missing permission and does not attempt a bypass.
+Both are TCC permissions, but they are not equally reachable for a standard
+corporate account:
+
+| Permission | Consent record | Owner | What the user does |
+| --- | --- | --- | --- |
+| Accessibility | `/Library/Application Support/com.apple.TCC/TCC.db` | `root:wheel` | unlock System Settings with an **administrator password** |
+| Automation (Apple Events) | `~/Library/Application Support/com.apple.TCC/TCC.db` | the logged-in user | click **OK** in one alert |
+
+Managed fleets normally do not hand out local administrator rights, which made
+the Accessibility connector unusable there. Automation consent is per-user and
+per-target-application, so the same locked-down account can approve Memento →
+Microsoft Outlook on its own.
+
+Requirements on the Memento side, both already in the bundle:
+
+- `NSAppleEventsUsageDescription` in `Info.plist` — the reason string shown in
+  the consent alert;
+- `com.apple.security.automation.apple-events` in `entitlements.plist` — needed
+  because the app ships with the hardened runtime.
+
+An MDM Privacy Preferences (PPPC) profile can still pre-approve or pre-deny
+Automation centrally. If it denies, Memento reports it and does not attempt a
+bypass.
+
+### Connector selection
+
+`calendar/macos_provider.rs` picks the connector:
+
+- classic Outlook → Apple Events (`macos_outlook_events.rs`), the default;
+- New Outlook (`IsRunningNewOutlook = 1`) → Accessibility
+  (`macos_outlook.rs`), because Microsoft has still not shipped AppleScript
+  support for New Outlook;
+- if an Apple Events read fails and an administrator had already approved
+  Accessibility, the Accessibility connector is used as a fallback.
+
+The Apple Events connector asks Outlook for each calendar's events in the
+requested window through the documented Calendar Suite (`calendar event`:
+`subject`, `start time`, `end time`, `location`, `all day flag`,
+`is recurring`, `exchange id`, attendee count). It never reads `content` or
+`plain text content`, which are the appointment body. Unlike the Accessibility
+connector it is not limited to the rendered week and does not depend on
+localized VoiceOver label wording.
+
+Both connectors work offline against the locally synced Outlook store and never
+contact Exchange, Graph, or OWA directly.
 
 ## Manual verification on Windows
 
@@ -97,12 +139,23 @@ control, Memento reports the missing permission and does not attempt a bypass.
 
 ## Manual verification on macOS
 
-1. Install Memento in `/Applications` and start Microsoft Outlook.
-2. Open **Settings → Calendar** and choose **Allow Accessibility**.
-3. Enable Memento in **System Settings → Privacy & Security → Accessibility**,
-   then return to Memento.
+Run this while signed in to a **standard, non-administrator** account; that is
+the case the connector exists for.
+
+1. Install Memento in `/Applications`. Outlook may be closed.
+2. Open **Settings → Calendar** and choose **Allow Outlook access**.
+3. Confirm macOS shows "Memento wants access to control Microsoft Outlook" and
+   that it asks only for a click — no administrator password, no System
+   Settings trip. Click **OK**.
 4. Enable the local Outlook calendar and choose **Refresh**.
-5. Confirm Outlook switches to Calendar/Today and that the preview lists the
-   visible meetings from the next seven days.
+5. Confirm the preview lists meetings from the next seven days, including
+   occurrences of recurring series, and that Outlook did **not** come to the
+   front or change its view.
 6. Start a recording from a preview item and confirm its title is used.
 7. Confirm event titles do not appear in Memento logs or its SQLite database.
+8. Deny the permission instead (**System Settings → Privacy & Security →
+   Automation**, switch Microsoft Outlook off for Memento — again with no
+   administrator prompt) and confirm Memento reports it and offers the
+   permission button rather than failing silently.
+9. Switch Outlook to New Outlook and confirm Settings reports that New Outlook
+   has no local calendar automation.

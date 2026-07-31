@@ -129,8 +129,14 @@ pub fn status() -> LocalOutlookCalendarStatus {
         supported: true,
         installed,
         running,
-        accessibility_granted,
-        provider: "macos-outlook-accessibility",
+        permission: super::macos_provider::PERMISSION_ACCESSIBILITY,
+        permission_state: if accessibility_granted {
+            super::local_outlook::PERMISSION_GRANTED
+        } else {
+            super::local_outlook::PERMISSION_UNDETERMINED
+        },
+        requires_admin: !accessibility_granted,
+        provider: super::macos_provider::PROVIDER_ACCESSIBILITY,
         detail,
     }
 }
@@ -206,7 +212,7 @@ pub fn upcoming_meetings(days: u32) -> Result<Vec<LocalOutlookMeeting>, String> 
     Ok(meetings)
 }
 
-fn outlook_installed() -> bool {
+pub(super) fn outlook_installed() -> bool {
     let system_path = Path::new("/Applications/Microsoft Outlook.app");
     let user_path = dirs::home_dir()
         .map(|home| home.join("Applications/Microsoft Outlook.app"))
@@ -214,7 +220,7 @@ fn outlook_installed() -> bool {
     system_path.exists() || user_path
 }
 
-fn outlook_pid() -> Option<i32> {
+pub(super) fn outlook_pid() -> Option<i32> {
     let output = Command::new("/usr/bin/pgrep")
         .args(["-x", "Microsoft Outlook"])
         .output()
@@ -250,7 +256,7 @@ fn ensure_outlook_running() -> Result<i32, String> {
     Err("Microsoft Outlook did not finish starting.".to_string())
 }
 
-fn accessibility_trusted(prompt: bool) -> bool {
+pub(super) fn accessibility_trusted(prompt: bool) -> bool {
     unsafe {
         if !prompt {
             return AXIsProcessTrusted() != 0;
