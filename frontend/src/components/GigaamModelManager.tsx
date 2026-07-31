@@ -11,6 +11,8 @@ interface VariantInfo {
   label: string;
   size_mb: number;
   present: boolean;
+  /** The encoder runs on the Apple Neural Engine (Apple Silicon builds only). */
+  neural_engine: boolean;
 }
 
 interface GigaamStatus {
@@ -21,6 +23,7 @@ interface GigaamStatus {
   downloading: boolean;
   download_progress: DownloadProgress | null;
   variants: VariantInfo[];
+  neural_engine_supported: boolean;
 }
 
 interface DownloadProgress {
@@ -28,6 +31,11 @@ interface DownloadProgress {
   downloaded: number;
   total: number;
   percent: number;
+  /**
+   * `downloading` has byte progress; `extracting` and `compiling` are local CPU steps of the
+   * Neural Engine model install and report none, so they render as indeterminate.
+   */
+  stage: 'downloading' | 'extracting' | 'compiling';
 }
 
 function mb(bytes: number): string {
@@ -148,6 +156,14 @@ export function GigaamModelManager() {
   const selected = status?.variants.find((v) => v.id === status.selected) ?? null;
   const present = !!status?.model_present;
   const loaded = !!status?.loaded;
+  // Unpacking and compiling the CoreML encoder have no byte counts to report.
+  const indeterminate = !!progress && progress.stage !== 'downloading';
+  const stageLabel = (stage: DownloadProgress['stage']) =>
+    stage === 'extracting'
+      ? t('Unpacking the Neural Engine model')
+      : stage === 'compiling'
+        ? t('Compiling the model for this Mac (one time)')
+        : t('Downloading');
   // The selected variant is the one actually running only if it's loaded AND matches.
   const selectedActive = loaded && status?.loaded_variant === status?.selected;
 
@@ -180,14 +196,22 @@ export function GigaamModelManager() {
           disabled={!status || downloading || switching}
           className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground focus:border-primary/40 focus:outline-none disabled:opacity-50"
         >
-          {(status?.variants ?? []).map((v) => (
-            <option key={v.id} value={v.id}>
-              {v.label} · ~{v.size_mb}{t(' MB')}{v.present ? t(' · installed') : ''}
-            </option>
-          ))}
+          {(status?.variants ?? []).map((v) => {
+            // An Apple Silicon Mac on macOS 13 lists the Neural Engine model but cannot load
+            // it, so the option stays visible (and explains itself) instead of being selectable.
+            const unsupported = v.neural_engine && !status?.neural_engine_supported;
+            return (
+              <option key={v.id} value={v.id} disabled={unsupported}>
+                {v.label} · ~{v.size_mb}{t(' MB')}
+                {unsupported ? t(' · needs macOS 14') : v.present ? t(' · installed') : ''}
+              </option>
+            );
+          })}
         </select>
         <p className="mt-1 text-xs text-muted-foreground">
-          {t('RNN-T usually beats CTC on accuracy; fp32 avoids int8 quantization loss (larger & slower).')}
+          {selected?.neural_engine
+            ? t('The encoder runs on the Apple Neural Engine (macOS 14+): the same transcripts as fp32, several times faster and much lighter on the CPU. The first load takes about a minute while macOS optimizes the model for this Mac.')
+            : t('RNN-T usually beats CTC on accuracy; fp32 avoids int8 quantization loss (larger & slower).')}
         </p>
       </div>
 
@@ -197,7 +221,7 @@ export function GigaamModelManager() {
             <div className="mb-1.5 flex items-center justify-between text-xs text-muted-foreground">
               <span className="flex items-center gap-1.5">
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                {t('Downloading')}{progress ? ` ${progress.file}` : '…'}
+                {progress ? `${stageLabel(progress.stage)}${indeterminate ? '…' : ` ${progress.file}`}` : `${t('Downloading')}…`}
               </span>
               {progress && progress.total > 0 && (
                 <span>
@@ -207,8 +231,8 @@ export function GigaamModelManager() {
             </div>
             <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
               <div
-                className="h-full rounded-full bg-primary transition-all"
-                style={{ width: `${progress?.percent ?? 0}%` }}
+                className={`h-full rounded-full bg-primary transition-all${indeterminate ? ' animate-pulse' : ''}`}
+                style={{ width: indeterminate ? '100%' : `${progress?.percent ?? 0}%` }}
               />
             </div>
           </div>
