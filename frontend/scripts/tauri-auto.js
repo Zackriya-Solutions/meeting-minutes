@@ -47,8 +47,22 @@ if (platform === 'linux' && feature === 'cuda') {
   env.CMAKE_POSITION_INDEPENDENT_CODE = 'ON';
 }
 
+// Updater artifacts are signed with a private key that only the release workflow
+// has, so a local build bundles the .app/DMG fine and then fails on signing.
+// Skip them unless the key is present. Same override as clean_build.sh.
+let configArg = '';
+if (command === 'build' && !process.env.TAURI_SIGNING_PRIVATE_KEY) {
+  // Passed as a file rather than inline JSON: execSync goes through a shell, and
+  // single-quoted JSON is not quoted on Windows cmd.exe. A double-quoted path
+  // works on both, and tolerates spaces in the repo path.
+  const overridePath = path.join(os.tmpdir(), 'meetily-tauri-no-updater.json');
+  fs.writeFileSync(overridePath, JSON.stringify({ bundle: { createUpdaterArtifacts: false } }));
+  configArg = ` --config "${overridePath}"`;
+  console.log('🔑 No TAURI_SIGNING_PRIVATE_KEY - skipping updater artifacts');
+}
+
 // Build the tauri command
-let tauriCmd = `tauri ${command}`;
+let tauriCmd = `tauri ${command}${configArg}`;
 if (feature && feature !== 'none') {
   tauriCmd += ` -- --features ${feature}`;
   console.log(`🚀 Running: tauri ${command} with features: ${feature}`);
