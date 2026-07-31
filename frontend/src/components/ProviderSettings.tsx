@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { CheckCircle2, KeyRound, Loader2, AlertTriangle, ChevronDown, ChevronRight } from '@/components/deslop-icons';
+import { CheckCircle2, KeyRound, Loader2, AlertTriangle, ChevronDown, ChevronRight, RefreshCw } from '@/components/deslop-icons';
 import { useT } from '@/lib/i18n';
 
 type Settings = Record<string, string>;
@@ -11,12 +11,59 @@ const has = (s: Settings, k: string) => !!s[k] && s[k].length > 0;
 
 export function ProviderSettings() {
   const t = useT();
+  const [refreshing, setRefreshing] = useState(false);
+  const [status, setStatus] = useState<'idle' | 'ok' | 'error'>('idle');
+  const [error, setError] = useState<string | null>(null);
+
+  const refreshToken = useCallback(async () => {
+    setRefreshing(true);
+    setStatus('idle');
+    setError(null);
+    try {
+      await invoke('refresh_managed_gateway_token');
+      setStatus('ok');
+      setTimeout(() => setStatus('idle'), 4000);
+    } catch (e) {
+      setStatus('error');
+      setError(typeof e === 'string' ? e : t('Failed to refresh access token.'));
+    } finally {
+      setRefreshing(false);
+    }
+  }, [t]);
+
   return (
     <div className="mt-6 max-w-2xl rounded-xl border border-border bg-card p-5">
       <h3 className="text-sm font-semibold text-foreground">{t('Managed cloud services')}</h3>
       <p className="mt-1 text-sm text-muted-foreground">
         {t('DeepSeek is used for summaries and the knowledge base. SaluteSpeech is used for transcription and speaker detection. Access is provided through the Memento gateway; no API keys are required.')}
       </p>
+
+      <div className="mt-4 border-t border-[var(--border-subtle)] pt-4">
+        <p className="text-sm text-[var(--fg2)]">
+          {t('Seeing an “invalid or expired token” error when generating a summary? Refresh the access token to reconnect to the managed services.')}
+        </p>
+        <div className="mt-3 flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onClick={refreshToken}
+            disabled={refreshing}
+            className="flex items-center gap-2 rounded-lg bg-[var(--gold)] px-4 py-2 text-sm font-medium text-[var(--fg-inverse)] transition-colors hover:bg-[var(--gold-active)] disabled:cursor-not-allowed disabled:bg-[var(--bg-elevated)]"
+          >
+            {refreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+            {t('Refresh token')}
+          </button>
+          {status === 'ok' && (
+            <span className="flex items-center gap-1.5 text-sm text-[var(--success)]">
+              <CheckCircle2 className="h-4 w-4" /> {t('Access token refreshed')}
+            </span>
+          )}
+          {status === 'error' && error && (
+            <span className="flex items-center gap-1.5 text-sm text-[var(--danger)]">
+              <AlertTriangle className="h-4 w-4" /> {error}
+            </span>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

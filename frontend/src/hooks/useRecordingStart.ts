@@ -14,7 +14,7 @@ import { toast } from 'sonner';
 import { useT } from '@/lib/i18n';
 
 interface UseRecordingStartReturn {
-  handleRecordingStart: () => Promise<void>;
+  handleRecordingStart: (meetingTitle?: string) => Promise<void>;
   isAutoStarting: boolean;
 }
 
@@ -134,7 +134,7 @@ export function useRecordingStart(
   }, [checkIfModelDownloading, showModal, t]);
 
   // Handle manual recording start (from button click)
-  const handleRecordingStart = useCallback(async () => {
+  const handleRecordingStart = useCallback(async (calendarMeetingTitle?: string) => {
     try {
       console.log('handleRecordingStart called - checking Parakeet model status');
 
@@ -148,7 +148,7 @@ export function useRecordingStart(
 
       console.log('Parakeet ready - setting up meeting title and state');
 
-      const randomTitle = generateMeetingTitle();
+      const randomTitle = calendarMeetingTitle?.trim() || generateMeetingTitle();
       setMeetingTitle(randomTitle);
 
       // Set STARTING status before initiating backend recording

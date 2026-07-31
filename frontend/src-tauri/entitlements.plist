@@ -10,5 +10,10 @@
     <true/>
     <key>com.apple.security.device.screen-capture</key>
     <true/>
+    <!-- Lets the hardened runtime send Apple Events to Microsoft Outlook so the
+         local calendar can be read with per-user Automation consent instead of
+         admin-gated Accessibility. -->
+    <key>com.apple.security.automation.apple-events</key>
+    <true/>
 </dict>
 </plist>

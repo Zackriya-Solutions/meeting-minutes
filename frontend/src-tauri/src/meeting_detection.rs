@@ -32,9 +32,26 @@ const AUTO_LISTENING_QUIET_POLLS: u8 = 23;
 pub enum MeetingApp {
     Zoom,
     MicrosoftTeams,
+    Telegram,
     YandexTelemost,
     SaluteJazz,
     BrowserCall,
+}
+
+impl MeetingApp {
+    /// Product name used when titling an automatically captured meeting. The webview
+    /// has its own localized labels for prompts; this is the Rust-side fallback for
+    /// captures that complete without any UI involved.
+    fn display(self) -> &'static str {
+        match self {
+            MeetingApp::Zoom => "Zoom",
+            MeetingApp::MicrosoftTeams => "Microsoft Teams",
+            MeetingApp::Telegram => "Telegram",
+            MeetingApp::YandexTelemost => "Yandex Telemost",
+            MeetingApp::SaluteJazz => "SaluteJazz",
+            MeetingApp::BrowserCall => "Browser call",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -143,9 +160,12 @@ pub async fn get_auto_meeting_detection_status(
     detector: State<'_, AutoMeetingDetectionState>,
     notifications: State<'_, NotificationManagerState<Wry>>,
 ) -> Result<AutoMeetingDetectionStatus, String> {
-    let enabled = match notifications.read().await.as_ref() {
-        Some(manager) => manager.get_settings().await.auto_meeting_detection,
-        None => false,
+    let (enabled, auto_listening_enabled) = match notifications.read().await.as_ref() {
+        Some(manager) => {
+            let settings = manager.get_settings().await;
+            (settings.auto_meeting_detection, settings.auto_listening)
+        }
+        None => (false, false),
     };
     let active_capture_session_id = detector
         .auto_listening
@@ -156,7 +176,7 @@ pub async fn get_auto_meeting_detection_status(
         enabled,
         running: detector.is_running(),
         microphone_signal_supported: cfg!(target_os = "macos"),
-        auto_listening_enabled: enabled,
+        auto_listening_enabled,
         auto_listening_supported: cfg!(target_os = "macos"),
         active_capture_session_id,
         poll_interval_seconds: POLL_INTERVAL.as_secs(),
@@ -273,6 +293,17 @@ impl ProcessLaunchEvidence {
     }
 }
 
+/// Which consumer owns the current automatic capture session. Both are driven by
+/// the same detector and the same `DetectionSession` state machine; only one can be
+/// armed at a time, so a call is never captured twice.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AutoCaptureMode {
+    /// The interactive recording session, with live transcription.
+    Listening,
+    /// A silent background capture, registered as audio-only when the call ends.
+    Background,
+}
+
 async fn run_detection_loop(
     app: AppHandle<Wry>,
     cancellation: CancellationToken,
@@ -286,7 +317,10 @@ async fn run_detection_loop(
     let mut system = System::new_all();
     let mut process_evidence = ProcessLaunchEvidence::default();
     let mut session = DetectionSession::default();
-    let mut suppress_auto_listening_until_quiet = false;
+    // A start attempt that failed must not be retried until the call signal has gone
+    // quiet, whichever mode attempted it.
+    let mut suppress_auto_capture_until_quiet = false;
+    let mut armed_mode: Option<AutoCaptureMode> = None;
     let mut interval = tokio::time::interval(POLL_INTERVAL);
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
@@ -294,17 +328,33 @@ async fn run_detection_loop(
         tokio::select! {
             _ = cancellation.cancelled() => break,
             _ = interval.tick() => {
-                let (enabled, auto_listening_enabled) = detection_settings(&app).await;
-                if !enabled {
+                let settings = detection_settings(&app).await;
+                let recording = crate::audio::recording_commands::is_recording().await;
+                if !settings.detection_enabled {
                     if session.observe(false, false, false, false) == DetectionEvent::StopAutoListening {
-                        stop_auto_listening(&app, &auto_listening_state).await;
+                        stop_armed_mode(&app, &auto_listening_state, armed_mode.take()).await;
                     }
                     process_evidence = ProcessLaunchEvidence::default();
                     continue;
                 }
-                if session.auto_listening_active && !auto_listening_enabled {
+                // A mode that is switched off mid-call must release the call it owns.
+                let armed_mode_still_enabled = match armed_mode {
+                    Some(AutoCaptureMode::Listening) => settings.auto_listening,
+                    Some(AutoCaptureMode::Background) => settings.background_auto_recording,
+                    None => true,
+                };
+                if session.auto_listening_active && !armed_mode_still_enabled {
                     session = DetectionSession::default();
-                    stop_auto_listening(&app, &auto_listening_state).await;
+                    stop_armed_mode(&app, &auto_listening_state, armed_mode.take()).await;
+                    process_evidence = ProcessLaunchEvidence::default();
+                    continue;
+                }
+                // The user took over manually. Finalize the background capture rather
+                // than recording the same call twice from two microphones.
+                if armed_mode == Some(AutoCaptureMode::Background) && recording {
+                    log::info!("Interactive recording started; finalizing the background capture");
+                    session = DetectionSession::default();
+                    stop_armed_mode(&app, &auto_listening_state, armed_mode.take()).await;
                     process_evidence = ProcessLaunchEvidence::default();
                     continue;
                 }
@@ -325,24 +375,31 @@ async fn run_detection_loop(
                             active_polls: REQUIRED_ACTIVE_POLLS.saturating_sub(1),
                             ..DetectionSession::default()
                         };
-                        suppress_auto_listening_until_quiet = true;
+                        // The webview already released that capture session, so the
+                        // armed mode is stale and must not be stopped again later.
+                        armed_mode = None;
+                        suppress_auto_capture_until_quiet = true;
                     }
                 }
                 if candidates.is_empty() {
-                    suppress_auto_listening_until_quiet = false;
+                    suppress_auto_capture_until_quiet = false;
                 }
-                let recording = crate::audio::recording_commands::is_recording().await;
-                let strong_auto_listening_signal = should_auto_listen(
+                let armable = !suppress_auto_capture_until_quiet;
+                let mode_to_arm = mode_to_arm(
                     &candidates,
                     source,
-                    auto_listening_enabled && !suppress_auto_listening_until_quiet,
+                    DetectionSettings {
+                        auto_listening: settings.auto_listening && armable,
+                        background_auto_recording: settings.background_auto_recording && armable,
+                        ..settings
+                    },
                     cfg!(target_os = "macos"),
                 );
                 match session.observe(
                     !candidates.is_empty(),
                     recording,
                     true,
-                    strong_auto_listening_signal,
+                    mode_to_arm.is_some(),
                 ) {
                     DetectionEvent::None => {}
                     DetectionEvent::SuggestRecording => {
@@ -358,31 +415,91 @@ async fn run_detection_loop(
                     }
                     DetectionEvent::StartAutoListening => {
                         let Some(source) = source else { continue };
+                        let Some(mode) = mode_to_arm else { continue };
                         let apps: Vec<_> = candidates.into_iter().collect();
-                        if let Err(error) = start_auto_listening(
-                            &app,
-                            &auto_listening_state,
-                            apps.clone(),
-                            source,
-                        )
-                        .await
-                        {
-                            log::warn!("Auto-listening start was rejected safely: {error}");
-                            session = DetectionSession {
-                                active_polls: REQUIRED_ACTIVE_POLLS,
-                                notified: true,
-                                ..DetectionSession::default()
-                            };
-                            deliver_detection(&app, MeetingDetectedEvent { apps, source }).await;
+                        let start = match mode {
+                            AutoCaptureMode::Listening => start_auto_listening(
+                                &app,
+                                &auto_listening_state,
+                                apps.clone(),
+                                source,
+                            )
+                            .await,
+                            AutoCaptureMode::Background => app
+                                .state::<crate::background_capture::BackgroundCaptureState>()
+                                .start(&app, &label_for(&apps))
+                                .await,
+                        };
+                        match start {
+                            Ok(()) => armed_mode = Some(mode),
+                            Err(error) => {
+                                log::warn!("{mode:?} start was rejected safely: {error}");
+                                // Fall back to a confirmation prompt and wait for the
+                                // signal to go quiet before arming again.
+                                session = DetectionSession {
+                                    active_polls: REQUIRED_ACTIVE_POLLS,
+                                    notified: true,
+                                    ..DetectionSession::default()
+                                };
+                                suppress_auto_capture_until_quiet = true;
+                                deliver_detection(&app, MeetingDetectedEvent { apps, source }).await;
+                            }
                         }
                     }
                     DetectionEvent::StopAutoListening => {
-                        stop_auto_listening(&app, &auto_listening_state).await;
+                        stop_armed_mode(&app, &auto_listening_state, armed_mode.take()).await;
                     }
                 }
             }
         }
     }
+}
+
+/// Which automatic mode, if either, should take the current call.
+///
+/// Auto-listening wins: it produces a live transcript, and two capture paths must
+/// never open the microphone for the same call. Background capture therefore only
+/// arms for calls auto-listening declines — a browser or Telegram call, or every
+/// call when auto-listening is switched off.
+fn mode_to_arm(
+    candidates: &BTreeSet<MeetingApp>,
+    source: Option<DetectionSource>,
+    settings: DetectionSettings,
+    microphone_signal_supported: bool,
+) -> Option<AutoCaptureMode> {
+    if should_auto_listen(
+        candidates,
+        source,
+        settings.auto_listening,
+        microphone_signal_supported,
+    ) {
+        return Some(AutoCaptureMode::Listening);
+    }
+    if should_capture_in_background(
+        candidates,
+        source,
+        settings.background_auto_recording,
+        microphone_signal_supported,
+    ) {
+        return Some(AutoCaptureMode::Background);
+    }
+    None
+}
+
+/// Background capture accepts every recognized client, including browsers and
+/// Telegram, because it is silent and reversible: nothing is shown, nothing is
+/// transcribed, and a capture that turns out to be a voice message rather than a
+/// call is discarded by the minimum-duration guard instead of reaching the library.
+fn should_capture_in_background(
+    candidates: &BTreeSet<MeetingApp>,
+    source: Option<DetectionSource>,
+    enabled: bool,
+    microphone_signal_supported: bool,
+) -> bool {
+    enabled
+        && microphone_signal_supported
+        && source == Some(DetectionSource::MicrophoneActivity)
+        && !candidates.is_empty()
 }
 
 fn should_auto_listen(
@@ -394,9 +511,10 @@ fn should_auto_listen(
     enabled
         && microphone_signal_supported
         && source == Some(DetectionSource::MicrophoneActivity)
-        // A browser may own the microphone for dictation or another non-call activity.
-        // Until call-specific evidence exists, keep it as a confirmation prompt.
+        // A browser or Telegram may own the microphone for dictation or a voice message.
+        // Until call-specific evidence exists, keep those as confirmation prompts.
         && !candidates.contains(&MeetingApp::BrowserCall)
+        && !candidates.contains(&MeetingApp::Telegram)
 }
 
 fn select_detection_signal(
@@ -416,16 +534,50 @@ fn select_detection_signal(
     (BTreeSet::new(), None)
 }
 
-async fn detection_settings(app: &AppHandle<Wry>) -> (bool, bool) {
+#[derive(Debug, Clone, Copy, Default)]
+struct DetectionSettings {
+    detection_enabled: bool,
+    auto_listening: bool,
+    background_auto_recording: bool,
+}
+
+async fn detection_settings(app: &AppHandle<Wry>) -> DetectionSettings {
     let state = app.state::<NotificationManagerState<Wry>>();
     let manager = state.read().await;
     match manager.as_ref() {
         Some(manager) => {
             let settings = manager.get_settings().await;
-            let enabled = settings.auto_meeting_detection;
-            (enabled, enabled)
+            DetectionSettings {
+                detection_enabled: settings.auto_meeting_detection,
+                auto_listening: settings.auto_listening,
+                background_auto_recording: settings.background_auto_recording,
+            }
         }
-        None => (false, false),
+        None => DetectionSettings::default(),
+    }
+}
+
+/// Human-readable list of the detected clients, used to title a captured meeting.
+fn label_for(apps: &[MeetingApp]) -> String {
+    let names: Vec<&str> = apps.iter().map(|app| app.display()).collect();
+    names.join(", ")
+}
+
+/// Release whichever consumer owns the current automatic capture session.
+async fn stop_armed_mode(
+    app: &AppHandle<Wry>,
+    shared: &Arc<Mutex<AutoListeningSharedState>>,
+    mode: Option<AutoCaptureMode>,
+) {
+    match mode {
+        Some(AutoCaptureMode::Background) => {
+            app.state::<crate::background_capture::BackgroundCaptureState>()
+                .stop_and_finalize(app)
+                .await;
+        }
+        // With no mode recorded there may still be an open capture session row from
+        // an earlier start; `stop_auto_listening` is a no-op when there is not.
+        Some(AutoCaptureMode::Listening) | None => stop_auto_listening(app, shared).await,
     }
 }
 
@@ -1193,6 +1345,7 @@ fn classify_native_process(value: &str) -> Option<MeetingApp> {
     match normalized_identity(value).as_str() {
         "zoom" | "zoomus" => Some(MeetingApp::Zoom),
         "msteams" | "microsoftteams" | "teams" => Some(MeetingApp::MicrosoftTeams),
+        "telegram" | "telegramdesktop" => Some(MeetingApp::Telegram),
         "telemost" | "yandextelemost" => Some(MeetingApp::YandexTelemost),
         "jazz" | "salutejazz" | "sberjazz" => Some(MeetingApp::SaluteJazz),
         _ => None,
@@ -1206,6 +1359,9 @@ fn classify_audio_process(bundle_id: &str, display_name: &str) -> Option<Meeting
     }
     if bundle.contains("microsoft.teams") || bundle.contains("msteams") {
         return Some(MeetingApp::MicrosoftTeams);
+    }
+    if bundle.contains("telegram") || bundle.contains("telegra") {
+        return Some(MeetingApp::Telegram);
     }
     if bundle.contains("telemost") {
         return Some(MeetingApp::YandexTelemost);
@@ -1427,8 +1583,12 @@ mod tests {
             Some(MeetingApp::SaluteJazz)
         );
 
+        assert_eq!(
+            classify_native_process("Telegram"),
+            Some(MeetingApp::Telegram)
+        );
+
         assert_eq!(classify_native_process("zoomautoupdater"), None);
-        assert_eq!(classify_native_process("Telegram"), None);
         assert_eq!(classify_native_process("TeamViewer"), None);
         assert_eq!(classify_native_process("chrome_crashpad_handler"), None);
     }
@@ -1457,7 +1617,7 @@ mod tests {
         );
         assert_eq!(
             classify_audio_process("org.telegram.desktop", "Telegram"),
-            None
+            Some(MeetingApp::Telegram)
         );
     }
 
@@ -1491,6 +1651,129 @@ mod tests {
             true,
             true,
         ));
+        assert!(!should_auto_listen(
+            &apps(&[MeetingApp::Telegram]),
+            Some(DetectionSource::MicrophoneActivity),
+            true,
+            true,
+        ));
+    }
+
+    #[test]
+    fn background_capture_accepts_every_recognized_client_on_a_microphone_signal() {
+        for app in [
+            MeetingApp::Zoom,
+            MeetingApp::BrowserCall,
+            MeetingApp::Telegram,
+        ] {
+            assert!(
+                should_capture_in_background(
+                    &apps(&[app]),
+                    Some(DetectionSource::MicrophoneActivity),
+                    true,
+                    true,
+                ),
+                "{app:?} should be captured in the background"
+            );
+        }
+    }
+
+    #[test]
+    fn background_capture_needs_the_setting_a_signal_and_a_supported_platform() {
+        let candidates = apps(&[MeetingApp::Zoom]);
+        assert!(!should_capture_in_background(
+            &candidates,
+            Some(DetectionSource::MicrophoneActivity),
+            false,
+            true,
+        ));
+        assert!(!should_capture_in_background(
+            &candidates,
+            Some(DetectionSource::MicrophoneActivity),
+            true,
+            false,
+        ));
+        // Process-launch evidence alone never starts a silent recording.
+        assert!(!should_capture_in_background(
+            &candidates,
+            Some(DetectionSource::NativeProcess),
+            true,
+            true,
+        ));
+        assert!(!should_capture_in_background(
+            &BTreeSet::new(),
+            None,
+            true,
+            true,
+        ));
+    }
+
+    #[test]
+    fn auto_listening_wins_over_background_capture_for_the_same_call() {
+        let both_on = DetectionSettings {
+            detection_enabled: true,
+            auto_listening: true,
+            background_auto_recording: true,
+        };
+        let source = Some(DetectionSource::MicrophoneActivity);
+
+        // A native client that auto-listening accepts is recorded live, once.
+        assert_eq!(
+            mode_to_arm(&apps(&[MeetingApp::Zoom]), source, both_on, true),
+            Some(AutoCaptureMode::Listening)
+        );
+
+        // Auto-listening keeps browser and Telegram calls as confirmation prompts, so
+        // background capture is what actually records them.
+        assert_eq!(
+            mode_to_arm(&apps(&[MeetingApp::BrowserCall]), source, both_on, true),
+            Some(AutoCaptureMode::Background)
+        );
+    }
+
+    #[test]
+    fn background_capture_takes_native_calls_when_auto_listening_is_off() {
+        let settings = DetectionSettings {
+            detection_enabled: true,
+            auto_listening: false,
+            background_auto_recording: true,
+        };
+        assert_eq!(
+            mode_to_arm(
+                &apps(&[MeetingApp::Zoom]),
+                Some(DetectionSource::MicrophoneActivity),
+                settings,
+                true,
+            ),
+            Some(AutoCaptureMode::Background)
+        );
+    }
+
+    #[test]
+    fn nothing_arms_when_both_modes_are_off() {
+        let settings = DetectionSettings {
+            detection_enabled: true,
+            auto_listening: false,
+            background_auto_recording: false,
+        };
+        assert_eq!(
+            mode_to_arm(
+                &apps(&[MeetingApp::Zoom]),
+                Some(DetectionSource::MicrophoneActivity),
+                settings,
+                true,
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn label_names_every_detected_client() {
+        assert_eq!(
+            label_for(&[MeetingApp::Zoom, MeetingApp::BrowserCall]),
+            "Zoom, Browser call"
+        );
+        assert_eq!(label_for(&[]), "");
     }
 
     #[test]

@@ -41,6 +41,8 @@ pub mod analytics;
 pub mod anthropic;
 pub mod api;
 pub mod audio;
+pub mod calendar;
+pub mod background_capture;
 pub mod collections;
 pub mod config;
 pub mod console_utils;
@@ -64,6 +66,7 @@ pub mod salutespeech;
 pub mod search;
 pub mod state;
 pub mod summary;
+pub mod telegram;
 pub mod tray;
 pub mod utils;
 pub mod vector;
@@ -368,6 +371,7 @@ pub fn run() {
             None::<notifications::manager::NotificationManager<tauri::Wry>>,
         )) as NotificationManagerState<tauri::Wry>)
         .manage(meeting_detection::AutoMeetingDetectionState::default())
+        .manage(background_capture::BackgroundCaptureState::default())
         .manage(audio::init_system_audio_state())
         .manage(summary::summary_engine::ModelManagerState(Arc::new(tokio::sync::Mutex::new(None))))
         .setup(|_app| {
@@ -501,6 +505,10 @@ pub fn run() {
                         Ok(_) => {}
                         Err(error) => log::warn!("Could not enforce auto-capture audio retention: {error}"),
                     }
+                    // Reports parked mid-run (e.g. at the clarify/speaker prompt) cannot
+                    // survive a restart — their pipeline lives only in memory — so mark
+                    // any orphaned rows failed to make the meeting restartable.
+                    report::pipeline::recover_interrupted_reports(&pool).await;
                 });
             }
 
@@ -735,6 +743,9 @@ pub fn run() {
             gigaam_engine::commands::gigaam_transcribe_audio,
             salutespeech::salutespeech_is_configured,
             salutespeech::salutespeech_can_be_selected,
+            calendar::local_outlook::local_outlook_calendar_status,
+            calendar::local_outlook::request_outlook_calendar_permission,
+            calendar::local_outlook::get_upcoming_local_outlook_meetings,
             collections::commands::create_collection,
             collections::commands::rename_collection,
             collections::commands::delete_collection,
@@ -751,11 +762,13 @@ pub fn run() {
             collections::commands::set_app_setting,
             collections::commands::get_app_settings,
             database::managed_defaults::resolve_managed_defaults_migration,
+            gateway_identity::refresh_managed_gateway_token,
             start_recording,
             stop_recording,
             is_recording,
             get_transcription_status,
             meeting_detection::get_auto_meeting_detection_status,
+            background_capture::get_background_capture_status,
             meeting_detection::report_auto_listening_start,
             meeting_detection::link_auto_listening_meeting,
             meeting_detection::get_capture_retention_policy,
@@ -914,7 +927,11 @@ pub fn run() {
             report::commands::get_analytics_report,
             report::commands::cancel_analytics_report,
             report::commands::submit_analytics_answers,
+            report::commands::submit_analytics_speakers,
             report::commands::reveal_report_in_folder,
+            // Telegram sharing
+            telegram::commands::telegram_share_text,
+            telegram::commands::save_summary_markdown_file,
             summary::content_window::get_meeting_content_window_suggestion,
             summary::content_window::set_meeting_content_window_preference,
             summary::standup_workflow::list_standup_records,
@@ -1060,6 +1077,15 @@ pub fn run() {
                         .state::<meeting_detection::AutoMeetingDetectionState>()
                         .stop();
                     tauri::async_runtime::block_on(async {
+                        // Finalize an in-progress background capture BEFORE the database
+                        // is closed, so quitting mid-call still saves and registers it.
+                        let background_capture =
+                            _app_handle.state::<background_capture::BackgroundCaptureState>();
+                        if background_capture.is_capturing() {
+                            log::info!("Finalizing in-progress background capture before exit");
+                            background_capture.stop_and_finalize(_app_handle).await;
+                        }
+
                         // Clean up database connection and checkpoint WAL
                         if let Some(app_state) = _app_handle.try_state::<state::AppState>() {
                             log::info!("Starting database cleanup...");

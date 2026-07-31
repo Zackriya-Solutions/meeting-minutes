@@ -106,6 +106,12 @@ interface UseSummaryGenerationProps {
   onMeetingUpdated?: () => Promise<void>;
   setAiSummary: (summary: Summary | null) => void;
   onOpenModelSettings?: () => void;
+  /**
+   * Fired only when a generation run actually produces a summary — not when a saved one
+   * is restored after a reload or a cancellation. Receives the fresh summary, since the
+   * `aiSummary` state this hook was given is a render behind at this point.
+   */
+  onSummaryGenerated?: (summary: any) => void;
 }
 
 export function useSummaryGeneration({
@@ -117,6 +123,7 @@ export function useSummaryGeneration({
   onMeetingUpdated,
   setAiSummary,
   onOpenModelSettings,
+  onSummaryGenerated,
 }: UseSummaryGenerationProps) {
   const t = useT();
   const [summaryStatus, setSummaryStatus] = useState<SummaryStatus>('idle');
@@ -326,6 +333,8 @@ export function useSummaryGeneration({
               modelConfig.model,
               true
             );
+
+            onSummaryGenerated?.(pollingResult.data);
             return;
           }
 
@@ -392,6 +401,8 @@ export function useSummaryGeneration({
           );
 
           if (onMeetingUpdated) await onMeetingUpdated();
+
+          onSummaryGenerated?.(formattedSummary);
         }
       });
     } catch (error) {
@@ -427,6 +438,7 @@ export function useSummaryGeneration({
     setAiSummary,
     onMeetingUpdated,
     restorePersistedSummary,
+    onSummaryGenerated,
   ]);
 
   // Helper function to fetch ALL transcripts for summary generation

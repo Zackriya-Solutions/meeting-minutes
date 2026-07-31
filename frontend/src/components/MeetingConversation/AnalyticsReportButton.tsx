@@ -15,7 +15,8 @@ import { AnalyticsReportDialog } from './AnalyticsReportDialog';
  *
  *   idle          → «Аналитический отчёт»      → generate() + open dialog
  *   running       → «Собираем отчёт · n/N»     → reopen dialog (runs in background)
- *   waiting_input → «Есть вопросы · ответить»  → open dialog on the questions screen
+ *   waiting_input → «Спикеры · подтвердить» / «Есть вопросы · ответить»
+ *                                              → open dialog on the pause screen
  *   completed     → «Показать в Finder»        → reveal file in Finder; ⟳ regenerates
  *   failed        → «Не удалось собрать отчёт» → open dialog (error + retry)
  *
@@ -65,16 +66,18 @@ export function AnalyticsReportButton({ meetingId, disabled = false, disabledTit
       </div>
     );
   } else if (status === 'waiting_input') {
+    const waitingLabel =
+      report.waitingKind === 'speakers' ? t('Speakers — tap to confirm') : t('Questions — tap to answer');
     control = (
       <Button
         variant="outline"
         size="sm"
         className="shrink-0 animate-pulse border-primary/40 bg-primary/10 text-foreground hover:bg-primary"
         onClick={() => setDialogOpen(true)}
-        title={t('Questions — tap to answer')}
+        title={waitingLabel}
       >
         <AlertCircle size={16} />
-        <span className={LABEL_VISIBILITY}>{t('Questions — tap to answer')}</span>
+        <span className={LABEL_VISIBILITY}>{waitingLabel}</span>
       </Button>
     );
   } else if (status === 'running') {

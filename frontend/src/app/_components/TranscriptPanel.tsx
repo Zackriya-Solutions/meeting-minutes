@@ -12,6 +12,7 @@ import { useIsLinux } from '@/hooks/usePlatform';
 import { useT } from '@/lib/i18n';
 import { useMemo } from 'react';
 import { HomeMeetingList } from './HomeMeetingList';
+import { UpcomingMeetings } from '@/components/UpcomingMeetings';
 
 /**
  * TranscriptPanel Component
@@ -25,12 +26,16 @@ interface TranscriptPanelProps {
   isProcessingStop: boolean;
   isStopping: boolean;
   showModal: (name: ModalType, message?: string) => void;
+  isRecordingDisabled: boolean;
+  onStartCalendarMeeting: (title: string) => Promise<void>;
 }
 
 export function TranscriptPanel({
   isProcessingStop,
   isStopping,
   showModal,
+  isRecordingDisabled,
+  onStartCalendarMeeting,
 }: TranscriptPanelProps) {
   const t = useT();
   // Contexts
@@ -118,7 +123,18 @@ export function TranscriptPanel({
       {/* Transcript content */}
       <div className={segments.length === 0 && !isRecording ? 'min-h-full' : 'pb-20'}>
         {segments.length === 0 && !isRecording ? (
-          <HomeMeetingList animateOnMount={false} />
+          <>
+            {/* Outlook-sourced agenda sits above the app's own meeting list. */}
+            <div className="flex justify-center">
+              <div className="w-2/3 max-w-[750px]">
+                <UpcomingMeetings
+                  disabled={isRecordingDisabled}
+                  onStartMeeting={onStartCalendarMeeting}
+                />
+              </div>
+            </div>
+            <HomeMeetingList animateOnMount={false} />
+          </>
         ) : (
           <div className="flex justify-center">
             <div className="w-2/3 max-w-[750px]">

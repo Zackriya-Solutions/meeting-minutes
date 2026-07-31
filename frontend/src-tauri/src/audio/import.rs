@@ -3331,12 +3331,32 @@ mod tests {
         };
 
         const MAX_SEGMENT_SAMPLES: usize = 25 * 16_000;
-        let mut rows = Vec::new();
+        let mut transcripts: Vec<(String, f64, f64)> = Vec::new();
         for (i, &(start_ms, end_ms)) in spans.iter().enumerate() {
             let s = ((start_ms as f64 / 1000.0) * 16_000.0) as usize;
             let e = (((end_ms as f64 / 1000.0) * 16_000.0) as usize).min(total);
             if e <= s || e - s < 1_600 {
                 continue;
+            }
+            // Same short-reply path as production refinement: context-padded
+            // transcription cut back to in-span words.
+            if end_ms - start_ms < crate::audio::refinement::SHORT_SPAN_MS {
+                let prev_end = i.checked_sub(1).map(|p| spans[p].1);
+                let next_start = spans.get(i + 1).map(|s| s.0);
+                match crate::audio::refinement::transcribe_short_span_with_context(
+                    &samples, start_ms, end_ms, prev_end, next_start,
+                )
+                .await
+                {
+                    Ok(Some(text)) => {
+                        if !text.trim().is_empty() {
+                            transcripts.push((text, start_ms as f64, end_ms as f64));
+                        }
+                        continue;
+                    }
+                    Ok(None) => {}
+                    Err(e) => panic!("short-span transcription failed: {e}"),
+                }
             }
             let piece = SpeechSegment {
                 samples: samples[s..e].to_vec(),
@@ -3353,17 +3373,29 @@ mod tests {
                     Some(Err(e)) => format!("<error: {e}>"),
                     None => panic!("engine not loaded"),
                 };
-                rows.push(serde_json::json!({
-                    "start_ms": sub.start_timestamp_ms,
-                    "end_ms": sub.end_timestamp_ms,
-                    "cluster": cluster_of(sub.start_timestamp_ms as i64, sub.end_timestamp_ms as i64),
-                    "text": text,
-                }));
+                transcripts.push((text, sub.start_timestamp_ms, sub.end_timestamp_ms));
             }
             if i % 20 == 0 {
                 eprintln!("[turnaligned] {i}/{} spans", spans.len());
             }
         }
+        // Same fragment-rejoin pass as production refinement.
+        let transcripts = crate::audio::refinement::rejoin_sentence_fragments(
+            transcripts,
+            &turns,
+            crate::audio::refinement::FRAGMENT_JOIN_MAX_GAP_MS,
+        );
+        let rows: Vec<serde_json::Value> = transcripts
+            .iter()
+            .map(|(text, start_ms, end_ms)| {
+                serde_json::json!({
+                    "start_ms": start_ms,
+                    "end_ms": end_ms,
+                    "cluster": cluster_of(*start_ms as i64, *end_ms as i64),
+                    "text": text,
+                })
+            })
+            .collect();
         let path = format!("{out_dir}/turnaligned.json");
         std::fs::write(&path, serde_json::to_string_pretty(&rows).unwrap()).unwrap();
         eprintln!("[turnaligned] wrote {} rows to {path}", rows.len());

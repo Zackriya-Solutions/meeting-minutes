@@ -224,6 +224,33 @@ impl SpeakersRepository {
         Ok(())
     }
 
+    /// Merge speaker attributions WITHIN one meeting: every transcript row of `meeting_id`
+    /// currently attributed to one of `merged_ids` is reattributed to `keep_id`. Speaker
+    /// rows themselves are NOT deleted here — profiles are global (other meetings may
+    /// reference them); callers follow up with [`Self::delete_orphaned_unconfirmed`] so
+    /// now-unreferenced unconfirmed profiles are collected. Returns rows reattributed.
+    pub async fn merge_meeting_speakers(
+        pool: &SqlitePool,
+        meeting_id: &str,
+        keep_id: i64,
+        merged_ids: &[i64],
+    ) -> Result<u64, SqlxError> {
+        if merged_ids.is_empty() {
+            return Ok(0);
+        }
+        let placeholders = vec!["?"; merged_ids.len()].join(", ");
+        let sql = format!(
+            "UPDATE transcripts SET speaker_id = ? \
+             WHERE meeting_id = ? AND speaker_id IN ({placeholders})"
+        );
+        let mut query = sqlx::query(&sql).bind(keep_id).bind(meeting_id);
+        for id in merged_ids {
+            query = query.bind(id);
+        }
+        let res = query.execute(pool).await?;
+        Ok(res.rows_affected())
+    }
+
     /// Speakers referenced by a meeting's transcripts, with per-meeting segment counts,
     /// most-spoken first.
     pub async fn meeting_speakers(
@@ -473,6 +500,69 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(again, 0);
+    }
+
+    #[tokio::test]
+    async fn merge_reattributes_only_this_meetings_segments() {
+        let pool = gc_test_pool().await;
+        for id in [1, 2, 3] {
+            sqlx::query("INSERT INTO speakers (id, display_name, is_confirmed) VALUES (?, ?, 0)")
+                .bind(id)
+                .bind(format!("Speaker {id}"))
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+        // m1: segments for speakers 1, 2, 3; m2: a segment for speaker 2 that must survive.
+        for (tid, mid, sid) in [
+            ("a", "m1", 1),
+            ("b", "m1", 2),
+            ("c", "m1", 3),
+            ("d", "m2", 2),
+        ] {
+            sqlx::query("INSERT INTO transcripts (id, meeting_id, speaker_id) VALUES (?, ?, ?)")
+                .bind(tid)
+                .bind(mid)
+                .bind(sid)
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+
+        let moved = SpeakersRepository::merge_meeting_speakers(&pool, "m1", 1, &[2, 3])
+            .await
+            .unwrap();
+        assert_eq!(moved, 2);
+
+        let m1_ids: Vec<i64> =
+            sqlx::query_scalar("SELECT speaker_id FROM transcripts WHERE meeting_id = 'm1'")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        assert_eq!(m1_ids, vec![1, 1, 1]);
+        // The other meeting's attribution is untouched.
+        let m2_id: i64 =
+            sqlx::query_scalar("SELECT speaker_id FROM transcripts WHERE meeting_id = 'm2'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(m2_id, 2);
+
+        // GC then removes only speaker 3 (unreferenced); 2 is still used by m2.
+        let deleted = SpeakersRepository::delete_orphaned_unconfirmed(&pool)
+            .await
+            .unwrap();
+        assert_eq!(deleted, 1);
+        assert_eq!(speaker_ids(&pool).await, vec![1, 2]);
+    }
+
+    #[tokio::test]
+    async fn merge_with_no_ids_is_a_noop() {
+        let pool = gc_test_pool().await;
+        let moved = SpeakersRepository::merge_meeting_speakers(&pool, "m1", 1, &[])
+            .await
+            .unwrap();
+        assert_eq!(moved, 0);
     }
 
     #[tokio::test]

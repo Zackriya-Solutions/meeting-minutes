@@ -388,6 +388,15 @@ $env:RUST_LOG="debug"; ./clean_run_windows.bat
   - `fix/*`: Bug fixes
   - `enhance/*`: Feature enhancements
   - Current: `fix/audio-mixing` (working on audio pipeline improvements)
+- **Multi-line text passed to CLI tools** (PR bodies, commit messages, issue comments): never wrap a
+  heredoc in command substitution. `--body "$(cat <<'EOF' … EOF)"` makes bash parse the body itself,
+  so an apostrophe in ordinary prose ("Telegram's picker") raises `unexpected EOF while looking for
+  matching quote` and the command never runs. Two forms that do work:
+  - Write the text to a file, then pass it by path: `gh pr create --body-file <path>`
+  - Pipe a quoted heredoc into a command that reads stdin: `git commit -F - <<'MSG' … MSG`
+
+  The distinction is that a heredoc as stdin is safe; a heredoc *inside* `$(…)` is not. Prefer a file
+  for anything long enough to contain prose, tables, or backticks.
 
 ## Key Files Reference
 

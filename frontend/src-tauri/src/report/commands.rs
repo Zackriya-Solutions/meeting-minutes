@@ -10,7 +10,7 @@ use uuid::Uuid;
 use crate::database::models::AnalyticsReportMeta;
 use crate::database::repositories::analytics_report::AnalyticsReportsRepository;
 use crate::report::pipeline;
-use crate::report::prompts::ClarifyAnswer;
+use crate::report::prompts::{ClarifyAnswer, SpeakerDecision};
 use crate::state::AppState;
 
 #[derive(Debug, Serialize)]
@@ -108,6 +108,22 @@ pub async fn submit_analytics_answers(
         answers.len()
     );
     pipeline::submit_answers(&report_id, answers);
+    Ok(())
+}
+
+/// Submit the user's speaker decisions to a report parked in `waiting_input` at the
+/// speakers stage. Idempotent: if no pipeline is currently waiting for `report_id`, this
+/// returns Ok(()) silently. An empty `decisions` vec means "skip — change nothing".
+#[tauri::command]
+pub async fn submit_analytics_speakers(
+    report_id: String,
+    decisions: Vec<SpeakerDecision>,
+) -> Result<(), String> {
+    log::info!(
+        "[report] speaker decisions submitted for {report_id} ({} decision(s))",
+        decisions.len()
+    );
+    pipeline::submit_speakers(&report_id, decisions);
     Ok(())
 }
 

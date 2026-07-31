@@ -30,9 +30,20 @@ use super::kaldi_fbank::KaldiFbank;
 /// GC removes once it is unreferenced).
 pub const DEFAULT_SPEAKER_TAU: f32 = 0.75;
 
-/// Minimum share of a segment that must be covered by a cluster's turns to attribute it;
-/// below this the segment is left unattributed (PLAN.md: ambiguous <60% → NULL speaker).
+/// Minimum share of a segment's *turn-covered* time that the dominant cluster must own to
+/// attribute the segment; below this the segment is contested between speakers and stays
+/// unattributed (PLAN.md: ambiguous → NULL speaker). The denominator is the time covered
+/// by any diarized turn, NOT the raw segment duration — ASR segments carry leading/trailing
+/// silence and VAD padding that the diarizer (correctly) never covers, and measuring
+/// dominance against total duration left such rows NULL even when 100% of their actual
+/// speech belonged to one voice (observed: 43/170 unattributed rows on a real meeting whose
+/// rows were 25 s silence-cut blocks).
 pub const MIN_OVERLAP_RATIO: f32 = 0.60;
+
+/// Minimum share of a segment that must be covered by diarized turns (any cluster) before
+/// dominance is even evaluated. Segments the diarizer barely saw (speech it missed, or
+/// rows that are mostly silence) stay unattributed rather than being labeled from a sliver.
+pub const MIN_ATTRIBUTION_COVERAGE: f32 = 0.25;
 
 // ---- Diarization ONNX pipeline constants ----
 
@@ -157,7 +168,10 @@ pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
 }
 
 /// Assign a segment to the cluster with maximum time-overlap. Returns `None` when the
-/// best cluster covers less than [`MIN_OVERLAP_RATIO`] of the segment (ambiguous).
+/// diarizer covered less than [`MIN_ATTRIBUTION_COVERAGE`] of the segment (too little
+/// evidence) or when the best cluster owns less than `min_overlap_ratio` of the covered
+/// time (contested between speakers). Dominance is measured against the turn-covered
+/// portion, not the raw duration — see [`MIN_OVERLAP_RATIO`] for why.
 pub fn assign_segment(
     seg_start_ms: i64,
     seg_end_ms: i64,
@@ -168,15 +182,17 @@ pub fn assign_segment(
     if seg_len == 0 {
         return None;
     }
-    // Sum overlap per cluster.
+    // Sum overlap per cluster, and collect the overlapping intervals for union coverage.
     let mut overlap_by_cluster: std::collections::HashMap<i64, i64> =
         std::collections::HashMap::new();
+    let mut intervals: Vec<(i64, i64)> = Vec::new();
     for t in turns {
         let start = seg_start_ms.max(t.start_ms);
         let end = seg_end_ms.min(t.end_ms);
         let ov = (end - start).max(0);
         if ov > 0 {
             *overlap_by_cluster.entry(t.cluster_id).or_insert(0) += ov;
+            intervals.push((start, end));
         }
     }
     let (best_cluster, best_overlap) = overlap_by_cluster
@@ -184,7 +200,18 @@ pub fn assign_segment(
         // Deterministic tie-break: larger overlap, then smaller cluster id.
         .max_by(|a, b| a.1.cmp(&b.1).then(b.0.cmp(&a.0)))?;
 
-    if (best_overlap as f32) / (seg_len as f32) >= min_overlap_ratio {
+    // Union of turn coverage over the segment (crosstalk must not double-count).
+    intervals.sort_unstable();
+    let mut covered = 0i64;
+    let mut reach = i64::MIN;
+    for (s, e) in intervals {
+        covered += (e - reach.max(s)).max(0);
+        reach = reach.max(e);
+    }
+
+    if (covered as f32) >= MIN_ATTRIBUTION_COVERAGE * (seg_len as f32)
+        && (best_overlap as f32) >= min_overlap_ratio * (covered as f32)
+    {
         Some(best_cluster)
     } else {
         None
@@ -624,14 +651,82 @@ pub fn nearest_cluster(
     centroids: &[Vec<f32>],
     min_similarity: f32,
 ) -> Option<usize> {
+    nearest_cluster_excluding(embedding, centroids, &[], min_similarity)
+}
+
+/// [`nearest_cluster`] with an exclusion list. A heavily-overlapped interjection that sits
+/// *inside* another speaker's continuous turn has a blended embedding biased toward that
+/// enclosing voice (it is louder and covers the whole slice), so cosine attachment would
+/// almost always echo the enclosing cluster back — silently swallowing the interjection.
+/// Excluding the enclosing cluster forces the choice among the *other* voices, which is
+/// what the segmentation asserted by reporting a second simultaneous speaker there.
+pub fn nearest_cluster_excluding(
+    embedding: &[f32],
+    centroids: &[Vec<f32>],
+    exclude: &[usize],
+    min_similarity: f32,
+) -> Option<usize> {
     let mut best: Option<(usize, f32)> = None;
     for (i, c) in centroids.iter().enumerate() {
+        if exclude.contains(&i) {
+            continue;
+        }
         let sim = cosine_similarity(embedding, c);
         if best.map_or(true, |(_, s)| sim > s) {
             best = Some((i, sim));
         }
     }
     best.filter(|(_, s)| *s >= min_similarity).map(|(i, _)| i)
+}
+
+/// Carve overlapped interjections out of their containing turns. When segmentation reports
+/// a second voice as a short turn fully inside another cluster's longer turn (a reply or
+/// backchannel spoken over a continuous speaker — the powerset decode keeps the main slot
+/// active throughout), downstream linearization would clip the interjection to nothing and
+/// its words would be transcribed inside the enclosing speaker's reply. Splitting the
+/// container around the interjection gives it its own time slice, so the ASR planner cuts
+/// a separate reply there and attribution sees non-overlapping turns. Container pieces
+/// shorter than `min_piece_ms` are dropped (a sliver left at a cut edge carries no reply).
+pub fn split_turns_at_interjections(turns: &[SpeakerTurn], min_piece_ms: i64) -> Vec<SpeakerTurn> {
+    let mut out: Vec<SpeakerTurn> = Vec::with_capacity(turns.len());
+    let push_piece = |out: &mut Vec<SpeakerTurn>, start_ms: i64, end_ms: i64, cluster_id| {
+        if end_ms - start_ms >= min_piece_ms {
+            out.push(SpeakerTurn {
+                start_ms,
+                end_ms,
+                cluster_id,
+            });
+        }
+    };
+    for t in turns {
+        let mut cuts: Vec<(i64, i64)> = turns
+            .iter()
+            .filter(|c| {
+                c.cluster_id != t.cluster_id
+                    && c.start_ms >= t.start_ms
+                    && c.end_ms <= t.end_ms
+                    && (c.end_ms - c.start_ms) < (t.end_ms - t.start_ms)
+            })
+            .map(|c| (c.start_ms, c.end_ms))
+            .collect();
+        if cuts.is_empty() {
+            out.push(*t);
+            continue;
+        }
+        cuts.sort_unstable();
+        let mut pos = t.start_ms;
+        for (cut_start, cut_end) in cuts {
+            if cut_start > pos {
+                push_piece(&mut out, pos, cut_start, t.cluster_id);
+            }
+            pos = pos.max(cut_end);
+        }
+        if pos < t.end_ms {
+            push_piece(&mut out, pos, t.end_ms, t.cluster_id);
+        }
+    }
+    out.sort_by_key(|t| (t.start_ms, t.end_ms, t.cluster_id));
+    out
 }
 
 /// Group `(cluster_idx, embedding, weight_ms)` items into `num_clusters` duration-weighted,
@@ -952,12 +1047,15 @@ impl Diarizer {
 
     /// Run diarization on an audio file → speaker turns + per-cluster mean embeddings.
     ///
-    /// Pipeline: decode to 16 kHz mono → slide 10 s segmentation windows → powerset-decode
-    /// per-local-speaker turns (tracking overlap fraction) → embed each turn (kaldi fbank +
-    /// WeSpeaker ONNX, L2-norm). Only *long, clean* turns form clusters (complete-linkage
-    /// agglomerative); short and heavily-overlapped turns are attached afterward to the most
-    /// similar formed cluster and can never spawn a new one — the fix for within-run
-    /// over-clustering. Cluster identity embeddings are duration-weighted means.
+    /// Pipeline: decode to 16 kHz mono → slide two half-offset grids of 10 s segmentation
+    /// windows → powerset-decode per-local-speaker turns (tracking overlap fraction) →
+    /// embed each turn (kaldi fbank + CAM++ ONNX, L2-norm). Only *long, clean* turns form
+    /// clusters (complete-linkage agglomerative); short and heavily-overlapped turns are
+    /// attached afterward to the most similar formed cluster and can never spawn a new
+    /// one — the fix for within-run over-clustering. Cluster identity embeddings are
+    /// duration-weighted means. Finally, interjections reported inside a continuous
+    /// speaker run are carved out of their containing turns so replies split at speaker
+    /// changes.
     pub fn diarize(&self, audio_path: &std::path::Path) -> Result<DiarizationResult> {
         // 1) Decode to 16 kHz mono f32 in [-1, 1] (reuses the shared audio decoder).
         let decoded = crate::audio::decoder::decode_audio_file(audio_path)
@@ -971,47 +1069,63 @@ impl Diarizer {
         }
         let total_ms = (waveform.len() as f64 / SEG_SAMPLE_RATE as f64) * 1000.0;
 
-        // 2) Slide non-overlapping 10 s windows; the final window is zero-padded. Track each
-        //    turn's overlap fraction (share of frames the powerset decode reported ≥2
-        //    simultaneous speakers) so blended-voice turns can be kept out of formation.
+        // 2) Slide TWO half-window-offset grids of non-overlapping 10 s windows; the final
+        //    window of each grid is zero-padded. A single grid misses speaker changes that
+        //    fall awkwardly within its windows (measured on the 31-min reference meeting:
+        //    68% of true speaker-change boundaries detected at grid 0, 72% at grid +5 s,
+        //    77% for the union — each grid sees each boundary with different context).
+        //    Duplicate same-voice turns from the two grids cluster together and fuse in
+        //    `merge_same_cluster`; cross-grid disagreements surface as contained
+        //    different-cluster turns, which `split_turns_at_interjections` carves apart.
+        //    Track each turn's overlap fraction (share of frames the powerset decode
+        //    reported ≥2 simultaneous speakers) so blended-voice turns can be kept out of
+        //    cluster formation.
+        const GRID_OFFSETS: [usize; 2] = [0, SEG_WINDOW_SAMPLES / 2];
         let mut raw_turns: Vec<(i64, i64, f32)> = Vec::new(); // (start_ms, end_ms, overlap_frac)
-        let mut win_start = 0usize;
         let mut window_buf = vec![0f32; SEG_WINDOW_SAMPLES];
-        while win_start < waveform.len() {
-            let end = (win_start + SEG_WINDOW_SAMPLES).min(waveform.len());
-            let n = end - win_start;
-            for (dst, src) in window_buf.iter_mut().zip(&waveform[win_start..end]) {
-                *dst = *src * SEG_WAVEFORM_SCALE;
-            }
-            for x in window_buf.iter_mut().skip(n) {
-                *x = 0.0;
-            }
+        for &grid_offset in &GRID_OFFSETS {
+            let mut win_start = grid_offset;
+            while win_start < waveform.len() {
+                let end = (win_start + SEG_WINDOW_SAMPLES).min(waveform.len());
+                let n = end - win_start;
+                for (dst, src) in window_buf.iter_mut().zip(&waveform[win_start..end]) {
+                    *dst = *src * SEG_WAVEFORM_SCALE;
+                }
+                for x in window_buf.iter_mut().skip(n) {
+                    *x = 0.0;
+                }
 
-            let active = self.run_segmentation(&window_buf)?; // Vec<[bool; 3]>
-            let num_frames = active.len();
-            if num_frames > 0 {
-                let frame_ms = SEG_WINDOW_MS / num_frames as f64;
-                let window_start_ms = (win_start as f64 / SEG_SAMPLE_RATE as f64) * 1000.0;
-                for spk in 0..SEG_NUM_LOCAL_SPEAKERS {
-                    let column: Vec<bool> = active.iter().map(|f| f[spk]).collect();
-                    for (s, e) in runs_to_turns(
-                        &column,
-                        frame_ms,
-                        window_start_ms,
-                        self.params.min_turn_ms,
-                        self.params.merge_gap_ms,
-                    ) {
-                        // Clamp to the real (unpadded) audio extent.
-                        let e = e.min(total_ms.round() as i64);
-                        if e - s >= self.params.min_turn_ms {
-                            let ov =
-                                window_overlap_fraction(&active, frame_ms, window_start_ms, s, e);
-                            raw_turns.push((s, e, ov));
+                let active = self.run_segmentation(&window_buf)?; // Vec<[bool; 3]>
+                let num_frames = active.len();
+                if num_frames > 0 {
+                    let frame_ms = SEG_WINDOW_MS / num_frames as f64;
+                    let window_start_ms = (win_start as f64 / SEG_SAMPLE_RATE as f64) * 1000.0;
+                    for spk in 0..SEG_NUM_LOCAL_SPEAKERS {
+                        let column: Vec<bool> = active.iter().map(|f| f[spk]).collect();
+                        for (s, e) in runs_to_turns(
+                            &column,
+                            frame_ms,
+                            window_start_ms,
+                            self.params.min_turn_ms,
+                            self.params.merge_gap_ms,
+                        ) {
+                            // Clamp to the real (unpadded) audio extent.
+                            let e = e.min(total_ms.round() as i64);
+                            if e - s >= self.params.min_turn_ms {
+                                let ov = window_overlap_fraction(
+                                    &active,
+                                    frame_ms,
+                                    window_start_ms,
+                                    s,
+                                    e,
+                                );
+                                raw_turns.push((s, e, ov));
+                            }
                         }
                     }
                 }
+                win_start += SEG_WINDOW_SAMPLES;
             }
-            win_start += SEG_WINDOW_SAMPLES;
         }
 
         if raw_turns.is_empty() {
@@ -1089,13 +1203,16 @@ impl Diarizer {
             self.params.centroid_merge_min_similarity,
             self.params.num_speakers,
         );
-        // Stage 3: fold crumb clusters into the meeting's major participants.
+        // Stage 3: fold crumb clusters into the meeting's major participants. The major
+        // floor is calibrated in real speaking time, but the two offset grids see each
+        // speech region ~twice, so per-cluster durations here run ~2× — scale the floor
+        // to match.
         let labels = consolidate_minor_clusters(
             &formation_embs,
             &formation_durs,
             &merged_labels,
             self.params.num_speakers,
-            self.params.min_major_cluster_ms,
+            self.params.min_major_cluster_ms * GRID_OFFSETS.len() as i64,
             self.params.short_turn_assign_min_similarity,
         );
         let num_clusters = labels.iter().copied().max().map(|m| m + 1).unwrap_or(0);
@@ -1112,6 +1229,10 @@ impl Diarizer {
 
         // Assign a cluster to every turn: formation turns take their clustering label; the
         // rest attach to the nearest provisional centroid (or are dropped below the floor).
+        // A heavily-overlapped turn sitting inside a formation turn is an interjection
+        // spoken over that voice — its blended embedding is biased toward the enclosing
+        // speaker, so the enclosing cluster is excluded from its attachment candidates
+        // (see `nearest_cluster_excluding`).
         let mut turn_cluster: Vec<Option<i64>> = vec![None; embs.len()];
         for (fi, &i) in formation.iter().enumerate() {
             turn_cluster[i] = Some(labels[fi] as i64);
@@ -1120,16 +1241,30 @@ impl Diarizer {
             if turn_cluster[i].is_some() {
                 continue;
             }
-            if let Some(c) = nearest_cluster(
+            let exclude: Vec<usize> = if embs[i].overlap_frac > self.params.max_overlap_frac {
+                formation
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, &j)| {
+                        embs[j].start_ms <= embs[i].start_ms && embs[j].end_ms >= embs[i].end_ms
+                    })
+                    .map(|(fi, _)| labels[fi])
+                    .collect()
+            } else {
+                Vec::new()
+            };
+            if let Some(c) = nearest_cluster_excluding(
                 &embs[i].embedding,
                 &provisional,
+                &exclude,
                 self.params.short_turn_assign_min_similarity,
             ) {
                 turn_cluster[i] = Some(c as i64);
             }
         }
 
-        // 6) Merged turns for transcript attribution.
+        // 6) Merged turns for transcript attribution. Interjections reported inside a
+        //    continuous speaker run get carved out so they own their time slice.
         let turns: Vec<SpeakerTurn> = embs
             .iter()
             .zip(&turn_cluster)
@@ -1141,6 +1276,11 @@ impl Diarizer {
                 })
             })
             .collect();
+        let turns = merge_same_cluster(turns, self.params.merge_gap_ms);
+        let turns = split_turns_at_interjections(&turns, self.params.min_turn_ms);
+        // The two offset grids can leave same-cluster duplicates that an interleaved
+        // different-cluster turn kept `merge_same_cluster` (last-turn-only) from fusing
+        // pre-carve; after carving the survivors are adjacent again — fuse them.
         let turns = merge_same_cluster(turns, self.params.merge_gap_ms);
 
         // 7) Final duration-weighted identity embedding per cluster, over every turn assigned
@@ -1276,6 +1416,14 @@ pub struct DiarizationResult {
 mod tests {
     use super::*;
 
+    fn turn(start_ms: i64, end_ms: i64, cluster_id: i64) -> SpeakerTurn {
+        SpeakerTurn {
+            start_ms,
+            end_ms,
+            cluster_id,
+        }
+    }
+
     #[test]
     fn cosine_basic() {
         assert!((cosine_similarity(&[1.0, 0.0], &[1.0, 0.0]) - 1.0).abs() < 1e-6);
@@ -1303,14 +1451,64 @@ mod tests {
     }
 
     #[test]
-    fn ambiguous_segment_is_unattributed() {
-        // Cluster 1 covers only 40% of the segment -> below 60% -> None.
+    fn silence_padded_segment_is_attributed_by_covered_dominance() {
+        // Cluster 1 covers only 40% of the segment, but it is 100% of what the diarizer
+        // covered — the rest is silence/padding, not another speaker. Attributed.
         let turns = vec![SpeakerTurn {
             start_ms: 0,
             end_ms: 400,
             cluster_id: 1,
         }];
+        assert_eq!(assign_segment(0, 1000, &turns, MIN_OVERLAP_RATIO), Some(1));
+    }
+
+    #[test]
+    fn contested_segment_is_unattributed() {
+        // Two clusters split the covered time 50/50 — below the 60% dominance floor.
+        let turns = vec![
+            SpeakerTurn {
+                start_ms: 0,
+                end_ms: 500,
+                cluster_id: 1,
+            },
+            SpeakerTurn {
+                start_ms: 500,
+                end_ms: 1000,
+                cluster_id: 2,
+            },
+        ];
         assert_eq!(assign_segment(0, 1000, &turns, MIN_OVERLAP_RATIO), None);
+    }
+
+    #[test]
+    fn barely_covered_segment_is_unattributed() {
+        // A 200 ms sliver on a 1 s segment is below MIN_ATTRIBUTION_COVERAGE — the
+        // diarizer essentially didn't see this row; don't label it from a sliver.
+        let turns = vec![SpeakerTurn {
+            start_ms: 0,
+            end_ms: 200,
+            cluster_id: 1,
+        }];
+        assert_eq!(assign_segment(0, 1000, &turns, MIN_OVERLAP_RATIO), None);
+    }
+
+    #[test]
+    fn crosstalk_does_not_double_count_coverage() {
+        // Cluster 1 covers the whole segment; cluster 2 overlaps (crosstalk) for 300 ms.
+        // Union coverage is 1000 ms (not 1300), so cluster 1 owns 1000/1000 >= 60%.
+        let turns = vec![
+            SpeakerTurn {
+                start_ms: 0,
+                end_ms: 1000,
+                cluster_id: 1,
+            },
+            SpeakerTurn {
+                start_ms: 400,
+                end_ms: 700,
+                cluster_id: 2,
+            },
+        ];
+        assert_eq!(assign_segment(0, 1000, &turns, MIN_OVERLAP_RATIO), Some(1));
     }
 
     #[test]
@@ -1677,6 +1875,79 @@ mod tests {
         assert_eq!(nearest_cluster(&[0.0, 0.0, 1.0], &centroids, 0.3), None);
         // No centroids → nothing to attach to.
         assert_eq!(nearest_cluster(&[1.0, 0.0, 0.0], &[], 0.3), None);
+    }
+
+    #[test]
+    fn nearest_cluster_excluding_skips_the_enclosing_cluster() {
+        let centroids = vec![vec![1.0, 0.0, 0.0], vec![0.0, 1.0, 0.0]];
+        // A blended interjection embedding leaning toward cluster 0 (the enclosing
+        // voice). Without exclusion it echoes cluster 0 back; excluding it attaches
+        // to the actual second voice when that still clears the floor.
+        let blend = [0.8, 0.5, 0.0];
+        assert_eq!(nearest_cluster_excluding(&blend, &centroids, &[], 0.3), Some(0));
+        assert_eq!(nearest_cluster_excluding(&blend, &centroids, &[0], 0.3), Some(1));
+        // Everything excluded → dropped, never a forced guess.
+        assert_eq!(nearest_cluster_excluding(&blend, &centroids, &[0, 1], 0.3), None);
+        // Excluded-but-only-noise-remains → dropped by the floor.
+        assert_eq!(
+            nearest_cluster_excluding(&[0.9, 0.0, 0.1], &centroids, &[0], 0.3),
+            None
+        );
+    }
+
+    #[test]
+    fn interjection_is_carved_out_of_its_containing_turn() {
+        // Observed on real audio (2026-07-24 meeting, 0–10 s window): slot 1 stays
+        // active 0–4720 while the reply "Нет" appears only as a fully-overlapped burst
+        // 3209–4109 on another slot. The container must split around it.
+        let turns = vec![turn(0, 4720, 1), turn(3209, 4109, 0)];
+        let out = split_turns_at_interjections(&turns, 250);
+        assert_eq!(
+            out,
+            vec![turn(0, 3209, 1), turn(3209, 4109, 0), turn(4109, 4720, 1)]
+        );
+    }
+
+    #[test]
+    fn multiple_interjections_carve_multiple_slices() {
+        let turns = vec![turn(0, 20_000, 0), turn(4_000, 5_000, 1), turn(10_000, 11_500, 2)];
+        let out = split_turns_at_interjections(&turns, 250);
+        assert_eq!(
+            out,
+            vec![
+                turn(0, 4_000, 0),
+                turn(4_000, 5_000, 1),
+                turn(5_000, 10_000, 0),
+                turn(10_000, 11_500, 2),
+                turn(11_500, 20_000, 0),
+            ]
+        );
+    }
+
+    #[test]
+    fn partial_overlaps_and_same_cluster_containment_stay_untouched() {
+        // Take-over overlap (not contained) is the planner's job, not the carver's.
+        let takeover = vec![turn(0, 10_000, 0), turn(8_000, 14_000, 1)];
+        assert_eq!(split_turns_at_interjections(&takeover, 250), takeover);
+        // Same-cluster containment carries no speaker change — nothing to carve.
+        let same = vec![turn(0, 10_000, 0), turn(4_000, 5_000, 0)];
+        assert_eq!(split_turns_at_interjections(&same, 250), same);
+    }
+
+    #[test]
+    fn edge_touching_interjection_leaves_no_empty_pieces() {
+        // Burst flush with the container's start: no zero-length head piece.
+        let turns = vec![turn(0, 10_000, 0), turn(0, 1_000, 1)];
+        let out = split_turns_at_interjections(&turns, 250);
+        assert_eq!(out, vec![turn(0, 1_000, 1), turn(1_000, 10_000, 0)]);
+    }
+
+    #[test]
+    fn sliver_pieces_left_by_a_cut_are_dropped() {
+        // The cut leaves a 100 ms head piece — below min_piece_ms, it carries no reply.
+        let turns = vec![turn(0, 10_000, 0), turn(100, 1_000, 1)];
+        let out = split_turns_at_interjections(&turns, 250);
+        assert_eq!(out, vec![turn(100, 1_000, 1), turn(1_000, 10_000, 0)]);
     }
 
     #[test]
@@ -2496,6 +2767,89 @@ mod tests {
             csv.push_str(&format!("{},{},{}\n", t.start_ms, t.end_ms, t.cluster_id));
         }
         std::fs::write(&out, csv).unwrap();
+        eprintln!("wrote {out}");
+    }
+
+    // Research harness: dump RAW segmentation turns (per 10 s window, per local powerset
+    // slot, before any clustering/attachment/merging) so segmentation-level misses can be
+    // told apart from clustering-level fusing. Same env as `research_diarize_wav`; writes
+    // CSV rows (window_start_ms, local_slot, start_ms, end_ms, overlap_frac).
+    //   cargo test -p meetily --lib pipeline::diarization::tests::research_segmentation_raw -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn research_segmentation_raw() {
+        let model_dir = match std::env::var("MEETILY_DIARIZATION_MODEL_DIR") {
+            Ok(d) => std::path::PathBuf::from(d),
+            Err(_) => {
+                eprintln!("skip: MEETILY_DIARIZATION_MODEL_DIR not set");
+                return;
+            }
+        };
+        let wav = match std::env::var("MEETILY_DIARIZATION_TEST_WAV") {
+            Ok(p) => std::path::PathBuf::from(p),
+            Err(_) => {
+                eprintln!("skip: MEETILY_DIARIZATION_TEST_WAV not set");
+                return;
+            }
+        };
+        let out = std::env::var("RESEARCH_OUT").unwrap_or_else(|_| "raw_turns.csv".into());
+        // Optional offset of the whole window grid (ms) — lets two runs (0 / 5000)
+        // approximate what an overlapping-window pass would see.
+        let offset_ms: usize = std::env::var("RESEARCH_WINDOW_OFFSET_MS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0);
+
+        let diarizer =
+            Diarizer::load(DiarizerConfig { model_dir }).expect("load diarization models");
+        let decoded = crate::audio::decoder::decode_audio_file(&wav).expect("decode wav");
+        let waveform = decoded.to_whisper_format();
+        let total_ms = (waveform.len() as f64 / SEG_SAMPLE_RATE as f64) * 1000.0;
+
+        let mut csv = String::from("window_start_ms,local_slot,start_ms,end_ms,overlap_frac\n");
+        let mut win_start = offset_ms * SEG_SAMPLE_RATE / 1000;
+        let mut window_buf = vec![0f32; SEG_WINDOW_SAMPLES];
+        while win_start < waveform.len() {
+            let end = (win_start + SEG_WINDOW_SAMPLES).min(waveform.len());
+            let n = end - win_start;
+            for (dst, src) in window_buf.iter_mut().zip(&waveform[win_start..end]) {
+                *dst = *src * SEG_WAVEFORM_SCALE;
+            }
+            for x in window_buf.iter_mut().skip(n) {
+                *x = 0.0;
+            }
+            let active = diarizer.run_segmentation(&window_buf).expect("segmentation");
+            let num_frames = active.len();
+            if num_frames > 0 {
+                let frame_ms = SEG_WINDOW_MS / num_frames as f64;
+                let window_start_ms = (win_start as f64 / SEG_SAMPLE_RATE as f64) * 1000.0;
+                for spk in 0..SEG_NUM_LOCAL_SPEAKERS {
+                    let column: Vec<bool> = active.iter().map(|f| f[spk]).collect();
+                    for (s, e) in runs_to_turns(
+                        &column,
+                        frame_ms,
+                        window_start_ms,
+                        DEFAULT_MIN_TURN_MS,
+                        DEFAULT_MERGE_GAP_MS,
+                    ) {
+                        let e = e.min(total_ms.round() as i64);
+                        if e > s {
+                            let ov =
+                                window_overlap_fraction(&active, frame_ms, window_start_ms, s, e);
+                            csv.push_str(&format!(
+                                "{},{},{},{},{ov:.3}\n",
+                                window_start_ms.round() as i64,
+                                spk,
+                                s,
+                                e
+                            ));
+                        }
+                    }
+                }
+            }
+            win_start += SEG_WINDOW_SAMPLES;
+        }
+        std::fs::write(&out, &csv).unwrap();
         eprintln!("wrote {out}");
     }
 }

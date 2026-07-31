@@ -12,7 +12,7 @@ pub mod prompts;
 pub mod providers;
 pub mod router;
 
-use router::Scope;
+use router::{RouteTarget, Scope};
 
 /// Why an LLM is being called — used for privacy enforcement and logging.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -147,9 +147,10 @@ where
     provider_call.await.map_err(LlmError::Provider)
 }
 
-/// High-level entry point used by extraction and RAG. Every network-backed LLM task
-/// uses the configured OpenRouter model; `scope` and `query_chars` remain in the
-/// signature because callers use them for retrieval policy and diagnostics.
+/// High-level entry point: enforce privacy, pick a provider via the router (GigaChat
+/// for fast/lookup, DeepSeek for synthesis), and complete — falling back to whichever
+/// provider is configured if the routed one isn't. This is what the extract/RAG/summary
+/// call sites use, so privacy + routing + provider selection are all centralized.
 pub async fn complete_routed(
     pool: &sqlx::SqlitePool,
     purpose: Purpose,
@@ -161,11 +162,35 @@ pub async fn complete_routed(
     let privacy = ensure_outbound_allowed(pool, purpose).await?;
     // Guard first — blocked purposes / local-only mode make ZERO network calls and
     // don't even resolve provider credentials.
-    let _ = router::route(purpose, scope, query_chars);
-    let client = providers::resolve_openrouter(pool).await.ok_or_else(|| {
-        LlmError::Provider("OpenRouter is not configured — add an API key".into())
-    })?;
-    guarded_complete(&privacy, purpose, client.complete(system, user)).await
+    let target = router::route(purpose, scope, query_chars);
+    let giga = providers::resolve_gigachat(pool).await;
+    let deep = providers::resolve_deepseek(pool).await;
+
+    // Preference order depends on the routing decision; fall back to the other.
+    match target {
+        RouteTarget::Fast => {
+            if let Some(g) = &giga {
+                return guarded_complete(&privacy, purpose, g.complete(system, user)).await;
+            }
+            if let Ok(d) = &deep {
+                return guarded_complete(&privacy, purpose, d.complete(system, user)).await;
+            }
+        }
+        RouteTarget::Synthesis => {
+            if let Ok(d) = &deep {
+                return guarded_complete(&privacy, purpose, d.complete(system, user)).await;
+            }
+            if let Some(g) = &giga {
+                return guarded_complete(&privacy, purpose, g.complete(system, user)).await;
+            }
+        }
+    }
+    // Reaching here means GigaChat is unconfigured *and* DeepSeek failed to resolve, so
+    // DeepSeek's reason is the only actionable thing we have. On the managed path there
+    // is no key for the user to add, and the generic advice below buried the real cause.
+    Err(LlmError::Provider(deep.err().unwrap_or_else(|| {
+        "no LLM provider configured — set GigaChat or DeepSeek credentials in settings".into()
+    })))
 }
 
 #[cfg(test)]

@@ -93,6 +93,10 @@ pub struct AnalyticsReportMeta {
     /// `waiting_input` state). Lets the frontend restore the question screen after a
     /// reload. NULL until (and unless) the clarify stage produces questions.
     pub questions: Option<String>,
+    /// Raw speaker-suggestions JSON (persisted when the speakers stage pauses for
+    /// confirmation). Lets the frontend restore the speaker screen after a reload.
+    /// NULL until (and unless) the speakers stage pauses.
+    pub speaker_suggestions: Option<String>,
 }
 
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize)]

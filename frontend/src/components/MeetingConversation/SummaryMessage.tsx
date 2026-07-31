@@ -2,7 +2,7 @@
 
 import { type ComponentProps, useMemo } from 'react';
 import { SummaryPanel } from '@/components/MeetingDetails/SummaryPanel';
-import { Loader2 } from '@/components/deslop-icons';
+import { Copy, Loader2, RefreshCw, Save, Send } from '@/components/deslop-icons';
 import { ChatMarkdown } from '@/components/chat/ChatMarkdown';
 import {
   extractSummaryAgreements,
@@ -71,6 +71,21 @@ export function SummaryMessage({ summaryPanelProps: p }: SummaryMessageProps) {
               />
             </section>
           ) : null}
+
+          {/* Quiet actions */}
+          <div className="mt-[18px] flex gap-4">
+            <QuietAction icon={<RefreshCw size={14} />} label={t('Regenerate')} onClick={() => void p.onRegenerateSummary()} />
+            <QuietAction icon={<Copy size={14} />} label={t('Copy')} onClick={() => void p.onCopySummary()} />
+            {p.canShareToTelegram && p.onShareSummaryToTelegram && (
+              <QuietAction
+                icon={p.isSharingToTelegram ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+                label={t('Telegram')}
+                disabled={p.isSharingToTelegram}
+                onClick={() => void p.onShareSummaryToTelegram?.()}
+              />
+            )}
+            <QuietAction icon={<Save size={14} />} label={t('Save to note')} onClick={() => void p.onSaveAll()} />
+          </div>
         </>
       ) : p.summaryLoadStatus === 'loading' ? (
         <div className="flex items-center gap-2 py-4 text-sm text-muted-foreground">
@@ -83,5 +98,29 @@ export function SummaryMessage({ summaryPanelProps: p }: SummaryMessageProps) {
         <p className="mt-2 text-xs text-destructive">{p.summaryError}</p>
       )}
     </div>
+  );
+}
+
+function QuietAction({
+  icon,
+  label,
+  onClick,
+  disabled = false,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className="inline-flex items-center gap-1.5 text-[12.5px] font-semibold text-[var(--fg3)] transition-colors hover:text-[var(--fg1)] disabled:opacity-50"
+    >
+      {icon}
+      {label}
+    </button>
   );
 }

@@ -44,6 +44,11 @@ interface SummaryPanelProps {
   isSaving: boolean;
   onSaveAll: () => Promise<void>;
   onCopySummary: () => Promise<void>;
+  /** Opens Telegram's chat picker with the summary prefilled. Absent when unavailable. */
+  onShareSummaryToTelegram?: () => Promise<void>;
+  /** False in local-only mode, which hides every Telegram affordance. */
+  canShareToTelegram?: boolean;
+  isSharingToTelegram?: boolean;
   onOpenFolder: () => Promise<void>;
   onDiscussSummary: () => void;
   aiSummary: Summary | null;

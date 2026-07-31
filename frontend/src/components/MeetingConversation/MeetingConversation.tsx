@@ -240,6 +240,12 @@ export function MeetingConversation({
           hasSummary={hasSummary}
           onCopySummary={onCopySummary}
           onRenameMeeting={onStartEditTitle}
+          onSaveSummary={summaryPanelProps.onSaveAll}
+          onShareSummaryToTelegram={summaryPanelProps.onShareSummaryToTelegram}
+          canShareToTelegram={summaryPanelProps.canShareToTelegram}
+          modelConfig={summaryPanelProps.modelConfig}
+          setModelConfig={summaryPanelProps.setModelConfig}
+          onSaveModelConfig={summaryPanelProps.onSaveModelConfig}
         />
       </div>
 
