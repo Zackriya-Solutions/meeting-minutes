@@ -11,6 +11,7 @@ import { ModalType } from '@/hooks/useModalState';
 import { useIsLinux } from '@/hooks/usePlatform';
 import { useT } from '@/lib/i18n';
 import { useMemo } from 'react';
+import { UpcomingMeetings } from '@/components/UpcomingMeetings';
 
 /**
  * TranscriptPanel Component
@@ -24,12 +25,16 @@ interface TranscriptPanelProps {
   isProcessingStop: boolean;
   isStopping: boolean;
   showModal: (name: ModalType, message?: string) => void;
+  isRecordingDisabled: boolean;
+  onStartCalendarMeeting: (title: string) => Promise<void>;
 }
 
 export function TranscriptPanel({
   isProcessingStop,
   isStopping,
-  showModal
+  showModal,
+  isRecordingDisabled,
+  onStartCalendarMeeting,
 }: TranscriptPanelProps) {
   const t = useT();
   // Contexts
@@ -107,6 +112,12 @@ export function TranscriptPanel({
       <div className="pb-20">
         <div className="flex justify-center">
           <div className="w-2/3 max-w-[750px]">
+            {!isRecording && segments.length === 0 && (
+              <UpcomingMeetings
+                disabled={isRecordingDisabled}
+                onStartMeeting={onStartCalendarMeeting}
+              />
+            )}
             <VirtualizedTranscriptView
               segments={segments}
               isRecording={isRecording}
