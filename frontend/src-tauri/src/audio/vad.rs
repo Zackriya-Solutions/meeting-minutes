@@ -183,8 +183,19 @@ impl ContinuousVadProcessor {
         // Force end any ongoing speech
         if self.in_speech && !self.current_speech.is_empty() {
             // processed_samples and speech_start_sample always count 16kHz samples (post-resampling)
-            let start_ms = (self.speech_start_sample as f64 / 16000.0) * 1000.0;
+            let mut start_ms = (self.speech_start_sample as f64 / 16000.0) * 1000.0;
             let end_ms = (self.processed_samples as f64 / 16000.0) * 1000.0;
+
+            // Defensive: a start after the end would put downstream consumers on a
+            // descending timeline (negative durations). Derive the start from the
+            // buffered speech length instead and keep timestamps monotonic.
+            if start_ms > end_ms {
+                warn!(
+                    "VAD flush: speech start {:.0}ms is after end {:.0}ms - deriving start from buffered samples",
+                    start_ms, end_ms
+                );
+                start_ms = (end_ms - (self.current_speech.len() as f64 / 16000.0) * 1000.0).max(0.0);
+            }
 
             debug!("VAD flush: Force-ending speech - start={}ms, end={}ms, duration={}ms, samples={}",
                   start_ms, end_ms, end_ms - start_ms, self.current_speech.len());
@@ -209,6 +220,27 @@ impl ContinuousVadProcessor {
         Ok(completed_segments)
     }
 
+    /// Handle a SpeechStart transition from the VAD session.
+    ///
+    /// `timestamp_ms` reported by silero is an ABSOLUTE session time. It must NOT
+    /// be offset by `processed_samples` - doing so double-counted the start
+    /// position, which surfaced in flush() (forced end at end-of-file / recording
+    /// stop) as segments with start > end. Downstream, split_segment_at_silence
+    /// then derived a NEGATIVE ms-per-sample and stamped sub-segments on a
+    /// descending timeline - transcripts showed a "mirrored" tail with timestamps
+    /// past the end of the recording.
+    fn on_speech_start(&mut self, timestamp_ms: usize) {
+        // Only log if state changed
+        if !self.last_logged_state {
+            debug!("VAD: Speech started at {}ms", timestamp_ms);
+            self.last_logged_state = true;
+        }
+        self.in_speech = true;
+        // Use 16000 (VAD processing rate) since speech_start_sample counts 16kHz samples
+        self.speech_start_sample = timestamp_ms * 16000 / 1000;
+        self.current_speech.clear();
+    }
+
     fn process_chunk(&mut self, chunk: &[f32]) -> Result<()> {
         // Track accumulated speech buffer size to detect memory issues
         let current_speech_size = self.current_speech.len();
@@ -230,15 +262,7 @@ impl ContinuousVadProcessor {
         for transition in transitions {
             match transition {
                 VadTransition::SpeechStart { timestamp_ms } => {
-                    // Only log if state changed
-                    if !self.last_logged_state {
-                        debug!("VAD: Speech started at {}ms", timestamp_ms);
-                        self.last_logged_state = true;
-                    }
-                    self.in_speech = true;
-                    // Use 16000 (VAD processing rate) since processed_samples counts 16kHz samples
-                    self.speech_start_sample = self.processed_samples + (timestamp_ms * 16000 / 1000);
-                    self.current_speech.clear();
+                    self.on_speech_start(timestamp_ms);
                 }
                 VadTransition::SpeechEnd { start_timestamp_ms, end_timestamp_ms, samples } => {
                     // Only log if we were previously in speech state
@@ -590,6 +614,50 @@ mod tests {
             // Each segment should be at least 250ms (min_speech_time)
             assert!(duration_ms >= 200.0, "Segment {} too short: {:.0}ms", i, duration_ms);
         }
+    }
+
+    /// Regression test: flush() must use the ABSOLUTE speech start position.
+    ///
+    /// speech_start_sample was previously computed as processed_samples + timestamp_ms,
+    /// double-counting the start (silero's SpeechStart timestamp is already absolute).
+    /// For a segment force-ended by flush() this produced start > end; downstream,
+    /// split_segment_at_silence derived a negative ms-per-sample and stamped
+    /// sub-segments on a descending ("mirrored") timeline past the end of the file.
+    #[test]
+    fn test_flush_uses_absolute_speech_start() {
+        let mut processor = ContinuousVadProcessor::new(16000, 2000)
+            .expect("Failed to create VAD processor");
+
+        // Silero reports speech starting at 20s (absolute session time) while 25s
+        // of audio has already run through the network - the exact situation where
+        // the old computation doubled the start to 45s.
+        processor.processed_samples = 25 * 16000;
+        processor.on_speech_start(20_000);
+
+        // Recording stops mid-speech at 30s with 5s of speech buffered, so the
+        // final segment is emitted by the forced-end path in flush().
+        processor.processed_samples = 30 * 16000;
+        processor.current_speech = vec![0.1f32; 5 * 16000];
+
+        let segments = processor.flush().expect("VAD flush failed");
+
+        assert_eq!(segments.len(), 1, "Expected exactly one force-ended segment");
+        let seg = &segments[0];
+        assert!(
+            (seg.start_timestamp_ms - 20_000.0).abs() < 1.0,
+            "Flushed segment start should be the absolute speech start (20000ms), got {:.0}ms",
+            seg.start_timestamp_ms
+        );
+        assert!(
+            (seg.end_timestamp_ms - 30_000.0).abs() < 1.0,
+            "Flushed segment end should be the processed position (30000ms), got {:.0}ms",
+            seg.end_timestamp_ms
+        );
+        assert!(
+            seg.end_timestamp_ms > seg.start_timestamp_ms,
+            "Flushed segment has inverted timestamps: {:.0}ms..{:.0}ms",
+            seg.start_timestamp_ms, seg.end_timestamp_ms
+        );
     }
 }
 
