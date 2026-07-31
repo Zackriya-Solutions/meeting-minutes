@@ -13,6 +13,7 @@ import { useMeetingData } from '@/hooks/meeting-details/useMeetingData';
 import { useSummaryGeneration } from '@/hooks/meeting-details/useSummaryGeneration';
 import { useTemplates } from '@/hooks/meeting-details/useTemplates';
 import { useCopyOperations } from '@/hooks/meeting-details/useCopyOperations';
+import { useTelegramShare } from '@/hooks/meeting-details/useTelegramShare';
 import { useMeetingOperations } from '@/hooks/meeting-details/useMeetingOperations';
 import { useConfig } from '@/contexts/ConfigContext';
 import { useT } from '@/lib/i18n';
@@ -134,6 +135,13 @@ export default function PageContent({
     }
   };
 
+  const telegramShare = useTelegramShare({
+    meeting,
+    meetingTitle: meetingData.meetingTitle,
+    aiSummary: meetingData.aiSummary,
+    blockNoteSummaryRef: meetingData.blockNoteSummaryRef,
+  });
+
   const summaryGeneration = useSummaryGeneration({
     meeting,
     transcripts: meetingData.transcripts,
@@ -143,6 +151,8 @@ export default function PageContent({
     onMeetingUpdated,
     setAiSummary: setAiSummaryDurably,
     onOpenModelSettings: handleOpenModelSettings,
+    // No-op unless the user turned auto-share on; opens Telegram, never sends by itself.
+    onSummaryGenerated: telegramShare.autoShareIfEnabled,
   });
 
   const copyOperations = useCopyOperations({
@@ -183,6 +193,9 @@ export default function PageContent({
     isSaving: meetingData.isSaving,
     onSaveAll: meetingData.saveAllChanges,
     onCopySummary: copyOperations.handleCopySummary,
+    onShareSummaryToTelegram: telegramShare.shareSummary,
+    canShareToTelegram: telegramShare.canShareToTelegram,
+    isSharingToTelegram: telegramShare.isSharing,
     onOpenFolder: meetingOperations.handleOpenMeetingFolder,
     onDiscussSummary: () => {}, // overridden by MeetingConversation → focuses the composer
     aiSummary: meetingData.aiSummary,

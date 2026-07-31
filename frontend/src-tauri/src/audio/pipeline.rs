@@ -15,7 +15,10 @@ use super::vad::{ContinuousVadProcessor, SpeechSegment};
 
 /// Ring buffer for synchronized audio mixing
 /// Accumulates samples from mic and system streams until we have aligned windows
-struct AudioMixerRingBuffer {
+///
+/// Shared with `background_capture`, which mixes the same aligned windows without
+/// running VAD or transcription.
+pub(crate) struct AudioMixerRingBuffer {
     mic_buffer: VecDeque<f32>,
     system_buffer: VecDeque<f32>,
     window_size_samples: usize,  // Fixed mixing window (e.g., 50ms)
@@ -23,7 +26,7 @@ struct AudioMixerRingBuffer {
 }
 
 impl AudioMixerRingBuffer {
-    fn new(sample_rate: u32) -> Self {
+    pub(crate) fn new(sample_rate: u32) -> Self {
         // Use 50ms windows for mixing
         let window_ms = 600.0;
         let window_size_samples = (sample_rate as f32 * window_ms / 1000.0) as usize;
@@ -46,7 +49,7 @@ impl AudioMixerRingBuffer {
         }
     }
 
-    fn add_samples(&mut self, device_type: DeviceType, samples: Vec<f32>) {
+    pub(crate) fn add_samples(&mut self, device_type: DeviceType, samples: Vec<f32>) {
         // Log buffer health periodically for diagnostics
         static mut SAMPLE_COUNTER: u64 = 0;
         unsafe {
@@ -84,12 +87,12 @@ impl AudioMixerRingBuffer {
         }
     }
 
-    fn can_mix(&self) -> bool {
+    pub(crate) fn can_mix(&self) -> bool {
         self.mic_buffer.len() >= self.window_size_samples ||
         self.system_buffer.len() >= self.window_size_samples
     }
 
-    fn extract_window(&mut self) -> Option<(Vec<f32>, Vec<f32>)> {
+    pub(crate) fn extract_window(&mut self) -> Option<(Vec<f32>, Vec<f32>)> {
         if !self.can_mix() {
             return None;
         }
@@ -140,6 +143,23 @@ impl AudioMixerRingBuffer {
         Some((mic_window, sys_window))
     }
 
+    /// Drain whatever is left as one final sub-window, zero-padding the shorter
+    /// side. Called once when capture stops so the tail (< one window) is not
+    /// dropped. The live pipeline flushes through its VAD instead; this exists for
+    /// `background_capture`, which writes mixed windows straight to disk.
+    pub(crate) fn flush(&mut self) -> Option<(Vec<f32>, Vec<f32>)> {
+        if self.mic_buffer.is_empty() && self.system_buffer.is_empty() {
+            return None;
+        }
+
+        let len = self.mic_buffer.len().max(self.system_buffer.len());
+        let mut mic_window: Vec<f32> = self.mic_buffer.drain(..).collect();
+        let mut sys_window: Vec<f32> = self.system_buffer.drain(..).collect();
+        mic_window.resize(len, 0.0);
+        sys_window.resize(len, 0.0);
+
+        Some((mic_window, sys_window))
+    }
 }
 
 /// Root-mean-square amplitude of a slice of audio samples.
@@ -255,14 +275,16 @@ impl ChannelEnergyTracker {
 
 /// Simple audio mixer without aggressive ducking
 /// Combines mic + system audio with basic clipping prevention
-struct ProfessionalAudioMixer;
+///
+/// Shared with `background_capture` so both recording paths produce the same mix.
+pub(crate) struct ProfessionalAudioMixer;
 
 impl ProfessionalAudioMixer {
-    fn new(_sample_rate: u32) -> Self {
+    pub(crate) fn new(_sample_rate: u32) -> Self {
         Self
     }
 
-    fn mix_window(&mut self, mic_window: &[f32], sys_window: &[f32]) -> Vec<f32> {
+    pub(crate) fn mix_window(&mut self, mic_window: &[f32], sys_window: &[f32]) -> Vec<f32> {
         // Handle different lengths (already padded by extract_window, but defensive)
         let max_len = mic_window.len().max(sys_window.len());
         let mut mixed = Vec::with_capacity(max_len);
@@ -1250,6 +1272,34 @@ impl Default for AudioPipelineManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ring_buffer_flush_returns_the_aligned_tail_then_nothing() {
+        // 600ms windows: at 1000 Hz that is 600 samples, so 100 samples is a tail.
+        let mut ring = AudioMixerRingBuffer::new(1000);
+        ring.add_samples(DeviceType::Microphone, vec![0.5; 100]);
+        assert!(!ring.can_mix());
+
+        let (mic, system) = ring.flush().expect("tail is flushed, not dropped");
+        assert_eq!(mic.len(), 100);
+        // The absent system stream is zero-padded to the same length, so mixing the
+        // tail cannot read past the end of either window.
+        assert_eq!(system.len(), 100);
+        assert!(system.iter().all(|&sample| sample == 0.0));
+
+        assert!(ring.flush().is_none(), "flush drains the buffers");
+    }
+
+    #[test]
+    fn ring_buffer_flush_pads_to_the_longer_stream() {
+        let mut ring = AudioMixerRingBuffer::new(1000);
+        ring.add_samples(DeviceType::Microphone, vec![0.5; 40]);
+        ring.add_samples(DeviceType::System, vec![0.25; 90]);
+
+        let (mic, system) = ring.flush().unwrap();
+        assert_eq!((mic.len(), system.len()), (90, 90));
+        assert_eq!(mic[40..], [0.0; 50]);
+    }
 
     #[test]
     fn classify_channel_prefers_mic_on_tie_and_silence() {

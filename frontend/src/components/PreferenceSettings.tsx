@@ -7,7 +7,45 @@ import { invoke } from "@tauri-apps/api/core"
 import Analytics from "@/lib/analytics"
 import AnalyticsConsentSwitch from "./AnalyticsConsentSwitch"
 import { useConfig, NotificationSettings } from "@/contexts/ConfigContext"
+import { TELEGRAM_AUTO_SHARE_KEY } from "@/hooks/meeting-details/useTelegramShare"
+import {
+  type AutoCaptureMode,
+  flagsForMode,
+  modeFromFlags,
+  modeNeedsMicrophoneSignal,
+} from "@/lib/autoCaptureMode"
 import { useT } from '@/lib/i18n'
+
+/**
+ * The four behaviours, ordered least to most automatic. Labels and descriptions are
+ * English translation keys (see `translations.ts`).
+ */
+const AUTO_CAPTURE_MODE_OPTIONS: ReadonlyArray<{
+  mode: AutoCaptureMode;
+  label: string;
+  description: string;
+}> = [
+  {
+    mode: 'off',
+    label: 'Do nothing',
+    description: 'Memento does not watch for calls. Start every recording yourself.',
+  },
+  {
+    mode: 'ask',
+    label: 'Ask me',
+    description: 'Offer to start recording when a call is detected. Nothing is recorded without your confirmation.',
+  },
+  {
+    mode: 'live',
+    label: 'Record with a live transcript',
+    description: 'Start recording Zoom, Teams, Telemost, and SberJazz calls right away and transcribe as you go, then save about 45 seconds after the call ends. Browser and Telegram calls still ask first.',
+  },
+  {
+    mode: 'silent',
+    label: 'Record quietly in the background',
+    description: 'Capture every detected call, including browser and Telegram, without opening the recorder or transcribing live. The meeting appears in your list with audio when the call ends — press Enhance to transcribe it. Calls shorter than a minute are discarded.',
+  },
+];
 
 export function PreferenceSettings() {
   const {
@@ -29,6 +67,11 @@ export function PreferenceSettings() {
     local_only: boolean;
   } | null>(null);
   const [identityAutoAssign, setIdentityAutoAssign] = useState(false);
+  const [telegramAutoShare, setTelegramAutoShare] = useState(false);
+  const [backgroundCapture, setBackgroundCapture] = useState<{
+    supported: boolean;
+    capturing: boolean;
+  } | null>(null);
   const [isSavingLearningPolicy, setIsSavingLearningPolicy] = useState(false);
   const hasTrackedViewRef = useRef(false);
 
@@ -47,9 +90,12 @@ export function PreferenceSettings() {
         local_only: boolean;
       }>('get_capture_retention_policy'),
       invoke<Record<string, string>>('get_app_settings'),
-    ]).then(([policy, settings]) => {
+      invoke<{ supported: boolean; capturing: boolean }>('get_background_capture_status'),
+    ]).then(([policy, settings, capture]) => {
       setCapturePolicy(policy);
       setIdentityAutoAssign(settings['identity.auto_assign_enabled'] === 'true');
+      setTelegramAutoShare(settings[TELEGRAM_AUTO_SHARE_KEY] === 'true');
+      setBackgroundCapture({ supported: capture.supported, capturing: capture.capturing });
     }).catch((error) => {
       console.warn('Failed to load local learning policy:', error);
     });
@@ -172,33 +218,15 @@ export function PreferenceSettings() {
   // Ensure we have a boolean value for the Switch component
   const notificationsEnabledValue = notificationsEnabled ?? false;
 
-  const handleAutoMeetingDetectionChange = async (enabled: boolean) => {
-    if (!notificationSettings) return;
-    try {
-      await updateNotificationSettings({
-        ...notificationSettings,
-        auto_meeting_detection: enabled,
-      });
-      await Analytics.track('auto_meeting_detection_setting_changed', {
-        enabled: enabled.toString(),
-      });
-    } catch (error) {
-      console.error('Failed to update automatic meeting detection:', error);
-    }
-  };
+  const autoCaptureMode = notificationSettings ? modeFromFlags(notificationSettings) : null;
 
-  const handleAutoListeningChange = async (enabled: boolean) => {
-    if (!notificationSettings) return;
+  const handleAutoCaptureModeChange = async (mode: AutoCaptureMode) => {
+    if (!notificationSettings || mode === autoCaptureMode) return;
     try {
-      await updateNotificationSettings({
-        ...notificationSettings,
-        auto_listening: enabled,
-      });
-      await Analytics.track('auto_listening_setting_changed', {
-        enabled: enabled.toString(),
-      });
+      await updateNotificationSettings({ ...notificationSettings, ...flagsForMode(mode) });
+      await Analytics.track('auto_capture_mode_changed', { mode });
     } catch (error) {
-      console.error('Failed to update auto-listening:', error);
+      console.error('Failed to update what happens when a call is detected:', error);
     }
   };
 
@@ -216,6 +244,19 @@ export function PreferenceSettings() {
       console.error('Failed to save capture retention policy:', error);
     } finally {
       setIsSavingLearningPolicy(false);
+    }
+  };
+
+  const handleTelegramAutoShare = async (enabled: boolean) => {
+    setTelegramAutoShare(enabled);
+    try {
+      await invoke('set_app_setting', {
+        key: TELEGRAM_AUTO_SHARE_KEY,
+        value: enabled ? 'true' : 'false',
+      });
+    } catch (error) {
+      setTelegramAutoShare(!enabled);
+      console.error('Failed to save Telegram auto-share setting:', error);
     }
   };
 
@@ -245,40 +286,80 @@ export function PreferenceSettings() {
         </div>
       </div>
 
-      {/* Detection evidence remains in memory; only normalized auto-listening lifecycle is stored. */}
+      {/* One choice instead of three toggles: detection, auto-listening and background
+          capture only ever described four behaviours. Detection evidence stays in
+          memory; only the normalized capture lifecycle is stored. */}
       <div className="bg-[var(--bg-canvas)] rounded-lg border border-[var(--border-subtle)] p-6 shadow-none">
-        <div className="flex items-start justify-between gap-4 sm:gap-6">
-          <div className="min-w-0">
-            <h3 className="text-lg font-semibold text-[var(--fg1)] mb-2">{t('Automatic meeting detection')}</h3>
-            <p className="text-sm text-[var(--fg2)]">
-              {t('Detect supported meeting apps and browser calls locally. Raw process names, window titles, and URLs are not stored.')}
-            </p>
-          </div>
-          <Switch
-            className="shrink-0"
-            checked={notificationSettings?.auto_meeting_detection ?? true}
-            disabled={!notificationSettings}
-            onCheckedChange={handleAutoMeetingDetectionChange}
-          />
+        <h3 className="text-lg font-semibold text-[var(--fg1)] mb-2">{t('When a call is detected')}</h3>
+        <p className="text-sm text-[var(--fg2)]">
+          {t('Memento recognizes calls in Zoom, Teams, Telemost, SberJazz, Telegram, and your browser by watching locally which app is using the microphone. Process names, window titles, and URLs are never stored.')}
+        </p>
+
+        <div className="mt-4 space-y-2" role="radiogroup" aria-label={t('When a call is detected')}>
+          {AUTO_CAPTURE_MODE_OPTIONS.map(({ mode, label, description }) => {
+            const unsupported =
+              modeNeedsMicrophoneSignal(mode) && backgroundCapture?.supported === false;
+            const disabled = !notificationSettings || unsupported;
+            const selected = autoCaptureMode === mode;
+            return (
+              <button
+                key={mode}
+                type="button"
+                role="radio"
+                aria-checked={selected}
+                disabled={disabled}
+                onClick={() => void handleAutoCaptureModeChange(mode)}
+                className={`flex w-full items-start gap-3 rounded-md border p-3 text-left transition-colors ${
+                  selected
+                    ? 'border-[var(--gold)] bg-[var(--gold-soft)]'
+                    : 'border-[var(--border-subtle)] bg-[var(--bg-sheet)] hover:bg-[var(--bg-elevated)]'
+                } ${disabled ? 'cursor-not-allowed opacity-50' : ''}`}
+              >
+                <span
+                  aria-hidden="true"
+                  className={`mt-0.5 h-4 w-4 shrink-0 rounded-full border-2 ${
+                    selected
+                      ? 'border-[var(--gold)] bg-[var(--gold)]'
+                      : 'border-[var(--border-strong)]'
+                  }`}
+                />
+                <span className="min-w-0">
+                  <span className="block text-sm font-medium text-[var(--fg1)]">{t(label)}</span>
+                  <span className="mt-1 block text-xs text-[var(--fg3)]">{t(description)}</span>
+                  {unsupported && (
+                    <span className="mt-1 block text-xs text-[var(--fg3)]">
+                      {t('Available on macOS only: other systems have no microphone-session signal to detect the call.')}
+                    </span>
+                  )}
+                </span>
+              </button>
+            );
+          })}
         </div>
+
+        {backgroundCapture?.capturing && (
+          <p className="mt-3 text-xs text-[var(--fg3)]">{t('Recording a call in the background right now.')}</p>
+        )}
       </div>
 
-      <div className="bg-[var(--bg-canvas)] rounded-lg border border-[var(--border-subtle)] p-6 shadow-none">
-        <div className="flex items-start justify-between gap-4 sm:gap-6">
-          <div className="min-w-0">
-            <h3 className="text-lg font-semibold text-[var(--fg1)] mb-2">{t('Auto-listening')}</h3>
-            <p className="text-sm text-[var(--fg2)]">
-              {t('Start a normal local recording when a supported native meeting client begins using the microphone, then stop and save it after the signal has been absent for about 45 seconds. Browser, Telegram, and process-only signals still require confirmation.')}
-            </p>
+      {/* Hidden in local-only mode: handing a summary to Telegram takes it off this machine. */}
+      {!capturePolicy?.local_only && (
+        <div className="bg-[var(--bg-canvas)] rounded-lg border border-[var(--border-subtle)] p-6 shadow-none">
+          <div className="flex items-start justify-between gap-4 sm:gap-6">
+            <div className="min-w-0">
+              <h3 className="text-lg font-semibold text-[var(--fg1)] mb-2">{t('Open Telegram after a summary is generated')}</h3>
+              <p className="text-sm text-[var(--fg2)]">
+                {t('Telegram opens its chat picker with the meeting title in the draft and the summary on the clipboard, ready to paste. You choose the chat and press send — the app never sends anything by itself.')}
+              </p>
+            </div>
+            <Switch
+              className="shrink-0"
+              checked={telegramAutoShare}
+              onCheckedChange={handleTelegramAutoShare}
+            />
           </div>
-          <Switch
-            className="shrink-0"
-            checked={notificationSettings?.auto_listening ?? true}
-            disabled={!notificationSettings || !notificationSettings.auto_meeting_detection}
-            onCheckedChange={handleAutoListeningChange}
-          />
         </div>
-      </div>
+      )}
 
       <div className="bg-[var(--bg-canvas)] rounded-lg border border-[var(--border-subtle)] p-6 shadow-none">
         <h3 className="text-lg font-semibold text-[var(--fg1)] mb-2">{t('Local learning and retention')}</h3>

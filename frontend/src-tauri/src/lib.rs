@@ -42,6 +42,7 @@ pub mod anthropic;
 pub mod api;
 pub mod audio;
 pub mod calendar;
+pub mod background_capture;
 pub mod collections;
 pub mod config;
 pub mod console_utils;
@@ -65,6 +66,7 @@ pub mod salutespeech;
 pub mod search;
 pub mod state;
 pub mod summary;
+pub mod telegram;
 pub mod tray;
 pub mod utils;
 pub mod vector;
@@ -414,6 +416,7 @@ pub fn run() {
             None::<notifications::manager::NotificationManager<tauri::Wry>>,
         )) as NotificationManagerState<tauri::Wry>)
         .manage(meeting_detection::AutoMeetingDetectionState::default())
+        .manage(background_capture::BackgroundCaptureState::default())
         .manage(audio::init_system_audio_state())
         .manage(summary::summary_engine::ModelManagerState(Arc::new(tokio::sync::Mutex::new(None))))
         .setup(|_app| {
@@ -758,6 +761,7 @@ pub fn run() {
             is_recording,
             get_transcription_status,
             meeting_detection::get_auto_meeting_detection_status,
+            background_capture::get_background_capture_status,
             meeting_detection::report_auto_listening_start,
             meeting_detection::link_auto_listening_meeting,
             meeting_detection::get_capture_retention_policy,
@@ -918,6 +922,9 @@ pub fn run() {
             report::commands::submit_analytics_answers,
             report::commands::submit_analytics_speakers,
             report::commands::reveal_report_in_folder,
+            // Telegram sharing
+            telegram::commands::telegram_share_text,
+            telegram::commands::save_summary_markdown_file,
             summary::content_window::get_meeting_content_window_suggestion,
             summary::content_window::set_meeting_content_window_preference,
             summary::standup_workflow::list_standup_records,
@@ -1063,6 +1070,15 @@ pub fn run() {
                         .state::<meeting_detection::AutoMeetingDetectionState>()
                         .stop();
                     tauri::async_runtime::block_on(async {
+                        // Finalize an in-progress background capture BEFORE the database
+                        // is closed, so quitting mid-call still saves and registers it.
+                        let background_capture =
+                            _app_handle.state::<background_capture::BackgroundCaptureState>();
+                        if background_capture.is_capturing() {
+                            log::info!("Finalizing in-progress background capture before exit");
+                            background_capture.stop_and_finalize(_app_handle).await;
+                        }
+
                         // Clean up database connection and checkpoint WAL
                         if let Some(app_state) = _app_handle.try_state::<state::AppState>() {
                             log::info!("Starting database cleanup...");
