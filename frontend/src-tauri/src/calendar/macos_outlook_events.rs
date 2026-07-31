@@ -416,6 +416,11 @@ on isoStamp(theDate)
 	return my padNumber(year of theDate, 4) & "-" & my padNumber((month of theDate) as integer, 2) & "-" & my padNumber(day of theDate, 2) & "T" & my padNumber(hours of theDate, 2) & ":" & my padNumber(minutes of theDate, 2) & ":" & my padNumber(seconds of theDate, 2)
 end isoStamp
 
+on textOrEmpty(value)
+	if value is missing value then return ""
+	return my flattenText(value)
+end textOrEmpty
+
 on flattenText(value)
 	set rendered to value as text
 	set saved to AppleScript's text item delimiters
@@ -442,7 +447,7 @@ tell application "Microsoft Outlook"
 		repeat with currentCalendar in calendarList
 			set calendarName to ""
 			try
-				set calendarName to my flattenText(name of currentCalendar)
+				set calendarName to my textOrEmpty(name of currentCalendar)
 			end try
 			set calendarIdentifier to ""
 			try
@@ -467,12 +472,12 @@ tell application "Microsoft Outlook"
 
 					set eventSubject to ""
 					try
-						set eventSubject to my flattenText(subject of currentEvent)
+						set eventSubject to my textOrEmpty(subject of currentEvent)
 					end try
 
 					set eventLocation to ""
 					try
-						set eventLocation to my flattenText(location of currentEvent)
+						set eventLocation to my textOrEmpty(location of currentEvent)
 					end try
 
 					set eventAllDay to false
@@ -487,7 +492,7 @@ tell application "Microsoft Outlook"
 
 					set eventKey to ""
 					try
-						set eventKey to (exchange id of currentEvent) as text
+						set eventKey to my textOrEmpty(exchange id of currentEvent)
 					end try
 					if eventKey is "" then
 						try
@@ -630,8 +635,14 @@ mod tests {
         let meetings = parse_records(&payload, range_start, range_end).unwrap();
         assert_eq!(meetings.len(), 2);
         assert_eq!(meetings[0].subject, "First");
+        // An event without a location must arrive as an empty field, never as
+        // AppleScript's "missing value" text, and must not reach the UI.
+        assert_eq!(meetings[0].location, None);
         assert_eq!(meetings[1].subject, "Second");
+        assert_eq!(meetings[1].location.as_deref(), Some("Room 4"));
         assert!(!meetings[1].is_meeting);
+        // Distinct events must not collide on the generated id.
+        assert_ne!(meetings[0].id, meetings[1].id);
     }
 
     #[test]
