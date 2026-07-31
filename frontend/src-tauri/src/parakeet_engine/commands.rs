@@ -1,8 +1,7 @@
-use crate::parakeet_engine::{ModelInfo, ModelStatus, ParakeetEngine, DownloadProgress};
+use crate::parakeet_engine::{DownloadProgress, ModelInfo, ParakeetEngine};
 use std::path::PathBuf;
-use std::sync::Mutex;
-use std::sync::Arc;
-use tauri::{command, Emitter, AppHandle, Manager, Runtime};
+use std::sync::{Arc, Mutex};
+use tauri::{command, AppHandle, Emitter, Manager, Runtime};
 
 // Global parakeet engine
 pub static PARAKEET_ENGINE: Mutex<Option<Arc<ParakeetEngine>>> = Mutex::new(None);
@@ -508,30 +507,9 @@ pub async fn parakeet_retry_download<R: Runtime>(
         guard.as_ref().cloned()
     };
 
-    if let Some(engine) = engine {
-        // DEFENSIVE: Ensure clean state before retry
-        // This handles any edge cases where error handler didn't complete
-        {
-            let mut active = engine.active_downloads.write().await;
-            if active.contains(&model_name) {
-                log::warn!("Retry: Model {} was still in active downloads, removing", model_name);
-                active.remove(&model_name);
-            }
-        }
-
-        // DEFENSIVE: Force model status to Missing to allow fresh download
-        {
-            let mut models = engine.available_models.write().await;
-            if let Some(model) = models.get_mut(&model_name) {
-                log::info!("Retry: Resetting model {} status from {:?} to Missing", model_name, model.status);
-                model.status = ModelStatus::Missing;
-            }
-        }
-
-        // Rediscover models to refresh state based on disk files
-        let _ = engine.discover_models().await;
-
-        // Call regular download (emits events)
+    if engine.is_some() {
+        // 重试必须复用常规下载入口的原子 active 注册；旧 worker 退出前不能强删标记，
+        // 否则取消后立即重试会让两个任务并发写入同一个 artifact。
         parakeet_download_model(app_handle, model_name).await
     } else {
         Err("Parakeet engine not initialized".to_string())
