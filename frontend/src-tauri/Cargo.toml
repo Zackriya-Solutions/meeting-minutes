@@ -59,6 +59,13 @@ hipblas = ["whisper-rs/hipblas"]   # Linux: AMD ROCm HIP
 openblas = ["whisper-rs/openblas"] # Optimized BLAS (Auto-enabled on Windows/Linux)
 openmp = ["whisper-rs/openmp"]     # OpenMP parallel processing
 
+[lints.rust]
+# `objc` 0.2's `msg_send!`/`class!` expand to a `cfg(feature = "cargo-clippy")` check, a
+# feature this crate doesn't declare — so the lint fires at every CoreML call site in
+# `gigaam_engine::coreml`. A local `#[allow]` can't reach it (the span belongs to the macro's
+# crate), so the value is declared expected here instead. The lint stays on otherwise.
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("cargo-clippy"))'] }
+
 [build-dependencies]
 tauri-build = { version = "2.3.0", features = [] }
 reqwest = { version = "0.11", features = ["blocking", "multipart", "json", "stream"] }
@@ -215,6 +222,9 @@ core-foundation-sys = "0.8"
 # Keychain Services, so the install token actually survives a restart.
 keyring = { version = "3.6", features = ["apple-native"] }
 cidre = { git = "https://github.com/yury/cidre", rev = "a9587fa", features = ["av"] }
+# Unpacks the CoreML/Neural Engine encoder archive at download time (see
+# `gigaam_engine::commands::extract_mlpackage`). Same version the build script uses.
+zip = "2.2"
 dasp = "0.11.0"
 futures-channel = "0.3.31"
 

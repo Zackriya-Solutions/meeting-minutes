@@ -78,8 +78,18 @@ pub(super) fn tokens_to_timed_words(
     words
 }
 
+/// Where the encoder runs. The prediction network and joiner are always ONNX (7 MB, and
+/// their per-frame cost is negligible); only the encoder is worth moving off the CPU.
+enum EncoderBackend {
+    /// `v3_e2e_rnnt_encoder(.int8).onnx` through `ort`.
+    Onnx(ort::session::Session),
+    /// The same weights as an fp16 CoreML MLProgram on the Apple Neural Engine.
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    Ane(super::coreml::AneEncoder),
+}
+
 pub struct RnntModel {
-    encoder: ort::session::Session,
+    encoder: EncoderBackend,
     decoder: ort::session::Session,
     joiner: ort::session::Session,
     featurizer: Featurizer,
@@ -98,7 +108,29 @@ impl RnntModel {
         let vocab = load_vocab(vocab_path)?;
         let blank = find_blank_idx(&vocab);
         Ok(Self {
-            encoder: build_session(encoder_path)?,
+            encoder: EncoderBackend::Onnx(build_session(encoder_path)?),
+            decoder: build_session(decoder_path)?,
+            joiner: build_session(joiner_path)?,
+            featurizer: Featurizer::new(),
+            vocab,
+            blank,
+        })
+    }
+
+    /// Same model, but with the encoder running as a CoreML fp16 MLProgram on the Apple
+    /// Neural Engine (`ane_model_dir` is a compiled `encoder-ane.mlmodelc`). The ONNX
+    /// encoder is not needed — and not downloaded — in this mode.
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    pub fn load_with_ane_encoder(
+        ane_model_dir: &Path,
+        decoder_path: &Path,
+        joiner_path: &Path,
+        vocab_path: &Path,
+    ) -> Result<Self> {
+        let vocab = load_vocab(vocab_path)?;
+        let blank = find_blank_idx(&vocab);
+        Ok(Self {
+            encoder: EncoderBackend::Ane(super::coreml::AneEncoder::load(ane_model_dir)?),
             decoder: build_session(decoder_path)?,
             joiner: build_session(joiner_path)?,
             featurizer: Featurizer::new(),
@@ -128,12 +160,9 @@ impl RnntModel {
         if t == 0 {
             return Ok((Vec::new(), Vec::new(), 0.0));
         }
-        let features = Array3::from_shape_vec((1, N_MELS, t), feats)
-            .map_err(|e| anyhow!("feature reshape: {e}"))?;
-        let length = Array1::from_vec(vec![t as i64]);
 
         // Encoder → owned `encoded` [1,D,T'] (row-major), dims, and valid length.
-        let (encoded, enc_dim, enc_tp, enc_len) = self.encode(&features, &length)?;
+        let (encoded, enc_dim, enc_tp, enc_len) = self.encode(feats, t)?;
         // Feature frames are HOP samples (10 ms) apart; the encoder subsamples T → T',
         // so one encoder frame spans t/T' feature frames (4× ⇒ 40 ms for GigaAM v3).
         let feature_frame_ms =
@@ -177,9 +206,31 @@ impl RnntModel {
         Ok((tokens, frames, frame_ms))
     }
 
-    /// Run the encoder. Returns owned `encoded` [1,D,T'] flattened row-major, D, T', and
-    /// the valid time length (clamped to T').
-    fn encode(
+    /// Run the encoder on log-mel `features` (row-major `[N_MELS][frames]`, taken by value so
+    /// the ONNX path can wrap it without a copy). Returns owned `encoded` [1,D,T'] flattened
+    /// row-major, D, T', and the valid time length (clamped to T'), whichever backend is
+    /// loaded.
+    fn encode(&mut self, features: Vec<f32>, frames: usize) -> Result<(Vec<f32>, usize, usize, usize)> {
+        match &mut self.encoder {
+            EncoderBackend::Onnx(_) => {
+                let features = Array3::from_shape_vec((1, N_MELS, frames), features)
+                    .map_err(|e| anyhow!("feature reshape: {e}"))?;
+                let length = Array1::from_vec(vec![frames as i64]);
+                self.encode_onnx(&features, &length)
+            }
+            // The CoreML graph has a fixed window, so `encode_sequence` chunks longer
+            // sequences and reports the concatenated valid length — there is no separate
+            // `encoded_len` output to trust (it is off by one on zero-padded input).
+            #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+            EncoderBackend::Ane(encoder) => {
+                let (encoded, dim, tp) = encoder.encode_sequence(&features, frames)?;
+                Ok((encoded, dim, tp, tp))
+            }
+        }
+    }
+
+    /// The ONNX encoder path.
+    fn encode_onnx(
         &mut self,
         features: &Array3<f32>,
         length: &Array1<i64>,
@@ -187,12 +238,14 @@ impl RnntModel {
         use ort::inputs;
         use ort::value::TensorRef;
 
+        let EncoderBackend::Onnx(session) = &mut self.encoder else {
+            return Err(anyhow!("encode_onnx called without an ONNX encoder"));
+        };
         let f_ref = TensorRef::from_array_view(features.view())
             .map_err(|e| anyhow!("enc features: {e}"))?;
         let l_ref =
             TensorRef::from_array_view(length.view()).map_err(|e| anyhow!("enc length: {e}"))?;
-        let out = self
-            .encoder
+        let out = session
             .run(inputs!["audio_signal" => f_ref, "length" => l_ref])
             .map_err(|e| anyhow!("encoder run: {e}"))?;
 
@@ -397,6 +450,77 @@ mod tests {
                 w.text
             );
         }
+    }
+
+    /// ONNX encoder vs Neural Engine encoder on the same audio: prints both transcripts and
+    /// both encoder timings. fp16 on the ANE does not reproduce fp32 bit-for-bit, so the
+    /// point is that the text is the same modulo fp16-level wobble (fillers, commas) — that
+    /// is what the reference implementation observed too, and it is why this stays a
+    /// human-read research test rather than an equality assertion.
+    ///
+    ///   GIGAAM_RNNT_DIR=<dir with v3_e2e_rnnt_{encoder,decoder,joint}.onnx + vocab> \
+    ///   GIGAAM_ANE_MODEL=<path to encoder-ane.mlmodelc> \
+    ///   GIGAAM_TEST_WAV=<wav/mp4>  WINDOW_MS=<start,end> \
+    ///   cargo test --lib gigaam_engine::rnnt::tests::ane_matches_onnx -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    fn ane_matches_onnx() {
+        let (Ok(dir), Ok(ane)) = (
+            std::env::var("GIGAAM_RNNT_DIR"),
+            std::env::var("GIGAAM_ANE_MODEL"),
+        ) else {
+            return;
+        };
+        let dir = std::path::PathBuf::from(dir);
+        let wav = std::env::var("GIGAAM_TEST_WAV").expect("set GIGAAM_TEST_WAV");
+        let (w_start, w_end) = match std::env::var("WINDOW_MS").unwrap_or_default().split_once(',') {
+            Some((a, b)) => (
+                a.trim().parse::<usize>().unwrap(),
+                b.trim().parse::<usize>().unwrap(),
+            ),
+            None => (0, 30_000),
+        };
+
+        let decoded =
+            crate::audio::decoder::decode_audio_file(std::path::Path::new(&wav)).expect("decode");
+        let samples = decoded.to_whisper_format();
+        let s = (w_start * 16).min(samples.len());
+        let e = (w_end * 16).min(samples.len());
+        let clip = &samples[s..e];
+        eprintln!("clip: {:.1} s", clip.len() as f64 / 16_000.0);
+
+        let mut onnx = RnntModel::load(
+            &dir.join("v3_e2e_rnnt_encoder.onnx"),
+            &dir.join("v3_e2e_rnnt_decoder.onnx"),
+            &dir.join("v3_e2e_rnnt_joint.onnx"),
+            &dir.join("v3_e2e_rnnt_vocab.txt"),
+        )
+        .expect("load ONNX RNN-T");
+        let started = std::time::Instant::now();
+        let onnx_text = onnx.transcribe(clip).expect("onnx transcribe");
+        let onnx_ms = started.elapsed().as_millis();
+
+        let mut ane = RnntModel::load_with_ane_encoder(
+            std::path::Path::new(&ane),
+            &dir.join("v3_e2e_rnnt_decoder.onnx"),
+            &dir.join("v3_e2e_rnnt_joint.onnx"),
+            &dir.join("v3_e2e_rnnt_vocab.txt"),
+        )
+        .expect("load ANE RNN-T");
+        let started = std::time::Instant::now();
+        let ane_text = ane.transcribe(clip).expect("ane transcribe");
+        let ane_ms = started.elapsed().as_millis();
+
+        eprintln!("\nONNX ({onnx_ms} ms):\n{onnx_text}\n\nANE ({ane_ms} ms):\n{ane_text}\n");
+        assert!(!ane_text.trim().is_empty(), "ANE produced no transcript");
+        // Same audio, same decoder: the transcripts must be recognizably the same text.
+        let onnx_words = onnx_text.split_whitespace().count();
+        let ane_words = ane_text.split_whitespace().count();
+        assert!(
+            ane_words * 10 >= onnx_words * 8 && onnx_words * 10 >= ane_words * 8,
+            "word counts diverge too far: onnx {onnx_words} vs ane {ane_words}"
+        );
     }
 
     /// End-to-end check against the real RNN-T ONNX files. Ignored by default; run with:
