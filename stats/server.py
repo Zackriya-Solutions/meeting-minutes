@@ -213,7 +213,7 @@ def compute_product(days: float = 30.0) -> dict[str, Any]:
     today = _day_index(now)
     current_date = date.fromordinal(today)
     week_start = today - current_date.weekday()
-    month_start = current_date.replace(day=1).toordinal()
+    month_start = current_date.toordinal() - 29
     # Retention needs at most the latest 90 Moscow dates; longer requested windows
     # still receive their complete selected history.
     history_date = date.fromordinal(today - 90)
