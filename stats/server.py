@@ -615,11 +615,6 @@ def _retention_cards() -> list[dict]:
         return []
 
 
-@app.get("/retention")
-def retention() -> JSONResponse:
-    return JSONResponse(compute_retention(),
-                        headers={"Cache-Control": "no-store"})
-
 
 @app.get("/")
 def dashboard() -> FileResponse:
