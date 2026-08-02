@@ -429,6 +429,7 @@ def compute_product(days: float = 30.0) -> dict[str, Any]:
             {"step": "Content copied", "devices": len(copy_devices)},
         ],
         "retention": {"mode": "rolling value retention", "rates": retention, "cohorts": cohort_sizes},
+        "weekly_cohorts": compute_retention()["weekly_cohorts"],
         "quality": {
             "fatal_recordings": counters["fatal_recordings"],
             "fatal_recording_rate": fatal_rate,
