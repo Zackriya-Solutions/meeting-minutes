@@ -508,6 +508,11 @@ def summary(days: float = 1.0) -> JSONResponse:
             {"label": "Observed installs", "value": str(installs)},
         ] + _retention_cards(),
     }
+    # Недельные когорты уже посчитаны внутри compute_product — переиспользуем
+    # их, чтобы не гонять второй проход по таблице событий.
+    payload["metrics"].extend(
+        _canonical_cards(now, {"weekly_cohorts": product.get("weekly_cohorts") or {}})
+    )
     return JSONResponse(payload, headers={"Cache-Control": "no-store"})
 
 
@@ -615,6 +620,153 @@ def _retention_cards() -> list[dict]:
     except Exception:  # noqa: BLE001 — cards degrade, the core survives
         return []
 
+
+# «Сессия = использование продукта = активность человека» (Артём/Цев,
+# 02.08). Модуль перечисляет СВОИ человеческие события явно: маска вида
+# «в имени есть tool» отваливается молча, а тихо завышенные сессии хуже
+# отсутствующих. Здесь только то, что эмитится прямо из обработчика жеста.
+# Намеренно снаружи списка:
+#   button_click_start_recording — авто-прослушка сама шлёт
+#     start-recording-from-sidebar (AutoMeetingDetection.tsx), запись
+#     стартует без клика;
+#   summary_generation_started, custom_prompt_used — рядом живёт
+#     setupAutoGeneration (meeting-details/page.tsx); клики по кнопкам
+#     уже покрыты button_click_(re)generate_summary;
+#   app_started, session_started, page_view_* — жизненный цикл: тот же
+#     useEffect отрабатывает и на relaunch() после автообновления;
+#   knowledge_search_completed, memory_record_accepted и оба
+#     *_chat_response_completed — в клиенте нет эмиттера, только план
+#     инструментации (docs/TRACTION_STATS_PLAN.md).
+HUMAN_EVENT_NAMES: tuple[str, ...] = (
+    "button_click_pause_recording",
+    "button_click_resume_recording",
+    "button_click_stop_recording",
+    "button_click_generate_summary",
+    "button_click_regenerate_summary",
+    "button_click_stop_summary_generation",
+    "button_click_copy_transcript",
+    "button_click_toggle_recording_playback",
+    "button_click_enhance_transcript",
+    "button_click_detect_speakers",
+    "button_click_edit_meeting_title",
+    "transcript_copied",
+    "summary_copied",
+    "import_audio_started",
+    "enhance_transcript_started",
+    "meeting_deleted",
+)
+# Машинные события перечисляются так же явно, а не как «всё остальное»:
+# дополнение к человеческому списку засасывает нейтральное (обновления,
+# версии, технические маркеры) и выдаёт его за работу агента. Здесь —
+# конвейер обработки, все три приходят из колбэков завершения задач:
+# listen('import-complete'), listen('retranscription-complete') и опрос
+# статуса LLM. Технические сбои (error, transcription_error) не попадают
+# ни в один список. Пустой кортеж = карточки Agent runtime у модуля нет.
+MACHINE_EVENT_NAMES: tuple[str, ...] = (
+    "summary_generation_completed",
+    "import_audio_completed",
+    "enhance_transcript_completed",
+)
+# Разрыв, после которого следующее человеческое событие открывает новую
+# сессию (веб-стандарт 30 минут; фрейм Цева — интервалы между user msg,
+# «сессия это когда человек касается ноута»).
+SESSION_GAP_SECONDS = 30 * 60
+
+
+def _canonical_cards(now: float, retention: dict | None = None) -> list[dict]:
+    """Черновик канона «6 показателей» (Артём/Цева 02.08; ПН решает состав).
+
+    Сессии считаются двумя способами намеренно — в ПН выбирается один:
+    - «gap» — интервалы между human-событиями с разрывом 30 минут (фрейм
+      Цевы: сессия = когда человек касается ноута);
+    - «hourly» — прокси Артёма: уникальные пары (актор, час). Дешевле и
+      детерминированнее, но длинный разговор дробится по границам часа.
+    Обе смотрят только на HUMAN_EVENT_NAMES, поэтому фоновая обработка не
+    надувает сессии; машинное время вынесено в Agent runtime по своему
+    списку MACHINE_EVENT_NAMES.
+    Плюс Stickiness DAU/MAU (rolling) и Return rate W+1/W+2 из недельных
+    когорт. Внутренние устройства отсекаются тем же exclusion_clause, что
+    и остальные метрики модуля, иначе карточки разойдутся с ядром.
+    Всё деградирует молча, ядро summary неприкосновенно.
+    """
+    cards: list[dict] = []
+    try:
+        clause, params = exclusion_clause(excluded_device_ids())
+        current = datetime.fromtimestamp(now, REPORTING_TZ)
+        day_start = current.replace(hour=0, minute=0, second=0, microsecond=0)
+        since = (day_start - timedelta(days=29)).timestamp()
+        # Имена — связанные параметры, а не текст запроса; строки событий
+        # в Python не вычитываются вовсе: на живых модулях это сотни тысяч
+        # строк и +секунды к /summary, из-за которых поллер хаба ловит
+        # таймаут и красит модуль в degraded.
+        window = " FROM events WHERE ts >= ? AND device_id != ''" + clause
+        human = (" AND name IN (" + ",".join("?" * len(HUMAN_EVENT_NAMES)) + ")"
+                 if HUMAN_EVENT_NAMES else "")
+        names = list(HUMAN_EVENT_NAMES)
+        if names:
+            # Сессия начинается, когда предыдущее человеческое событие того
+            # же актора старше SESSION_GAP_SECONDS (или его вовсе не было).
+            gap_sessions = _db.execute(
+                "SELECT COUNT(*) FROM (SELECT ts - LAG(ts) OVER"
+                " (PARTITION BY device_id ORDER BY ts) AS delta"
+                + window + human + ") WHERE delta IS NULL OR delta > ?",
+                [since, *params, *names, SESSION_GAP_SECONDS]).fetchone()[0]
+            cards.append({
+                "label": "Sessions / day · human, 30-min gap · 30 Moscow dates",
+                "value": f"{gap_sessions / 30:.1f}",
+            })
+            hours = _db.execute(
+                "SELECT COUNT(DISTINCT device_id || ':' || CAST(ts / 3600 AS INT))"
+                + window + human, [since, *params, *names]).fetchone()[0]
+            cards.append({
+                "label": "Sessions / day · human hourly proxy · 30 Moscow dates",
+                "value": f"{hours / 30:.1f}",
+            })
+        if MACHINE_EVENT_NAMES:
+            machine = list(MACHINE_EVENT_NAMES)
+            agent_hours = _db.execute(
+                "SELECT COUNT(DISTINCT device_id || ':' || CAST(ts / 3600 AS INT))"
+                + window + " AND name IN ("
+                + ",".join("?" * len(machine)) + ")",
+                [since, *params, *machine]).fetchone()[0]
+            if agent_hours:
+                cards.append({
+                    "label": "Agent runtime · machine actor-hours / day",
+                    "value": f"{agent_hours / 30:.1f}",
+                })
+        dau, mau = _db.execute(
+            "SELECT COUNT(DISTINCT CASE WHEN ts >= ? THEN device_id END),"
+            " COUNT(DISTINCT device_id)" + window,
+            [day_start.timestamp(), since, *params]).fetchone()
+        if mau:
+            cards.append({"label": "Stickiness · DAU/MAU rolling",
+                          "value": f"{dau / mau * 100:.0f}%"})
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        cohorts = (retention or compute_retention(now))["weekly_cohorts"]
+        sizes, weeks = cohorts.get("sizes") or {}, cohorts.get("weeks") or {}
+        if sizes:
+            current = datetime.fromtimestamp(now, REPORTING_TZ)
+            week_start = (current.date()
+                          - timedelta(days=current.weekday())).toordinal()
+            for offset in (1, 2):
+                den = num = 0
+                for key, size in sizes.items():
+                    # Зрелость: неделя W+offset когорты полностью прожита,
+                    # т.е. закончилась до начала текущей недели.
+                    cohort = date.fromisoformat(key).toordinal()
+                    if cohort + offset * 7 + 7 <= week_start:
+                        den += size
+                        num += (weeks.get(key) or {}).get(str(offset), 0)
+                if den:
+                    cards.append({
+                        "label": f"Return rate W+{offset} · weekly cohorts",
+                        "value": f"{num / den * 100:.0f}%",
+                    })
+    except Exception:  # noqa: BLE001
+        pass
+    return cards
 
 
 @app.get("/")
