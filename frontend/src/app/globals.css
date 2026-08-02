@@ -869,16 +869,6 @@ input, textarea, button, [role='dialog'], [role='menu'], [role='listbox'] { font
 .global-header-action { background: var(--elevation-2); }
 .fluid-sidebar-action {
   color: var(--deslop-primary-60);
-  transition: color 80ms ease;
-}
-.fluid-sidebar-action:hover,
-.fluid-sidebar-action:focus-visible {
-  color: var(--deslop-primary);
-}
-.fluid-sidebar-action[data-active='true'],
-.fluid-sidebar-action[data-active='true']:hover,
-.fluid-sidebar-action[data-active='true']:focus-visible {
-  color: var(--deslop-primary);
 }
 .mm-press { transition: transform 180ms cubic-bezier(0.2, 0, 0, 1); }
 .mm-press:active { transform: scale(0.985); }

@@ -216,7 +216,7 @@ function FluidSidebarGroup({
                 {item.label}
               </span>
               <span
-                className="col-start-1 row-start-1 truncate transition-[color,font-variation-settings] duration-75"
+                className="col-start-1 row-start-1 truncate transition-[font-variation-settings] duration-75"
                 style={{
                   fontVariationSettings: emphasized
                     ? fluidFontWeight.semibold
