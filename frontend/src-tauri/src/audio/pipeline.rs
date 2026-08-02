@@ -694,6 +694,9 @@ pub struct AudioPipeline {
     mixer: ProfessionalAudioMixer,
     // Recording sender for pre-mixed audio
     recording_sender_for_mixed: Option<mpsc::UnboundedSender<AudioChunk>>,
+    // Streaming sender for pre-mixed audio (continuous, pre-VAD): feeds a
+    // realtime transcription provider. `None` unless a streaming provider is active.
+    streaming_sender_for_mixed: Option<mpsc::UnboundedSender<AudioChunk>>,
 }
 
 impl AudioPipeline {
@@ -760,6 +763,7 @@ impl AudioPipeline {
             ring_buffer,
             mixer,
             recording_sender_for_mixed: None,  // Will be set by manager
+            streaming_sender_for_mixed: None,  // Will be set by manager when streaming is active
         }
     }
 
@@ -876,6 +880,20 @@ impl AudioPipeline {
                                 };
                                 let _ = sender.send(recording_chunk);
                             }
+
+                            // STEP 5: Send continuous (pre-VAD) mixed audio to a streaming
+                            // transcription provider, when one is active. The provider does
+                            // its own segmentation, so this bypasses VAD entirely.
+                            if let Some(ref sender) = self.streaming_sender_for_mixed {
+                                let streaming_chunk = AudioChunk {
+                                    data: mixed_with_gain.clone(),
+                                    sample_rate: self.sample_rate,
+                                    timestamp: chunk.timestamp,
+                                    chunk_id: self.chunk_id_counter,
+                                    device_type: DeviceType::Microphone,  // Mixed audio
+                                };
+                                let _ = sender.send(streaming_chunk);
+                            }
                         }
                     }
                 }
@@ -962,6 +980,7 @@ impl AudioPipelineManager {
         target_chunk_duration_ms: u32,
         sample_rate: u32,
         recording_sender: Option<mpsc::UnboundedSender<AudioChunk>>,
+        streaming_sender: Option<mpsc::UnboundedSender<AudioChunk>>,
         mic_device_name: String,
         mic_device_kind: super::device_detection::InputDeviceKind,
         system_device_name: String,
@@ -994,6 +1013,7 @@ impl AudioPipelineManager {
         // CRITICAL FIX: Connect recording sender to receive pre-mixed audio
         // This ensures both mic AND system audio are captured in recordings
         pipeline.recording_sender_for_mixed = recording_sender;
+        pipeline.streaming_sender_for_mixed = streaming_sender;
 
         let handle = tokio::spawn(async move {
             pipeline.run().await

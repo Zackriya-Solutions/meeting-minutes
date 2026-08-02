@@ -65,6 +65,7 @@ impl RecordingManager {
         microphone_device: Option<Arc<AudioDevice>>,
         system_device: Option<Arc<AudioDevice>>,
         auto_save: bool,
+        streaming_sender: Option<mpsc::UnboundedSender<AudioChunk>>,
     ) -> Result<mpsc::UnboundedReceiver<AudioChunk>> {
         info!("Starting recording manager (auto_save: {})", auto_save);
 
@@ -112,6 +113,7 @@ impl RecordingManager {
             0, // Ignored - using dynamic sizing internally
             48000, // 48kHz sample rate
             Some(recording_sender), // CRITICAL: Pass recording sender to receive pre-mixed audio
+            streaming_sender, // Optional: continuous pre-VAD tap for a streaming provider
             mic_name,
             mic_kind,
             sys_name,
@@ -186,7 +188,7 @@ impl RecordingManager {
             }
 
             // Start recording with selected devices and auto_save setting
-            self.start_recording(microphone_device, system_device, auto_save).await
+            self.start_recording(microphone_device, system_device, auto_save, None).await
         }
 
         #[cfg(not(target_os = "macos"))]
@@ -221,7 +223,7 @@ impl RecordingManager {
                 return Err(anyhow::anyhow!("No microphone device available"));
             }
 
-            self.start_recording(microphone_device, system_device, auto_save).await
+            self.start_recording(microphone_device, system_device, auto_save, None).await
         }
     }
 
