@@ -118,7 +118,7 @@ interface LanguageSelectionProps {
   selectedLanguage: string;
   onLanguageChange: (language: string) => void;
   disabled?: boolean;
-  provider?: 'localWhisper' | 'parakeet' | 'deepgram' | 'elevenLabs' | 'groq' | 'openai';
+  provider?: 'localWhisper' | 'parakeet' | 'deepgram' | 'elevenLabs' | 'groq' | 'openai' | 'customStreaming';
 }
 
 export function LanguageSelection({
@@ -130,9 +130,11 @@ export function LanguageSelection({
   const [saving, setSaving] = useState(false);
   const { setSelectedLanguage } = useConfig();
 
-  // Parakeet only supports auto-detection (doesn't support manual language selection)
+  // Parakeet and Voxtral realtime only support auto-detection (no manual language selection)
   const isParakeet = provider === 'parakeet';
-  const availableLanguages = isParakeet
+  const isCustomStreaming = provider === 'customStreaming';
+  const autoDetectOnly = isParakeet || isCustomStreaming;
+  const availableLanguages = autoDetectOnly
     ? LANGUAGES.filter(lang => lang.code === 'auto' || lang.code === 'auto-translate')
     : LANGUAGES;
 
@@ -202,6 +204,14 @@ export function LanguageSelection({
           <div className="p-2 bg-amber-50 border border-amber-200 rounded text-amber-800">
             <p className="font-medium">ℹ️ Parakeet Language Support</p>
             <p className="mt-1 text-xs">Parakeet currently only supports automatic language detection. Manual language selection is not available. Use Whisper if you need to specify a particular language.</p>
+          </div>
+        )}
+
+        {/* Realtime streaming language limitation warning */}
+        {isCustomStreaming && (
+          <div className="p-2 bg-amber-50 border border-amber-200 rounded text-amber-800">
+            <p className="font-medium">ℹ️ Realtime Language Support</p>
+            <p className="mt-1 text-xs">Realtime models such as Voxtral detect the spoken language automatically; manual language selection is handled server-side and not available here.</p>
           </div>
         )}
 

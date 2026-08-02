@@ -111,7 +111,12 @@ export function TranscriptPanel({
               isPaused={isPaused}
               isProcessing={isProcessingStop}
               isStopping={isStopping}
-              enableStreaming={isRecording}
+              // The typewriter reveal animates each NEW (immutable, id-keyed)
+              // segment. A realtime provider instead grows one segment's text in
+              // place under a stable id, which the typewriter can't track (it
+              // snapshots on id change), so it would freeze on the first word.
+              // Disable it there and show the server's live text directly.
+              enableStreaming={isRecording && transcriptModelConfig.provider !== 'customStreaming'}
               showConfidence={true}
             />
           </div>

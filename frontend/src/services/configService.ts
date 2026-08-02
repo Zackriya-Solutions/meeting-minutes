@@ -6,7 +6,7 @@
  */
 
 import { invoke } from '@tauri-apps/api/core';
-import { TranscriptModelProps } from '@/components/TranscriptSettings';
+import type { TranscriptModelProps } from '@/components/TranscriptSettings';
 
 export interface ModelConfig {
   provider: 'ollama' | 'groq' | 'claude' | 'openrouter' | 'openai' | 'builtin-ai' | 'custom-openai';
@@ -39,6 +39,24 @@ export interface CustomOpenAIConfig {
 export interface RecordingPreferences {
   preferred_mic_device: string | null;
   preferred_system_device: string | null;
+}
+
+/**
+ * Configuration for a self-hosted realtime (websocket) transcription endpoint,
+ * e.g. a vLLM server hosting Voxtral Realtime. Mirrors the backend
+ * `CustomTranscriptionConfig` (JSON in `transcript_settings.customTranscriptionConfig`).
+ */
+export interface CustomTranscriptionConfig {
+  /** Base URL of the endpoint (ws://, wss://, http:// or https://). */
+  endpoint: string;
+  /** Optional bearer token (null/empty if the server needs none). */
+  apiKey: string | null;
+  /** Model identifier requested from the server. */
+  model: string;
+  /** Streaming protocol dialect. Defaults to "voxtral-realtime". */
+  protocol: string;
+  /** Optional requested transcription delay (ms); protocol-specific, may be ignored. */
+  delayMs: number | null;
 }
 
 /**
@@ -110,6 +128,53 @@ export class ConfigService {
       endpoint,
       apiKey,
       model,
+    });
+  }
+
+  /**
+   * Get the custom streaming (websocket) transcription configuration.
+   * @returns Promise with CustomTranscriptionConfig or null if not configured
+   */
+  async getCustomTranscriptionConfig(): Promise<CustomTranscriptionConfig | null> {
+    return invoke<CustomTranscriptionConfig | null>('api_get_custom_transcription_config');
+  }
+
+  /**
+   * Save the custom streaming transcription configuration. This also activates
+   * the streaming provider (sets the transcript provider to "customStreaming").
+   * @param config - CustomTranscriptionConfig to save
+   * @returns Promise with result status
+   */
+  async saveCustomTranscriptionConfig(
+    config: CustomTranscriptionConfig
+  ): Promise<{ status: string; message: string }> {
+    return invoke<{ status: string; message: string }>('api_save_custom_transcription_config', {
+      endpoint: config.endpoint,
+      model: config.model,
+      apiKey: config.apiKey,
+      protocol: config.protocol,
+      delayMs: config.delayMs,
+    });
+  }
+
+  /**
+   * Test connectivity to a realtime transcription endpoint (connects, performs
+   * the protocol handshake — which validates the model — and disconnects).
+   * @returns Promise with test result; rejects with an error message on failure
+   */
+  async testCustomTranscriptionConnection(
+    endpoint: string,
+    model: string,
+    apiKey: string | null,
+    protocol: string = 'voxtral-realtime',
+    delayMs: number | null = null
+  ): Promise<{ status: string; message: string }> {
+    return invoke<{ status: string; message: string }>('api_test_custom_transcription_connection', {
+      endpoint,
+      model,
+      apiKey,
+      protocol,
+      delayMs,
     });
   }
 }
