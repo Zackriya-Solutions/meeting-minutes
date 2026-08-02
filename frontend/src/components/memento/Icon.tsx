@@ -121,10 +121,7 @@ export interface IconProps extends Omit<LucideProps, 'name'> {
   name: MementoIconName;
 }
 
-/**
- * Product-level semantic icon adapter. Glyphs come exclusively from Lucide,
- * which is the icon set used by shadcn/ui.
- */
+/** Product-level semantic adapter for the mishanaer/deslop primitive icon set. */
 export function Icon({ name, size = 20, strokeWidth = 1.9, ...props }: IconProps) {
   const Glyph = icons[name];
   return <Glyph aria-hidden="true" size={size} strokeWidth={strokeWidth} {...props} />;

@@ -8,7 +8,7 @@ import { SpeakerRenameDialog } from "./MeetingDetails/SpeakerRenameDialog";
 import { useT } from "@/lib/i18n";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "./ui/dialog";
 import { Bubble, BubbleContent } from "./ui/bubble";
-import { Message, MessageAvatar, MessageContent, MessageHeader } from "./ui/message";
+import { Message, MessageAvatar, MessageContent } from "./ui/message";
 import {
     MessageScroller,
     MessageScrollerButton,
@@ -172,30 +172,6 @@ const TranscriptSegment = memo(function TranscriptSegment({
                 <span aria-hidden="true">{avatarInitials}</span>
             </MessageAvatar>
             <MessageContent className={cn('gap-1', isOwn ? 'items-end' : 'items-start')}>
-                {speakerLabel && (
-                    <MessageHeader
-                        className={cn(
-                            'gap-2 px-1 text-muted-foreground',
-                            isOwn && 'flex-row-reverse',
-                        )}
-                    >
-                        {speakerRenamable && speakerId != null && onSpeakerClick ? (
-                            <button
-                                type="button"
-                                onClick={() => onSpeakerClick(speakerId)}
-                                title={t('Rename speaker')}
-                                className="text-[10px] font-medium uppercase leading-tight tracking-wide text-muted-foreground hover:text-primary focus:outline-none"
-                            >
-                                {speakerLabel}
-                            </button>
-                        ) : (
-                            <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground leading-tight">
-                                {speakerLabel}
-                            </span>
-                        )}
-                    </MessageHeader>
-                )}
-
                 <Bubble
                     align={align}
                     variant={isOwn || isStreaming ? 'muted' : 'secondary'}
@@ -207,7 +183,25 @@ const TranscriptSegment = memo(function TranscriptSegment({
                     )}
                 >
                     <BubbleContent className="whitespace-pre-wrap px-[15px] py-[11px] text-base leading-relaxed">
-                        {displayText}
+                        <div className={cn('flex flex-col gap-1', isOwn ? 'items-end' : 'items-start')}>
+                            {speakerLabel && (
+                                speakerRenamable && speakerId != null && onSpeakerClick ? (
+                                    <button
+                                        type="button"
+                                        onClick={() => onSpeakerClick(speakerId)}
+                                        title={t('Rename speaker')}
+                                        className="text-[10px] font-medium uppercase leading-tight tracking-wide text-[var(--deslop-primary-60)] hover:text-[var(--deslop-primary)] focus:outline-none"
+                                    >
+                                        {speakerLabel}
+                                    </button>
+                                ) : (
+                                    <span className="text-[10px] font-medium uppercase leading-tight tracking-wide text-[var(--deslop-primary-60)]">
+                                        {speakerLabel}
+                                    </span>
+                                )
+                            )}
+                            <span>{displayText}</span>
+                        </div>
                     </BubbleContent>
                 </Bubble>
             </MessageContent>

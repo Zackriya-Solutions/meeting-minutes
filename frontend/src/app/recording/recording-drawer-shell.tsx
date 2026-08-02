@@ -1,6 +1,6 @@
 "use client"
 
-import { type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react"
+import { type ReactNode, useCallback, useLayoutEffect, useRef } from "react"
 import { useRouter } from "next/navigation"
 import { HOME_SCROLL_POSITION_KEY, HomeMeetingList } from "@/app/_components/HomeMeetingList"
 import {
@@ -12,6 +12,7 @@ import {
   DrawerProvider,
   DrawerTitle,
 } from "@/components/ui/drawer"
+import { useRouteDrawerLifecycle } from "@/hooks/useRouteDrawerLifecycle"
 import { useT } from "@/lib/i18n"
 
 export function RecordingDrawerShell({
@@ -23,10 +24,7 @@ export function RecordingDrawerShell({
 }) {
   const router = useRouter()
   const t = useT()
-  const [open, setOpen] = useState(false)
   const backgroundRef = useRef<HTMLDivElement>(null)
-  const hasRequestedOpenRef = useRef(false)
-  const didNavigateRef = useRef(false)
 
   useLayoutEffect(() => {
     const storedPosition = Number(window.sessionStorage.getItem(HOME_SCROLL_POSITION_KEY))
@@ -35,24 +33,20 @@ export function RecordingDrawerShell({
     }
   }, [])
 
-  useEffect(() => {
-    const frame = window.requestAnimationFrame(() => {
-      hasRequestedOpenRef.current = true
-      setOpen(true)
+  const navigateHome = useCallback(() => {
+    window.requestAnimationFrame(() => {
+      router.replace("/", { scroll: false })
     })
-    return () => window.cancelAnimationFrame(frame)
-  }, [])
-
-  const handleOpenChange = useCallback((nextOpen: boolean) => {
-    if (!nextOpen && locked) return
-    setOpen(nextOpen)
-  }, [locked])
-
-  const handleOpenChangeComplete = useCallback((nextOpen: boolean) => {
-    if (nextOpen || !hasRequestedOpenRef.current || didNavigateRef.current) return
-    didNavigateRef.current = true
-    router.replace("/", { scroll: false })
   }, [router])
+
+  const {
+    open,
+    onOpenChange,
+    onOpenChangeComplete,
+  } = useRouteDrawerLifecycle({
+    canClose: !locked,
+    onClosed: navigateHome,
+  })
 
   return (
     <DrawerProvider>
@@ -82,8 +76,8 @@ export function RecordingDrawerShell({
       </DrawerIndent>
       <Drawer
         open={open}
-        onOpenChange={handleOpenChange}
-        onOpenChangeComplete={handleOpenChangeComplete}
+        onOpenChange={onOpenChange}
+        onOpenChangeComplete={onOpenChangeComplete}
         modal={false}
         swipeDirection="right"
         showSwipeHandle

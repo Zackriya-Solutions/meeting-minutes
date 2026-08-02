@@ -245,6 +245,7 @@ export function DeviceSelection({ selectedDevices, onDeviceChange, disabled = fa
           <button
             onClick={handleRefresh}
             disabled={refreshing || disabled}
+            aria-label={t('Refresh audio devices')}
             className="h-8 w-8 p-0 inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-50"
           >
             <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
@@ -364,17 +365,6 @@ export function DeviceSelection({ selectedDevices, onDeviceChange, disabled = fa
         </div>
       </div>
 
-      {/* Info text */}
-      <div className="text-xs text-muted-foreground space-y-1">
-        <p>• <strong>{t('Microphone:')}</strong> {t('Records your voice and ambient sound')}</p>
-        <p>• <strong>{t('System Audio:')}</strong> {t('Records computer audio (music, calls, etc.)')}</p>
-        {isMonitoring && (
-          <p>• <strong>{t('Mic Levels:')}</strong> {t('Green = good, Yellow = loud, Red = too loud')}</p>
-        )}
-        {!isMonitoring && inputDevices.length > 0 && (
-          <p>• <strong>{t('Tip:')}</strong> {t('Click "Test Mic" to check if your microphone is working')}</p>
-        )}
-      </div>
     </div>
   );
 }

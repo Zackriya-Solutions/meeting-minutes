@@ -3,7 +3,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { Search, Download, CheckCircle2, Loader2, AlertTriangle, RotateCw } from '@/components/deslop-icons';
+import { Search, Download, CheckCircle2, Loader2, AlertTriangle, RotateCw, ChevronDown } from '@/components/deslop-icons';
 import { useT } from '@/lib/i18n';
 
 // Mirrors the Rust `embedder_status` payload (pipeline::commands).
@@ -143,13 +143,10 @@ export function EmbeddingModelSettings() {
   const loaded = !!status?.loaded;
   const present = !!status?.model_present;
   const modelName = status?.model ?? 'multilingual-e5-small';
-  const dim = status?.dim ?? 384;
   const availableModels = status?.available_models ?? [
     { id: 'multilingual-e5-small', name: 'Multilingual E5 Small', dim: 384, download_mb: 470, present },
     { id: 'frida', name: 'FRIDA', dim: 1536, download_mb: 3300, present: false },
   ];
-  const selectedDownloadMb =
-    availableModels.find((model) => model.id === modelName)?.download_mb ?? 470;
   const activeJobs = (indexStatus?.queued_jobs ?? 0) + (indexStatus?.running_jobs ?? 0);
   const semanticCoverage = indexStatus?.chunks_total
     ? Math.round((indexStatus.embeddings_done / indexStatus.chunks_total) * 100)
@@ -166,11 +163,8 @@ export function EmbeddingModelSettings() {
           </div>
           <div className="min-w-0 flex-1">
             <h3 className="text-sm font-semibold text-foreground">{t('Semantic search model')}</h3>
-            <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
-              {t('Powers meaning-based (vector) search and Chat with archive. Runs fully locally —')}{' '}
-              <span className="font-medium text-muted-foreground">{modelName}</span> ({dim}{' '}
-              {t('dimensions')}, ~{modelDownloadSize(selectedDownloadMb)}).{' '}
-              {t('Until it is installed, Search and Chat use keyword (FTS) matching only.')}
+            <p className="mt-1 text-sm text-muted-foreground">
+              {t('Searches meetings by meaning and powers Chat with the archive. Runs on this device.')}
             </p>
 
             <div className="mt-4 grid gap-2 sm:grid-cols-2">
@@ -193,23 +187,12 @@ export function EmbeddingModelSettings() {
                       {selected && <CheckCircle2 className="h-4 w-4 text-primary" />}
                     </div>
                     <p className="mt-1 text-xs text-muted-foreground">
-                      {model.dim} {t('dimensions')} · ~{modelDownloadSize(model.download_mb)}
-                    </p>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      {model.id === 'frida'
-                        ? t('Russian-first retrieval model. Uses search_query/search_document prefixes and CLS pooling.')
-                        : t('Compact multilingual retrieval model. Recommended for most devices.')}
+                      ~{modelDownloadSize(model.download_mb)}
                     </p>
                   </button>
                 );
               })}
             </div>
-
-            {modelName === 'frida' && (
-              <div className="mt-3 rounded-lg border border-primary/40 bg-primary/10 p-3 text-xs leading-relaxed text-primary">
-                {t('FRIDA is optional and large (~3.3 GB ONNX). Memento downloads a community ONNX conversion of the ai-forever/FRIDA weights. Switching models rebuilds the semantic index in the background; keyword search remains available during reindexing.')}
-              </div>
-            )}
 
             <div className="mt-4">
               {downloading ? (
@@ -269,65 +252,73 @@ export function EmbeddingModelSettings() {
               )}
             </div>
 
-            <div className="mt-5 border-t border-border pt-5">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <h4 className="text-sm font-semibold text-foreground">{t('Archive search index')}</h4>
-                  {indexStatus ? (
-                    <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                      {indexStatus.chunked_meetings} {t('of')} {indexStatus.indexable_meetings}{' '}
-                      {t('meetings searchable')} · {indexStatus.embeddings_done} {t('of')}{' '}
-                      {indexStatus.chunks_total} {t('semantic chunks ready')}
-                    </p>
-                  ) : (
-                    <p className="mt-1 text-xs text-muted-foreground">{t('Index status unavailable')}</p>
-                  )}
-                </div>
-                <button
-                  onClick={repairIndex}
-                  disabled={repairing || activeJobs > 0}
-                  className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs text-muted-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  <RotateCw className={`h-3.5 w-3.5 ${repairing || activeJobs > 0 ? 'animate-spin' : ''}`} />
-                  {repairing || activeJobs > 0 ? t('Repairing index…') : t('Check and repair index')}
-                </button>
-              </div>
+            <details className="group mt-5 border-t border-[var(--primary-10)] pt-4">
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm font-medium text-foreground [&::-webkit-details-marker]:hidden">
+                <span>{t('Archive search index')}</span>
+                <span className="flex items-center gap-2 text-xs font-normal text-muted-foreground">
+                  <span>{indexStatus && loaded ? `${semanticCoverage}%` : '—'}</span>
+                  <ChevronDown className="h-4 w-4 transition-transform group-open:rotate-180" />
+                </span>
+              </summary>
 
-              {indexStatus && (
-                <>
-                  <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-muted">
-                    <div
-                      className="h-full rounded-full bg-primary transition-all"
-                      style={{ width: `${loaded ? semanticCoverage : 0}%` }}
-                    />
-                  </div>
-                  <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
-                    {loaded ? (
-                      <span>{semanticCoverage}% {t('semantic coverage')}</span>
+              <div className="pt-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    {indexStatus ? (
+                      <p className="text-xs leading-relaxed text-muted-foreground">
+                        {indexStatus.chunked_meetings} {t('of')} {indexStatus.indexable_meetings}{' '}
+                        {t('meetings searchable')}
+                      </p>
                     ) : (
-                      <span>{t('Install the model to build semantic coverage')}</span>
-                    )}
-                    {indexStatus.embeddings_pending > 0 && (
-                      <span>{indexStatus.embeddings_pending} {t('pending')}</span>
-                    )}
-                    {indexStatus.embeddings_failed > 0 && (
-                      <span className="text-destructive">
-                        {indexStatus.embeddings_failed} {t('failed')}
-                      </span>
-                    )}
-                    {activeJobs > 0 && <span>{activeJobs} {t('background jobs active')}</span>}
-                    {indexStatus.unresolved_failed_jobs > 0 && (
-                      <span className="text-destructive">
-                        {indexStatus.unresolved_failed_jobs} {t('jobs need retry')}
-                      </span>
-                    )}
-                    {!indexStatus.needs_repair && activeJobs === 0 && (
-                      <span className="text-success">{t('Index is healthy')}</span>
+                      <p className="text-xs text-muted-foreground">{t('Index status unavailable')}</p>
                     )}
                   </div>
-                </>
-              )}
-            </div>
+                  <button
+                    onClick={repairIndex}
+                    disabled={repairing || activeJobs > 0}
+                    className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs text-muted-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <RotateCw className={`h-3.5 w-3.5 ${repairing || activeJobs > 0 ? 'animate-spin' : ''}`} />
+                    {repairing || activeJobs > 0 ? t('Repairing index…') : t('Check and repair index')}
+                  </button>
+                </div>
+
+                {indexStatus && (
+                  <>
+                    <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-muted">
+                      <div
+                        className="h-full rounded-full bg-primary transition-all"
+                        style={{ width: `${loaded ? semanticCoverage : 0}%` }}
+                      />
+                    </div>
+                    <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                      {loaded ? (
+                        <span>{semanticCoverage}% {t('semantic coverage')}</span>
+                      ) : (
+                        <span>{t('Install the model to build semantic coverage')}</span>
+                      )}
+                      {indexStatus.embeddings_pending > 0 && (
+                        <span>{indexStatus.embeddings_pending} {t('pending')}</span>
+                      )}
+                      {indexStatus.embeddings_failed > 0 && (
+                        <span className="text-destructive">
+                          {indexStatus.embeddings_failed} {t('failed')}
+                        </span>
+                      )}
+                      {activeJobs > 0 && <span>{activeJobs} {t('background jobs active')}</span>}
+                      {indexStatus.unresolved_failed_jobs > 0 && (
+                        <span className="text-destructive">
+                          {indexStatus.unresolved_failed_jobs} {t('jobs need retry')}
+                        </span>
+                      )}
+                      {!indexStatus.needs_repair && activeJobs === 0 && (
+                        <span className="text-success">{t('Index is healthy')}</span>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
+            </details>
           </div>
         </div>
       </section>

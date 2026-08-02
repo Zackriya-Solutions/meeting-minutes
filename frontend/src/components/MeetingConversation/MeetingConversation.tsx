@@ -13,7 +13,12 @@ import { TranscriptCard } from './TranscriptCard';
 import { SummaryMessage } from './SummaryMessage';
 import { MeetingComposer } from './MeetingComposer';
 import { MeetingOverflowMenu } from './MeetingOverflowMenu';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  FluidTabs,
+  FluidTabsContent,
+  FluidTabsList,
+  FluidTabsTrigger,
+} from '@/components/ui/fluid-tabs';
 import {
   MessageScroller,
   MessageScrollerButton,
@@ -221,7 +226,7 @@ export function MeetingConversation({
   }, [meeting.created_at, meeting.duration_seconds, meeting.occurred_at, segments, transcripts, locale]);
 
   return (
-    <div className="meeting-conversation flex h-full flex-col bg-[var(--elevation-1)]">
+    <div className="meeting-conversation flex h-full flex-col bg-[var(--elevation-2)]">
       {/* Top bar */}
       <div className="flex items-center gap-3 px-[var(--drawer-content-inset)] pb-3 pt-4">
         <div className="min-w-0 flex-1">
@@ -251,21 +256,21 @@ export function MeetingConversation({
 
       {reviewSlot && <div className="shrink-0">{reviewSlot}</div>}
 
-      <Tabs
+      <FluidTabs
         value={activeTab}
         onValueChange={(value) => setActiveTab(value as 'summary' | 'transcript')}
         className="flex min-h-0 flex-1 flex-col"
       >
-        <TabsList className="mx-[var(--drawer-content-inset)] mb-3 grid h-10 w-auto shrink-0 grid-cols-2 rounded-xl bg-[var(--primary-5)] p-1">
-          <TabsTrigger value="summary" className="h-8 w-full rounded-lg px-4 shadow-none data-[state=active]:bg-[var(--elevation-1)] data-[state=active]:shadow-none">
+        <FluidTabsList className="mx-[var(--drawer-content-inset)] mb-3 w-auto shrink-0 grid-cols-2">
+          <FluidTabsTrigger value="summary" className="shadow-none">
             {t('Summary tab')}
-          </TabsTrigger>
-          <TabsTrigger value="transcript" className="h-8 w-full rounded-lg px-4 shadow-none data-[state=active]:bg-[var(--elevation-1)] data-[state=active]:shadow-none">
+          </FluidTabsTrigger>
+          <FluidTabsTrigger value="transcript" className="shadow-none">
             {t('Transcript tab')}
-          </TabsTrigger>
-        </TabsList>
+          </FluidTabsTrigger>
+        </FluidTabsList>
 
-        <TabsContent value="summary" className="mt-0 min-h-0 flex-1 data-[state=active]:flex data-[state=active]:flex-col data-[state=inactive]:hidden">
+        <FluidTabsContent value="summary" className="mt-0 min-h-0 flex-1 data-[state=active]:flex data-[state=active]:flex-col data-[state=inactive]:hidden">
           <MessageScrollerProvider
             key={`${meetingId}-${loadingHistory ? 'loading' : 'ready'}`}
             autoScroll
@@ -327,9 +332,9 @@ export function MeetingConversation({
               />
             </div>
           </MessageScrollerProvider>
-        </TabsContent>
+        </FluidTabsContent>
 
-        <TabsContent value="transcript" className="mt-0 min-h-0 flex-1 overflow-hidden data-[state=inactive]:hidden">
+        <FluidTabsContent value="transcript" className="mt-0 min-h-0 flex-1 overflow-hidden data-[state=inactive]:hidden">
           <TranscriptCard
             meetingId={meetingId}
             meetingFolderPath={meetingFolderPath}
@@ -352,8 +357,8 @@ export function MeetingConversation({
             onSpeakersDetected={onSpeakersDetected}
             transcriptViewportClassName="px-[var(--drawer-content-inset)]"
           />
-        </TabsContent>
-      </Tabs>
+        </FluidTabsContent>
+      </FluidTabs>
     </div>
   );
 }

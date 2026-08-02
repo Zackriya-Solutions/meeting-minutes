@@ -3,11 +3,9 @@
 import {
   type ReactNode,
   useCallback,
-  useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
-  useState,
 } from "react"
 import { useRouter } from "next/navigation"
 import {
@@ -24,15 +22,13 @@ import {
   DrawerTitle,
 } from "@/components/ui/drawer"
 import { MeetingDrawerProvider } from "@/contexts/MeetingDrawerContext"
+import { useRouteDrawerLifecycle } from "@/hooks/useRouteDrawerLifecycle"
 import { useT } from "@/lib/i18n"
 
 export function MeetingDrawerShell({ children }: { children: ReactNode }) {
   const router = useRouter()
   const t = useT()
-  const [open, setOpen] = useState(false)
   const backgroundRef = useRef<HTMLDivElement>(null)
-  const hasRequestedOpenRef = useRef(false)
-  const didNavigateRef = useRef(false)
 
   useLayoutEffect(() => {
     const storedPosition = Number(
@@ -44,32 +40,21 @@ export function MeetingDrawerShell({ children }: { children: ReactNode }) {
     }
   }, [])
 
-  useEffect(() => {
-    const frame = window.requestAnimationFrame(() => {
-      hasRequestedOpenRef.current = true
-      setOpen(true)
+  const navigateHome = useCallback(() => {
+    // Let the background width commit before replacing the route so the home
+    // screen does not paint once at the drawer width and once at full width.
+    window.requestAnimationFrame(() => {
+      router.replace("/", { scroll: false })
     })
-
-    return () => window.cancelAnimationFrame(frame)
-  }, [])
-
-  const close = useCallback(() => setOpen(false), [])
-  const contextValue = useMemo(() => ({ close }), [close])
-
-  const handleOpenChangeComplete = useCallback((nextOpen: boolean) => {
-    if (
-      nextOpen ||
-      !hasRequestedOpenRef.current ||
-      didNavigateRef.current
-    ) {
-      return
-    }
-    didNavigateRef.current = true
-    // The home screen is already rendered behind the drawer. Preserve its
-    // scroll position while replacing the route so the identical background
-    // does not jump for a frame when the closing animation completes.
-    router.replace("/", { scroll: false })
   }, [router])
+
+  const {
+    open,
+    requestClose,
+    onOpenChange,
+    onOpenChangeComplete,
+  } = useRouteDrawerLifecycle({ onClosed: navigateHome })
+  const contextValue = useMemo(() => ({ close: requestClose }), [requestClose])
 
   return (
     <MeetingDrawerProvider value={contextValue}>
@@ -87,8 +72,8 @@ export function MeetingDrawerShell({ children }: { children: ReactNode }) {
         </DrawerIndent>
         <Drawer
           open={open}
-          onOpenChange={setOpen}
-          onOpenChangeComplete={handleOpenChangeComplete}
+          onOpenChange={onOpenChange}
+          onOpenChangeComplete={onOpenChangeComplete}
           modal={false}
           swipeDirection="right"
           showSwipeHandle

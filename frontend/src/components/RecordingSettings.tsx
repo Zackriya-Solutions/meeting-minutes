@@ -113,14 +113,10 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
   }
 
   return (
-    <section className="settings-section space-y-6">
-      {/* Auto Save Toggle */}
+    <section className="settings-section space-y-5">
       <div className="flex items-center justify-between gap-4">
         <div className="flex-1">
           <div className="font-medium">{t('Save Audio Recordings')}</div>
-          <div className="text-sm text-muted-foreground">
-            {t('Automatically save audio files when recording stops')}
-          </div>
         </div>
         <Switch
           checked={preferences.auto_save}
@@ -129,34 +125,23 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
         />
       </div>
 
-      {/* Info when auto_save is disabled */}
       {!preferences.auto_save && (
-        <div className="rounded-xl border border-primary/20 bg-primary/10 p-4">
-          <div className="text-sm text-primary">
+        <div className="rounded-xl bg-[var(--primary-5)] px-3 py-2">
+          <div className="text-sm text-muted-foreground">
             {t('Audio recording is disabled. Enable "Save Audio Recordings" to automatically save your meeting audio.')}
           </div>
         </div>
       )}
 
-      {/* Device Настройки */}
-      <div className="space-y-4">
-        <div className="border-t pt-6">
-          <h4 className="text-base font-medium text-foreground mb-4">{t('Default Audio Devices')}</h4>
-          <p className="text-sm text-muted-foreground mb-4">
-            {t('Set your preferred microphone and system audio devices for recording. These will be automatically selected when starting new recordings.')}
-          </p>
-
-          <div className="settings-subsection">
-            <DeviceSelection
-              selectedDevices={{
-                micDevice: preferences.preferred_mic_device,
-                systemDevice: preferences.preferred_system_device
-              }}
-              onDeviceChange={handleDeviceChange}
-              disabled={saving}
-            />
-          </div>
-        </div>
+      <div className="border-t border-[var(--primary-10)] pt-5">
+        <DeviceSelection
+          selectedDevices={{
+            micDevice: preferences.preferred_mic_device,
+            systemDevice: preferences.preferred_system_device
+          }}
+          onDeviceChange={handleDeviceChange}
+          disabled={saving}
+        />
       </div>
     </section>
   );

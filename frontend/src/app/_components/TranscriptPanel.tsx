@@ -65,10 +65,10 @@ export function TranscriptPanel({
     <div
       ref={transcriptContainerRef}
       data-home-scroll-container
-      className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto bg-background"
+      className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto bg-[var(--elevation-1)]"
     >
       {/* Actions only exist once they have something useful to control. */}
-      {showTranscriptActions && <div className="sticky top-0 z-10 border-border bg-background p-4">
+      {showTranscriptActions && <div className="sticky top-0 z-10 border-border bg-[var(--elevation-1)] p-4">
         <div className="flex flex-col space-y-3">
           <div className="flex  flex-col space-y-2">
             <div className="flex justify-center  items-center space-x-2">

@@ -69,7 +69,7 @@ export default function RecordingPage() {
 
   return (
     <RecordingDrawerShell locked={locked}>
-      <div className="flex h-full flex-col bg-[var(--elevation-1)]">
+      <div className="flex h-full flex-col bg-[var(--elevation-2)]">
         <header className="shrink-0 border-b border-border px-[var(--drawer-content-inset)] py-4">
           <h1 className="memento-screen-title truncate text-foreground">
             {displayMeetingTitle}

@@ -37,6 +37,7 @@ export const materialSymbolNames = /* @__PURE__ */ Object.freeze([
   "chevron_right",
   "close",
   "cloud",
+  "construction",
   "content_copy",
   "credit_card",
   "currency_exchange",
@@ -220,6 +221,7 @@ export const materialSymbolComponents = /* @__PURE__ */ Object.freeze({
   "chevron_right": createMaterialSymbol("chevron_right"),
   "close": createMaterialSymbol("close"),
   "cloud": createMaterialSymbol("cloud"),
+  "construction": createMaterialSymbol("construction"),
   "content_copy": createMaterialSymbol("content_copy"),
   "credit_card": createMaterialSymbol("credit_card"),
   "currency_exchange": createMaterialSymbol("currency_exchange"),
@@ -324,6 +326,7 @@ export const IconCircleCheck = /* @__PURE__ */ createMaterialSymbol("check_circl
 export const IconCircleClose = /* @__PURE__ */ createMaterialSymbol("cancel", "IconCircleClose");
 export const IconCircleInfo = /* @__PURE__ */ createMaterialSymbol("info", "IconCircleInfo");
 export const IconClock = /* @__PURE__ */ createMaterialSymbol("schedule", "IconClock");
+export const IconConstruction = /* @__PURE__ */ createMaterialSymbol("construction", "IconConstruction");
 export const IconCross = /* @__PURE__ */ createMaterialSymbol("close", "IconCross");
 export const IconLoader = /* @__PURE__ */ createMaterialSymbol("progress_activity", "IconLoader");
 export const IconMenu = /* @__PURE__ */ createMaterialSymbol("menu", "IconMenu");

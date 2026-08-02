@@ -127,7 +127,7 @@ export function MeetingOverflowMenu({
             size="icon"
             aria-label={t('More actions')}
             title={t('More actions')}
-            className="h-[38px] w-[38px] rounded-full bg-transparent shadow-none"
+            className="h-[38px] w-[38px] rounded-full !bg-[var(--primary-5)] shadow-none hover:!bg-[var(--primary-5)]"
           >
             <MoreHorizontal size={18} />
           </Button>

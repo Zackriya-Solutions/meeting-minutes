@@ -5,7 +5,7 @@
     "packageManager": "pnpm@10.15.1",
     "main": "electron/main.js",
     "scripts": {
-        "dev": "next dev -p 3118",
+        "dev": "node scripts/tauri-next-dev.js",
         "build": "next build",
         "export": "next export",
         "start": "next start -p 3118",
@@ -89,6 +89,7 @@
         "framer-motion": "^11.15.0",
         "katex": "^0.18.1",
         "lodash": "^4.17.21",
+        "lucide-react": "^1.28.0",
         "next": "^14.2.25",
         "next-themes": "^0.4.6",
         "radix-ui": "^1.4.3",

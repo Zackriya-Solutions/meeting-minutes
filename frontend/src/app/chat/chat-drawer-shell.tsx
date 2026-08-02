@@ -1,6 +1,6 @@
 "use client"
 
-import { type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react"
+import { type ReactNode, useCallback, useLayoutEffect, useRef } from "react"
 import { useRouter } from "next/navigation"
 import { HOME_SCROLL_POSITION_KEY, HomeMeetingList } from "@/app/_components/HomeMeetingList"
 import {
@@ -12,15 +12,13 @@ import {
   DrawerProvider,
   DrawerTitle,
 } from "@/components/ui/drawer"
+import { useRouteDrawerLifecycle } from "@/hooks/useRouteDrawerLifecycle"
 import { useT } from "@/lib/i18n"
 
 export function ChatDrawerShell({ children }: { children: ReactNode }) {
   const router = useRouter()
   const t = useT()
-  const [open, setOpen] = useState(false)
   const backgroundRef = useRef<HTMLDivElement>(null)
-  const hasRequestedOpenRef = useRef(false)
-  const didNavigateRef = useRef(false)
 
   useLayoutEffect(() => {
     const storedPosition = Number(window.sessionStorage.getItem(HOME_SCROLL_POSITION_KEY))
@@ -30,22 +28,20 @@ export function ChatDrawerShell({ children }: { children: ReactNode }) {
     }
   }, [])
 
-  useEffect(() => {
-    const frame = window.requestAnimationFrame(() => {
-      hasRequestedOpenRef.current = true
-      setOpen(true)
+  const navigateHome = useCallback(() => {
+    // Let the indent width settle before replacing the route. This prevents
+    // the home layout from painting once at the pre-close width and once at
+    // the full width, which reads as a jump when returning from the drawer.
+    window.requestAnimationFrame(() => {
+      router.replace("/", { scroll: false })
     })
-
-    return () => window.cancelAnimationFrame(frame)
-  }, [])
-
-  const handleOpenChangeComplete = useCallback((nextOpen: boolean) => {
-    if (nextOpen || !hasRequestedOpenRef.current || didNavigateRef.current) return
-
-    didNavigateRef.current = true
-    // Keep the already-visible home background in place across the route swap.
-    router.replace("/", { scroll: false })
   }, [router])
+
+  const {
+    open,
+    onOpenChange,
+    onOpenChangeComplete,
+  } = useRouteDrawerLifecycle({ onClosed: navigateHome })
 
   return (
     <DrawerProvider>
@@ -62,8 +58,8 @@ export function ChatDrawerShell({ children }: { children: ReactNode }) {
       </DrawerIndent>
       <Drawer
         open={open}
-        onOpenChange={setOpen}
-        onOpenChangeComplete={handleOpenChangeComplete}
+        onOpenChange={onOpenChange}
+        onOpenChangeComplete={onOpenChangeComplete}
         modal={false}
         swipeDirection="right"
         showSwipeHandle

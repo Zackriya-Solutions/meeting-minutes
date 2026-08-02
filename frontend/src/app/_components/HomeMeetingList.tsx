@@ -96,14 +96,6 @@ function meetingTimestamp(meeting: CurrentMeeting): number {
   return meetingDate(meeting)?.getTime() ?? 0;
 }
 
-const MIN_VISIBLE_MEETING_DURATION_SECONDS = 2 * 60;
-
-function isLongEnoughForHistory(meeting: CurrentMeeting): boolean {
-  const seconds = meeting.durationSeconds;
-  if (typeof seconds !== 'number' || !Number.isFinite(seconds)) return true;
-  return seconds >= MIN_VISIBLE_MEETING_DURATION_SECONDS;
-}
-
 function meetingDurationMinutes(meeting: CurrentMeeting): number | null {
   const seconds = meeting.durationSeconds;
   if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds <= 0) return null;
@@ -240,6 +232,14 @@ export function HomeMeetingList({ animateOnMount = true }: { animateOnMount?: bo
   const screenRef = useRef<HTMLDivElement>(null);
   const locale = lang === 'ru' ? 'ru-RU' : 'en-US';
 
+  // The provider owns the archive request and retries when the WebView is not
+  // ready yet. Only request on an empty initial state; route drawers render
+  // this view in the background and mount the home view again on close, so an
+  // unconditional request here would cause a second render during hand-off.
+  useEffect(() => {
+    if (meetings.length === 0) void refetchMeetings();
+  }, [meetings.length, refetchMeetings]);
+
   useLayoutEffect(() => {
     const scrollContainer = screenRef.current?.closest<HTMLElement>('[data-home-scroll-container]');
     const storedPosition = Number(window.sessionStorage.getItem(HOME_SCROLL_POSITION_KEY));
@@ -311,7 +311,6 @@ export function HomeMeetingList({ animateOnMount = true }: { animateOnMount?: bo
     const timeFormatter = new Intl.DateTimeFormat(locale, { hour: '2-digit', minute: '2-digit' });
 
     return [...meetings]
-      .filter(isLongEnoughForHistory)
       .sort((left, right) => meetingTimestamp(right) - meetingTimestamp(left))
       .map((meeting) => {
         const display = getMeetingDisplayInfo(meeting, lang);
@@ -425,7 +424,7 @@ export function HomeMeetingList({ animateOnMount = true }: { animateOnMount?: bo
         </header>
 
         <main className="home-screen__content">
-          <section className="home-meeting-card" aria-label={t('Upcoming meetings')}>
+          <section className="home-meeting-card no-drag" aria-label={t('Upcoming meetings')}>
             {upcomingMeetings.map((item) => (
               <button
                 key={item.id}
@@ -462,25 +461,27 @@ export function HomeMeetingList({ animateOnMount = true }: { animateOnMount?: bo
                 {calendarMeetingGroups.map((group) => (
                   <section key={group.key} className="home-history__group" aria-label={group.label}>
                     <h3>{group.label}</h3>
-                    <div className="home-history__list">
+                    <div className="home-history__list no-drag">
                       {group.meetings.map((item) => (
                         <ContextMenu key={item.meeting.id}>
                           <ContextMenuTrigger asChild>
-                            <Cell
-                              type="button"
-                              className="no-drag"
-                              onClick={(event) => openMeeting(item.meeting, event)}
-                              start={(
-                                <span className="home-history-icon" aria-hidden="true">
-                                  <span className="home-history-emoji">
-                                    {meetingEmoji(item.meeting.id)}
+                            <div className="contents">
+                              <Cell
+                                type="button"
+                                className="no-drag"
+                                onClick={(event) => openMeeting(item.meeting, event)}
+                                start={(
+                                  <span className="home-history-icon" aria-hidden="true">
+                                    <span className="home-history-emoji">
+                                      {meetingEmoji(item.meeting.id)}
+                                    </span>
                                   </span>
-                                </span>
-                              )}
-                              end={<span className="home-history-time">{item.timeRange}</span>}
-                            >
-                              <CellText title={item.title} description={item.description} bold />
-                            </Cell>
+                                )}
+                                end={<span className="home-history-time">{item.timeRange}</span>}
+                              >
+                                <CellText title={item.title} description={item.description} bold />
+                              </Cell>
+                            </div>
                           </ContextMenuTrigger>
                           <ContextMenuContent className="w-[210px] rounded-[14px] p-1.5">
                             <ContextMenuItem

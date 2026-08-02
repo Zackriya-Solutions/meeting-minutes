@@ -10,6 +10,8 @@
         "fullscreen": false,
         "acceptFirstMouse": true,
         "decorations": true,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
         "transparent": true,
         "windowEffects": {
           "effects": [

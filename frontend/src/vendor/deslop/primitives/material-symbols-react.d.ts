@@ -41,6 +41,7 @@ export const materialSymbolNames: readonly [
   "chevron_right",
   "close",
   "cloud",
+  "construction",
   "content_copy",
   "credit_card",
   "currency_exchange",
@@ -178,6 +179,7 @@ export const IconCircleCheck: MaterialSymbolComponent;
 export const IconCircleClose: MaterialSymbolComponent;
 export const IconCircleInfo: MaterialSymbolComponent;
 export const IconClock: MaterialSymbolComponent;
+export const IconConstruction: MaterialSymbolComponent;
 export const IconCross: MaterialSymbolComponent;
 export const IconLoader: MaterialSymbolComponent;
 export const IconMenu: MaterialSymbolComponent;

@@ -53,7 +53,7 @@ function UpcomingMeetingPreview() {
     : '';
 
   return (
-    <div className="flex h-full flex-col bg-[var(--elevation-1)]">
+    <div className="flex h-full flex-col bg-[var(--elevation-2)]">
       <div className="flex items-center gap-3 border-b border-border px-[var(--drawer-content-inset)] py-4">
         <div className="min-w-0 flex-1">
           <h1 className="memento-screen-title truncate text-foreground">{title}</h1>

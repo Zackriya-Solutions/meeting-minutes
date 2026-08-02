@@ -151,6 +151,14 @@
     --chart-3: 197 37% 24%;
     --chart-4: 43 74% 66%;
     --chart-5: 27 87% 67%;
+    --sidebar-background: 0 0% 98%;
+    --sidebar-foreground: 240 5.3% 26.1%;
+    --sidebar-primary: 240 5.9% 10%;
+    --sidebar-primary-foreground: 0 0% 98%;
+    --sidebar-accent: 240 4.8% 95.9%;
+    --sidebar-accent-foreground: 240 5.9% 10%;
+    --sidebar-border: 220 13% 91%;
+    --sidebar-ring: 217.2 91.2% 59.8%;
   }
 
   .dark {
@@ -179,6 +187,14 @@
     --chart-3: 30 80% 55%;
     --chart-4: 280 65% 60%;
     --chart-5: 340 75% 55%;
+    --sidebar-background: 240 5.9% 10%;
+    --sidebar-foreground: 240 4.8% 95.9%;
+    --sidebar-primary: 224.3 76.3% 48%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 240 3.7% 15.9%;
+    --sidebar-accent-foreground: 240 4.8% 95.9%;
+    --sidebar-border: 240 3.7% 15.9%;
+    --sidebar-ring: 217.2 91.2% 59.8%;
   }
 }
 
@@ -198,29 +214,39 @@
     overflow: hidden;
   }
 
-  /* The actual blur is NSVisualEffectView via Tauri's macOS windowEffects.
-     These overrides only uncover it; browsers and other platforms keep the
-     standard opaque background. */
+  /* Desktop-app chrome: static copy should never turn into accidental blue
+     selections while the user is trying to move the window. Editable surfaces
+     retain native selection so text inputs and editors keep working. */
+  body,
+  body * {
+    -webkit-user-select: none !important;
+    user-select: none !important;
+  }
+
+  input,
+  textarea,
+  [contenteditable="true"],
+  .ProseMirror {
+    -webkit-user-select: text !important;
+    user-select: text !important;
+  }
+
+  /* The native material stays visible only through the permanent sidebar. */
   html.native-macos-vibrancy,
   html.native-macos-vibrancy body {
     background: transparent !important;
   }
 
-  html.native-macos-vibrancy .memento-shell,
-  html.native-macos-vibrancy .mm-page {
-    background: var(--background-secondary) !important;
-  }
-
   html.native-macos-vibrancy [data-home-scroll-container] {
-    background: transparent !important;
+    background: var(--elevation-1) !important;
   }
 
-  /* Drawer routes render a live copy of the home screen behind the panel.
-     Give that route-level scroll container the same screen scrim as
-     `.memento-shell`; otherwise swapping between the two briefly exposes the
-     raw native vibrancy and looks like a white/dark flash. */
-  html.native-macos-vibrancy .route-drawer-background {
-    background: var(--background-secondary) !important;
+  html.native-macos-vibrancy .home-ask-backdrop {
+    background: linear-gradient(
+      to bottom,
+      transparent,
+      var(--elevation-1)
+    );
   }
 
   /* Make the window draggable */
@@ -313,7 +339,7 @@
     flex-direction: column;
     overflow: hidden;
     border: 1px solid hsl(var(--border));
-    background: var(--elevation-1);
+    background: var(--elevation-2);
     box-shadow: none;
     outline: none;
     transform: translate3d(var(--drawer-translate-x, 0), var(--drawer-translate-y, 0), 0);
@@ -414,10 +440,10 @@
     --drawer-height: calc(100dvh - 24px);
     --drawer-max-height: calc(100dvh - 24px);
     --drawer-content-inset: var(--ui-space-24);
-    border-radius: 22px;
+    border-radius: 14px;
   }
   .drawer-elevation-surface {
-    background: var(--elevation-1) !important;
+    background: var(--elevation-2) !important;
   }
   .recording-route-drawer .mm-record-overlay {
     width: 100%;
@@ -426,8 +452,20 @@
   .route-drawer-background {
     position: relative;
     z-index: 1;
-    background: transparent;
+    /* The exposed area around an indented route drawer is the same canvas as
+       the home screen — never the transparent WebView/native material. */
+    background: var(--elevation-1);
     transform: none !important;
+  }
+  .route-drawer-background-surface {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: var(--sidebar-width, 0px);
+    z-index: 0;
+    background: var(--elevation-1);
+    pointer-events: none;
   }
   /* Every route drawer participates in the desktop layout like a right
      sidebar. Shrinking this shared background wrapper re-centres the home
@@ -443,18 +481,21 @@
       width: calc(100% - var(--route-drawer-reserved-width));
     }
     .route-drawer-background[data-active] .home-ask-dock {
-      left: calc((100vw - var(--route-drawer-reserved-width)) / 2);
+      --home-ask-surface-width: calc(
+        100vw - var(--sidebar-width, 0px) - var(--route-drawer-reserved-width)
+      );
+      left: calc(
+        var(--sidebar-width, 0px) +
+        (100vw - var(--sidebar-width, 0px) - var(--route-drawer-reserved-width)) / 2
+      );
+      width: min(
+        calc(
+          100vw - var(--sidebar-width, 0px) - var(--route-drawer-reserved-width) -
+          var(--home-column-gutter) - var(--home-column-gutter)
+        ),
+        calc(var(--home-column-width) - var(--home-column-gutter) - var(--home-column-gutter))
+      );
     }
-  }
-  .route-drawer-background-surface {
-    position: fixed;
-    inset: 0;
-    z-index: 0;
-    /* This layer is exposed in the inset around a route drawer. It must use
-       the same Deslop screen surface as the home page, never the white page
-       background, or opening a drawer visibly changes the window colour. */
-    background: var(--background-secondary);
-    pointer-events: none;
   }
   @media (max-width: 760px) {
     .meeting-route-drawer {
@@ -462,7 +503,7 @@
       --drawer-width: min(calc(100vw - 12px), 500px);
       --drawer-height: calc(100dvh - 12px);
       --drawer-max-height: calc(100dvh - 12px);
-      border-radius: 18px;
+      border-radius: 10px;
     }
   }
   @media (prefers-reduced-motion: reduce) {
@@ -471,8 +512,15 @@
     .route-drawer-background { transition-duration: 1ms; }
   }
 
-  .memento-shell { background: hsl(var(--background)); color: hsl(var(--foreground)); }
+  .memento-shell { background: var(--elevation-1); color: hsl(var(--foreground)); }
   .memento-sidebar { background: hsl(var(--background)); border-color: hsl(var(--border) / 0.6); }
+  .memento-settings-sidebar {
+    border-right: 1px solid var(--primary-10) !important;
+  }
+  .memento-settings-sidebar [data-sidebar="sidebar"] {
+    background: transparent !important;
+    border-right: 0;
+  }
   .memento-logo { color: hsl(var(--foreground)); font-size: 21px; font-weight: 600; letter-spacing: -0.04em; }
   .memento-nav-item { position: relative; border-radius: 12px; padding: 0 12px; color: hsl(var(--muted-foreground)); font-size: 14px; font-weight: 500; transition: background 180ms ease, color 180ms ease; }
   .memento-nav-item:hover { background: hsl(var(--accent)); color: hsl(var(--foreground)); }
@@ -555,7 +603,6 @@
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    padding-block: 4px;
     border: 1px solid var(--primary-10);
     border-radius: 24px;
     background: var(--elevation-2);
@@ -580,12 +627,18 @@
     line-height: var(--ui-title-24-line-height) !important;
   }
   .prompt-input-fade {
-    --prompt-input-fade-color: var(--background-secondary);
+    --prompt-input-fade-color: hsl(var(--background));
     position: relative;
     isolation: isolate;
   }
   .meeting-conversation .prompt-input-fade {
+    --prompt-input-fade-color: var(--elevation-2);
+  }
+  html.native-macos-vibrancy .prompt-input-fade {
     --prompt-input-fade-color: var(--elevation-1);
+  }
+  html.native-macos-vibrancy .meeting-conversation .prompt-input-fade {
+    --prompt-input-fade-color: var(--elevation-2);
   }
   .prompt-input-fade::before {
     position: absolute;
@@ -601,10 +654,17 @@
     );
   }
   .home-screen .home-ask-dock {
+    --home-ask-surface-width: calc(100vw - var(--sidebar-width, 0px));
     position: fixed;
     z-index: 20;
     bottom: 30px;
-    left: 50%;
+    /* Fixed elements do not participate in the flex layout that reserves the
+       left sidebar. Centre the composer in the same usable canvas as the
+       meeting column instead of in the whole window. */
+    left: calc(
+      var(--sidebar-width, 0px) +
+      (100vw - var(--sidebar-width, 0px)) / 2
+    );
     width: min(
       calc(100% - var(--home-column-gutter) - var(--home-column-gutter)),
       calc(var(--home-column-width) - var(--home-column-gutter) - var(--home-column-gutter))
@@ -612,14 +672,16 @@
     transform: translateX(-50%);
   }
   .home-screen .home-ask-dock::before {
-    bottom: -40px;
+    inset: -96px auto -40px 50%;
+    width: var(--home-ask-surface-width);
+    transform: translateX(-50%);
   }
   .home-screen .home-ask {
     width: 100%;
     overflow: clip;
     border: 1px solid var(--primary-10);
     border-radius: 24px;
-    background: color-mix(in srgb, var(--elevation-1) 72%, transparent);
+    background: var(--elevation-2);
     -webkit-backdrop-filter: blur(16px);
     backdrop-filter: blur(16px);
     box-shadow: 0 8px 20px rgb(0 0 0 / .05);
@@ -639,7 +701,12 @@
   .settings-screen {
     --settings-column-width: 600px;
     --settings-column-gutter: clamp(22px, 4vw, 42px);
-    min-height: 100vh;
+    height: 100%;
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    background: var(--elevation-1);
     color: hsl(var(--foreground));
   }
   .settings-screen__inner {
@@ -800,6 +867,19 @@ input, textarea, button, [role='dialog'], [role='menu'], [role='listbox'] { font
 .mm-hover { transition: background 180ms cubic-bezier(0.2, 0, 0, 1), color 180ms cubic-bezier(0.2, 0, 0, 1); }
 .mm-hover:hover { background: hsl(var(--accent)); color: hsl(var(--accent-foreground)); }
 .global-header-action { background: var(--elevation-2); }
+.fluid-sidebar-action {
+  color: var(--deslop-primary-60);
+  transition: color 80ms ease;
+}
+.fluid-sidebar-action:hover,
+.fluid-sidebar-action:focus-visible {
+  color: var(--deslop-primary);
+}
+.fluid-sidebar-action[data-active='true'],
+.fluid-sidebar-action[data-active='true']:hover,
+.fluid-sidebar-action[data-active='true']:focus-visible {
+  color: var(--deslop-primary);
+}
 .mm-press { transition: transform 180ms cubic-bezier(0.2, 0, 0, 1); }
 .mm-press:active { transform: scale(0.985); }
 .mm-numeric { font-family: var(--ui-font-interface); font-variant-numeric: tabular-nums; }

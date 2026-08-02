@@ -122,6 +122,7 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
   const [transcriptServerAddress, setTranscriptServerAddress] = useState('');
   const [activeSummaryPolls, setActiveSummaryPolls] = useState<Map<string, NodeJS.Timeout>>(new Map());
   const latestSearchRequestRef = React.useRef(0);
+  const meetingsRequestRef = React.useRef<Promise<boolean> | null>(null);
 
   // Use recording state from RecordingStateContext (single source of truth)
   const { isRecording } = useRecordingState();
@@ -130,51 +131,104 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
 
   // Extract fetchMeetings as a reusable function
-  const fetchMeetings = React.useCallback(async () => {
-    try {
-      const meetings = await invoke('api_get_meetings', { authToken: null }) as Array<{
-        id: string;
-        title: string;
-        created_at: string;
-        occurred_at?: string | null;
-        folder_path?: string | null;
-        duration_seconds?: number | null;
-      }>;
-      const transformedMeetings = meetings.map((meeting) => ({
-        id: meeting.id,
-        title: meeting.title,
-        createdAt: meeting.created_at,
-        occurredAt: meeting.occurred_at ?? null,
-        folderPath: meeting.folder_path ?? null,
-        durationSeconds: meeting.duration_seconds ?? null,
-      }));
-      setMeetings(transformedMeetings);
-      // Warm the small in-memory summary cache as soon as the archive becomes
-      // available. Reads are independent SQLite calls and are de-duplicated by
-      // meetingSummaryCache, so opening a drawer can render saved content at once.
-      void Promise.allSettled(
-        transformedMeetings.map((meeting) => prefetchMeetingSummary(meeting.id)),
-      );
-      Analytics.trackBackendConnection(true);
-    } catch (error) {
-      console.error('Error fetching meetings:', error);
-      Analytics.trackBackendConnection(false, error instanceof Error ? error.message : 'Unknown error');
-    }
+  const fetchMeetings = React.useCallback((): Promise<boolean> => {
+    if (meetingsRequestRef.current) return meetingsRequestRef.current;
+
+    const request = (async () => {
+      try {
+        const meetings = await invoke('api_get_meetings', { authToken: null }) as Array<{
+          id: string;
+          title: string;
+          created_at: string;
+          occurred_at?: string | null;
+          folder_path?: string | null;
+          duration_seconds?: number | null;
+        }>;
+        const transformedMeetings = meetings.map((meeting) => ({
+          id: meeting.id,
+          title: meeting.title,
+          createdAt: meeting.created_at,
+          occurredAt: meeting.occurred_at ?? null,
+          folderPath: meeting.folder_path ?? null,
+          durationSeconds: meeting.duration_seconds ?? null,
+        }));
+        setMeetings((previousMeetings) => {
+          // Route drawers render the archive in the background and the home
+          // route renders it again after the drawer closes. Keep the existing
+          // array when the backend returned the same records so that this
+          // hand-off does not trigger a second layout pass.
+          if (
+            previousMeetings.length === transformedMeetings.length
+            && previousMeetings.every((previous, index) => {
+              const next = transformedMeetings[index];
+              return previous.id === next.id
+                && previous.title === next.title
+                && previous.createdAt === next.createdAt
+                && previous.occurredAt === next.occurredAt
+                && previous.folderPath === next.folderPath
+                && previous.durationSeconds === next.durationSeconds;
+            })
+          ) {
+            return previousMeetings;
+          }
+
+          return transformedMeetings;
+        });
+        // Warm the small in-memory summary cache as soon as the archive becomes
+        // available. Reads are independent SQLite calls and are de-duplicated by
+        // meetingSummaryCache, so opening a drawer can render saved content at once.
+        void Promise.allSettled(
+          transformedMeetings.map((meeting) => prefetchMeetingSummary(meeting.id)),
+        );
+        Analytics.trackBackendConnection(true);
+        return true;
+      } catch (error) {
+        console.error('Error fetching meetings:', error);
+        Analytics.trackBackendConnection(false, error instanceof Error ? error.message : 'Unknown error');
+        return false;
+      }
+    })();
+
+    meetingsRequestRef.current = request;
+    void request.then(() => {
+      if (meetingsRequestRef.current === request) meetingsRequestRef.current = null;
+    });
+    return request;
   }, []);
 
-  useEffect(() => {
-    void fetchMeetings();
+  const refetchMeetings = React.useCallback(async (): Promise<void> => {
+    await fetchMeetings();
+  }, [fetchMeetings]);
 
-    // A freshly opened dev WebView can hydrate before Tauri IPC and the database
-    // are ready. Repeat the initial read instead of leaving the home screen empty
-    // for the whole session after that transient startup race.
-    const retryTimer = window.setTimeout(() => void fetchMeetings(), 1_000);
+  useEffect(() => {
+    let cancelled = false;
+    let retryTimer: number | undefined;
+    let attempts = 0;
+
+    // A freshly opened WebView can hydrate before Tauri IPC and the database
+    // are ready. Retry a failed read instead of leaving the archive empty for
+    // the whole session after that startup race.
+    const loadMeetings = async () => {
+      const loaded = await fetchMeetings();
+      attempts += 1;
+      if (!cancelled && !loaded && attempts < 5) {
+        retryTimer = window.setTimeout(() => void loadMeetings(), attempts * 1_000);
+      }
+    };
+
+    void loadMeetings();
     const handleFocus = () => void fetchMeetings();
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') void fetchMeetings();
+    };
     window.addEventListener('focus', handleFocus);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
-      window.clearTimeout(retryTimer);
+      cancelled = true;
+      if (retryTimer) window.clearTimeout(retryTimer);
       window.removeEventListener('focus', handleFocus);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, [fetchMeetings]);
 
@@ -402,7 +456,7 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
       activeSummaryPolls,
       startSummaryPolling,
       stopSummaryPolling,
-      refetchMeetings: fetchMeetings,
+      refetchMeetings,
 
     }}>
       {children}

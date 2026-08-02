@@ -32,7 +32,7 @@ export function PromptInputContainer({
   return (
     <InputGroup
       className={cn(
-        "min-h-[50px] items-center rounded-[24px] border-[var(--primary-10)] bg-[var(--elevation-1)] py-0 pl-4 pr-2 shadow-none dark:bg-[var(--elevation-1)]",
+        "min-h-[50px] items-center rounded-[24px] border-[var(--primary-10)] bg-[var(--elevation-2)] py-0 pl-4 pr-2 shadow-none dark:bg-[var(--elevation-2)]",
         "focus-within:border-[var(--primary-10)] has-[[data-slot=input-group-control]:focus-visible]:ring-0",
         className,
       )}
