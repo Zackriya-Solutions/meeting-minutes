@@ -137,6 +137,11 @@ For build and acceleration details, see:
 - [GPU Acceleration](../docs/GPU_ACCELERATION.md)
 - [Architecture](../docs/architecture.md)
 
+Optionally, Meetily can transcribe against a self-hosted realtime ASR websocket
+instead (e.g. vLLM serving Voxtral Realtime) — see
+[Streaming Transcription](../docs/streaming-transcription.md). Local
+transcription is unaffected if you don't configure it.
+
 ## Development
 
 ### Frontend (Next.js)
