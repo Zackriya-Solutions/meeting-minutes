@@ -9,6 +9,7 @@
 :root {
   --white: #ffffff;
   --black: #111111;
+  --accent-orange: #ff8d28;
   --background-primary: #ffffff;
   --background-secondary: #f5f5f5;
 }
@@ -156,6 +157,7 @@
 }
 
 .dark {
+  --accent-orange: #ff9230;
   --background-primary: #111111;
   --background-secondary: #111111;
   --elevation-1: #1d1d1d;

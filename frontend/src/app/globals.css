@@ -691,6 +691,25 @@
   .home-meeting-copy { display: flex; min-width: 0; flex-direction: column; justify-content: center; }
   .home-meeting-title { overflow: hidden; color: hsl(var(--foreground)); font-size: 16px; font-weight: 400; letter-spacing: -.02em; line-height: 1.18; text-overflow: ellipsis; white-space: nowrap; }
   .home-meeting-time { margin-top: 3px; color: hsl(var(--muted-foreground)); font-size: 12px; font-variant-numeric: tabular-nums; line-height: 1.45; }
+  .home-outlook-card { cursor: default; }
+  .home-outlook-card__top {
+    align-items: flex-start;
+    justify-content: space-between;
+    border-bottom: 0;
+    background: transparent;
+    padding-top: 20px;
+  }
+  .home-outlook-card__main {
+    display: flex;
+    grid-template-columns: none;
+    gap: 0;
+  }
+  .home-outlook-card__main .home-meeting-time {
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
   .home-history { padding: 0; }
   .home-history__groups { display: flex; flex-direction: column; gap: 18px; }
   .home-history__group h3 {
@@ -1041,6 +1060,7 @@
 
 input, textarea, button, [role='dialog'], [role='menu'], [role='listbox'] { font-family: inherit; }
 [data-sonner-toaster], [data-sonner-toast] { font-family: var(--ui-font-interface) !important; }
+[data-sonner-toast] { background: var(--elevation-2) !important; }
 .font-mono { font-family: var(--ui-font-mono); font-variant-numeric: tabular-nums; }
 
 /* Standalone glyphs stay quiet. Icons inside actions inherit the action color,

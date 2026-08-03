@@ -231,8 +231,8 @@ const Switch = forwardRef<HTMLDivElement, SwitchProps>(
             height: TRACK_HEIGHT,
             backgroundColor: checked
               ? hovered
-                ? "color-mix(in srgb, hsl(var(--foreground)) 88%, transparent)"
-                : "hsl(var(--foreground))"
+                ? "color-mix(in srgb, var(--accent-orange) 88%, var(--white))"
+                : "var(--accent-orange)"
               : hovered
                 ? "var(--deslop-primary-20)"
                 : "var(--primary-10)",
@@ -254,7 +254,7 @@ const Switch = forwardRef<HTMLDivElement, SwitchProps>(
               return (
                 <motion.span
                   {...rest}
-                  className="absolute left-0 top-0 block rounded-full bg-background shadow-sm"
+                  className="absolute left-0 top-0 block rounded-full bg-[var(--white)] shadow-sm"
                   initial={false}
                   style={{
                     ...(baseStyle as React.CSSProperties | undefined),

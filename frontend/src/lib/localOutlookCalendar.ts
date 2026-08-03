@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 
 const ENABLED_SETTING = 'calendar.local_outlook_enabled';
+export const LOCAL_OUTLOOK_SETTING_CHANGED_EVENT = 'memento:local-outlook-setting-changed';
 const CACHE_TTL_MS = 30 * 1000;
 
 export const OUTLOOK_CALENDAR_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
@@ -112,4 +113,9 @@ export async function setLocalOutlookCalendarEnabled(enabled: boolean): Promise<
     value: enabled ? 'true' : 'false',
   });
   if (!enabled) meetingCache.clear();
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent(LOCAL_OUTLOOK_SETTING_CHANGED_EVENT, {
+      detail: { enabled },
+    }));
+  }
 }

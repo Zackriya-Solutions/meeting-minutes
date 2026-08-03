@@ -160,8 +160,6 @@ export default function Home() {
           isProcessingStop={isProcessingStop}
           isStopping={isStopping}
           showModal={showModal}
-          isRecordingDisabled={isRecordingDisabled}
-          onStartCalendarMeeting={handleRecordingStart}
         />
 
         {/* Recording controls - only show when permissions are granted or already recording and not showing status messages */}

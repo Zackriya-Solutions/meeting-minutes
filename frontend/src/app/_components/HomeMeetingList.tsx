@@ -43,6 +43,8 @@ import { splitSummaryLead, summaryToMarkdown } from '@/lib/summaryToMarkdown';
 import { Cell, CellText } from '@/vendor/deslop/mini-app/Cell';
 import { IconPlus } from '@/vendor/deslop/primitives/material-symbols-react';
 import { buildArchivePromptSuggestions } from '@/lib/promptSuggestions';
+import { CalendarSettings } from '@/components/CalendarSettings';
+import type { LocalOutlookMeeting } from '@/lib/localOutlookCalendar';
 
 interface CalendarMeeting {
   meeting: CurrentMeeting;
@@ -57,25 +59,6 @@ interface CalendarMeetingGroup {
   label: string;
   meetings: CalendarMeeting[];
 }
-
-interface UpcomingMeeting {
-  id: string;
-  title: string;
-  date: Date;
-  end: Date;
-  day: string;
-  month: string;
-  weekday: string;
-  time: string;
-}
-
-const UPCOMING_MEETING_MOCKS = [
-  { id: 'weekly-sync', title: 'Weekly team sync', dayOffset: 1, hour: 18, minute: 10, duration: 30 },
-  { id: 'product-review', title: 'Product review', dayOffset: 4, hour: 12, minute: 0, duration: 60 },
-  { id: 'client-call', title: 'Client call', dayOffset: 7, hour: 10, minute: 30, duration: 45 },
-  { id: 'design-review', title: 'Design review', dayOffset: 8, hour: 15, minute: 0, duration: 45 },
-  { id: 'sprint-planning', title: 'Sprint planning', dayOffset: 11, hour: 11, minute: 0, duration: 60 },
-] as const;
 
 export const HOME_SCROLL_POSITION_KEY = 'memento:home-scroll-position';
 
@@ -101,10 +84,6 @@ function meetingDurationMinutes(meeting: CurrentMeeting): number | null {
   const seconds = meeting.durationSeconds;
   if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds <= 0) return null;
   return Math.max(1, Math.round(seconds / 60));
-}
-
-function capitalize(value: string): string {
-  return value ? value.charAt(0).toUpperCase() + value.slice(1) : value;
 }
 
 function historyDateKey(date: Date | null): string {
@@ -278,40 +257,6 @@ export function HomeMeetingList({ animateOnMount = true }: { animateOnMount?: bo
     };
   }, [meetings]);
 
-  const upcomingMeetings = useMemo<UpcomingMeeting[]>(() => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const dayFormatter = new Intl.DateTimeFormat(locale, { day: 'numeric' });
-    const monthFormatter = new Intl.DateTimeFormat(locale, { day: 'numeric', month: 'long' });
-    const weekdayFormatter = new Intl.DateTimeFormat(locale, { weekday: 'long' });
-    const timeFormatter = new Intl.DateTimeFormat(locale, { hour: '2-digit', minute: '2-digit' });
-
-    const now = Date.now();
-
-    return UPCOMING_MEETING_MOCKS.map((mock) => {
-      const date = new Date(today);
-      date.setDate(today.getDate() + mock.dayOffset);
-      date.setHours(mock.hour, mock.minute, 0, 0);
-      const end = new Date(date.getTime() + mock.duration * 60_000);
-
-      return {
-        id: mock.id,
-        title: t(mock.title),
-        date,
-        end,
-        day: dayFormatter.format(date),
-        month: capitalize(
-          monthFormatter.formatToParts(date).find((part) => part.type === 'month')?.value ?? '',
-        ),
-        weekday: capitalize(weekdayFormatter.format(date)),
-        time: `${timeFormatter.format(date)}\u00a0–\u00a0${timeFormatter.format(end)}`,
-      };
-    })
-      .filter((meeting) => meeting.date.getTime() >= now)
-      .sort((left, right) => left.date.getTime() - right.date.getTime())
-      .slice(0, 2);
-  }, [locale, t]);
-
   const calendarMeetings = useMemo<CalendarMeeting[]>(() => {
     const timeFormatter = new Intl.DateTimeFormat(locale, { hour: '2-digit', minute: '2-digit' });
 
@@ -377,19 +322,20 @@ export function HomeMeetingList({ animateOnMount = true }: { animateOnMount?: bo
     router.push(`/meeting-details?id=${encodeURIComponent(meeting.id)}`);
   };
 
-  const openUpcomingMeeting = (meeting: UpcomingMeeting, event: MouseEvent<HTMLButtonElement>) => {
+  const openUpcomingMeeting = (meeting: LocalOutlookMeeting, event: MouseEvent<HTMLButtonElement>) => {
     rememberHomeScrollPosition(event.currentTarget);
+    const title = meeting.subject.trim() || t('Upcoming meeting');
     setCurrentMeeting({
       id: meeting.id,
-      title: meeting.title,
-      occurredAt: meeting.date.toISOString(),
+      title,
+      occurredAt: meeting.start_at,
     });
     const params = new URLSearchParams({
       id: meeting.id,
       upcoming: '1',
-      title: meeting.title,
-      start: meeting.date.toISOString(),
-      end: meeting.end.toISOString(),
+      title,
+      start: meeting.start_at,
+      end: meeting.end_at,
     });
     router.push(`/meeting-details?${params.toString()}`);
   };
@@ -449,36 +395,7 @@ export function HomeMeetingList({ animateOnMount = true }: { animateOnMount?: bo
         </header>
 
         <main className="home-screen__content">
-          <section className="home-meeting-card no-drag" aria-label={t('Upcoming meetings')}>
-            {upcomingMeetings.map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                className="home-meeting-row no-drag"
-                onClick={(event) => openUpcomingMeeting(item, event)}
-                aria-label={`${t('Open meeting')}: ${item.title}`}
-              >
-                <span className="home-meeting-date">
-                  <span className="home-meeting-day home-display">{item.day}</span>
-                    <span className="home-meeting-date-copy">
-                      <span className="home-meeting-month">
-                        {item.month}
-                      </span>
-                    <span className="home-meeting-weekday">{item.weekday}</span>
-                  </span>
-                </span>
-                <span className="home-meeting-main">
-                  <span className="home-meeting-accent" aria-hidden="true" />
-                  <span className="home-meeting-copy">
-                    <span className="home-meeting-title">{item.title}</span>
-                    <time className="home-meeting-time" dateTime={item.date.toISOString()}>
-                      {item.time}
-                    </time>
-                  </span>
-                </span>
-              </button>
-            ))}
-          </section>
+          <CalendarSettings variant="home" onOpenMeeting={openUpcomingMeeting} />
 
           {calendarMeetings.length > 0 ? (
             <section className="home-history" aria-label={t('Earlier')}>
