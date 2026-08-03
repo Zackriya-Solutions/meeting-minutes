@@ -212,7 +212,9 @@ pub fn upcoming_meetings(days: u32) -> Result<Vec<LocalOutlookMeeting>, String> 
             return Err("Microsoft Outlook is not responding.".to_string());
         }
         AutomationPermission::Unknown(code) => {
-            return Err(format!("macOS refused the Outlook automation check ({code})."));
+            return Err(format!(
+                "macOS refused the Outlook automation check ({code})."
+            ));
         }
     }
 
@@ -532,7 +534,10 @@ mod tests {
 
     #[test]
     fn parses_a_calendar_record() {
-        let range_start = Local.with_ymd_and_hms(2026, 7, 28, 0, 0, 0).single().unwrap();
+        let range_start = Local
+            .with_ymd_and_hms(2026, 7, 28, 0, 0, 0)
+            .single()
+            .unwrap();
         let range_end = range_start + Duration::days(7);
         let meetings = parse_records(
             &record(&[
@@ -566,7 +571,10 @@ mod tests {
 
     #[test]
     fn skips_events_outside_the_window() {
-        let range_start = Local.with_ymd_and_hms(2026, 7, 28, 0, 0, 0).single().unwrap();
+        let range_start = Local
+            .with_ymd_and_hms(2026, 7, 28, 0, 0, 0)
+            .single()
+            .unwrap();
         let range_end = range_start + Duration::days(7);
         let meetings = parse_records(
             &record(&[
@@ -603,7 +611,10 @@ mod tests {
 
     #[test]
     fn separates_multiple_records() {
-        let range_start = Local.with_ymd_and_hms(2026, 7, 28, 0, 0, 0).single().unwrap();
+        let range_start = Local
+            .with_ymd_and_hms(2026, 7, 28, 0, 0, 0)
+            .single()
+            .unwrap();
         let range_end = range_start + Duration::days(7);
         let payload = format!(
             "{}{RECORD_SEPARATOR}{}",
@@ -647,7 +658,10 @@ mod tests {
 
     #[test]
     fn gives_an_all_day_event_a_usable_end() {
-        let range_start = Local.with_ymd_and_hms(2026, 7, 28, 0, 0, 0).single().unwrap();
+        let range_start = Local
+            .with_ymd_and_hms(2026, 7, 28, 0, 0, 0)
+            .single()
+            .unwrap();
         let range_end = range_start + Duration::days(7);
         let meetings = parse_records(
             &record(&[

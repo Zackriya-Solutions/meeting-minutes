@@ -113,36 +113,36 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
   }
 
   return (
-    <section className="settings-section space-y-5">
-      <div className="flex items-center justify-between gap-4">
-        <div className="flex-1">
-          <div className="font-medium">{t('Save Audio Recordings')}</div>
-        </div>
-        <Switch
-          checked={preferences.auto_save}
-          onCheckedChange={handleAutoSaveToggle}
-          disabled={saving}
-        />
-      </div>
-
-      {!preferences.auto_save && (
-        <div className="rounded-xl bg-[var(--primary-5)] px-3 py-2">
-          <div className="text-sm text-muted-foreground">
-            {t('Audio recording is disabled. Enable "Save Audio Recordings" to automatically save your meeting audio.')}
+    <>
+      <section className="settings-section space-y-3">
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex-1">
+            <div className="font-medium">{t('Save Audio Recordings')}</div>
           </div>
+          <Switch
+            checked={preferences.auto_save}
+            onCheckedChange={handleAutoSaveToggle}
+            disabled={saving}
+          />
         </div>
-      )}
 
-      <div className="border-t border-[var(--primary-10)] pt-5">
-        <DeviceSelection
-          selectedDevices={{
-            micDevice: preferences.preferred_mic_device,
-            systemDevice: preferences.preferred_system_device
-          }}
-          onDeviceChange={handleDeviceChange}
-          disabled={saving}
-        />
-      </div>
-    </section>
+        {!preferences.auto_save && (
+          <div className="rounded-xl bg-[var(--primary-5)] px-3 py-2">
+            <div className="text-sm text-muted-foreground">
+              {t('Audio recording is disabled. Enable "Save Audio Recordings" to automatically save your meeting audio.')}
+            </div>
+          </div>
+        )}
+      </section>
+
+      <DeviceSelection
+        selectedDevices={{
+          micDevice: preferences.preferred_mic_device,
+          systemDevice: preferences.preferred_system_device
+        }}
+        onDeviceChange={handleDeviceChange}
+        disabled={saving}
+      />
+    </>
   );
 }

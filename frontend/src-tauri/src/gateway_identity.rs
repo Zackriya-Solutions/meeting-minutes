@@ -104,16 +104,16 @@ fn interpret_registration(status: u16, content_type: &str, body: &str) -> Result
         .map_err(|e| format!("шлюз вернул неразбираемый ответ (HTTP {status}): {e}"))?;
 
     if let Some(error) = parsed.get("error").and_then(serde_json::Value::as_str) {
-        return Err(format!("шлюз отклонил регистрацию (HTTP {status}): {error}"));
+        return Err(format!(
+            "шлюз отклонил регистрацию (HTTP {status}): {error}"
+        ));
     }
     if status < 200 || status >= 300 {
         return Err(format!("шлюз ответил ошибкой HTTP {status}"));
     }
     match parsed.get("token").and_then(serde_json::Value::as_str) {
         Some(token) if !token.is_empty() => Ok(token.to_string()),
-        _ => Err(format!(
-            "ответ шлюза не содержит токена (HTTP {status})"
-        )),
+        _ => Err(format!("ответ шлюза не содержит токена (HTTP {status})")),
     }
 }
 
@@ -170,7 +170,10 @@ async fn valid(base: &str, token: &str) -> bool {
         }
     };
     if !response.status().is_success() {
-        log::debug!("[gateway] {base}/me rejected the stored token: {}", response.status());
+        log::debug!(
+            "[gateway] {base}/me rejected the stored token: {}",
+            response.status()
+        );
         return false;
     }
     let content_type = response
@@ -319,9 +322,16 @@ mod tests {
     fn a_rejected_key_is_a_rejection_even_though_the_gateway_answers_200() {
         // The gateway returns 200 with an error body, so a status-only check reports the
         // downstream "missing field `token`" parse failure instead of the real cause.
-        let error = interpret_registration(200, "application/json", r#"{"error":"invalid memento registration key"}"#)
-            .expect_err("an error body is not a token");
-        assert!(error.contains("invalid memento registration key"), "{error}");
+        let error = interpret_registration(
+            200,
+            "application/json",
+            r#"{"error":"invalid memento registration key"}"#,
+        )
+        .expect_err("an error body is not a token");
+        assert!(
+            error.contains("invalid memento registration key"),
+            "{error}"
+        );
         assert!(error.contains("отклонил"), "{error}");
     }
 

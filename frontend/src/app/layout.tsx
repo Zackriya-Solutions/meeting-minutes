@@ -19,7 +19,7 @@ import { TooltipProvider } from '@/components/ui/tooltip'
 import { RecordingStateProvider } from '@/contexts/RecordingStateContext'
 import { OllamaDownloadProvider } from '@/contexts/OllamaDownloadContext'
 import { TranscriptProvider } from '@/contexts/TranscriptContext'
-import { ConfigProvider, useConfig } from '@/contexts/ConfigContext'
+import { ConfigProvider } from '@/contexts/ConfigContext'
 import { OnboardingProvider } from '@/contexts/OnboardingContext'
 import { loadBetaFeatures } from '@/types/betaFeatures'
 import { DownloadProgressToastProvider } from '@/components/shared/DownloadProgressToast'
@@ -119,13 +119,6 @@ function ConditionalImportDialog({
   handleImportDialogClose: (open: boolean) => void;
   importFilePath: string | null;
 }) {
-  const { betaFeatures } = useConfig();
-
-  // Only mount ImportAudioDialog (and its hooks/listeners) when feature is enabled
-  if (!betaFeatures.importAndRetranscribe) {
-    return null;
-  }
-
   return (
     <ImportAudioDialog
       open={showImportDialog}
@@ -306,12 +299,12 @@ export default function RootLayout({
                       <OnboardingProvider>
                         <UpdateCheckProvider>
                           <SidebarProvider>
-                            <ShadcnSidebarProvider defaultOpen>
-                              <AppSidebar />
-                              <SidebarInset className="min-w-0 bg-transparent">
-                            <TooltipProvider>
-                              <RecordingPostProcessingProvider>
-                                <ImportDialogProvider onOpen={handleOpenImportDialog}>
+                            <ImportDialogProvider onOpen={handleOpenImportDialog}>
+                              <ShadcnSidebarProvider defaultOpen>
+                                <AppSidebar />
+                                <SidebarInset className="min-w-0 bg-transparent">
+                              <TooltipProvider>
+                                <RecordingPostProcessingProvider>
                                   {/* Download progress toast provider - listens for background downloads */}
                                   <DownloadProgressToastProvider />
                                   <ManagedDefaultsMigrationDialog />
@@ -326,11 +319,11 @@ export default function RootLayout({
                                     handleImportDialogClose={handleImportDialogClose}
                                     importFilePath={importFilePath}
                                   />
-                                </ImportDialogProvider>
-                              </RecordingPostProcessingProvider>
-                            </TooltipProvider>
-                              </SidebarInset>
-                            </ShadcnSidebarProvider>
+                                </RecordingPostProcessingProvider>
+                              </TooltipProvider>
+                                </SidebarInset>
+                              </ShadcnSidebarProvider>
+                            </ImportDialogProvider>
                           </SidebarProvider>
                         </UpdateCheckProvider>
                       </OnboardingProvider>
@@ -340,7 +333,7 @@ export default function RootLayout({
               </RecordingStateProvider>
             </AnalyticsProvider>
 
-            <Toaster position="bottom-center" richColors closeButton />
+            <Toaster position="bottom-center" />
           </LanguageProvider>
         </ThemeProvider>
       </body>

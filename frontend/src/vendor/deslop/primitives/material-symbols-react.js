@@ -27,6 +27,7 @@ export const materialSymbolNames = /* @__PURE__ */ Object.freeze([
   "book_2",
   "business_center",
   "calendar_month",
+  "calendar_today",
   "call",
   "cancel",
   "chat",
@@ -211,6 +212,7 @@ export const materialSymbolComponents = /* @__PURE__ */ Object.freeze({
   "book_2": createMaterialSymbol("book_2"),
   "business_center": createMaterialSymbol("business_center"),
   "calendar_month": createMaterialSymbol("calendar_month"),
+  "calendar_today": createMaterialSymbol("calendar_today"),
   "call": createMaterialSymbol("call"),
   "cancel": createMaterialSymbol("cancel"),
   "chat": createMaterialSymbol("chat"),
@@ -304,7 +306,15 @@ export const materialSymbolComponents = /* @__PURE__ */ Object.freeze({
 
 export const iconNames = materialSymbolNames;
 export const iconComponents = materialSymbolComponents;
-export const getIconComponent = (name) => materialSymbolComponents[name];
+const dynamicIconComponents = new Map(Object.entries(materialSymbolComponents));
+export const getIconComponent = (name) => {
+  const existing = dynamicIconComponents.get(name);
+  if (existing) return existing;
+
+  const component = createMaterialSymbol(name);
+  dynamicIconComponents.set(name, component);
+  return component;
+};
 
 export const IconArrowBackIos = /* @__PURE__ */ createMaterialSymbol("arrow_back_ios", "IconArrowBackIos");
 export const IconArrowBackIosNew = /* @__PURE__ */ createMaterialSymbol("arrow_back_ios_new", "IconArrowBackIosNew");
@@ -313,6 +323,7 @@ export const IconArrowLeft = /* @__PURE__ */ createMaterialSymbol("arrow_back", 
 export const IconArrowRight = /* @__PURE__ */ createMaterialSymbol("arrow_forward", "IconArrowRight");
 export const IconArrowUp = /* @__PURE__ */ createMaterialSymbol("arrow_upward", "IconArrowUp");
 export const IconBell = /* @__PURE__ */ createMaterialSymbol("notifications", "IconBell");
+export const IconCalendarToday = /* @__PURE__ */ createMaterialSymbol("calendar_today", "IconCalendarToday");
 export const IconChart = /* @__PURE__ */ createMaterialSymbol("bar_chart", "IconChart");
 export const IconCheck = /* @__PURE__ */ createMaterialSymbol("check", "IconCheck");
 export const IconChevronDown = /* @__PURE__ */ createMaterialSymbol("keyboard_arrow_down", "IconChevronDown");

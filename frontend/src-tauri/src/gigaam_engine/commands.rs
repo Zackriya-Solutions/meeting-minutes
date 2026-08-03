@@ -90,7 +90,9 @@ fn variant_present(dir: &Path, v: GigaamVariant) -> bool {
 fn ane_supported() -> bool {
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
     {
-        macos_major_version().map(|major| major >= 14).unwrap_or(true)
+        macos_major_version()
+            .map(|major| major >= 14)
+            .unwrap_or(true)
     }
     #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
     {
@@ -282,13 +284,13 @@ async fn ensure_ane_model<R: Runtime>(
 fn extract_mlpackage(archive: &Path, staging: &Path) -> Result<PathBuf, String> {
     let _ = std::fs::remove_dir_all(staging);
     std::fs::create_dir_all(staging).map_err(|e| e.to_string())?;
-    let file = std::fs::File::open(archive).map_err(|e| format!("open {}: {e}", archive.display()))?;
+    let file =
+        std::fs::File::open(archive).map_err(|e| format!("open {}: {e}", archive.display()))?;
     let mut zip = zip::ZipArchive::new(std::io::BufReader::new(file))
         .map_err(|e| format!("read {}: {e}", archive.display()))?;
     zip.extract(staging)
         .map_err(|e| format!("unpack {}: {e}", archive.display()))?;
-    find_mlpackage(staging, 0)
-        .ok_or_else(|| format!("no .mlpackage inside {}", archive.display()))
+    find_mlpackage(staging, 0).ok_or_else(|| format!("no .mlpackage inside {}", archive.display()))
 }
 
 /// Depth-limited search for the `.mlpackage` directory in an unpacked archive (the release

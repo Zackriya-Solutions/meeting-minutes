@@ -822,7 +822,10 @@ mod tests {
 
     #[test]
     fn speakers_prompt_contains_roster_and_schema() {
-        let roster = speaker_roster(&[(12, "Speaker 1".to_string(), 42), (15, "Аня".to_string(), 7)]);
+        let roster = speaker_roster(&[
+            (12, "Speaker 1".to_string(), 42),
+            (15, "Аня".to_string(), 7),
+        ]);
         assert!(roster.contains("- id 12: «Speaker 1», реплик: 42"));
         assert!(roster.contains("- id 15: «Аня», реплик: 7"));
         let (system, user) = speakers("[0|00:00] Speaker 1: тест\n", &roster);
@@ -850,7 +853,8 @@ mod tests {
         assert_eq!(d.display_name.as_deref(), Some("Аня"));
         assert!(d.merge_into.is_none());
         // merge-only decision omits display_name entirely
-        let d2: SpeakerDecision = serde_json::from_str(r#"{"speaker_id":5,"merge_into":3}"#).unwrap();
+        let d2: SpeakerDecision =
+            serde_json::from_str(r#"{"speaker_id":5,"merge_into":3}"#).unwrap();
         assert!(d2.display_name.is_none());
         assert_eq!(d2.merge_into, Some(3));
     }

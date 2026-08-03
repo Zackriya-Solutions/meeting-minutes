@@ -317,7 +317,7 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
             audio_start_time: update.audio_start_time,
             audio_end_time: update.audio_end_time,
             duration: update.duration,
-            // Dominant audio channel (mic = You, system = Others)
+            // Dominant audio source channel. Identity is assigned later by diarization.
             speaker: update.speaker,
           };
 

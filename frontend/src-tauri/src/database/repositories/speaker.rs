@@ -24,7 +24,11 @@ pub struct MeetingSpeaker {
     pub id: i64,
     pub display_name: String,
     pub is_confirmed: bool,
+    /// User-confirmed owner identity. Derived from diarization/voice matching, never channel.
+    pub is_self: bool,
     pub segment_count: i64,
+    /// Total diarized speech time for this speaker in the meeting, in seconds.
+    pub speech_duration_seconds: f64,
 }
 
 /// One transcript segment with its resolved speaker display name (LEFT JOINed), ordered as
@@ -44,6 +48,8 @@ pub struct TranscriptSpeakerSegment {
     pub speaker_id: Option<i64>,
     /// speakers.display_name when speaker_id resolves, else NULL.
     pub display_name: Option<String>,
+    /// Whether the resolved diarized profile is the local user.
+    pub is_self: bool,
 }
 
 /// Encode an embedding as raw little-endian f32 bytes (see module docs). 4 bytes/dim.
@@ -182,6 +188,39 @@ impl SpeakersRepository {
         Ok(res.rows_affected())
     }
 
+    /// Mark or unmark a diarized voice profile as the local user.
+    ///
+    /// The operation is transactional because only one profile may be `is_self`.
+    /// Returns 0 when the requested speaker does not exist, 1 otherwise.
+    pub async fn set_self(
+        pool: &SqlitePool,
+        speaker_id: i64,
+        is_self: bool,
+    ) -> Result<u64, SqlxError> {
+        let mut transaction = pool.begin().await?;
+        let exists: i64 = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM speakers WHERE id = ?)")
+            .bind(speaker_id)
+            .fetch_one(&mut *transaction)
+            .await?;
+        if exists == 0 {
+            transaction.rollback().await?;
+            return Ok(0);
+        }
+
+        if is_self {
+            sqlx::query("UPDATE speakers SET is_self = 0 WHERE is_self = 1")
+                .execute(&mut *transaction)
+                .await?;
+        }
+        sqlx::query("UPDATE speakers SET is_self = ? WHERE id = ?")
+            .bind(if is_self { 1 } else { 0 })
+            .bind(speaker_id)
+            .execute(&mut *transaction)
+            .await?;
+        transaction.commit().await?;
+        Ok(1)
+    }
+
     /// A meeting's transcript segments ordered by recording time: (id, start_secs, end_secs).
     /// Timing is the SECONDS-based `audio_start_time`/`audio_end_time` (NULL when unknown).
     pub async fn list_meeting_segments(
@@ -257,12 +296,18 @@ impl SpeakersRepository {
         pool: &SqlitePool,
         meeting_id: &str,
     ) -> Result<Vec<MeetingSpeaker>, SqlxError> {
-        let rows: Vec<(i64, String, i64, i64)> = sqlx::query_as(
-            "SELECT s.id, s.display_name, s.is_confirmed, COUNT(t.id) AS segment_count \
+        let rows: Vec<(i64, String, i64, i64, i64, f64)> = sqlx::query_as(
+            "SELECT s.id, s.display_name, s.is_confirmed, s.is_self, COUNT(t.id) AS segment_count, \
+                    COALESCE(SUM(CASE \
+                        WHEN t.audio_start_time IS NOT NULL AND t.audio_end_time IS NOT NULL \
+                             AND t.audio_end_time >= t.audio_start_time \
+                            THEN t.audio_end_time - t.audio_start_time \
+                        WHEN t.duration > 0 THEN t.duration \
+                        ELSE 0 END), 0) AS speech_duration_seconds \
              FROM speakers s \
              JOIN transcripts t ON t.speaker_id = s.id \
              WHERE t.meeting_id = ? \
-             GROUP BY s.id, s.display_name, s.is_confirmed \
+             GROUP BY s.id, s.display_name, s.is_confirmed, s.is_self \
              ORDER BY segment_count DESC, s.id ASC",
         )
         .bind(meeting_id)
@@ -272,11 +317,20 @@ impl SpeakersRepository {
         let mut speakers = rows
             .into_iter()
             .map(
-                |(id, display_name, is_confirmed, segment_count)| MeetingSpeaker {
+                |(
+                    id,
+                    display_name,
+                    is_confirmed,
+                    is_self,
+                    segment_count,
+                    speech_duration_seconds,
+                )| MeetingSpeaker {
                     id,
                     display_name,
                     is_confirmed: is_confirmed != 0,
+                    is_self: is_self != 0,
                     segment_count,
+                    speech_duration_seconds,
                 },
             )
             .collect::<Vec<_>>();
@@ -293,9 +347,9 @@ impl SpeakersRepository {
         pool: &SqlitePool,
         meeting_id: &str,
     ) -> Result<Vec<TranscriptSpeakerSegment>, SqlxError> {
-        let rows: Vec<(String, String, Option<f64>, Option<String>, Option<i64>, Option<String>)> =
+        let rows: Vec<(String, String, Option<f64>, Option<String>, Option<i64>, Option<String>, i64)> =
             sqlx::query_as(
-                "SELECT t.transcript, t.timestamp, t.audio_start_time, t.speaker, t.speaker_id, s.display_name \
+                "SELECT t.transcript, t.timestamp, t.audio_start_time, t.speaker, t.speaker_id, s.display_name, COALESCE(s.is_self, 0) \
                  FROM transcripts t \
                  LEFT JOIN speakers s ON s.id = t.speaker_id \
                  WHERE t.meeting_id = ? \
@@ -314,7 +368,15 @@ impl SpeakersRepository {
         Ok(rows
             .into_iter()
             .map(
-                |(text, timestamp, audio_start_time, speaker, speaker_id, display_name)| {
+                |(
+                    text,
+                    timestamp,
+                    audio_start_time,
+                    speaker,
+                    speaker_id,
+                    display_name,
+                    is_self,
+                )| {
                     let display_name = speaker_id
                         .and_then(|id| meeting_labels.get(&id).cloned())
                         .or(display_name);
@@ -325,6 +387,7 @@ impl SpeakersRepository {
                         speaker,
                         speaker_id,
                         display_name,
+                        is_self: is_self != 0,
                     }
                 },
             )
@@ -341,6 +404,7 @@ impl SpeakersRepository {
         let res = sqlx::query(
             "DELETE FROM speakers \
              WHERE is_confirmed = 0 \
+               AND is_self = 0 \
                AND id NOT IN (SELECT DISTINCT speaker_id FROM transcripts \
                               WHERE speaker_id IS NOT NULL)",
         )
@@ -391,25 +455,33 @@ mod tests {
                 id: 64,
                 display_name: "Speaker 41".into(),
                 is_confirmed: false,
+                is_self: false,
                 segment_count: 72,
+                speech_duration_seconds: 0.0,
             },
             MeetingSpeaker {
                 id: 60,
                 display_name: "Speaker 37".into(),
                 is_confirmed: false,
+                is_self: false,
                 segment_count: 4,
+                speech_duration_seconds: 0.0,
             },
             MeetingSpeaker {
                 id: 62,
                 display_name: "Андрей".into(),
                 is_confirmed: true,
+                is_self: true,
                 segment_count: 20,
+                speech_duration_seconds: 0.0,
             },
             MeetingSpeaker {
                 id: 61,
                 display_name: "Speaker 38".into(),
                 is_confirmed: false,
+                is_self: false,
                 segment_count: 17,
+                speech_duration_seconds: 0.0,
             },
         ];
 
@@ -435,7 +507,8 @@ mod tests {
                 id INTEGER PRIMARY KEY,
                 display_name TEXT NOT NULL,
                 voice_embedding BLOB,
-                is_confirmed INTEGER NOT NULL DEFAULT 0
+                is_confirmed INTEGER NOT NULL DEFAULT 0,
+                is_self INTEGER NOT NULL DEFAULT 0
             )",
         )
         .execute(&pool)
@@ -588,5 +661,43 @@ mod tests {
             .unwrap();
         assert_eq!(deleted, 0);
         assert_eq!(speaker_ids(&pool).await, vec![5]);
+    }
+
+    #[tokio::test]
+    async fn self_identity_is_unique_reassignable_and_protected_from_gc() {
+        let pool = gc_test_pool().await;
+        for id in [1, 2] {
+            sqlx::query("INSERT INTO speakers (id, display_name) VALUES (?, ?)")
+                .bind(id)
+                .bind(format!("Speaker {id}"))
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+
+        assert_eq!(
+            SpeakersRepository::set_self(&pool, 1, true).await.unwrap(),
+            1
+        );
+        assert_eq!(
+            SpeakersRepository::set_self(&pool, 2, true).await.unwrap(),
+            1
+        );
+        let owners: Vec<i64> = sqlx::query_scalar("SELECT id FROM speakers WHERE is_self = 1")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+        assert_eq!(owners, vec![2]);
+
+        SpeakersRepository::delete_orphaned_unconfirmed(&pool)
+            .await
+            .unwrap();
+        assert_eq!(speaker_ids(&pool).await, vec![2]);
+        assert_eq!(
+            SpeakersRepository::set_self(&pool, 999, true)
+                .await
+                .unwrap(),
+            0
+        );
     }
 }

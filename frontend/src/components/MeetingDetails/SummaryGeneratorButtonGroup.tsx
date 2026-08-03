@@ -8,8 +8,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { VisuallyHidden } from "@/components/ui/visually-hidden"
-import { Button } from '@/components/ui/button';
-import { ButtonGroup } from '@/components/ui/button-group';
+import { Button } from '@/components/ui/fluid-button';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -19,7 +18,8 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Sparkles, Settings, Loader2, FileText, Check, Square } from '@/components/deslop-icons';
+import { Check } from '@/components/deslop-icons';
+import { MaterialSymbol } from '@/vendor/deslop/primitives/material-symbols-react';
 import Analytics from '@/lib/analytics';
 import { invoke } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
@@ -27,6 +27,12 @@ import { useState, useEffect, useMemo, useRef, ReactNode } from 'react';
 import { isOllamaNotInstalledError } from '@/lib/utils';
 import { BuiltInModelInfo } from '@/lib/builtin-ai';
 import { useT } from '@/lib/i18n';
+
+type FluidIconProps = { size?: number; strokeWidth?: number; className?: string };
+const StopIcon = ({ size = 16, className }: FluidIconProps) => <MaterialSymbol name="stop" size={size} weight={400} className={className} />;
+const GenerateIcon = ({ size = 16, className }: FluidIconProps) => <MaterialSymbol name="auto_awesome" size={size} weight={400} className={className} />;
+const SettingsIcon = ({ size = 16, className }: FluidIconProps) => <MaterialSymbol name="settings" size={size} weight={400} className={className} />;
+const TemplateIcon = ({ size = 16, className }: FluidIconProps) => <MaterialSymbol name="description" size={size} weight={400} className={className} />;
 
 interface SummaryGeneratorButtonGroupProps {
   languageSlot?: ReactNode;
@@ -284,27 +290,27 @@ export function SummaryGeneratorButtonGroup({
   const isGenerating = summaryStatus === 'processing' || summaryStatus === 'summarizing' || summaryStatus === 'regenerating';
 
   return (
-    <ButtonGroup>
+    <div className="flex w-fit items-center gap-2">
       {/* Generate Summary or Stop button */}
       {isGenerating ? (
         <Button
-          variant="outline"
-          size="sm"
-          className="border-destructive/40 bg-primary/10 hover:bg-accent xl:px-4"
+          variant="ghost"
+          size="md"
+          leadingIcon={StopIcon}
           onClick={() => {
             Analytics.trackButtonClick('stop_summary_generation', 'meeting_details');
             onStopGeneration();
           }}
           title={t('Stop summary generation')}
         >
-          <Square className="xl:mr-2" size={18} fill="currentColor" />
-          <span className="hidden lg:inline xl:inline">{t('Stop')}</span>
+          {t('Stop')}
         </Button>
       ) : (
         <Button
-          variant="outline"
-          size="sm"
-          className="border-primary/40 bg-primary hover:bg-primary/90 xl:px-4"
+          variant="ghost"
+          size="md"
+          leadingIcon={GenerateIcon}
+          loading={isCheckingModels || isModelConfigLoading}
           onClick={() => {
             Analytics.trackButtonClick('generate_summary', 'meeting_details');
             checkOllamaModelsAndGenerate();
@@ -318,17 +324,9 @@ export function SummaryGeneratorButtonGroup({
                 : hasSummary ? t('Regenerate AI Summary') : t('Generate AI Summary')
           }
         >
-          {isCheckingModels || isModelConfigLoading ? (
-            <>
-              <Loader2 className="animate-spin xl:mr-2" size={18} />
-              <span className="hidden xl:inline">{t('Processing...')}</span>
-            </>
-          ) : (
-            <>
-              <Sparkles className="xl:mr-2" size={18} />
-              <span className="hidden lg:inline xl:inline">{hasSummary ? t('Regenerate Summary') : t('Generate Summary')}</span>
-            </>
-          )}
+          {isCheckingModels || isModelConfigLoading
+            ? t('Processing...')
+            : hasSummary ? t('Regenerate Summary') : t('Generate Summary')}
         </Button>
       )}
 
@@ -338,12 +336,12 @@ export function SummaryGeneratorButtonGroup({
       <Dialog open={settingsDialogOpen} onOpenChange={setSettingsDialogOpen}>
         <DialogTrigger asChild>
           <Button
-            variant="outline"
-            size="sm"
+            variant="ghost"
+            size="md"
+            leadingIcon={SettingsIcon}
             title={t('Summary Settings')}
           >
-            <Settings />
-            <span className="hidden lg:inline">{t('AI Model')}</span>
+            {t('AI Model')}
           </Button>
         </DialogTrigger>
         <DialogContent
@@ -370,14 +368,14 @@ export function SummaryGeneratorButtonGroup({
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button
-              variant="outline"
-              size="sm"
+              variant="ghost"
+              size="md"
+              leadingIcon={TemplateIcon}
               title={selectedTemplateName
                 ? `${t('Template')}: ${t(selectedTemplateName)}`
                 : t('Select summary template')}
             >
-              <FileText />
-              <span className="hidden lg:inline">{t('Template')}</span>
+              {t('Template')}
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-[min(28rem,calc(100vw-2rem))]">
@@ -409,6 +407,6 @@ export function SummaryGeneratorButtonGroup({
           </DropdownMenuContent>
         </DropdownMenu>
       )}
-    </ButtonGroup>
+    </div>
   );
 }

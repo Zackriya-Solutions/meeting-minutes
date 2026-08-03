@@ -1,7 +1,7 @@
 "use client"
 
 import { Switch } from "./ui/switch"
-import { FlaskConical, AlertCircle } from '@/components/deslop-icons'
+import { createMaterialSymbol } from '@/vendor/deslop/primitives/material-symbols-react'
 import { useConfig } from "@/contexts/ConfigContext"
 import { useT } from "@/lib/i18n"
 import {
@@ -9,6 +9,8 @@ import {
   BETA_FEATURE_NAMES,
   BETA_FEATURE_DESCRIPTIONS
 } from "@/types/betaFeatures"
+
+const IconExperiment = createMaterialSymbol('bolt', 'IconExperiment')
 
 export function BetaSettings() {
   const t = useT();
@@ -19,55 +21,33 @@ export function BetaSettings() {
 
   return (
     <div className="space-y-6">
-      {/* Yellow Warning Banner */}
-      <div className="flex items-start gap-3 p-4 bg-primary/10 border border-primary/40 rounded-lg">
-        <AlertCircle className="h-5 w-5 text-primary flex-shrink-0 mt-0.5" />
-        <div className="text-sm text-primary">
-          <p className="font-medium">{t('Beta Features')}</p>
-          <p className="mt-1">
-            {t('These features are still being tested. You may encounter issues, and we appreciate your feedback.')}
-          </p>
-        </div>
-      </div>
-
       {/* Dynamic Feature Toggles - Automatically renders all features */}
       {featureOrder.map((featureKey) => (
         <div
           key={featureKey}
-          className="bg-background rounded-lg border border-border p-6 shadow-none"
+          className="settings-section settings-cell"
         >
-          <div className="flex items-center justify-between">
-            <div className="flex-1">
-              <div className="flex items-center gap-2 mb-2">
-                <FlaskConical className="h-5 w-5 text-muted-foreground" />
-                <h3 className="text-lg font-semibold text-foreground">
-                  {t(BETA_FEATURE_NAMES[featureKey])}
-                </h3>
-                <span className="px-2 py-0.5 text-xs font-medium bg-primary/10 text-primary rounded-full">
-                  {t('BETA')}
-                </span>
-              </div>
-              <p className="text-sm text-muted-foreground">
+          <div className="settings-cell__row">
+            <span className="settings-cell__avatar" aria-hidden="true">
+              <IconExperiment size={20} weight={400} />
+            </span>
+            <div className="settings-cell__text">
+              <h3 className="settings-cell__label">
+                {t(BETA_FEATURE_NAMES[featureKey])}
+              </h3>
+              <p className="settings-cell__caption">
                 {t(BETA_FEATURE_DESCRIPTIONS[featureKey])}
               </p>
             </div>
-
-            <div className="ml-6">
-              <Switch
-                checked={betaFeatures[featureKey]}
-                onCheckedChange={(checked) => toggleBetaFeature(featureKey, checked)}
-              />
-            </div>
+            <Switch
+              className="shrink-0"
+              checked={betaFeatures[featureKey]}
+              onCheckedChange={(checked) => toggleBetaFeature(featureKey, checked)}
+            />
           </div>
         </div>
       ))}
 
-      {/* Info Box */}
-      <div className="p-4 bg-primary/10 border border-primary/40 rounded-lg">
-        <p className="text-sm text-primary">
-          {t('When disabled, beta features will be hidden. Your existing meetings remain unaffected.')}
-        </p>
-      </div>
     </div>
   );
 }

@@ -81,7 +81,7 @@
 
 @keyframes fade-in {
   0% {
-    opacity: 0;
+    opacity: .65;
     transform: translateY(-4px);
   }
 
@@ -159,6 +159,23 @@
     --sidebar-accent-foreground: 240 5.9% 10%;
     --sidebar-border: 220 13% 91%;
     --sidebar-ring: 217.2 91.2% 59.8%;
+    --surface-1: #FAFAFA;
+    --surface-2: #FCFCFC;
+    --surface-3: #FFFFFF;
+    --surface-4: #FFFFFF;
+    --surface-5: #FFFFFF;
+    --surface-6: #FFFFFF;
+    --surface-7: #FFFFFF;
+    --surface-8: #FFFFFF;
+    --shadow-color: rgb(0 0 0 / 0.06);
+    --shadow-1: 0 0 0 1px var(--shadow-color);
+    --shadow-2: 0 0 0 1px var(--shadow-color), 0 1px 1px -0.5px var(--shadow-color);
+    --shadow-3: 0 0 0 1px var(--shadow-color), 0 1px 1px -0.5px var(--shadow-color), 0 3px 3px -1.5px var(--shadow-color);
+    --shadow-4: 0 0 0 1px var(--shadow-color), 0 1px 1px -0.5px var(--shadow-color), 0 3px 3px -1.5px var(--shadow-color), 0 6px 6px -3px var(--shadow-color);
+    --shadow-5: 0 0 0 1px var(--shadow-color), 0 1px 1px -0.5px var(--shadow-color), 0 3px 3px -1.5px var(--shadow-color), 0 6px 6px -3px var(--shadow-color), 0 12px 12px -6px var(--shadow-color);
+    --shadow-6: 0 0 0 1px var(--shadow-color), 0 1px 1px -0.5px var(--shadow-color), 0 3px 3px -1.5px var(--shadow-color), 0 6px 6px -3px var(--shadow-color), 0 12px 12px -6px var(--shadow-color), 0 24px 24px -12px var(--shadow-color);
+    --shadow-7: 0 0 0 1px var(--shadow-color), 0 1px 1px -0.5px var(--shadow-color), 0 3px 3px -1.5px var(--shadow-color), 0 6px 6px -3px var(--shadow-color), 0 12px 12px -6px var(--shadow-color), 0 24px 24px -12px var(--shadow-color), 0 48px 48px -24px var(--shadow-color);
+    --shadow-8: 0 0 0 1px var(--shadow-color), 0 1px 1px -0.5px var(--shadow-color), 0 3px 3px -1.5px var(--shadow-color), 0 6px 6px -3px var(--shadow-color), 0 12px 12px -6px var(--shadow-color), 0 24px 24px -12px var(--shadow-color), 0 48px 48px -24px var(--shadow-color), 0 96px 96px -48px var(--shadow-color);
   }
 
   .dark {
@@ -195,6 +212,48 @@
     --sidebar-accent-foreground: 240 4.8% 95.9%;
     --sidebar-border: 240 3.7% 15.9%;
     --sidebar-ring: 217.2 91.2% 59.8%;
+    --surface-1: #171717;
+    --surface-2: #1E1E1E;
+    --surface-3: #252525;
+    --surface-4: #2C2C2C;
+    --surface-5: #333333;
+    --surface-6: #3A3A3A;
+    --surface-7: #414141;
+    --surface-8: #484848;
+    --dm-hi-base: rgba(255,255,255,0.01);
+    --dm-hi-mid: rgba(255,255,255,0.02);
+    --dm-hi-high: rgba(255,255,255,0.04);
+    --dm-hi-peak: rgba(255,255,255,0.06);
+    --dm-ring-base: rgba(255,255,255,0.02);
+    --dm-ring-mid: rgba(255,255,255,0.04);
+    --dm-ring-high: rgba(255,255,255,0.06);
+    --dm-drop: rgba(0,0,0,0.18);
+    --shadow-1: inset 0 0 0 1px var(--dm-ring-base);
+    --shadow-2: inset 0 1px 0 0 var(--dm-hi-base), inset 0 0 0 1px var(--dm-ring-base), 0 1px 1px -0.5px var(--dm-drop);
+    --shadow-3: inset 0 1px 0 0 var(--dm-hi-mid), inset 0 0 0 1px var(--dm-ring-base), 0 0 0 1px rgba(0,0,0,0.12), 0 1px 1px -0.5px var(--dm-drop), 0 3px 3px -1.5px var(--dm-drop);
+    --shadow-4: inset 0 1px 0 0 var(--dm-hi-mid), inset 0 0 0 1px var(--dm-ring-mid), 0 0 0 1px rgba(0,0,0,0.14), 0 1px 1px -0.5px var(--dm-drop), 0 3px 3px -1.5px var(--dm-drop), 0 6px 6px -3px var(--dm-drop);
+    --shadow-5: inset 0 1px 0 0 var(--dm-hi-high), inset 0 0 0 1px var(--dm-ring-mid), 0 0 0 1px rgba(0,0,0,0.16), 0 1px 1px -0.5px var(--dm-drop), 0 3px 3px -1.5px var(--dm-drop), 0 6px 6px -3px var(--dm-drop), 0 12px 12px -6px var(--dm-drop);
+    --shadow-6: inset 0 1px 0 0 var(--dm-hi-high), inset 0 0 0 1px var(--dm-ring-high), 0 0 0 1px rgba(0,0,0,0.18), 0 1px 1px -0.5px var(--dm-drop), 0 3px 3px -1.5px var(--dm-drop), 0 6px 6px -3px var(--dm-drop), 0 12px 12px -6px var(--dm-drop), 0 24px 24px -12px var(--dm-drop);
+    --shadow-7: inset 0 1px 0 0 var(--dm-hi-peak), inset 0 0 0 1px var(--dm-ring-high), 0 0 0 1px rgba(0,0,0,0.20), 0 1px 1px -0.5px var(--dm-drop), 0 3px 3px -1.5px var(--dm-drop), 0 6px 6px -3px var(--dm-drop), 0 12px 12px -6px var(--dm-drop), 0 24px 24px -12px var(--dm-drop), 0 48px 48px -24px var(--dm-drop);
+    --shadow-8: inset 0 1px 0 0 var(--dm-hi-peak), inset 0 0 0 1px var(--dm-ring-high), 0 0 0 1px rgba(0,0,0,0.22), 0 1px 1px -0.5px var(--dm-drop), 0 3px 3px -1.5px var(--dm-drop), 0 6px 6px -3px var(--dm-drop), 0 12px 12px -6px var(--dm-drop), 0 24px 24px -12px var(--dm-drop), 0 48px 48px -24px var(--dm-drop), 0 96px 96px -48px var(--dm-drop);
+  }
+  .theme {
+    --color-surface-1: var(--surface-1);
+    --color-surface-2: var(--surface-2);
+    --color-surface-3: var(--surface-3);
+    --color-surface-4: var(--surface-4);
+    --color-surface-5: var(--surface-5);
+    --color-surface-6: var(--surface-6);
+    --color-surface-7: var(--surface-7);
+    --color-surface-8: var(--surface-8);
+    --shadow-surface-1: var(--shadow-1);
+    --shadow-surface-2: var(--shadow-2);
+    --shadow-surface-3: var(--shadow-3);
+    --shadow-surface-4: var(--shadow-4);
+    --shadow-surface-5: var(--shadow-5);
+    --shadow-surface-6: var(--shadow-6);
+    --shadow-surface-7: var(--shadow-7);
+    --shadow-surface-8: var(--shadow-8);
   }
 }
 
@@ -436,11 +495,46 @@
   }
   .meeting-route-drawer {
     --drawer-inset: 12px;
-    --drawer-width: min(calc(100vw - 24px), 500px);
+    --drawer-width: min(calc(100vw - 24px), 450px);
     --drawer-height: calc(100dvh - 24px);
     --drawer-max-height: calc(100dvh - 24px);
     --drawer-content-inset: var(--ui-space-24);
-    border-radius: 14px;
+    border-radius: 10px;
+  }
+  .meeting-drawer-resize-handle {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 10;
+    width: 16px;
+    cursor: ew-resize;
+    touch-action: none;
+    -webkit-app-region: no-drag;
+    outline: none;
+  }
+  .meeting-drawer-resize-handle::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 6px;
+    width: 4px;
+    height: 64px;
+    border-radius: 999px;
+    background: var(--primary-40);
+    opacity: 1;
+    transform: translateY(-50%);
+    transition: opacity 150ms ease, width 150ms ease;
+  }
+  .meeting-drawer-resize-handle:hover::after,
+  .meeting-drawer-resize-handle:focus-visible::after,
+  .meeting-drawer-resize-handle:active::after {
+    opacity: 1;
+    width: 5px;
+  }
+  .meeting-page-surface {
+    background-color: var(--elevation-1);
+    background-image: linear-gradient(var(--deslop-primary-4), var(--deslop-primary-4));
   }
   .drawer-elevation-surface {
     background: var(--elevation-2) !important;
@@ -467,18 +561,27 @@
     background: var(--elevation-1);
     pointer-events: none;
   }
-  /* Every route drawer participates in the desktop layout like a right
-     sidebar. Shrinking this shared background wrapper re-centres the home
-     column inside the unobscured area instead of placing it under the drawer. */
+  /* Treat the route drawer like a right sidebar without animating layout.
+     Changing the wrapper width forced every meeting card to reflow on every
+     animation frame. Moving the fixed-width home column on the compositor
+     keeps card geometry stable while preserving the same visual centering. */
   @media (min-width: 1024px) {
     .route-drawer-background {
-      --route-drawer-reserved-width: 512px;
+      --route-drawer-reserved-width: 462px;
       width: 100%;
-      transition: width 450ms cubic-bezier(.22, 1, .36, 1);
-      will-change: width;
+      transition: none;
+      will-change: auto;
     }
-    .route-drawer-background[data-active] {
-      width: calc(100% - var(--route-drawer-reserved-width));
+    .route-drawer-background .home-screen__inner {
+      transition: transform 450ms cubic-bezier(.22, 1, .36, 1);
+      will-change: transform;
+    }
+    .route-drawer-background[data-active] .home-screen__inner {
+      transform: translate3d(
+        calc(var(--route-drawer-reserved-width) / -2),
+        0,
+        0
+      );
     }
     .route-drawer-background[data-active] .home-ask-dock {
       --home-ask-surface-width: calc(
@@ -500,16 +603,16 @@
   @media (max-width: 760px) {
     .meeting-route-drawer {
       --drawer-inset: 6px;
-      --drawer-width: min(calc(100vw - 12px), 500px);
+      --drawer-width: min(calc(100vw - 12px), 450px);
       --drawer-height: calc(100dvh - 12px);
       --drawer-max-height: calc(100dvh - 12px);
-      border-radius: 10px;
+      border-radius: 6px;
     }
   }
   @media (prefers-reduced-motion: reduce) {
     .memento-drawer-overlay,
     .memento-drawer-popup,
-    .route-drawer-background { transition-duration: 1ms; }
+    .route-drawer-background .home-screen__inner { transition-duration: 1ms; }
   }
 
   .memento-shell { background: var(--elevation-1); color: hsl(var(--foreground)); }
@@ -603,12 +706,11 @@
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    border: 1px solid var(--primary-10);
+    border: 1px solid var(--primary-5);
     border-radius: 24px;
-    background: var(--elevation-2);
+    background: var(--primary-5);
   }
-  .home-history-icon { display: flex; width: 40px; height: 40px; align-items: center; justify-content: center; border: 1px solid hsl(var(--border)); border-radius: 999px; background: var(--primary-5); color: hsl(var(--muted-foreground)); }
-  .home-history-emoji { display: block; font-family: system-ui, sans-serif; font-size: 16px; font-weight: 400; line-height: 1; }
+  .home-history__list .home-history-cell { padding-left: 16px; }
   .home-history-time { color: var(--deslop-primary-60); font-size: var(--ui-subtitle-font-size); font-variant-numeric: tabular-nums; line-height: var(--ui-subtitle-line-height); white-space: nowrap; }
 
   /* Message and summary copy use Body 16/21. Sender labels keep the
@@ -717,22 +819,28 @@
   .settings-screen__header {
     display: flex;
     align-items: center;
-    gap: 14px;
     margin-bottom: 24px;
   }
-  .settings-screen__back {
-    display: inline-flex;
-    width: 40px;
-    height: 40px;
-    flex: 0 0 auto;
-    align-items: center;
-    justify-content: center;
-    border: 1px solid var(--primary-10);
-    border-radius: 999px;
-    background: var(--elevation-2);
-    color: hsl(var(--foreground));
-  }
   .settings-screen__content {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 32px;
+  }
+  .settings-screen__group {
+    min-width: 0;
+    scroll-margin-top: 24px;
+  }
+  .settings-screen__section-title {
+    margin: 0 0 10px;
+    padding: 0 var(--ui-layout-content-inset);
+    color: var(--deslop-primary-60);
+    font-size: var(--ui-subtitle-font-size);
+    font-weight: var(--ui-subtitle-font-weight);
+    letter-spacing: var(--ui-subtitle-letter-spacing);
+    line-height: var(--ui-subtitle-line-height);
+  }
+  .settings-screen__section-content {
     display: flex;
     min-width: 0;
     flex-direction: column;
@@ -740,11 +848,89 @@
   }
   .settings-section {
     min-width: 0;
-    border: 1px solid var(--primary-10);
+    border: 1px solid var(--primary-5);
     border-radius: 24px;
-    background: var(--elevation-2);
+    background: var(--primary-5);
     padding: 20px;
     box-shadow: none;
+  }
+  .settings-section.settings-cell {
+    overflow: hidden;
+    padding: 0;
+  }
+  .settings-cell__row {
+    display: flex;
+    min-height: 50px;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: var(--ui-space-9) 16px var(--ui-space-9) 12px;
+  }
+  .settings-cell__avatar {
+    display: flex;
+    width: 40px;
+    height: 40px;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid hsl(var(--border));
+    border-radius: 999px;
+    background: var(--primary-5);
+    color: hsl(var(--muted-foreground));
+  }
+  .settings-cell__text {
+    display: flex;
+    min-width: 0;
+    flex: 1;
+    flex-direction: column;
+    font-family: var(--ui-font-interface);
+  }
+  .settings-cell__label {
+    color: var(--deslop-primary);
+    font-size: var(--ui-body-font-size);
+    font-weight: 500;
+    letter-spacing: var(--ui-body-letter-spacing);
+    line-height: var(--ui-body-line-height);
+  }
+  .settings-cell__caption {
+    margin-top: 2px;
+    color: var(--deslop-primary-60);
+    font-size: var(--ui-subtitle-font-size);
+    font-weight: var(--ui-subtitle-font-weight);
+    letter-spacing: var(--ui-subtitle-letter-spacing);
+    line-height: var(--ui-subtitle-line-height);
+  }
+  .settings-cell__select {
+    width: fit-content;
+    min-width: 0;
+    border-radius: 999px;
+    font-family: var(--ui-font-interface);
+  }
+  .settings-cell__device-select {
+    width: 100%;
+    max-width: none;
+  }
+  .settings-cell__control {
+    display: flex;
+    width: min(45%, 220px);
+    min-width: 0;
+    flex: 0 0 min(45%, 220px);
+    justify-content: flex-end;
+    margin-left: auto;
+  }
+  .settings-cell__control > * {
+    min-width: 0;
+  }
+  @media (max-width: 720px) {
+    .settings-cell__row { flex-wrap: wrap; }
+    .settings-cell__select { width: fit-content; min-width: 0; }
+    .settings-cell__control {
+      width: 100%;
+      max-width: 100%;
+      flex-basis: 100%;
+      padding-left: 56px;
+    }
+    .settings-cell__device-select { width: 100%; max-width: 100%; }
   }
   .settings-subsection {
     border: 1px solid var(--primary-10);
@@ -933,3 +1119,19 @@ input, textarea, button, [role='dialog'], [role='menu'], [role='listbox'] { font
 .mm-md .katex { font-size: 1.02em; color: inherit; word-break: normal; overflow-wrap: normal; }
 .mm-md .katex-display { margin: 8px 0; overflow-x: auto; overflow-y: hidden; }
 .mm-md .katex-display > .katex { text-align: left; }
+
+@theme inline {
+  @keyframes spinner-move {
+  to {
+    stroke-dashoffset: -100;
+    }
+  }
+  @keyframes spinner-dash {
+  0%, 100% {
+    stroke-dasharray: 15 85;
+    }
+  50% {
+    stroke-dasharray: 40 60;
+    }
+  }
+}

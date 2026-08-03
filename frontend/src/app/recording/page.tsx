@@ -21,6 +21,7 @@ export default function RecordingPage() {
   const { setIsMeetingActive } = useSidebar()
   const { transcripts, meetingTitle, currentMeetingId } = useTranscripts()
   const [isRecording, setIsRecording] = useState(recordingState.isRecording)
+  const [transcriptScrollEdges, setTranscriptScrollEdges] = useState({ start: false, end: false })
 
   const { setIsRecordingDisabled } = useRecordingStateSync(
     isRecording,
@@ -70,10 +71,16 @@ export default function RecordingPage() {
   return (
     <RecordingDrawerShell locked={locked}>
       <div className="flex h-full flex-col bg-[var(--elevation-2)]">
-        <header className="shrink-0 border-b border-border px-[var(--drawer-content-inset)] py-4">
+        <header className="relative shrink-0 px-[var(--drawer-content-inset)] py-4">
           <h1 className="memento-screen-title truncate text-foreground">
             {displayMeetingTitle}
           </h1>
+          <div
+            aria-hidden="true"
+            className={`absolute inset-x-0 bottom-0 h-px bg-[var(--primary-10)] transition-opacity duration-150 ${
+              transcriptScrollEdges.start ? "opacity-100" : "opacity-0"
+            }`}
+          />
         </header>
 
         <main className="min-h-0 flex-1 overflow-hidden">
@@ -91,12 +98,19 @@ export default function RecordingPage() {
               enableStreaming={recordingState.isRecording}
               showConfidence
               viewportClassName="px-[var(--drawer-content-inset)]"
+              onScrollEdgesChange={setTranscriptScrollEdges}
             />
           )}
         </main>
 
         {(recordingState.isRecording || isFinalizing) && (
-          <footer className="shrink-0 border-t border-border px-[var(--drawer-content-inset)] py-4">
+          <footer className="relative shrink-0 px-[var(--drawer-content-inset)] py-4">
+            <div
+              aria-hidden="true"
+              className={`absolute inset-x-0 top-0 h-px bg-[var(--primary-10)] transition-opacity duration-150 ${
+                transcriptScrollEdges.start || transcriptScrollEdges.end ? "opacity-100" : "opacity-0"
+              }`}
+            />
             <RecordOverlay
               title={displayMeetingTitle}
               meetingId={currentMeetingId}

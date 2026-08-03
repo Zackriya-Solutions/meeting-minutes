@@ -6,7 +6,7 @@ import PageContent from "./page-content";
 import { useSearchParams } from "next/navigation";
 import Analytics from "@/lib/analytics";
 import { invoke } from "@tauri-apps/api/core";
-import { LoaderIcon } from '@/components/deslop-icons';
+import { FluidSpinner } from '@/components/ui/fluid-spinner';
 import { usePaginatedTranscripts } from "@/hooks/usePaginatedTranscripts";
 import { useMeetingSpeakers } from "@/hooks/useMeetingSpeakers";
 import { useLanguage, useT } from "@/lib/i18n";
@@ -53,7 +53,7 @@ function UpcomingMeetingPreview() {
     : '';
 
   return (
-    <div className="flex h-full flex-col bg-[var(--elevation-2)]">
+    <div className="meeting-page-surface flex h-full flex-col">
       <div className="flex items-center gap-3 border-b border-border px-[var(--drawer-content-inset)] py-4">
         <div className="min-w-0 flex-1">
           <h1 className="memento-screen-title truncate text-foreground">{title}</h1>
@@ -116,7 +116,14 @@ function MeetingDetailsContent() {
   // Diarized speaker identities for this meeting. Kept here (alongside the
   // transcript pagination hook) so the `diarization-complete` listener can
   // refresh both speakers and transcripts for the currently open meeting.
-  const { speakers, speakersById, refetchSpeakers, renameSpeaker } = useMeetingSpeakers({
+  const {
+    speakers,
+    speakersById,
+    selfSpeakerIds,
+    refetchSpeakers,
+    renameSpeaker,
+    setSelfSpeaker,
+  } = useMeetingSpeakers({
     meetingId: meetingId || null,
     onDiarized: refetch,
   });
@@ -155,6 +162,24 @@ function MeetingDetailsContent() {
       return next;
     });
   }, [renameSpeaker]);
+
+  const handleSetSelfSpeaker = useCallback(async (speakerId: number, isSelf: boolean) => {
+    await setSelfSpeaker(speakerId, isSelf);
+    // Owner identity changes the labels supplied to future summaries just like a rename.
+    setMeetingSummary((previous) => {
+      if (!previous) return previous;
+      const next = {
+        ...(previous as any),
+        summary_freshness: {
+          ...((previous as any).summary_freshness || {}),
+          speaker_attribution_status: 'stale',
+          speaker_attribution_stale: true,
+        },
+      } as any;
+      meetingSummaryRef.current = next;
+      return next;
+    });
+  }, [setSelfSpeaker]);
 
   // Sync meeting metadata from pagination hook to meeting details state
   useEffect(() => {
@@ -368,7 +393,7 @@ function MeetingDetailsContent() {
   // Show loading spinner while initial data loads
   if ((isLoading || isLoadingTranscripts) || !meetingDetails) {
     return <div className="flex h-full items-center justify-center">
-      <LoaderIcon className="animate-spin size-6 " />
+      <FluidSpinner className="size-6 text-[var(--primary-50)]" />
     </div>;
   }
 
@@ -401,8 +426,11 @@ function MeetingDetailsContent() {
     seekToSeconds={seekToSeconds}
     // Speaker diarization props
     speakersById={speakersById}
+    speakers={speakers}
+    selfSpeakerIds={selfSpeakerIds}
     speakerCount={speakers.length}
     onRenameSpeaker={handleRenameSpeaker}
+    onSetSelfSpeaker={handleSetSelfSpeaker}
     onSpeakersDetected={handleSpeakersDetected}
   />;
 }
@@ -412,7 +440,7 @@ export default function MeetingDetails() {
     <MeetingDrawerShell>
       <Suspense fallback={
         <div className="flex h-full items-center justify-center">
-          <LoaderIcon className="animate-spin size-6" />
+          <FluidSpinner className="size-6 text-[var(--primary-50)]" />
         </div>
       }>
         <MeetingDetailsRoute />

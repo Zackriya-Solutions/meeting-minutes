@@ -30,8 +30,10 @@ interface TranscriptCardProps {
   markedMoments?: number[];
   onSeekToMoment?: (seconds: number) => void;
   speakersById?: Map<number, string> | null;
+  selfSpeakerIds?: ReadonlySet<number> | null;
   speakerCount?: number;
   onRenameSpeaker?: (speakerId: number, displayName: string) => Promise<void> | void;
+  onSetSelfSpeaker?: (speakerId: number, isSelf: boolean) => Promise<void> | void;
   onSpeakersDetected?: () => Promise<void> | void;
   transcriptViewportClassName?: string;
 }
@@ -53,8 +55,10 @@ export function TranscriptCard({
   markedMoments = [],
   onSeekToMoment,
   speakersById = null,
+  selfSpeakerIds = null,
   speakerCount = 0,
   onRenameSpeaker,
+  onSetSelfSpeaker,
   onSpeakersDetected,
   transcriptViewportClassName,
 }: TranscriptCardProps) {
@@ -85,8 +89,10 @@ export function TranscriptCard({
         markedMoments={markedMoments}
         onSeekToMoment={onSeekToMoment}
         speakersById={speakersById}
+        selfSpeakerIds={selfSpeakerIds}
         speakerCount={speakerCount}
         onRenameSpeaker={onRenameSpeaker}
+        onSetSelfSpeaker={onSetSelfSpeaker}
         onSpeakersDetected={onSpeakersDetected}
         showToolbar={false}
         showContextField={false}

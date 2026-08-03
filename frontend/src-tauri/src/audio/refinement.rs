@@ -504,8 +504,7 @@ async fn turn_aligned_retranscribe<R: Runtime>(
         anyhow::bail!("turn-aligned transcription produced no text");
     }
     // Rejoin sentences that phantom boundary micro-spans split across rows.
-    let transcripts =
-        rejoin_sentence_fragments(transcripts, &plan.turns, FRAGMENT_JOIN_MAX_GAP_MS);
+    let transcripts = rejoin_sentence_fragments(transcripts, &plan.turns, FRAGMENT_JOIN_MAX_GAP_MS);
 
     // 4) Replace the meeting's rows atomically.
     let segments = crate::audio::common::create_transcript_segments(&transcripts);
@@ -1053,7 +1052,11 @@ mod tests {
             ("Не, я думаю,".to_string(), 0.0, 1_000.0),
             ("что мы путаем статусы. Вот".to_string(), 1_500.0, 4_000.0),
             ("важно разделять".to_string(), 4_200.0, 5_000.0),
-            ("Прототип готов, NVP не готов.".to_string(), 5_500.0, 9_000.0),
+            (
+                "Прототип готов, NVP не готов.".to_string(),
+                5_500.0,
+                9_000.0,
+            ),
         ];
         let out = rejoin_sentence_fragments(rows, &[], FRAGMENT_JOIN_MAX_GAP_MS);
         let texts: Vec<&str> = out.iter().map(|r| r.0.as_str()).collect();
@@ -1106,7 +1109,11 @@ mod tests {
         // the phantom-micro-span shape this pass exists to repair.
         let rows = vec![
             ("Понять,".to_string(), 0.0, 1_500.0),
-            ("Нужно ли мне здесь ставить жёлтый?".to_string(), 2_000.0, 8_000.0),
+            (
+                "Нужно ли мне здесь ставить жёлтый?".to_string(),
+                2_000.0,
+                8_000.0,
+            ),
         ];
         let cross = vec![turn(0, 1_500, 4), turn(2_000, 8_000, 1)];
         let out = rejoin_sentence_fragments(rows, &cross, FRAGMENT_JOIN_MAX_GAP_MS);

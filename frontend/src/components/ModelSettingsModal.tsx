@@ -1,10 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
 import { useSidebar } from './Sidebar/SidebarProvider';
 import { invoke } from '@tauri-apps/api/core';
-import { Button } from '@/components/ui/button';
+import { Button } from '@/components/ui/fluid-button';
 import { useOllamaDownload } from '@/contexts/OllamaDownloadContext';
 import { BuiltInModelManager } from '@/components/BuiltInModelManager';
-import { Input } from '@/components/ui/input';
+import { Input } from '@/components/ui/fluid-input';
 import { Label } from '@/components/ui/label';
 import { useConfig } from '@/contexts/ConfigContext';
 import {
@@ -12,8 +12,7 @@ import {
   SelectContent,
   SelectItem,
   SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
+} from '@/components/ui/fluid-select';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Switch } from '@/components/ui/switch';
@@ -888,18 +887,16 @@ export function ModelSettingsModal({
                 }
               }}
             >
-              <SelectTrigger>
-                <SelectValue placeholder={t('Select provider')} />
-              </SelectTrigger>
+              <SelectTrigger placeholder={t('Select provider')} />
               <SelectContent className="max-h-64 overflow-y-auto">
-                <SelectItem value="builtin-ai">{t('Built-in AI (Offline, No API needed)')}</SelectItem>
-                <SelectItem value="claude">Claude</SelectItem>
-                <SelectItem value="custom-openai">{t('Custom Server (OpenAI)')}</SelectItem>
-                <SelectItem value="deepseek">DeepSeek</SelectItem>
-                <SelectItem value="groq">Groq</SelectItem>
-                <SelectItem value="ollama">Ollama</SelectItem>
-                <SelectItem value="openai">OpenAI</SelectItem>
-                <SelectItem value="openrouter">OpenRouter</SelectItem>
+                <SelectItem index={0} value="builtin-ai">{t('Built-in AI (Offline, No API needed)')}</SelectItem>
+                <SelectItem index={1} value="claude">Claude</SelectItem>
+                <SelectItem index={2} value="custom-openai">{t('Custom Server (OpenAI)')}</SelectItem>
+                <SelectItem index={3} value="deepseek">DeepSeek</SelectItem>
+                <SelectItem index={4} value="groq">Groq</SelectItem>
+                <SelectItem index={5} value="ollama">Ollama</SelectItem>
+                <SelectItem index={6} value="openai">OpenAI</SelectItem>
+                <SelectItem index={7} value="openrouter">OpenRouter</SelectItem>
               </SelectContent>
             </Select>
 

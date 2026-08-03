@@ -54,7 +54,6 @@ pub const DRAFT_TEXT_BUDGET: usize = 400;
 /// Change this one constant to move that line elsewhere.
 pub const SHARE_URL_LINE: &str = "https://t.me";
 
-
 /// Percent-encode per RFC 3986: everything outside the unreserved set becomes `%XX` for
 /// each UTF-8 byte. Deliberately not `form_urlencoded`, which writes a space as `+` —
 /// correct for HTML form bodies, but the `tg://` handler is not a form decoder and would

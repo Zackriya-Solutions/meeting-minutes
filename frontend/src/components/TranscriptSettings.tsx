@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useT } from '@/lib/i18n';
 import { GigaamModelManager } from './GigaamModelManager';
-import { Label } from './ui/label';
+import { SlidersHorizontal, Sparkles } from '@/components/deslop-icons';
 import { Switch } from './ui/switch';
 
 export interface TranscriptModelProps {
@@ -58,54 +58,12 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
 
   return (
     <div className="space-y-4 pb-6">
-      <div>
-        <Label className="mb-1 block text-sm font-medium text-muted-foreground">{t('Transcription engine')}</Label>
-        <p className="text-sm text-muted-foreground">{t('Meetings are transcribed on this device.')}</p>
-      </div>
-
-      <div className="grid gap-2">
-        <EngineOption
-          active
-          onClick={() => {}}
-          title={t('GigaAM v3 · on-device')}
-          subtitle={t('Sber · offline Russian speech recognition with punctuation. Private — audio never leaves your machine.')}
-        />
-      </div>
-
-      <GigaamModelManager />
+      <GigaamModelManager compact />
 
       <MicSensitivitySetting />
 
       <RefinementSetting />
     </div>
-  );
-}
-
-
-function EngineOption({ active, onClick, title, subtitle }: {
-  active: boolean;
-  onClick: () => void;
-  title: string;
-  subtitle: string;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`mm-press flex items-start gap-3 rounded-lg border p-4 text-left transition-colors ${
-        active
-          ? 'border-primary/40 bg-primary/10'
-          : 'border-border bg-card hover:border-border hover:bg-accent'
-      }`}
-    >
-      <span className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border ${active ? 'border-primary' : 'border-border'}`}>
-        {active && <span className="h-2 w-2 rounded-full bg-primary" />}
-      </span>
-      <span>
-        <span className="block text-sm font-medium text-foreground">{title}</span>
-        <span className="mt-0.5 block text-xs text-muted-foreground">{subtitle}</span>
-      </span>
-    </button>
   );
 }
 
@@ -140,13 +98,18 @@ function MicSensitivitySetting() {
   if (!loaded) return null;
 
   return (
-    <div className="flex items-start justify-between gap-4 border-t border-border pt-4">
-      <div>
-        <Label className="block text-sm font-medium text-muted-foreground">{t('Boost sensitivity for Bluetooth / quiet microphones')}</Label>
-        <p className="mt-0.5 text-xs text-muted-foreground">{t('Detects speech more aggressively for low-quality inputs like AirPods used as a mic (Bluetooth hands-free mode). Turn on if phrases are being skipped. Applies to the next recording.')}</p>
+    <section className="settings-section settings-cell">
+      <div className="settings-cell__row">
+        <span className="settings-cell__avatar" aria-hidden="true">
+          <SlidersHorizontal size={20} />
+        </span>
+        <div className="settings-cell__text">
+          <h3 className="settings-cell__label">{t('Boost sensitivity for Bluetooth / quiet microphones')}</h3>
+          <p className="settings-cell__caption">{t('Detects speech more aggressively for low-quality inputs like AirPods used as a mic (Bluetooth hands-free mode). Turn on if phrases are being skipped. Applies to the next recording.')}</p>
+        </div>
+        <Switch className="shrink-0" checked={enabled} onCheckedChange={toggle} />
       </div>
-      <Switch checked={enabled} onCheckedChange={toggle} />
-    </div>
+    </section>
   );
 }
 
@@ -181,12 +144,17 @@ function RefinementSetting() {
   if (!loaded) return null;
 
   return (
-    <div className="flex items-start justify-between gap-4 border-t border-border pt-4">
-      <div>
-        <Label className="block text-sm font-medium text-muted-foreground">{t('Polish transcript after the meeting')}</Label>
-        <p className="mt-0.5 text-xs text-muted-foreground">{t('When a recording ends, the meeting is re-transcribed from the saved audio with full context and split by speaker. The live transcript is replaced once the pass finishes (a few minutes).')}</p>
+    <section className="settings-section settings-cell">
+      <div className="settings-cell__row">
+        <span className="settings-cell__avatar" aria-hidden="true">
+          <Sparkles size={20} />
+        </span>
+        <div className="settings-cell__text">
+          <h3 className="settings-cell__label">{t('Polish transcript after the meeting')}</h3>
+          <p className="settings-cell__caption">{t('When a recording ends, the meeting is re-transcribed from the saved audio with full context and split by speaker. The live transcript is replaced once the pass finishes (a few minutes).')}</p>
+        </div>
+        <Switch className="shrink-0" checked={enabled} onCheckedChange={toggle} />
       </div>
-      <Switch checked={enabled} onCheckedChange={toggle} />
-    </div>
+    </section>
   );
 }

@@ -1,10 +1,14 @@
 "use client";
 
-import { Button } from '@/components/ui/button';
-import { ButtonGroup } from '@/components/ui/button-group';
-import { Copy, Save, Loader2, MessageSquare } from '@/components/deslop-icons';
+import { Button } from '@/components/ui/fluid-button';
+import { MaterialSymbol } from '@/vendor/deslop/primitives/material-symbols-react';
 import Analytics from '@/lib/analytics';
 import { useT } from '@/lib/i18n';
+
+type FluidIconProps = { size?: number; strokeWidth?: number; className?: string };
+const SaveIcon = ({ size = 16, className }: FluidIconProps) => <MaterialSymbol name="save" size={size} weight={400} className={className} />;
+const DiscussIcon = ({ size = 16, className }: FluidIconProps) => <MaterialSymbol name="chat" size={size} weight={400} className={className} />;
+const CopyIcon = ({ size = 16, className }: FluidIconProps) => <MaterialSymbol name="content_copy" size={size} weight={400} className={className} />;
 
 interface SummaryUpdaterButtonGroupProps {
   isSaving: boolean;
@@ -29,11 +33,13 @@ export function SummaryUpdaterButtonGroup({
 }: SummaryUpdaterButtonGroupProps) {
   const t = useT();
   return (
-    <ButtonGroup>
+    <div className="flex w-fit items-center gap-2">
       {/* Save button */}
       <Button
-        variant="outline"
-        size="sm"
+        variant="ghost"
+        size="md"
+        leadingIcon={SaveIcon}
+        loading={isSaving}
         className={`${isDirty ? 'bg-success/10' : ""}`}
         title={
           isSaving
@@ -48,44 +54,33 @@ export function SummaryUpdaterButtonGroup({
         }}
         disabled={isSaving || !isDirty}
       >
-        {isSaving ? (
-          <>
-            <Loader2 className="animate-spin" />
-            <span className="hidden lg:inline">{t('Saving...')}</span>
-          </>
-        ) : (
-          <>
-            <Save />
-            <span className="hidden lg:inline">{t('Save')}</span>
-          </>
-        )}
+        {isSaving ? t('Saving...') : t('Save')}
       </Button>
 
       <Button
-        variant="outline"
-        size="sm"
+        variant="ghost"
+        size="md"
+        leadingIcon={DiscussIcon}
         title={t('Discuss this meeting with AI')}
         onClick={onDiscuss}
         disabled={!hasSummary}
       >
-        <MessageSquare />
-        <span className="hidden lg:inline">{t('Discuss')}</span>
+        {t('Discuss')}
       </Button>
 
       {/* Copy button */}
       <Button
-        variant="outline"
-        size="sm"
+        variant="ghost"
+        size="md"
+        leadingIcon={CopyIcon}
         title={t('Copy Summary')}
         onClick={() => {
           Analytics.trackButtonClick('copy_summary', 'meeting_details');
           onCopy();
         }}
         disabled={!hasSummary}
-        className="cursor-pointer"
       >
-        <Copy />
-        <span className="hidden lg:inline">{t('Copy')}</span>
+        {t('Copy')}
       </Button>
 
       {/* Find button */}
@@ -105,6 +100,6 @@ export function SummaryUpdaterButtonGroup({
           <span className="hidden lg:inline">Найти</span>
         </Button>
       )} */}
-    </ButtonGroup>
+    </div>
   );
 }

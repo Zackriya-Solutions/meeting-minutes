@@ -214,7 +214,10 @@ function uniqueMarkdownList(items: string[]): string {
 }
 
 /** Return the explicitly identified speakers from the generated attendee section. */
-export function extractSummaryParticipants(markdown: string): string {
+export function extractSummaryParticipants(
+  markdown: string,
+  localizeLabel?: (label: string) => string,
+): string {
   if (!markdown.trim()) return '';
 
   const participants = markdownSections(markdown)
@@ -227,7 +230,11 @@ export function extractSummaryParticipants(markdown: string): string {
     })
     .flatMap((section) => sectionItems(section, 'participant'));
 
-  return uniqueMarkdownList(participants);
+  const localizedParticipants = localizeLabel
+    ? participants.map(localizeLabel)
+    : participants;
+
+  return uniqueMarkdownList(localizedParticipants);
 }
 
 /**
@@ -269,4 +276,19 @@ export function extractSummaryAgreements(markdown: string): string {
   }
 
   return uniqueMarkdownList(combined);
+}
+
+/** Return the generated assessment of whether the meeting stayed on schedule. */
+export function extractSummaryTiming(markdown: string): string {
+  if (!markdown.trim()) return '';
+
+  const timing = markdownSections(markdown).find(({ title }) => {
+    const normalized = normalizeSectionTitle(title);
+    return normalized === 'тайминг'
+      || normalized === 'timing'
+      || normalized === 'schedule'
+      || normalized === 'time management';
+  });
+
+  return timing?.body.trim() ?? '';
 }

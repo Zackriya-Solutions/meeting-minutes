@@ -15,6 +15,7 @@
                 "title": "Memento",
                 "width": 1100,
                 "height": 700,
+                "minWidth": 1068,
                 "resizable": true,
                 "fullscreen": false,
                 "decorations": true
@@ -66,6 +67,8 @@
                         "core:window:allow-set-theme",
                         "core:window:allow-set-background-color",
                         "core:window:allow-set-effects",
+                        "core:window:allow-set-min-size",
+                        "core:window:allow-set-size",
                         "core:window:allow-start-dragging",
                         "core:app:default",
                         "core:resources:default",

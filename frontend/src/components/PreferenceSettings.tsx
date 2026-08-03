@@ -2,7 +2,16 @@
 
 import { useEffect, useState, useRef } from "react"
 import { Switch } from "./ui/switch"
-import { FolderOpen } from '@/components/deslop-icons'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+} from "./ui/fluid-select"
+import {
+  createMaterialSymbol,
+  IconBell,
+} from '@/vendor/deslop/primitives/material-symbols-react'
 import { invoke } from "@tauri-apps/api/core"
 import Analytics from "@/lib/analytics"
 import AnalyticsConsentSwitch from "./AnalyticsConsentSwitch"
@@ -47,10 +56,12 @@ const AUTO_CAPTURE_MODE_OPTIONS: ReadonlyArray<{
   },
 ];
 
+const IconCall = createMaterialSymbol('call', 'IconCall');
+const IconVoice = createMaterialSymbol('record_voice_over', 'IconVoice');
+
 export function PreferenceSettings() {
   const {
     notificationSettings,
-    storageLocations,
     isLoadingPreferences,
     loadPreferences,
     updateNotificationSettings
@@ -61,18 +72,13 @@ export function PreferenceSettings() {
   const [notificationsEnabled, setNotificationsEnabled] = useState<boolean | null>(null);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [previousNotificationsEnabled, setPreviousNotificationsEnabled] = useState<boolean | null>(null);
-  const [capturePolicy, setCapturePolicy] = useState<{
-    unpromoted_retention_minutes: number;
-    saved_audio_retention_days?: number | null;
-    local_only: boolean;
-  } | null>(null);
+  const [isLocalOnly, setIsLocalOnly] = useState<boolean | null>(null);
   const [identityAutoAssign, setIdentityAutoAssign] = useState(false);
   const [telegramAutoShare, setTelegramAutoShare] = useState(false);
   const [backgroundCapture, setBackgroundCapture] = useState<{
     supported: boolean;
     capturing: boolean;
   } | null>(null);
-  const [isSavingLearningPolicy, setIsSavingLearningPolicy] = useState(false);
   const hasTrackedViewRef = useRef(false);
 
   // Lazy load preferences on mount (only loads if not already cached)
@@ -84,15 +90,11 @@ export function PreferenceSettings() {
 
   useEffect(() => {
     Promise.all([
-      invoke<{
-        unpromoted_retention_minutes: number;
-        saved_audio_retention_days?: number | null;
-        local_only: boolean;
-      }>('get_capture_retention_policy'),
+      invoke<{ local_only: boolean }>('get_capture_retention_policy'),
       invoke<Record<string, string>>('get_app_settings'),
       invoke<{ supported: boolean; capturing: boolean }>('get_background_capture_status'),
     ]).then(([policy, settings, capture]) => {
-      setCapturePolicy(policy);
+      setIsLocalOnly(policy.local_only);
       setIdentityAutoAssign(settings['identity.auto_assign_enabled'] === 'true');
       setTelegramAutoShare(settings[TELEGRAM_AUTO_SHARE_KEY] === 'true');
       setBackgroundCapture({ supported: capture.supported, capturing: capture.capturing });
@@ -182,31 +184,8 @@ export function PreferenceSettings() {
     handleUpdateNotificationSettings();
   }, [notificationsEnabled, notificationSettings, isInitialLoad, previousNotificationsEnabled, updateNotificationSettings])
 
-  const handleOpenFolder = async (folderType: 'database' | 'models' | 'recordings') => {
-    try {
-      switch (folderType) {
-        case 'database':
-          await invoke('open_database_folder');
-          break;
-        case 'models':
-          await invoke('open_models_folder');
-          break;
-        case 'recordings':
-          await invoke('open_recordings_folder');
-          break;
-      }
-
-      // Track storage folder access
-      await Analytics.track('storage_folder_opened', {
-        folder_type: folderType
-      });
-    } catch (error) {
-      console.error(`Failed to open ${folderType} folder:`, error);
-    }
-  };
-
   // Show loading only if we're actually loading and don't have cached data
-  if (isLoadingPreferences && !notificationSettings && !storageLocations) {
+  if (isLoadingPreferences && !notificationSettings) {
     return <div className="max-w-2xl mx-auto p-6">{t('Loading Preferences...')}</div>
   }
 
@@ -227,23 +206,6 @@ export function PreferenceSettings() {
       await Analytics.track('auto_capture_mode_changed', { mode });
     } catch (error) {
       console.error('Failed to update what happens when a call is detected:', error);
-    }
-  };
-
-  const saveLearningPolicy = async () => {
-    if (!capturePolicy) return;
-    setIsSavingLearningPolicy(true);
-    try {
-      await invoke('update_capture_retention_policy', {
-        input: {
-          unpromotedRetentionMinutes: capturePolicy.unpromoted_retention_minutes,
-          savedAudioRetentionDays: capturePolicy.saved_audio_retention_days ?? null,
-        },
-      });
-    } catch (error) {
-      console.error('Failed to save capture retention policy:', error);
-    } finally {
-      setIsSavingLearningPolicy(false);
     }
   };
 
@@ -276,11 +238,14 @@ export function PreferenceSettings() {
   return (
     <div className="space-y-6">
       {/* Уведомления Section */}
-      <div className="settings-section">
-        <div className="flex items-start justify-between gap-4">
-          <div className="min-w-0">
-            <h3 className="text-lg font-semibold text-[var(--fg1)] mb-2">{t('Notifications')}</h3>
-            <p className="text-sm text-[var(--fg2)]">{t('Enable or disable notifications of start and end of meeting')}</p>
+      <div className="settings-section settings-cell">
+        <div className="settings-cell__row">
+          <span className="settings-cell__avatar" aria-hidden="true">
+            <IconBell size={20} weight={400} />
+          </span>
+          <div className="settings-cell__text">
+            <h3 className="settings-cell__label">{t('Notifications')}</h3>
+            <p className="settings-cell__caption">{t('Enable or disable notifications of start and end of meeting')}</p>
           </div>
           <Switch className="shrink-0" checked={notificationsEnabledValue} onCheckedChange={setNotificationsEnabled} />
         </div>
@@ -289,61 +254,48 @@ export function PreferenceSettings() {
       {/* One choice instead of three toggles: detection, auto-listening and background
           capture only ever described four behaviours. Detection evidence stays in
           memory; only the normalized capture lifecycle is stored. */}
-      <div className="settings-section">
-        <h3 className="text-lg font-semibold text-[var(--fg1)] mb-2">{t('When a call is detected')}</h3>
-        <p className="text-sm text-[var(--fg2)]">
-          {t('Memento recognizes calls in Zoom, Teams, Telemost, SberJazz, Telegram, and your browser by watching locally which app is using the microphone. Process names, window titles, and URLs are never stored.')}
-        </p>
-
-        <div className="mt-4 space-y-2" role="radiogroup" aria-label={t('When a call is detected')}>
-          {AUTO_CAPTURE_MODE_OPTIONS.map(({ mode, label, description }) => {
-            const unsupported =
-              modeNeedsMicrophoneSignal(mode) && backgroundCapture?.supported === false;
-            const disabled = !notificationSettings || unsupported;
-            const selected = autoCaptureMode === mode;
-            return (
-              <button
-                key={mode}
-                type="button"
-                role="radio"
-                aria-checked={selected}
-                disabled={disabled}
-                onClick={() => void handleAutoCaptureModeChange(mode)}
-                className={`flex w-full items-start gap-3 rounded-md border p-3 text-left transition-colors ${
-                  selected
-                    ? 'border-[var(--gold)] bg-[var(--gold-soft)]'
-                    : 'border-[var(--border-subtle)] bg-[var(--bg-sheet)] hover:bg-[var(--bg-elevated)]'
-                } ${disabled ? 'cursor-not-allowed opacity-50' : ''}`}
-              >
-                <span
-                  aria-hidden="true"
-                  className={`mt-0.5 h-4 w-4 shrink-0 rounded-full border-2 ${
-                    selected
-                      ? 'border-[var(--gold)] bg-[var(--gold)]'
-                      : 'border-[var(--border-strong)]'
-                  }`}
-                />
-                <span className="min-w-0">
-                  <span className="block text-sm font-medium text-[var(--fg1)]">{t(label)}</span>
-                  <span className="mt-1 block text-xs text-[var(--fg3)]">{t(description)}</span>
-                  {unsupported && (
-                    <span className="mt-1 block text-xs text-[var(--fg3)]">
-                      {t('Available on macOS only: other systems have no microphone-session signal to detect the call.')}
-                    </span>
-                  )}
-                </span>
-              </button>
-            );
-          })}
+      <div className="settings-section settings-cell">
+        <div className="settings-cell__row">
+          <span className="settings-cell__avatar" aria-hidden="true">
+            <IconCall size={20} weight={400} />
+          </span>
+          <div className="settings-cell__text">
+            <h3 className="settings-cell__label">{t('When a call is detected')}</h3>
+            <p className="settings-cell__caption">
+              {backgroundCapture?.capturing
+                ? t('Recording a call in the background right now.')
+                : t('Choose how Memento responds when it detects a call')}
+            </p>
+          </div>
+          <div className="settings-cell__control">
+            <Select
+              value={autoCaptureMode ?? ''}
+              disabled={!notificationSettings}
+              onValueChange={(value) => void handleAutoCaptureModeChange(value as AutoCaptureMode)}
+            >
+              <SelectTrigger
+                className="settings-cell__select settings-cell__device-select"
+                placeholder={t('Choose an action')}
+              />
+              <SelectContent>
+                {AUTO_CAPTURE_MODE_OPTIONS.map(({ mode, label }, index) => (
+                  <SelectItem
+                    key={mode}
+                    index={index}
+                    value={mode}
+                    disabled={modeNeedsMicrophoneSignal(mode) && backgroundCapture?.supported === false}
+                  >
+                    {t(label)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
         </div>
-
-        {backgroundCapture?.capturing && (
-          <p className="mt-3 text-xs text-[var(--fg3)]">{t('Recording a call in the background right now.')}</p>
-        )}
       </div>
 
       {/* Hidden in local-only mode: handing a summary to Telegram takes it off this machine. */}
-      {!capturePolicy?.local_only && (
+      {!isLocalOnly && (
         <div className="settings-section">
           <div className="flex items-start justify-between gap-4 sm:gap-6">
             <div className="min-w-0">
@@ -361,120 +313,23 @@ export function PreferenceSettings() {
         </div>
       )}
 
-      <div className="settings-section">
-        <h3 className="text-lg font-semibold text-[var(--fg1)] mb-2">{t('Local learning and retention')}</h3>
-        <p className="text-sm text-[var(--fg2)]">
-          {t('Voice profiles, corrections, and capture evidence stay local. Predictions never become training examples without an explicit confirmation.')}
-        </p>
-        <div className="mt-4 flex items-start justify-between gap-6 border-t border-[var(--border-subtle)] pt-4">
-          <div>
-            <div className="text-sm font-medium text-[var(--fg1)]">{t('Automatic assignment for very high-confidence known voices')}</div>
-            <p className="mt-1 text-xs text-[var(--fg3)]">{t('Off by default. Voice floor and top-two margin still apply; uncertain voices remain Unknown.')}</p>
+      <div className="settings-section settings-cell">
+        <div className="settings-cell__row">
+          <span className="settings-cell__avatar" aria-hidden="true">
+            <IconVoice size={20} weight={400} />
+          </span>
+          <div className="settings-cell__text">
+            <h3 className="settings-cell__label">{t('Automatic assignment for very high-confidence known voices')}</h3>
+            <p className="settings-cell__caption">
+              {t('Voice profiles, corrections, and capture evidence stay local. Predictions never become training examples without an explicit confirmation.')}
+            </p>
           </div>
-          <Switch checked={identityAutoAssign} onCheckedChange={handleIdentityAutoAssign} />
-        </div>
-        {capturePolicy && (
-          <div className="mt-4 grid gap-3 border-t border-[var(--border-subtle)] pt-4 sm:grid-cols-2">
-            <label className="text-xs text-[var(--fg2)]">
-              {t('Unpromoted capture metadata, minutes')}
-              <input
-                type="number"
-                min={1}
-                max={1440}
-                value={capturePolicy.unpromoted_retention_minutes}
-                onChange={(event) => setCapturePolicy({ ...capturePolicy, unpromoted_retention_minutes: Number(event.target.value) })}
-                className="mt-1 w-full rounded-md border border-[var(--border-strong)] bg-[var(--bg-sheet)] px-3 py-2 text-sm"
-              />
-            </label>
-            <label className="text-xs text-[var(--fg2)]">
-              {t('Saved audio retention, days (blank keeps it)')}
-              <input
-                type="number"
-                min={1}
-                max={3650}
-                value={capturePolicy.saved_audio_retention_days ?? ''}
-                onChange={(event) => setCapturePolicy({ ...capturePolicy, saved_audio_retention_days: event.target.value ? Number(event.target.value) : null })}
-                className="mt-1 w-full rounded-md border border-[var(--border-strong)] bg-[var(--bg-sheet)] px-3 py-2 text-sm"
-              />
-            </label>
-            <div className="sm:col-span-2 flex items-center justify-between gap-3">
-              <span className="text-xs text-[var(--fg3)]">{t('Local-only is enforced for capture evidence and learning profiles.')}</span>
-              <button
-                type="button"
-                disabled={isSavingLearningPolicy}
-                onClick={() => void saveLearningPolicy()}
-                className="rounded-md bg-[var(--gold)] px-3 py-2 text-xs text-[var(--fg-inverse)] disabled:opacity-50"
-              >
-                {isSavingLearningPolicy ? t('Saving...') : t('Save policy')}
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Хранение данных Section */}
-      <div className="settings-section">
-        <h3 className="text-lg font-semibold text-[var(--fg1)] mb-4">{t('Data Storage Locations')}</h3>
-        <p className="text-sm text-[var(--fg2)] mb-6">
-          {t('View and access where Memento stores your data')}
-        </p>
-
-        <div className="space-y-4">
-          {/* Database Location */}
-          {/* <div className="p-4 border rounded-lg bg-[var(--bg-sheet)]">
-            <div className="font-medium mb-2">База данных</div>
-            <div className="text-sm text-[var(--fg2)] mb-3 break-all font-mono text-xs">
-              {storageLocations?.database || 'Loading...'}
-            </div>
-            <button
-              onClick={() => handleOpenFolder('database')}
-              className="flex items-center gap-2 px-3 py-2 text-sm border border-[var(--border-strong)] rounded-md hover:bg-[var(--bg-elevated)] transition-colors"
-            >
-              <FolderOpen className="w-4 h-4" />
-              Open Folder
-            </button>
-          </div> */}
-
-          {/* Models Location */}
-          {/* <div className="p-4 border rounded-lg bg-[var(--bg-sheet)]">
-            <div className="font-medium mb-2">Модели Whisper</div>
-            <div className="text-sm text-[var(--fg2)] mb-3 break-all font-mono text-xs">
-              {storageLocations?.models || 'Loading...'}
-            </div>
-            <button
-              onClick={() => handleOpenFolder('models')}
-              className="flex items-center gap-2 px-3 py-2 text-sm border border-[var(--border-strong)] rounded-md hover:bg-[var(--bg-elevated)] transition-colors"
-            >
-              <FolderOpen className="w-4 h-4" />
-              Open Folder
-            </button>
-          </div> */}
-
-          {/* Recordings Location */}
-          <div className="p-4 border rounded-lg bg-[var(--bg-sheet)]">
-            <div className="font-medium mb-2">{t('Meeting Recordings')}</div>
-            <div className="text-sm text-[var(--fg2)] mb-3 break-all font-mono text-xs">
-              {storageLocations?.recordings || t('Loading...')}
-            </div>
-            <button
-              onClick={() => handleOpenFolder('recordings')}
-              className="flex items-center gap-2 px-3 py-2 text-sm border border-[var(--border-strong)] rounded-md hover:bg-[var(--bg-elevated)] transition-colors"
-            >
-              <FolderOpen className="w-4 h-4" />
-              {t('Open Folder')}
-            </button>
-          </div>
-        </div>
-
-        <div className="mt-4 p-3 bg-[var(--gold-soft)] rounded-md">
-          <p className="text-xs text-[var(--gold)]">
-            <strong>{t('Note:')}</strong> {t('Database and models are stored together in your application data directory for unified management.')}
-          </p>
+          <Switch className="shrink-0" checked={identityAutoAssign} onCheckedChange={handleIdentityAutoAssign} />
         </div>
       </div>
 
       {/* Analytics Section */}
-      <div className="settings-section">
+      <div className="settings-section settings-cell">
         <AnalyticsConsentSwitch />
       </div>
     </div>

@@ -16,6 +16,7 @@ import {
     MessageScrollerItem,
     MessageScrollerProvider,
     MessageScrollerViewport,
+    useMessageScrollerScrollable,
 } from "./ui/message-scroller";
 import { cn } from "@/lib/utils";
 import { avatarGradients } from "@/vendor/deslop/primitives/tokens.js";
@@ -39,6 +40,8 @@ export interface VirtualizedTranscriptViewProps {
     disableAutoScroll?: boolean;
     /** Optional spacing override for the scroll viewport. */
     viewportClassName?: string;
+    /** Reports whether content continues above or below the visible viewport. */
+    onScrollEdgesChange?: (edges: { start: boolean; end: boolean }) => void;
 
     // Pagination props (infinite scroll)
     hasMore?: boolean;
@@ -53,8 +56,12 @@ export interface VirtualizedTranscriptViewProps {
 
     /** Diarized speaker names (id → display_name); takes precedence over channel tags in labels. */
     speakersById?: Map<number, string> | null;
+    /** Diarized profile ids explicitly confirmed as the local user. */
+    selfSpeakerIds?: ReadonlySet<number> | null;
     /** When provided, diarized speaker labels become clickable to rename them. */
     onRenameSpeaker?: (speakerId: number, displayName: string) => Promise<void> | void;
+    /** Mark or unmark a diarized voice profile as the local user. */
+    onSetSelfSpeaker?: (speakerId: number, isSelf: boolean) => Promise<void> | void;
 
     /** Play the saved recording from a transcript-relative timestamp. */
     onPlayTimestamp?: (seconds: number) => void;
@@ -62,6 +69,20 @@ export interface VirtualizedTranscriptViewProps {
     playbackTime?: number | null;
     /** Persist a reviewed correction while retaining the original ASR text. */
     onCorrectTranscript?: (transcriptId: string, correctedText: string) => Promise<void> | void;
+}
+
+function ScrollEdgesObserver({
+    onChange,
+}: {
+    onChange?: (edges: { start: boolean; end: boolean }) => void;
+}) {
+    const edges = useMessageScrollerScrollable();
+
+    useEffect(() => {
+        onChange?.({ start: edges.start, end: edges.end });
+    }, [edges.end, edges.start, onChange]);
+
+    return null;
 }
 
 function isPlaybackSegmentActive(
@@ -183,7 +204,7 @@ const TranscriptSegment = memo(function TranscriptSegment({
                     )}
                 >
                     <BubbleContent className="whitespace-pre-wrap px-[15px] py-[11px] text-base leading-relaxed">
-                        <div className={cn('flex flex-col gap-1', isOwn ? 'items-end' : 'items-start')}>
+                        <div className="flex flex-col items-start gap-1 text-left">
                             {speakerLabel && (
                                 speakerRenamable && speakerId != null && onSpeakerClick ? (
                                     <button
@@ -216,6 +237,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
     showConfidence = true,
     disableAutoScroll = false,
     viewportClassName,
+    onScrollEdgesChange,
     hasMore = false,
     isLoadingMore = false,
     totalCount = 0,
@@ -223,7 +245,9 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
     onLoadMore,
     scrollToTimestamp = null,
     speakersById = null,
+    selfSpeakerIds = null,
     onRenameSpeaker,
+    onSetSelfSpeaker,
     onPlayTimestamp,
     playbackTime = null,
     onCorrectTranscript,
@@ -232,14 +256,18 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
     // Segment id to briefly highlight after a jump-to-timestamp.
     const [highlightedId, setHighlightedId] = useState<string | null>(null);
     // Diarized speaker being renamed (null when the rename dialog is closed).
-    const [renamingSpeaker, setRenamingSpeaker] = useState<{ id: number; name: string } | null>(null);
+    const [renamingSpeaker, setRenamingSpeaker] = useState<{ id: number; name: string; isSelf: boolean } | null>(null);
     const [editingSegment, setEditingSegment] = useState<{ id: string; text: string } | null>(null);
     const [isSavingCorrection, setIsSavingCorrection] = useState(false);
 
     // Stable so memoized segments don't re-render on every parent render.
     const handleSpeakerClick = useCallback((speakerId: number) => {
-        setRenamingSpeaker({ id: speakerId, name: speakersById?.get(speakerId) ?? '' });
-    }, [speakersById]);
+        setRenamingSpeaker({
+            id: speakerId,
+            name: speakersById?.get(speakerId) ?? '',
+            isSelf: selfSpeakerIds?.has(speakerId) ?? false,
+        });
+    }, [selfSpeakerIds, speakersById]);
     // Ensures a given jump target is consumed only once (not re-triggered on paginate).
     const seekConsumedRef = useRef<number | null>(null);
     // Ref for infinite scroll trigger element
@@ -318,6 +346,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
             defaultScrollPosition={isRecording ? 'end' : 'start'}
             scrollPreviousItemPeek={48}
         >
+        <ScrollEdgesObserver onChange={onScrollEdgesChange} />
         <MessageScroller className="h-full">
         <MessageScrollerViewport className={cn("px-4 py-2", viewportClassName)}>
         <MessageScrollerContent className="gap-0">
@@ -335,13 +364,11 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                     <div className="space-y-1" role="list">
                         {segments.map((segment) => {
                             const isStreaming = streamingSegmentId === segment.id;
-                            // Live chunks from older/in-flight recorder sessions can arrive
-                            // before the backend has attached the mic/system channel tag.
-                            // In an active recording the safe UI fallback is the local mic:
-                            // otherwise the user's own speech is rendered as an incoming
-                            // anonymous speaker message until the recording is finalized.
-                            const isOwnSegment = segment.speaker === 'mic'
-                                || (isRecording && segment.speaker == null);
+                            // Audio source is not identity: an offline meeting can contain
+                            // several people on the same microphone. Only a diarized voice
+                            // profile explicitly confirmed by the user receives "You" styling.
+                            const isOwnSegment = segment.speaker_id != null
+                                && (selfSpeakerIds?.has(segment.speaker_id) ?? false);
                             const speakerLabel = isOwnSegment
                                 ? t('You')
                                 : localizeSpeakerLabel(resolveSpeakerLabel(segment, speakersById), t);
@@ -413,8 +440,10 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                 <SpeakerRenameDialog
                     open={true}
                     currentName={renamingSpeaker.name}
+                    currentIsSelf={renamingSpeaker.isSelf}
                     onOpenChange={(o) => { if (!o) setRenamingSpeaker(null); }}
                     onRename={(name) => onRenameSpeaker(renamingSpeaker.id, name)}
+                    onSelfChange={(isSelf) => onSetSelfSpeaker?.(renamingSpeaker.id, isSelf)}
                 />
             )}
             <Dialog open={editingSegment != null} onOpenChange={(open) => { if (!open && !isSavingCorrection) setEditingSegment(null); }}>

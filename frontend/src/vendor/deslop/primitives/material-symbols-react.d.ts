@@ -31,6 +31,7 @@ export const materialSymbolNames: readonly [
   "book_2",
   "business_center",
   "calendar_month",
+  "calendar_today",
   "call",
   "cancel",
   "chat",
@@ -122,7 +123,8 @@ export const materialSymbolNames: readonly [
   "workspace_premium"
 ];
 
-export type MaterialSymbolName = (typeof materialSymbolNames)[number];
+export type ApprovedMaterialSymbolName = (typeof materialSymbolNames)[number];
+export type MaterialSymbolName = ApprovedMaterialSymbolName | (string & {});
 export type MaterialSymbolBaseProps = Omit<HTMLAttributes<HTMLSpanElement>, "children"> & {
   size?: number | string;
   fill?: boolean | 0 | 1;
@@ -147,7 +149,7 @@ export function createMaterialSymbol(
 ): MaterialSymbolComponent;
 
 export const materialSymbolComponents: Readonly<
-  Record<MaterialSymbolName, MaterialSymbolComponent>
+  Record<ApprovedMaterialSymbolName, MaterialSymbolComponent>
 >;
 
 export const iconNames: typeof materialSymbolNames;
@@ -157,7 +159,6 @@ export type IconProps = MaterialSymbolProps;
 export type IconComponent = MaterialSymbolComponent;
 export const iconComponents: typeof materialSymbolComponents;
 export function getIconComponent(name: MaterialSymbolName): MaterialSymbolComponent;
-export function getIconComponent(name: string): MaterialSymbolComponent | undefined;
 
 export const IconArrowBackIos: MaterialSymbolComponent;
 export const IconArrowBackIosNew: MaterialSymbolComponent;
@@ -166,6 +167,7 @@ export const IconArrowLeft: MaterialSymbolComponent;
 export const IconArrowRight: MaterialSymbolComponent;
 export const IconArrowUp: MaterialSymbolComponent;
 export const IconBell: MaterialSymbolComponent;
+export const IconCalendarToday: MaterialSymbolComponent;
 export const IconChart: MaterialSymbolComponent;
 export const IconCheck: MaterialSymbolComponent;
 export const IconChevronDown: MaterialSymbolComponent;

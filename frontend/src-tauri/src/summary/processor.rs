@@ -283,6 +283,7 @@ pub fn clean_llm_markdown_output(markdown: &str) -> String {
 fn russian_summary_label(label: &str) -> Option<&'static str> {
     Some(match label {
         "Summary" => "Краткое содержание",
+        "Timing" => "Тайминг",
         "Agreements" => "Договорённости",
         "Key Decisions" => "Ключевые решения",
         "Action Items" => "Задачи",
@@ -484,7 +485,9 @@ fn validate_generated_list(
         return if allow_empty {
             Vec::new()
         } else {
-            vec![format!("The '{label}' section must contain at least one bullet.")]
+            vec![format!(
+                "The '{label}' section must contain at least one bullet."
+            )]
         };
     }
 
@@ -525,12 +528,20 @@ fn compact_standard_meeting_violations(markdown: &str) -> Vec<String> {
             None,
             None,
         )),
-        None => violations.push("The report is missing the mandatory 'Attendees' section.".to_string()),
+        None => {
+            violations.push("The report is missing the mandatory 'Attendees' section.".to_string())
+        }
     }
 
     match generated_section(
         &sections,
-        &["summary", "overview", "краткое содержание", "о чем встреча", "саммари"],
+        &[
+            "summary",
+            "overview",
+            "краткое содержание",
+            "о чем встреча",
+            "саммари",
+        ],
     ) {
         Some(section) => violations.extend(validate_generated_list(
             section,
@@ -539,13 +550,13 @@ fn compact_standard_meeting_violations(markdown: &str) -> Vec<String> {
             Some(3),
             Some(150),
         )),
-        None => violations.push("The report is missing the mandatory 'Summary' section.".to_string()),
+        None => {
+            violations.push("The report is missing the mandatory 'Summary' section.".to_string())
+        }
     }
 
-    match generated_section(
-        &sections,
-        &["agreements", "commitments", "договоренност"],
-    ) {
+    match generated_section(&sections, &["agreements", "commitments", "договоренност"])
+    {
         Some(section) => violations.extend(validate_generated_list(
             section,
             "Agreements",
@@ -553,7 +564,9 @@ fn compact_standard_meeting_violations(markdown: &str) -> Vec<String> {
             Some(3),
             Some(150),
         )),
-        None => violations.push("The report is missing the mandatory 'Agreements' section.".to_string()),
+        None => {
+            violations.push("The report is missing the mandatory 'Agreements' section.".to_string())
+        }
     }
 
     violations
@@ -924,10 +937,8 @@ pub async fn generate_meeting_summary(
                 cancellation_token,
             )
             .await?;
-            final_markdown = localize_generated_markdown(
-                &clean_llm_markdown_output(&repaired),
-                output_language,
-            );
+            final_markdown =
+                localize_generated_markdown(&clean_llm_markdown_output(&repaired), output_language);
         }
 
         let violations = compact_standard_meeting_violations(&final_markdown);

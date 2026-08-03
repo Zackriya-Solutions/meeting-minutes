@@ -77,14 +77,6 @@
   font-display: swap;
 }
 
-@font-face {
-  font-family: "Material Symbols Rounded";
-  font-style: normal;
-  font-weight: 100 700;
-  font-display: block;
-  src: url("./fonts/MaterialSymbolsRounded-Variable.woff2") format("woff2");
-}
-
 :root {
   --ui-font-interface: "SB Sans Interface";
   --ui-font-display: "SB Sans Display";

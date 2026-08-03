@@ -21,6 +21,16 @@
   --cell-separator-height: 0px;
 }
 
+.root[data-separator='true'] .body,
+.root[data-separator='true'] .end {
+  --cell-separator-height: 0.33px;
+}
+
+.root[data-separator='false'] .body,
+.root[data-separator='false'] .end {
+  --cell-separator-height: 0px;
+}
+
 .root:focus {
   outline: none;
 }

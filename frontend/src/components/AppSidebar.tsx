@@ -8,15 +8,15 @@ import {
   Sidebar,
   SidebarFooter,
 } from '@/components/ui/sidebar';
-import { RecordingStatus, useRecordingState } from '@/contexts/RecordingStateContext';
 import { useT } from '@/lib/i18n';
-import { isRecordingNavigationLocked } from '@/lib/recordingNavigation';
+import { useImportDialog } from '@/contexts/ImportDialogContext';
 import { fluidFontWeight, spring } from '@/lib/fluid/springs';
 import {
+  IconCalendarToday,
   IconConstruction,
   IconMoon,
-  IconPlus,
   IconSun,
+  MaterialSymbol,
 } from '@/vendor/deslop/primitives/material-symbols-react';
 
 type FluidSidebarItem = {
@@ -237,21 +237,9 @@ export function AppSidebar() {
   const pathname = usePathname();
   const router = useRouter();
   const { setTheme } = useTheme();
-  const { isRecording, status } = useRecordingState();
+  const { openImportDialog } = useImportDialog();
   const t = useT();
-  const navigationLocked = isRecordingNavigationLocked(isRecording, status);
-  const canStartMeeting = !navigationLocked && (
-    status === RecordingStatus.IDLE ||
-    status === RecordingStatus.COMPLETED ||
-    status === RecordingStatus.ERROR
-  );
-
-  const startNewMeeting = () => {
-    if (!canStartMeeting) return;
-
-    sessionStorage.setItem('autoStartRecording', 'true');
-    router.push('/recording');
-  };
+  const meetingsActive = pathname === '/' || pathname.startsWith('/meeting-details');
 
   const toggleTheme = () => {
     const isDark = document.documentElement.classList.contains('dark');
@@ -260,13 +248,18 @@ export function AppSidebar() {
 
   return (
     <Sidebar side="left" variant="sidebar" collapsible="none" className="memento-settings-sidebar h-svh border-0 bg-transparent">
-      <div className="pointer-events-none flex px-5 pt-8" aria-label="Memento">
+      <button
+        type="button"
+        className="no-drag flex cursor-pointer appearance-none border-0 bg-transparent px-5 pb-0 pt-[44px]"
+        aria-label={t('Meetings')}
+        onClick={() => router.push('/')}
+      >
         <span
           aria-hidden="true"
-          className="aspect-[341/167] w-24 bg-[var(--deslop-primary-60)]"
+          className="aspect-[10/3] w-[115.2px] bg-[var(--deslop-primary-40)]"
           style={{
-            WebkitMaskImage: "url('/mementologo.svg')",
-            maskImage: "url('/mementologo.svg')",
+            WebkitMaskImage: "url('/memento-logo-handwritten.svg')",
+            maskImage: "url('/memento-logo-handwritten.svg')",
             WebkitMaskPosition: 'center',
             maskPosition: 'center',
             WebkitMaskRepeat: 'no-repeat',
@@ -275,25 +268,30 @@ export function AppSidebar() {
             maskSize: 'contain',
           }}
         />
-      </div>
+      </button>
       <div className="flex-1" />
       <SidebarFooter className="mt-auto border-0 p-3">
         <FluidSidebarGroup
           items={[
             {
-              id: 'new-meeting',
-              active: pathname === '/recording',
-              disabled: !canStartMeeting,
-              icon: <IconPlus size={20} weight={600} />,
-              label: t('New meeting'),
-              onClick: startNewMeeting,
+              id: 'meetings',
+              active: meetingsActive,
+              icon: <IconCalendarToday size={20} weight={400} />,
+              label: t('Meetings'),
+              onClick: () => router.push('/'),
+            },
+            {
+              id: 'upload-meeting',
+              icon: <MaterialSymbol name="upload" size={20} weight={400} />,
+              label: t('Upload meeting'),
+              onClick: () => openImportDialog(),
             },
             {
               id: 'theme',
               icon: (
                 <>
-                  <span aria-hidden="true" className="inline-flex dark:hidden"><IconMoon size={20} weight={600} /></span>
-                  <span aria-hidden="true" className="hidden dark:inline-flex"><IconSun size={20} weight={600} /></span>
+                  <span aria-hidden="true" className="inline-flex dark:hidden"><IconSun size={20} weight={400} /></span>
+                  <span aria-hidden="true" className="hidden dark:inline-flex"><IconMoon size={20} weight={400} /></span>
                 </>
               ),
               label: t('Switch theme'),
@@ -302,7 +300,7 @@ export function AppSidebar() {
             {
               id: 'settings',
               active: pathname === '/settings',
-              icon: <IconConstruction className="deslop-material-symbol--construction" size={20} weight={600} />,
+              icon: <IconConstruction className="deslop-material-symbol--construction" size={20} weight={400} />,
               label: t('Settings'),
               onClick: () => router.push('/settings'),
             },

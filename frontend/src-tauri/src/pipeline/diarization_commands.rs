@@ -882,6 +882,23 @@ pub async fn rename_speaker(
     Ok(())
 }
 
+/// Persist whether a diarized voice profile belongs to the local user.
+/// The repository clears any previous owner assignment in the same transaction.
+#[tauri::command]
+pub async fn set_self_speaker(
+    state: tauri::State<'_, AppState>,
+    speaker_id: i64,
+    is_self: bool,
+) -> Result<(), String> {
+    let affected = SpeakersRepository::set_self(state.db_manager.pool(), speaker_id, is_self)
+        .await
+        .map_err(|e| format!("Failed to update speaker identity: {e}"))?;
+    if affected == 0 {
+        return Err(format!("Speaker {speaker_id} not found"));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -110,7 +110,15 @@ ${componentMap}
 
 export const iconNames = materialSymbolNames;
 export const iconComponents = materialSymbolComponents;
-export const getIconComponent = (name) => materialSymbolComponents[name];
+const dynamicIconComponents = new Map(Object.entries(materialSymbolComponents));
+export const getIconComponent = (name) => {
+  const existing = dynamicIconComponents.get(name);
+  if (existing) return existing;
+
+  const component = createMaterialSymbol(name);
+  dynamicIconComponents.set(name, component);
+  return component;
+};
 
 ${aliasRuntime}
 `;
@@ -126,7 +134,8 @@ export const materialSymbolNames: readonly [
   ${serializedNames}
 ];
 
-export type MaterialSymbolName = (typeof materialSymbolNames)[number];
+export type ApprovedMaterialSymbolName = (typeof materialSymbolNames)[number];
+export type MaterialSymbolName = ApprovedMaterialSymbolName | (string & {});
 export type MaterialSymbolBaseProps = Omit<HTMLAttributes<HTMLSpanElement>, "children"> & {
   size?: number | string;
   fill?: boolean | 0 | 1;
@@ -151,7 +160,7 @@ export function createMaterialSymbol(
 ): MaterialSymbolComponent;
 
 export const materialSymbolComponents: Readonly<
-  Record<MaterialSymbolName, MaterialSymbolComponent>
+  Record<ApprovedMaterialSymbolName, MaterialSymbolComponent>
 >;
 
 export const iconNames: typeof materialSymbolNames;
@@ -161,7 +170,6 @@ export type IconProps = MaterialSymbolProps;
 export type IconComponent = MaterialSymbolComponent;
 export const iconComponents: typeof materialSymbolComponents;
 export function getIconComponent(name: MaterialSymbolName): MaterialSymbolComponent;
-export function getIconComponent(name: string): MaterialSymbolComponent | undefined;
 
 ${aliasTypes}
 `;

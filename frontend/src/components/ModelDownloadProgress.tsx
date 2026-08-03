@@ -1,6 +1,6 @@
 import React from 'react';
 import { ModelStatus } from '../lib/whisper';
-import { Button } from './ui/button';
+import { Button } from './ui/fluid-button';
 import { useT } from '@/lib/i18n';
 
 interface ModelDownloadProgressProps {

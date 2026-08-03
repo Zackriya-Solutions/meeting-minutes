@@ -3,7 +3,7 @@
   font-style: normal;
   font-weight: 100 700;
   font-display: block;
-  src: url("./fonts/MaterialSymbolsRounded-Variable.woff2?v=114") format("woff2");
+  src: url("./fonts/MaterialSymbolsRounded-Variable.woff2?v=full") format("woff2");
 }
 
 /* `construction` is not included by Google's large icon-name subset query,

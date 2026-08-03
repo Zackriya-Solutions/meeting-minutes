@@ -1,13 +1,16 @@
-import React, { useContext, useState, useEffect } from 'react';
+import { useContext, useEffect, useState } from 'react';
 import { Switch } from '@/components/ui/switch';
-import { Button } from '@/components/ui/button';
-import { Info, Loader2, Copy, Check } from '@/components/deslop-icons';
+import { Button } from '@/components/ui/fluid-button';
+import { Check, Copy, Info } from '@/components/deslop-icons';
+import { createMaterialSymbol } from '@/vendor/deslop/primitives/material-symbols-react';
 import { ANALYTICS_CONSENT_MIGRATION_KEY, AnalyticsContext } from './AnalyticsProvider';
 import { load } from '@tauri-apps/plugin-store';
 import { invoke } from '@tauri-apps/api/core';
 import { Analytics } from '@/lib/analytics';
 import AnalyticsDataModal from './AnalyticsDataModal';
 import { useT } from '@/lib/i18n';
+
+const IconAnalytics = createMaterialSymbol('analytics', 'IconAnalytics');
 
 export default function AnalyticsConsentSwitch() {
   const t = useT();
@@ -146,105 +149,87 @@ export default function AnalyticsConsentSwitch() {
     }
   };
 
+  // The caption carries the live consent state, the way every other settings
+  // cell reports its own status; the static explainer sits in the footer.
+  const statusCaption = isProcessing
+    ? t('Updating...')
+    : isAnalyticsOptedIn && runtimeEnabled
+      ? t('Enabled and sending anonymous events to Memento statistics')
+      : isAnalyticsOptedIn
+        ? t('Enabled, but the analytics client is not connected')
+        : t('Disabled — no analytics events are sent');
+
   return (
     <>
-      <div className="space-y-4">
-        <div>
-          <h3 className="text-base font-semibold text-foreground mb-2">{t('Usage Analytics')}</h3>
-          <p className="text-sm text-muted-foreground mb-4">
-            {t('Usage analytics is off by default. You can turn it on to share anonymous product and performance data; no personal content is collected.')}
-          </p>
+      <div className="settings-cell__row">
+        <span className="settings-cell__avatar" aria-hidden="true">
+          <IconAnalytics size={20} weight={400} />
+        </span>
+        <div className="settings-cell__text">
+          <h3 className="settings-cell__label">{t('Usage Analytics')}</h3>
+          <p className="settings-cell__caption">{statusCaption}</p>
         </div>
+        <Switch
+          className="shrink-0"
+          checked={isAnalyticsOptedIn}
+          onCheckedChange={handleToggle}
+          disabled={isProcessing}
+          aria-label={t('Usage Analytics')}
+        />
+      </div>
 
-        <div className="flex items-center justify-between p-3 bg-background rounded-lg border border-border">
-          <div>
-            <h4 className="font-semibold text-foreground">{t('Enable Analytics')}</h4>
-            <p className="text-sm text-muted-foreground">
-              {isProcessing
-                ? t('Updating...')
-                : isAnalyticsOptedIn && runtimeEnabled
-                  ? t('Enabled and sending anonymous events to Memento statistics')
-                  : isAnalyticsOptedIn
-                    ? t('Enabled, but the analytics client is not connected')
-                    : t('Disabled — no analytics events are sent')}
-            </p>
-          </div>
-          <div className="flex items-center gap-2 ml-4">
-            {isProcessing && (
-              <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
-            )}
-            <Switch
-              checked={isAnalyticsOptedIn}
-              onCheckedChange={handleToggle}
-              disabled={isProcessing}
-            />
-          </div>
-        </div>
+      <div className="flex flex-col gap-3 border-t border-[var(--primary-10)] px-4 py-4">
+        <p className="settings-cell__caption">
+          {t('Usage analytics is off by default. You can turn it on to share anonymous product and performance data; no personal content is collected.')}
+        </p>
 
-        <Button variant="outline" size="sm" onClick={handleShowDetails}>
-          <Info className="h-4 w-4" />
+        <Button
+          variant="tertiary"
+          size="sm"
+          leadingIcon={Info}
+          onClick={handleShowDetails}
+          className="self-start"
+        >
           {t('What analytics collects and where it goes')}
         </Button>
 
-        {/* User ID Display */}
+        {/* The install ID is what support asks for; it only exists once analytics is on. */}
         {isAnalyticsOptedIn && userId && (
-          <div className="p-4 border rounded-lg bg-background">
-            <div className="flex items-start justify-between gap-4">
-              <div className="flex-1 min-w-0">
-                <div className="font-medium text-foreground mb-1">{t('Your User ID')}</div>
-                <p className="text-xs text-muted-foreground mb-2">
-                  {t('Share this ID when reporting issues to help us investigate your issue logs')}
-                </p>
-                <div className="flex items-center gap-2">
-                  <code className="text-xs text-muted-foreground bg-background px-2 py-1 rounded border border-border font-mono flex-1 truncate">
-                    {userId}
-                  </code>
-                  <Button
-                    onClick={handleCopyUserId}
-                    variant="outline"
-                    size="sm"
-                    className="flex-shrink-0"
-                    title={t('Copy User ID')}
-                  >
-                    {isCopied ? (
-                      <>
-                        <Check className="w-3.5 h-3.5 text-success" />
-                        <span className="text-success">{t('Copied!')}</span>
-                      </>
-                    ) : (
-                      <>
-                        <Copy className="w-3.5 h-3.5" />
-                        <span>{t('Copy')}</span>
-                      </>
-                    )}
-                  </Button>
-                </div>
-              </div>
+          <div className="settings-subsection">
+            <div className="settings-cell__label">{t('Your User ID')}</div>
+            <p className="settings-cell__caption mb-2">
+              {t('Share this ID when reporting issues to help us investigate your issue logs')}
+            </p>
+            <div className="flex items-center gap-2">
+              <code className="min-w-0 flex-1 truncate rounded border border-[var(--primary-10)] px-2 py-1 font-mono text-xs text-[var(--fg2)]">
+                {userId}
+              </code>
+              <Button
+                variant="tertiary"
+                size="sm"
+                leadingIcon={isCopied ? Check : Copy}
+                onClick={handleCopyUserId}
+                className="shrink-0"
+                title={t('Copy User ID')}
+              >
+                {isCopied ? t('Copied!') : t('Copy')}
+              </Button>
             </div>
           </div>
         )}
 
-        <div className="flex items-start gap-2 p-2 bg-primary/10 rounded border border-primary/40">
-          <Info className="w-4 h-4 text-primary mt-0.5 flex-shrink-0" />
-          <div className="text-xs text-primary">
-            <p className="mb-1">
-              {t('Your meetings, transcripts, and recordings remain completely private and local.')}
-            </p>
-            <button
-              onClick={handlePrivacyPolicyClick}
-              className="text-primary hover:text-primary/90 underline hover:no-underline"
-            >
-              {t('View Privacy Policy')}
-            </button>
-          </div>
-        </div>
+        <p className="settings-cell__caption">
+          {t('Your meetings, transcripts, and recordings remain completely private and local.')}{' '}
+          <button
+            onClick={handlePrivacyPolicyClick}
+            className="underline underline-offset-2 hover:no-underline"
+          >
+            {t('View Privacy Policy')}
+          </button>
+        </p>
       </div>
 
-      {/* 2-Step Opt-Out Modal */}
-      <AnalyticsDataModal
-        isOpen={showModal}
-        onClose={() => setShowModal(false)}
-      />
+      <AnalyticsDataModal isOpen={showModal} onClose={() => setShowModal(false)} />
     </>
   );
 }

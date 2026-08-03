@@ -18,8 +18,10 @@
       700
     ]
   },
-  "names": 114,
-  "registryHash": "98e26471c23e2003ab5bfbb7b40935eb51c4e8618dbf8b3a9b5314e499240c5a",
-  "fontHash": "764400c9d43681bacb0d058427085967caa5ac722a7021dc762cef783e2b5474",
-  "byteLength": 138032
+  "names": "all",
+  "approvedNames": 115,
+  "includeAll": true,
+  "registryHash": "1db2ea6d5a8928d84a04226ac86ca6e101b7478c664183ddcac54d11f5951f24",
+  "fontHash": "3500043e8929d5140f34dff8f8687e1dd5fda3a33fff20bfcc96ecd0b2f99518",
+  "byteLength": 5349652
 }

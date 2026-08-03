@@ -30,14 +30,19 @@ import {
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
 import { PromptInput } from '@/components/ui/prompt-input';
+import { Button as FluidButton } from '@/components/ui/fluid-button';
 import { useSidebar, type CurrentMeeting } from '@/components/Sidebar/SidebarProvider';
+import { RecordingStatus, useRecordingState } from '@/contexts/RecordingStateContext';
 import { useLanguage } from '@/lib/i18n';
 import Analytics from '@/lib/analytics';
 import { clearMarkedMoments } from '@/lib/markedMoments';
 import { formatRelativeMeetingDate, getMeetingDisplayInfo } from '@/lib/meetingDisplay';
 import { prefetchMeetingSummary } from '@/lib/meetingSummaryCache';
+import { isRecordingNavigationLocked } from '@/lib/recordingNavigation';
 import { splitSummaryLead, summaryToMarkdown } from '@/lib/summaryToMarkdown';
 import { Cell, CellText } from '@/vendor/deslop/mini-app/Cell';
+import { IconPlus } from '@/vendor/deslop/primitives/material-symbols-react';
+import { buildArchivePromptSuggestions } from '@/lib/promptSuggestions';
 
 interface CalendarMeeting {
   meeting: CurrentMeeting;
@@ -70,10 +75,6 @@ const UPCOMING_MEETING_MOCKS = [
   { id: 'client-call', title: 'Client call', dayOffset: 7, hour: 10, minute: 30, duration: 45 },
   { id: 'design-review', title: 'Design review', dayOffset: 8, hour: 15, minute: 0, duration: 45 },
   { id: 'sprint-planning', title: 'Sprint planning', dayOffset: 11, hour: 11, minute: 0, duration: 60 },
-] as const;
-
-const MEETING_EMOJIS = [
-  '💬', '💡', '🎯', '✨', '🧠', '☕️', '🚀', '📝', '🤝', '🔎', '📌', '🌿',
 ] as const;
 
 export const HOME_SCROLL_POSITION_KEY = 'memento:home-scroll-position';
@@ -114,16 +115,6 @@ function historyDateKey(date: Date | null): string {
     String(date.getMonth() + 1).padStart(2, '0'),
     String(date.getDate()).padStart(2, '0'),
   ].join('-');
-}
-
-function meetingEmoji(meetingId: string): string {
-  let hash = 0;
-
-  for (let index = 0; index < meetingId.length; index += 1) {
-    hash = ((hash << 5) - hash + meetingId.charCodeAt(index)) | 0;
-  }
-
-  return MEETING_EMOJIS[Math.abs(hash) % MEETING_EMOJIS.length];
 }
 
 const MEETING_DESCRIPTION_MAX_WORDS = 4;
@@ -217,6 +208,7 @@ function meetingSummaryDescription(summary: unknown): string | null {
 
 export function HomeMeetingList({ animateOnMount = true }: { animateOnMount?: boolean }) {
   const router = useRouter();
+  const { isRecording, status } = useRecordingState();
   const {
     currentMeeting,
     meetings,
@@ -231,6 +223,19 @@ export function HomeMeetingList({ animateOnMount = true }: { animateOnMount?: bo
   const [meetingDescriptions, setMeetingDescriptions] = useState<Record<string, string>>({});
   const screenRef = useRef<HTMLDivElement>(null);
   const locale = lang === 'ru' ? 'ru-RU' : 'en-US';
+  const navigationLocked = isRecordingNavigationLocked(isRecording, status);
+  const canStartMeeting = !navigationLocked && (
+    status === RecordingStatus.IDLE
+    || status === RecordingStatus.COMPLETED
+    || status === RecordingStatus.ERROR
+  );
+
+  const startNewMeeting = () => {
+    if (!canStartMeeting) return;
+
+    window.sessionStorage.setItem('autoStartRecording', 'true');
+    router.push('/recording');
+  };
 
   // The provider owns the archive request and retries when the WebView is not
   // ready yet. Only request on an empty initial state; route drawers render
@@ -356,6 +361,16 @@ export function HomeMeetingList({ animateOnMount = true }: { animateOnMount?: bo
     return Array.from(groups.values());
   }, [calendarMeetings, locale, t]);
 
+  const archiveSuggestions = useMemo(
+    () => buildArchivePromptSuggestions(
+      calendarMeetings.map((item) => ({
+        title: item.title,
+        description: item.description,
+      })),
+      lang,
+    ),
+    [calendarMeetings, lang],
+  );
   const openMeeting = (meeting: CurrentMeeting, event: MouseEvent<HTMLButtonElement>) => {
     rememberHomeScrollPosition(event.currentTarget);
     setCurrentMeeting(meeting);
@@ -418,9 +433,19 @@ export function HomeMeetingList({ animateOnMount = true }: { animateOnMount?: bo
     <div ref={screenRef} className={`home-screen min-h-full${animateOnMount ? '' : ' home-screen--static'}`}>
       <div className="home-screen__inner">
         <header className="home-screen__header">
-          <div>
-            <h1 className="memento-screen-title">{t('Upcoming meetings')}</h1>
-          </div>
+          <h1 className="memento-screen-title">{t('Meetings')}</h1>
+          <FluidButton
+            type="button"
+            variant="tertiary"
+            size="icon-lg"
+            className="no-drag rounded-[20px] text-[var(--primary-50)] [&>span:last-child]:absolute [&>span:last-child]:inset-0 [&_.deslop-material-symbol]:flex [&_.deslop-material-symbol]:h-5 [&_.deslop-material-symbol]:w-5 [&_.deslop-material-symbol]:items-center [&_.deslop-material-symbol]:justify-center"
+            onClick={startNewMeeting}
+            disabled={!canStartMeeting}
+            aria-label={t('New meeting')}
+            title={t('New meeting')}
+          >
+            <IconPlus aria-hidden="true" size={20} weight={400} />
+          </FluidButton>
         </header>
 
         <main className="home-screen__content">
@@ -462,21 +487,15 @@ export function HomeMeetingList({ animateOnMount = true }: { animateOnMount?: bo
                   <section key={group.key} className="home-history__group" aria-label={group.label}>
                     <h3>{group.label}</h3>
                     <div className="home-history__list no-drag">
-                      {group.meetings.map((item) => (
+                      {group.meetings.map((item, itemIndex) => (
                         <ContextMenu key={item.meeting.id}>
                           <ContextMenuTrigger asChild>
                             <div className="contents">
                               <Cell
                                 type="button"
-                                className="no-drag"
+                                className="home-history-cell no-drag"
+                                data-separator={itemIndex < group.meetings.length - 1}
                                 onClick={(event) => openMeeting(item.meeting, event)}
-                                start={(
-                                  <span className="home-history-icon" aria-hidden="true">
-                                    <span className="home-history-emoji">
-                                      {meetingEmoji(item.meeting.id)}
-                                    </span>
-                                  </span>
-                                )}
                                 end={<span className="home-history-time">{item.timeRange}</span>}
                               >
                                 <CellText title={item.title} description={item.description} bold />
@@ -510,6 +529,7 @@ export function HomeMeetingList({ animateOnMount = true }: { animateOnMount?: bo
           submitButtonType="submit"
           containerClassName="home-ask"
           placeholder={t('Ask anything')}
+          placeholderSuggestions={archiveSuggestions}
           aria-label={t('Ask anything')}
           sendLabel={t('Send')}
         />

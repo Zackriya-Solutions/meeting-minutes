@@ -4,7 +4,8 @@
 //! transcript segments WITHOUT speaker labels (see
 //! `frontend/src/hooks/meeting-details/useSummaryGeneration.ts::buildSummaryTranscriptPayload`).
 //! When a meeting's stored transcripts carry speaker information — a diarized `speaker_id` or
-//! a 'mic'/'system' channel tag — we rebuild that text server-side, prefixing each line with
+//! a diarized speaker profile (or a remote 'system' channel tag) — we rebuild that text
+//! server-side, prefixing each line with
 //! the speaker's display name so the LLM can attribute statements, decisions, and action items.
 //!
 //! Rebuilding server-side keyed on `meeting_id` means (a) speaker renames are always fresh at
@@ -17,9 +18,10 @@
 //! byte-for-byte — zero behavior change.
 //!
 //! ## Label resolution (mirrors the UI's `resolveSpeakerLabel`, frontend/src/types/index.ts)
-//!   1. `speaker_id` resolving to a non-empty `speakers.display_name` wins.
-//!   2. else channel tag: 'mic' -> "You", 'system' -> "Others".
-//!   3. else no label for that line.
+//!   1. A diarized profile explicitly marked `is_self` resolves to "You".
+//!   2. Another `speaker_id` resolving to a non-empty display name uses that name.
+//!   3. A remote `system` channel without identity resolves to "Others".
+//!   4. A `mic` channel alone is never identity evidence; it stays unlabeled.
 //!
 //! ## Line format
 //! We keep the frontend's exact line shape — `<time-prefix> <text>` — and inject
@@ -49,12 +51,14 @@ fn stable_text_fingerprint(text: &str) -> String {
 /// falling through to the channel tag — matching the frontend exactly.
 pub fn resolve_segment_label(seg: &TranscriptSpeakerSegment) -> Option<String> {
     if seg.speaker_id.is_some() {
+        if seg.is_self {
+            return Some("You".to_string());
+        }
         if let Some(name) = seg.display_name.as_deref().filter(|n| !n.is_empty()) {
             return Some(name.to_string());
         }
     }
     match seg.speaker.as_deref() {
-        Some("mic") => Some("You".to_string()),
         Some("system") => Some("Others".to_string()),
         _ => None,
     }
@@ -173,6 +177,7 @@ mod tests {
             speaker: speaker.map(str::to_string),
             speaker_id,
             display_name: display_name.map(str::to_string),
+            is_self: false,
         }
     }
 
@@ -201,16 +206,26 @@ mod tests {
     }
 
     #[test]
+    fn resolve_label_uses_confirmed_self_identity_instead_of_channel() {
+        let mut own = seg("hi", "t", Some(0.0), Some("system"), Some(1), Some("Миша"));
+        own.is_self = true;
+        assert_eq!(resolve_segment_label(&own), Some("You".to_string()));
+
+        let mic_guest = seg("hello", "t", Some(1.0), Some("mic"), Some(2), Some("Анна"));
+        assert_eq!(resolve_segment_label(&mic_guest), Some("Анна".to_string()));
+    }
+
+    #[test]
     fn resolve_label_falls_through_when_display_name_missing_or_empty() {
         // speaker_id set but the speaker row is gone (display_name NULL) -> channel tag.
         assert_eq!(
             resolve_segment_label(&seg("hi", "t", Some(0.0), Some("system"), Some(9), None)),
             Some("Others".to_string())
         );
-        // empty display_name is treated as not-found (matches JS truthiness).
+        // A mic channel cannot identify the user when the diarized profile is missing.
         assert_eq!(
             resolve_segment_label(&seg("hi", "t", Some(0.0), Some("mic"), Some(9), Some(""))),
-            Some("You".to_string())
+            None
         );
     }
 
@@ -218,7 +233,7 @@ mod tests {
     fn resolve_label_channel_tags_and_none() {
         assert_eq!(
             resolve_segment_label(&seg("hi", "t", None, Some("mic"), None, None)),
-            Some("You".to_string())
+            None
         );
         assert_eq!(
             resolve_segment_label(&seg("hi", "t", None, Some("system"), None, None)),
@@ -256,7 +271,7 @@ mod tests {
                 None,
                 None,
             ),
-            // Local channel.
+            // Shared microphone channel without diarized identity: deliberately unlabeled.
             seg("отлично", "00:00:07", Some(7.0), Some("mic"), None, None),
             // No speaker info at all -> unlabeled line, but still contributes (mixed meeting).
             seg("(тишина)", "00:00:09", Some(65.0), None, None, None),
@@ -267,7 +282,7 @@ mod tests {
             out,
             "[00:00] Андрей: ну давайте начнем\n\
              [00:03] Others: да, я готов\n\
-             [00:07] You: отлично\n\
+             [00:07] отлично\n\
              [01:05] (тишина)"
         );
     }
@@ -326,11 +341,27 @@ mod tests {
     }
 
     #[test]
-    fn assemble_uses_wall_clock_when_audio_time_missing() {
-        let segments = vec![seg("hola", "14:30:05", None, Some("mic"), None, None)];
-        assert_eq!(
-            assemble_labeled_transcript(&segments),
-            Some("14:30:05 You: hola".to_string())
+    fn speaker_attribution_fingerprint_changes_when_owner_identity_changes() {
+        let guest = seg(
+            "реплика",
+            "00:00:01",
+            Some(0.0),
+            Some("mic"),
+            Some(7),
+            Some("Миша"),
         );
+        let mut owner = guest.clone();
+        owner.is_self = true;
+
+        assert_ne!(
+            speaker_attribution_fingerprint(&[guest]),
+            speaker_attribution_fingerprint(&[owner])
+        );
+    }
+
+    #[test]
+    fn microphone_only_transcript_stays_unlabeled_without_diarized_identity() {
+        let segments = vec![seg("hola", "14:30:05", None, Some("mic"), None, None)];
+        assert_eq!(assemble_labeled_transcript(&segments), None);
     }
 }

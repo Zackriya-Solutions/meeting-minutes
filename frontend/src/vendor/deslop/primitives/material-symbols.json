@@ -1,6 +1,7 @@
 {
   "family": "Material Symbols Rounded",
   "source": "https://github.com/google/material-design-icons",
+  "includeAll": true,
   "names": [
     "account_balance",
     "account_balance_wallet",
@@ -27,6 +28,7 @@
     "book_2",
     "business_center",
     "calendar_month",
+    "calendar_today",
     "call",
     "cancel",
     "chat",
@@ -125,6 +127,7 @@
     "IconArrowRight": "arrow_forward",
     "IconArrowUp": "arrow_upward",
     "IconBell": "notifications",
+    "IconCalendarToday": "calendar_today",
     "IconChart": "bar_chart",
     "IconCheck": "check",
     "IconChevronDown": "keyboard_arrow_down",

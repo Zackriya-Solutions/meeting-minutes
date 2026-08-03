@@ -64,7 +64,7 @@ export function MessageBubble({
                 !msg.error && '!bg-[var(--primary-5)] !text-[var(--deslop-primary)]',
               )}
             >
-              <div className={cn('flex flex-col gap-1', isUser ? 'items-end' : 'items-start')}>
+              <div className="flex flex-col items-start gap-1 text-left">
                 <span className="text-xs font-medium text-[var(--deslop-primary-60)]">
                   {senderName}
                 </span>
