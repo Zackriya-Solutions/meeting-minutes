@@ -88,6 +88,41 @@ else
     echo -e "${YELLOW}⚠️ No specific GPU feature detected or forced${NC}"
 fi
 
+# Locate CUDA static libraries.
+# llama-cpp-sys-2 links cudart_static/cublas_static/culibos and relies on
+# find_cuda_helper, which only probes $CUDA_LIBRARY_PATH/lib64, /opt/cuda/lib64
+# and /usr/local/cuda*/lib64. Distro packages (e.g. Ubuntu's nvidia-cuda-toolkit)
+# install into /usr/lib/<triple> instead, so rustc gets no -L path and fails with
+# "could not find native static library `cudart_static`".
+if [ "$TAURI_GPU_FEATURE" = "cuda" ] && [[ "$OSTYPE" == "linux-gnu"* ]]; then
+    CUDA_LIB_DIR=""
+    NVCC_LIB_DIR=""
+    if command_exists nvcc; then
+        NVCC_LIB_DIR="$(dirname "$(command -v nvcc)")/../lib64"
+    fi
+    for candidate in \
+        "${CUDA_PATH:+$CUDA_PATH/lib64}" \
+        "${CUDA_HOME:+$CUDA_HOME/lib64}" \
+        "$NVCC_LIB_DIR" \
+        /usr/local/cuda/lib64 \
+        /opt/cuda/lib64 \
+        "/usr/lib/$(uname -m)-linux-gnu" \
+        /usr/lib64; do
+        if [ -n "$candidate" ] && [ -f "$candidate/libcudart_static.a" ]; then
+            CUDA_LIB_DIR="$(cd "$candidate" && pwd)"
+            break
+        fi
+    done
+
+    if [ -n "$CUDA_LIB_DIR" ]; then
+        echo -e "${GREEN}✅ Found CUDA libraries in $CUDA_LIB_DIR${NC}"
+        export RUSTFLAGS="${RUSTFLAGS:+$RUSTFLAGS }-L native=$CUDA_LIB_DIR"
+    else
+        echo -e "${YELLOW}⚠️ Could not locate libcudart_static.a${NC}"
+        echo -e "${YELLOW}   Install the CUDA toolkit or set CUDA_PATH; the link step may fail.${NC}"
+    fi
+fi
+
 # Build llama-helper
 echo ""
 echo -e "${BLUE}🦙 Building llama-helper sidecar (release)...${NC}"
