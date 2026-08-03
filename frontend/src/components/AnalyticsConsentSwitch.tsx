@@ -158,9 +158,6 @@ export default function AnalyticsConsentSwitch() {
       <div className="space-y-4">
         <div>
           <h3 className="text-base font-semibold text-gray-800 mb-2">Usage Analytics</h3>
-          <p className="text-sm text-gray-600 mb-4">
-            Usage analytics is off by default. You can turn it on to share anonymous product and performance data; no personal content is collected.
-          </p>
         </div>
 
         <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-200">

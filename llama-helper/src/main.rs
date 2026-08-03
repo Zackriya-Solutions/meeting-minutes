@@ -147,7 +147,7 @@ fn detect_vram_gb() -> f32 {
         }
     }
 
-    /// TODO: Vulkan VRAM detection
+    // TODO: Vulkan VRAM detection
 
     eprintln!("VRAM detection not available, using conservative estimate");
     4.0 // Conservative fallback

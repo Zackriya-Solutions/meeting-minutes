@@ -77,3 +77,6 @@ experiments/
 target/
 
 frontend/src-tauri/binaries/
+# Local Pi runtime state
+.atl/
+.pi/
