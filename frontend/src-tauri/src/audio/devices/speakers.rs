@@ -35,7 +35,31 @@ pub fn default_output_device() -> Result<AudioDevice> {
         return Ok(AudioDevice::new(device.name()?, DeviceType::Output));
     }
 
-    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    #[cfg(target_os = "linux")]
+    {
+        // On Linux there is no output device that can be opened for capture.
+        // System audio comes from the sound server's monitor source, so the
+        // "default system audio device" is the monitor of the default sink.
+        //
+        // Returning cpal's default output device here would name it "default",
+        // which get_device_and_config() then resolves against ALSA *capture*
+        // devices - silently opening the microphone a second time instead of
+        // capturing system audio.
+        use crate::audio::capture::linux_monitor::{is_monitor_available, DEFAULT_MONITOR_DEVICE_NAME};
+
+        if !is_monitor_available() {
+            return Err(anyhow!(
+                "No system audio monitor source available (requires a running PulseAudio or PipeWire server)"
+            ));
+        }
+
+        return Ok(AudioDevice::new(
+            DEFAULT_MONITOR_DEVICE_NAME.to_string(),
+            DeviceType::Output,
+        ));
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
     {
         let host = cpal::default_host();
         let device = host

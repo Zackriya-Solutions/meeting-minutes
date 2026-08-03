@@ -68,6 +68,38 @@ impl RecordingManager {
     ) -> Result<mpsc::UnboundedReceiver<AudioChunk>> {
         info!("Starting recording manager (auto_save: {})", auto_save);
 
+        // Resolve unspecified devices to the system defaults.
+        //
+        // The UI sends `null` when the user leaves a selector on "Default".
+        // Without this, a "Default System Audio" selection meant *no* system
+        // audio stream was ever created, so system audio was silently missing
+        // from every recording.
+        let microphone_device = microphone_device.or_else(|| {
+            match super::devices::default_input_device() {
+                Ok(device) => {
+                    info!("🎤 Using default microphone: {}", device.name);
+                    Some(Arc::new(device))
+                }
+                Err(e) => {
+                    warn!("No default microphone available: {}", e);
+                    None
+                }
+            }
+        });
+
+        let system_device = system_device.or_else(|| {
+            match super::devices::default_output_device() {
+                Ok(device) => {
+                    info!("🔊 Using default system audio: {}", device.name);
+                    Some(Arc::new(device))
+                }
+                Err(e) => {
+                    warn!("No default system audio available: {}", e);
+                    None
+                }
+            }
+        });
+
         // Set up transcription channel
         let (transcription_sender, transcription_receiver) = mpsc::unbounded_channel::<AudioChunk>();
 

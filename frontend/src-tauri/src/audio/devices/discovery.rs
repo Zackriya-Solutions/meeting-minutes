@@ -2,7 +2,10 @@ use anyhow::Result;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use log::error;
 
-use super::configuration::{AudioDevice, DeviceType};
+use super::configuration::AudioDevice;
+// Only used by the non-Linux "additional devices" pass below.
+#[cfg(not(target_os = "linux"))]
+use super::configuration::DeviceType;
 use super::platform;
 
 /// List all available audio devices on the system
@@ -10,6 +13,8 @@ pub async fn list_audio_devices() -> Result<Vec<AudioDevice>> {
     let host = cpal::default_host();
 
     // Platform-specific device enumeration
+    // (not mutated on Linux - the additional-devices pass below is skipped there)
+    #[cfg_attr(target_os = "linux", allow(unused_mut))]
     let mut devices = {
         #[cfg(target_os = "windows")]
         {
@@ -27,7 +32,14 @@ pub async fn list_audio_devices() -> Result<Vec<AudioDevice>> {
         }
     };
 
-    // Add any additional devices from the default host
+    // Add any additional devices from the default host.
+    //
+    // NOTE: skipped on Linux. Every remaining ALSA PCM would be labelled as an
+    // Output device, but none of them can capture system audio - only the sound
+    // server's monitor source can (added by configure_linux_audio above).
+    // Listing them made the UI offer system audio devices that silently
+    // captured nothing or re-captured the microphone.
+    #[cfg(not(target_os = "linux"))]
     if let Ok(other_devices) = host.devices() {
         for device in other_devices {
             if let Ok(name) = device.name() {
