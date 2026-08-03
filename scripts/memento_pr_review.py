@@ -41,6 +41,12 @@ incident, P1 for likely serious production breakage, and P2 for a real
 limited-impact defect. Omit style, speculation, and pre-existing issues. Every
 finding needs a changed file and line, a concrete failure scenario, evidence,
 and the smallest practical fix.
+
+P1 requires a demonstrated code path to serious production impact. A concern
+whose smallest fix is only to confirm, document, monitor, or consider something
+is not blocking. Put hypothetical risks, defense-in-depth ideas, intended
+tradeoffs, and issues outside the changed code in residual_risks instead of
+findings. Never promote an item merely to ensure the review has a finding.
 """
 
 
@@ -57,7 +63,13 @@ def trusted_policy() -> str:
     except OSError as exc:
         print(f"::warning title=AI review policy::Using fallback policy: {exc}")
         return DEFAULT_POLICY
-    return policy or DEFAULT_POLICY
+    if not policy:
+        print("::warning title=AI review policy::CLAUDE.md is empty; using fallback policy")
+        return DEFAULT_POLICY
+    # CLAUDE.md is repository context, not a replacement for review severity
+    # calibration. Keeping both prevents documentation-only or speculative
+    # concerns from being mislabeled as merge-blocking P1 findings.
+    return f"{DEFAULT_POLICY}\nRepository context:\n{policy}"
 
 
 def changed_paths(diff: str) -> list[str]:

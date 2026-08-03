@@ -38,6 +38,21 @@ class MementoPrReviewTests(unittest.TestCase):
         self.assertEqual(payload["provider"], {"data_collection": "deny", "zdr": True})
         self.assertTrue(payload["turn_off_message_logging"])
 
+    def test_repository_context_does_not_replace_severity_policy(self):
+        with mock.patch.object(reviewer.Path, "read_text", return_value="repo context"):
+            policy = reviewer.trusted_policy()
+
+        self.assertIn("P1 requires a demonstrated code path", policy)
+        self.assertIn("Repository context:\nrepo context", policy)
+
+    def test_prompt_rejects_speculative_blockers(self):
+        payload = reviewer.messages_payload(
+            reviewer.DEFAULT_POLICY, "85", "title", "diff", False
+        )
+        system = payload["system"]
+        self.assertIn("smallest fix is only to confirm, document", system)
+        self.assertIn("Never promote an item", system)
+
     def test_extract_review_requires_tool_result(self):
         expected = {"summary": "Safe", "findings": [], "test_gaps": [], "residual_risks": []}
         response = {"content": [{"type": "tool_use", "name": reviewer.TOOL_NAME, "input": expected}]}
