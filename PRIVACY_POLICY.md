@@ -1,10 +1,10 @@
-# Meetily Privacy Policy
+# Memento Privacy Policy
 
-*Last updated: [Current Date]*
+*Last updated: August 3, 2026*
 
 ## Our Privacy-First Commitment
 
-Meetily is built on the principle that your meeting data should remain private and under your control. This privacy policy explains how we handle data in our open-source meeting assistant.
+Memento is built on the principle that your meeting data should remain private and under your control. This privacy policy explains how we handle data in our open-source meeting assistant.
 
 ## Data Processing Philosophy
 
@@ -54,12 +54,13 @@ When enabled, analytics helps us with:
 - **Open Source Sustainability**: Ensuring the project meets user needs effectively
 
 ### Analytics Implementation
-- **Provider**: PostHog (privacy-focused analytics platform)
+- **Provider**: First-party Memento statistics service (`stats.multitool.works`)
 - **Default**: Off by default; analytics starts only after you enable it in settings
 - **Anonymization**: All data linked to generated user IDs only - no personal identification
 - **Data retention**: 12 months maximum, then automatically deleted
 - **Encryption**: All data encrypted in transit using industry-standard protocols
-- **Location**: Data processed in accordance with PostHog's privacy policy
+- **Authentication**: A separate per-install credential is verified by the Memento gateway; no shared analytics secret is embedded in the application
+- **Location**: Analytics events are stored in the Memento product module of our Traction statistics infrastructure
 - **Access Control**: Strictly limited to core development team members
 
 ## Third-Party Services
@@ -71,7 +72,7 @@ If you choose to use external LLM providers:
 - **Local Ollama**: Processed entirely on your device
 
 ### Analytics Service (Optional)
-- **PostHog**: Used for usage analytics when enabled
+- **Memento statistics**: Our first-party Traction module is used for usage analytics when enabled
 - **Data**: Only anonymized usage patterns, no meeting content
 - **Control**: Completely optional, off by default, and user-controlled
 
@@ -110,9 +111,7 @@ We will notify users of any material changes to this privacy policy through:
 ## Contact Us
 
 For privacy-related questions or concerns:
-- **GitHub Issues**: [Create an issue](https://github.com/Zackriya-Solutions/meeting-minutes/issues)
-- **Email**: [Contact form](https://www.zackriya.com/service-interest-form/)
-- **Community**: [Discord](https://discord.gg/crRymMQBFH)
+- **GitHub Issues**: [Create an issue](https://github.com/andyzt/meet_at_giga/issues)
 
 ## Open Source Commitment
 
@@ -124,4 +123,4 @@ As an open-source project under MIT license, you can:
 
 ---
 
-*This privacy policy applies to Meetily v0.0.5 and later versions. For enterprise deployments, additional privacy controls may be available.*
+*This privacy policy applies to Memento v0.4.0 and later versions. For enterprise deployments, additional privacy controls may be available.*

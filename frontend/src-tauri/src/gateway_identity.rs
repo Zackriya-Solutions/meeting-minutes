@@ -43,7 +43,7 @@ fn entry(name: &str) -> Result<keyring::Entry, String> {
     keyring::Entry::new(SERVICE, name).map_err(|e| format!("credential vault unavailable: {e}"))
 }
 
-fn device_id() -> Result<String, String> {
+pub(crate) fn device_id() -> Result<String, String> {
     let item = entry("device-id")?;
     if let Ok(value) = item.get_password() {
         if !value.is_empty() {
@@ -162,8 +162,10 @@ async fn valid(base: &str, token: &str) -> bool {
         .await
     {
         Ok(response) => response,
-        Err(e) => {
-            log::debug!("[gateway] {base}/me unreachable: {e}");
+        Err(_) => {
+            // Request errors are intentionally not interpolated: this module
+            // never logs credential-bearing request details.
+            log::debug!("[gateway] {base}/me unreachable");
             return false;
         }
     };
@@ -198,7 +200,10 @@ async fn register_and_store(item: &keyring::Entry) -> Result<(String, String), S
                 return Ok((token, base.to_string()));
             }
             Err(e) => {
-                log::warn!("[gateway] {base}: {e}");
+                // The detailed failure is returned to the explicit caller,
+                // but not copied into logs. Tokens and registration keys are
+                // never formatted into an error in this module.
+                log::warn!("[gateway] registration failed at {base}");
                 failures.push(format!("{base}: {e}"));
             }
         }

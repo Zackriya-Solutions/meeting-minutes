@@ -334,6 +334,7 @@ export function useAnalyticsReport(meetingId: string | null): UseAnalyticsReport
         setStatus('completed');
         setHtmlPath(p.html_path ?? null);
         setError(null);
+        void Analytics.track('analytics_report_completed', { success: 'true' });
       });
       unlistenError = await listen<AnalyticsErrorEvent>('analytics-report-error', (event) => {
         const p = event.payload;
@@ -341,6 +342,7 @@ export function useAnalyticsReport(meetingId: string | null): UseAnalyticsReport
         reportIdRef.current = p.report_id;
         setStatus('failed');
         setError(p.error ?? 'Unknown error');
+        void Analytics.trackError('analytics_report_failed', p.error ?? 'Unknown error');
       });
       unlistenQuestions = await listen<AnalyticsQuestionsEvent>('analytics-report-questions', (event) => {
         const p = event.payload;

@@ -15,7 +15,9 @@ WorkingDirectory=/srv/stats/memento/app
 Environment=STATS_PORT=9901
 Environment=STATS_DB=/srv/stats/memento/data/events.db
 # Секреты — только через drop-in: /etc/systemd/system/stats-memento.service.d/env.conf
-# (там STATS_INGEST_TOKEN, read-only POSTHOG_PERSONAL_API_KEY и POSTHOG_PROJECT_ID).
+# (там server-to-server STATS_INGEST_TOKEN и, только для legacy-миграции,
+# read-only POSTHOG_PERSONAL_API_KEY + POSTHOG_PROJECT_ID).
+# Desktop-клиенты используют проверяемый per-install gateway JWT.
 # PostHog sync выключен, если один из двух POSTHOG_* параметров отсутствует.
 # EnvironmentFile переопределяет Environment.
 ExecStart=/srv/stats/memento/app/.venv/bin/python /srv/stats/memento/app/server.py

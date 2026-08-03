@@ -164,21 +164,10 @@ export class Analytics {
   // User ID management with persistent storage
   static async getPersistentUserId(): Promise<string> {
     try {
-      // First check if we have a stored user ID
-      const { Store } = await import('@tauri-apps/plugin-store');
-      const store = await Store.load('analytics.json');
-      
-      let userId = await store.get<string>('user_id');
-      
-      if (!userId) {
-        // Generate new user ID
-        userId = `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-        await store.set('user_id', userId);
-        await store.set('is_first_launch', true);
-        await store.save();
-      }
-      
-      return userId;
+      // Use the same OS-vault-backed per-install identity that authenticates
+      // first-party statistics. The stats server verifies this identity and
+      // never trusts a caller-supplied event actor.
+      return await invoke<string>('get_analytics_device_id');
     } catch (error) {
       console.error('Failed to get persistent user ID:', error);
       // Fallback to session storage

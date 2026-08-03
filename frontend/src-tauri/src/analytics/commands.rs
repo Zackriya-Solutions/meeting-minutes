@@ -9,11 +9,7 @@ static ANALYTICS_CLIENT: std::sync::Mutex<Option<Arc<AnalyticsClient>>> =
 
 #[command]
 pub async fn init_analytics() -> Result<(), String> {
-    let config = AnalyticsConfig {
-        api_key: "phc_Aa9PqeCkDkVbtbRsYjtmHANBfcscjCVupxZwrtL5vZ77".to_string(),
-        host: Some("https://us.i.posthog.com".to_string()),
-        enabled: true,
-    };
+    let config = AnalyticsConfig { enabled: true };
 
     let client = Arc::new(AnalyticsClient::new(config).await);
 
@@ -21,6 +17,11 @@ pub async fn init_analytics() -> Result<(), String> {
     *guard = Some(client);
 
     Ok(())
+}
+
+#[command]
+pub fn get_analytics_device_id() -> Result<String, String> {
+    crate::gateway_identity::device_id()
 }
 
 #[command]

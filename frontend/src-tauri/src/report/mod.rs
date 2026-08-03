@@ -7,7 +7,7 @@
 //! [`pipeline`]; the Tauri command surface is in [`commands`].
 //!
 //! NOTE: the module is deliberately named `report` (not `analytics`) — `crate::analytics`
-//! is the unrelated PostHog telemetry module.
+//! is the unrelated opt-in product-statistics module.
 
 pub mod commands;
 pub mod dynamics;

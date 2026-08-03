@@ -5,14 +5,33 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Memento product statistics</title>
 <style>
-  :root { color-scheme:light; --page:#f9f9f7; --surface:#fff; --ink:#11110f;
-    --ink2:#54534e; --muted:#8b8982; --border:rgba(17,17,15,.11);
-    --blue:#2a78d6; --blue-soft:#dceafb; --gold:#a66a12; --gold-soft:#f7e8ca;
-    --bad:#b8443d; --good:#267a4b; }
-  :root[data-theme="dark"], :root.auto-dark { color-scheme:dark; --page:#0d0d0d;
-    --surface:#191918; --ink:#f6f5f1; --ink2:#c6c4bc; --muted:#918f88;
-    --border:rgba(255,255,255,.11); --blue:#5da2ee; --blue-soft:#172f4c;
-    --gold:#e0a84d; --gold-soft:#443118; --bad:#e47b73; --good:#62bd86; }
+  /* shadcn/ui semantic tokens. This dashboard intentionally stays a single,
+     dependency-free file because Traction embeds it as a product iframe. */
+  :root { color-scheme:light; --radius:.625rem;
+    --background:oklch(1 0 0); --foreground:oklch(.145 0 0);
+    --card:oklch(1 0 0); --card-foreground:oklch(.145 0 0);
+    --primary:oklch(.488 .217 264.4); --primary-foreground:oklch(.985 0 0);
+    --secondary:oklch(.97 0 0); --secondary-foreground:oklch(.205 0 0);
+    --muted-surface:oklch(.97 0 0); --muted-foreground:oklch(.556 0 0);
+    --accent:oklch(.97 0 0); --accent-foreground:oklch(.205 0 0);
+    --destructive:oklch(.577 .245 27.325); --border:oklch(.922 0 0);
+    --ring:oklch(.708 0 0); --chart-1:oklch(.488 .217 264.4);
+    --chart-2:oklch(.646 .18 67); --success:oklch(.527 .154 150.1);
+    --page:var(--background); --surface:var(--card); --ink:var(--foreground);
+    --ink2:var(--secondary-foreground); --muted:var(--muted-foreground);
+    --blue:var(--chart-1); --blue-soft:color-mix(in oklch,var(--chart-1) 14%,var(--card));
+    --gold:var(--chart-2); --gold-soft:color-mix(in oklch,var(--chart-2) 16%,var(--card));
+    --bad:var(--destructive); --good:var(--success); }
+  :root[data-theme="dark"], :root.auto-dark { color-scheme:dark;
+    --background:oklch(.145 0 0); --foreground:oklch(.985 0 0);
+    --card:oklch(.205 0 0); --card-foreground:oklch(.985 0 0);
+    --primary:oklch(.707 .165 254.6); --primary-foreground:oklch(.145 0 0);
+    --secondary:oklch(.269 0 0); --secondary-foreground:oklch(.985 0 0);
+    --muted-surface:oklch(.269 0 0); --muted-foreground:oklch(.708 0 0);
+    --accent:oklch(.269 0 0); --accent-foreground:oklch(.985 0 0);
+    --destructive:oklch(.704 .191 22.216); --border:oklch(1 0 0 / 10%);
+    --ring:oklch(.556 0 0); --chart-1:oklch(.707 .165 254.6);
+    --chart-2:oklch(.769 .188 70.08); --success:oklch(.696 .17 162.48); }
   * { box-sizing:border-box; }
   body { margin:0; padding:24px 28px 40px; background:var(--page); color:var(--ink);
     font:14px/1.45 Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif; }
@@ -20,12 +39,20 @@
   h1 { font-size:19px; line-height:1.2; margin:0 0 4px; letter-spacing:-.01em; }
   .sub,.note { color:var(--muted); font-size:12px; }
   .periods { margin-left:auto; display:flex; gap:4px; }
-  button { background:var(--surface); border:1px solid var(--border); color:var(--ink2);
-    border-radius:8px; padding:5px 11px; font:12px inherit; cursor:pointer; }
-  button.on { color:var(--ink); border-color:var(--blue); box-shadow:0 0 0 1px var(--blue) inset; }
+  .periods { background:var(--muted-surface); border-radius:calc(var(--radius) - 2px);
+    padding:3px; }
+  button { background:transparent; border:0; color:var(--muted); min-height:30px;
+    border-radius:calc(var(--radius) - 4px); padding:5px 11px; font:12px inherit;
+    font-weight:500; cursor:pointer; transition:background-color .15s,color .15s,box-shadow .15s; }
+  button:hover { color:var(--ink); }
+  button:focus-visible { outline:2px solid var(--ring); outline-offset:2px; }
+  button.on,button[data-state="active"] { background:var(--surface); color:var(--ink);
+    box-shadow:0 1px 2px rgba(0,0,0,.08); }
   .kpis { display:grid; grid-template-columns:repeat(6,minmax(125px,1fr)); gap:10px;
     max-width:1200px; margin-top:18px; }
-  .kpi,.panel { background:var(--surface); border:1px solid var(--border); border-radius:12px; }
+  .kpi,.panel { background:var(--surface); color:var(--card-foreground);
+    border:1px solid var(--border); border-radius:calc(var(--radius) + 2px);
+    box-shadow:0 1px 2px rgba(0,0,0,.035); }
   .kpi { padding:13px 14px; min-height:82px; }
   .kpi .value { font-size:23px; font-weight:650; font-variant-numeric:tabular-nums; }
   .kpi .label { color:var(--ink2); font-size:11px; margin-top:2px; }
@@ -47,7 +74,8 @@
   .stage .fill { height:100%; background:var(--blue); border-radius:99px; min-width:2px; }
   .stage .n { text-align:right; font-variant-numeric:tabular-nums; color:var(--ink2); }
   .retention { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }
-  .ret { background:var(--page); border:1px solid var(--border); border-radius:9px; padding:10px; }
+  .ret { background:var(--muted-surface); border:1px solid var(--border);
+    border-radius:calc(var(--radius) - 1px); padding:10px; }
   .ret .v { font-size:20px; font-weight:650; font-variant-numeric:tabular-nums; }
   .ret .l { color:var(--muted); font-size:10px; }
   .quality { display:grid; grid-template-columns:1fr auto; gap:8px 14px; font-size:12px; }
@@ -73,8 +101,8 @@
       <h1>Memento product statistics</h1>
       <div class="sub" id="sub">Loading opted-in product activity…</div>
     </div>
-    <nav class="periods" id="periods" aria-label="Reporting window">
-      <button data-days="7">7 dates</button><button data-days="30" class="on">30 dates</button><button data-days="90">90 dates</button>
+    <nav class="periods" id="periods" role="tablist" aria-label="Reporting window">
+      <button role="tab" aria-selected="false" data-state="inactive" data-days="7">7 dates</button><button role="tab" aria-selected="true" data-state="active" data-days="30" class="on">30 dates</button><button role="tab" aria-selected="false" data-state="inactive" data-days="90">90 dates</button>
     </nav>
   </header>
   <main>
@@ -191,7 +219,7 @@
       document.getElementById('sub').textContent = `Dashboard failed: ${error}`;
     }
   }
-  document.getElementById('periods').addEventListener('click', event => { const button=event.target.closest('button'); if(!button)return; days=Number(button.dataset.days); document.querySelectorAll('#periods button').forEach(item=>item.classList.toggle('on',item===button)); refresh(); });
+  document.getElementById('periods').addEventListener('click', event => { const button=event.target.closest('button'); if(!button)return; days=Number(button.dataset.days); document.querySelectorAll('#periods button').forEach(item=>{ const active=item===button; item.classList.toggle('on',active); item.dataset.state=active?'active':'inactive'; item.setAttribute('aria-selected',String(active)); }); refresh(); });
   refresh();
 </script>
 </body>

@@ -2,14 +2,12 @@ import React, { useContext, useState, useEffect } from 'react';
 import { Switch } from '@/components/ui/switch';
 import { Button } from '@/components/ui/button';
 import { Info, Loader2, Copy, Check } from '@/components/deslop-icons';
-import { AnalyticsContext } from './AnalyticsProvider';
+import { ANALYTICS_CONSENT_MIGRATION_KEY, AnalyticsContext } from './AnalyticsProvider';
 import { load } from '@tauri-apps/plugin-store';
 import { invoke } from '@tauri-apps/api/core';
 import { Analytics } from '@/lib/analytics';
 import AnalyticsDataModal from './AnalyticsDataModal';
 import { useT } from '@/lib/i18n';
-
-const ANALYTICS_DEFAULT_OFF_MIGRATION_KEY = 'analyticsDefaultOffMigrationV1';
 
 export default function AnalyticsConsentSwitch() {
   const t = useT();
@@ -76,7 +74,7 @@ export default function AnalyticsConsentSwitch() {
         }
       });
       await store.set('analyticsOptedIn', enabled);
-      await store.set(ANALYTICS_DEFAULT_OFF_MIGRATION_KEY, true);
+      await store.set(ANALYTICS_CONSENT_MIGRATION_KEY, true);
       await store.save();
 
       if (enabled) {
@@ -142,7 +140,7 @@ export default function AnalyticsConsentSwitch() {
 
   const handlePrivacyPolicyClick = async () => {
     try {
-      await invoke('open_external_url', { url: 'https://github.com/Zackriya-Solutions/meeting-minutes/blob/main/PRIVACY_POLICY.md' });
+      await invoke('open_external_url', { url: 'https://github.com/andyzt/meet_at_giga/blob/main/PRIVACY_POLICY.md' });
     } catch (error) {
       console.error('Failed to open privacy policy link:', error);
     }
@@ -165,7 +163,7 @@ export default function AnalyticsConsentSwitch() {
               {isProcessing
                 ? t('Updating...')
                 : isAnalyticsOptedIn && runtimeEnabled
-                  ? t('Enabled and sending anonymous events to PostHog')
+                  ? t('Enabled and sending anonymous events to Memento statistics')
                   : isAnalyticsOptedIn
                     ? t('Enabled, but the analytics client is not connected')
                     : t('Disabled — no analytics events are sent')}

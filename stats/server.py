@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import hmac
 import json
 import os
 import time
-from collections import Counter, defaultdict
+import urllib.error
+import urllib.parse
+import urllib.request
+from collections import Counter, defaultdict, deque
 from contextlib import asynccontextmanager, suppress
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -19,15 +23,70 @@ from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
 
 from posthog_sync import sync_once
-from storage import connect, excluded_device_ids, exclusion_clause, insert_events
+from storage import (
+    connect,
+    delete_events_before,
+    excluded_device_ids,
+    exclusion_clause,
+    insert_events,
+)
 
 HERE = Path(__file__).resolve().parent
 PORT = int(os.environ.get("STATS_PORT", "9901"))
 DB_PATH = Path(os.environ.get("STATS_DB", HERE / "data" / "events.db"))
 INGEST_TOKEN = os.environ.get("STATS_INGEST_TOKEN", "")
-ALLOW_UNAUTHENTICATED_INGEST = (
-    os.environ.get("STATS_ALLOW_UNAUTHENTICATED_INGEST", "") == "1"
+ALLOWED_GATEWAY_IDENTITY_HOSTS = frozenset({
+    "gw.multitool.works",
+    "gw2.multitool.works",
+})
+
+
+def _gateway_identity_urls(raw: str) -> tuple[str, ...]:
+    """Return exact managed `/me` URLs or fail closed at process startup."""
+    result = []
+    for value in raw.split(","):
+        value = value.strip().rstrip("/")
+        if not value:
+            continue
+        parsed = urllib.parse.urlsplit(value)
+        try:
+            port = parsed.port
+        except ValueError as error:
+            raise RuntimeError(
+                f"untrusted STATS_GATEWAY_IDENTITY_URLS entry: {value!r}"
+            ) from error
+        if (
+            parsed.scheme != "https"
+            or parsed.hostname not in ALLOWED_GATEWAY_IDENTITY_HOSTS
+            or port not in (None, 443)
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.path not in ("", "/")
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise RuntimeError(f"untrusted STATS_GATEWAY_IDENTITY_URLS entry: {value!r}")
+        result.append(f"https://{parsed.hostname}/me")
+    return tuple(dict.fromkeys(result))
+
+
+GATEWAY_IDENTITY_URLS = _gateway_identity_urls(os.environ.get(
+    "STATS_GATEWAY_IDENTITY_URLS",
+    "https://gw.multitool.works,https://gw2.multitool.works",
+))
+INSTALL_AUTH_CACHE_SECONDS = max(
+    0, min(int(os.environ.get("STATS_INSTALL_AUTH_CACHE_SECONDS", "60")), 60)
 )
+INSTALL_RATE_LIMIT_PER_MINUTE = max(
+    1, int(os.environ.get("STATS_INSTALL_RATE_LIMIT_PER_MINUTE", "12"))
+)
+AUTH_VALIDATION_RATE_LIMIT_PER_MINUTE = max(
+    1, int(os.environ.get("STATS_AUTH_VALIDATION_RATE_LIMIT_PER_MINUTE", "1200"))
+)
+STATIC_RATE_LIMIT_PER_MINUTE = max(
+    1, int(os.environ.get("STATS_STATIC_RATE_LIMIT_PER_MINUTE", "60"))
+)
+RETENTION_DAYS = max(1, int(os.environ.get("STATS_RETENTION_DAYS", "365")))
 VERSION_FILE = HERE / "VERSION"
 VERSION = VERSION_FILE.read_text().strip() if VERSION_FILE.exists() else "dev"
 MAX_BODY_BYTES = 1_000_000
@@ -43,12 +102,115 @@ VALUE_EVENTS = {
     "meeting_chat_response_completed",
     "collection_chat_response_completed",
     "memory_record_accepted",
+    "analytics_report_completed",
 }
 CAPTURE_STARTED = {"recording_started", "import_audio_started"}
 COPY_EVENTS = {"summary_copied", "transcript_copied"}
 SUCCESS_PROPERTY_EVENTS = {"import_audio_completed", "summary_generation_completed"}
 
 _db = connect(DB_PATH)
+_install_auth_cache: dict[str, tuple[float, str]] = {}
+_install_request_times: dict[str, deque[float]] = defaultdict(deque)
+_auth_validation_times: deque[float] = deque()
+_static_request_times: deque[float] = deque()
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: ANN001
+        # Never forward an install bearer token beyond the exact configured
+        # gateway `/me` URL.
+        return None
+
+
+def _inspect_install_token(url: str, token: str) -> tuple[str, str | None]:
+    """Ask the managed gateway to validate a client JWT.
+
+    The stats service never receives the gateway signing key. It accepts only
+    `/me` responses for the Memento product and uses the verified device id as
+    the event actor, ignoring any actor claimed in the request body.
+    """
+    request = urllib.request.Request(
+        url,
+        headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
+    )
+    try:
+        opener = urllib.request.build_opener(_NoRedirect)
+        with opener.open(request, timeout=5) as response:  # noqa: S310
+            payload = json.loads(response.read(MAX_BODY_BYTES))
+    except urllib.error.HTTPError as error:
+        return ("invalid", None) if error.code in (401, 403) else ("unavailable", None)
+    except (OSError, ValueError, json.JSONDecodeError):
+        return "unavailable", None
+    device = payload.get("deviceId") if isinstance(payload, dict) else None
+    if (
+        isinstance(payload, dict)
+        and payload.get("ok") is True
+        and payload.get("product") == "memento"
+        and isinstance(device, str)
+        and 0 < len(device) <= 200
+    ):
+        return "valid", device
+    return "invalid", None
+
+
+async def _validate_install_token(token: str) -> tuple[str | None, int]:
+    digest = hashlib.sha256(token.encode()).hexdigest()
+    cached = _install_auth_cache.get(digest)
+    if cached and cached[0] > time.monotonic():
+        return cached[1], 200
+
+    # Cache misses are the only requests that fan out to the managed gateways.
+    # Bound them globally so random bearer tokens cannot amplify a public ingest
+    # flood into an outbound gateway flood. A valid cached install is unaffected.
+    if _auth_validation_rate_limited():
+        return None, 429
+
+    saw_definitive_rejection = False
+    for url in GATEWAY_IDENTITY_URLS:
+        state, device = await asyncio.to_thread(_inspect_install_token, url, token)
+        if state == "valid" and device:
+            if len(_install_auth_cache) >= 10_000:
+                _install_auth_cache.clear()
+                # The cache is only an availability optimization. Clearing it
+                # is safer than allowing unbounded per-install memory growth.
+            _install_auth_cache[digest] = (
+                time.monotonic() + INSTALL_AUTH_CACHE_SECONDS,
+                device,
+            )
+            return device, 200
+        saw_definitive_rejection = saw_definitive_rejection or state == "invalid"
+    return None, 401 if saw_definitive_rejection else 503
+
+
+def _auth_validation_rate_limited() -> bool:
+    now = time.monotonic()
+    while _auth_validation_times and _auth_validation_times[0] <= now - 60:
+        _auth_validation_times.popleft()
+    if len(_auth_validation_times) >= AUTH_VALIDATION_RATE_LIMIT_PER_MINUTE:
+        return True
+    _auth_validation_times.append(now)
+    return False
+
+
+def _install_rate_limited(device: str) -> bool:
+    now = time.monotonic()
+    requests = _install_request_times[device]
+    while requests and requests[0] <= now - 60:
+        requests.popleft()
+    if len(requests) >= INSTALL_RATE_LIMIT_PER_MINUTE:
+        return True
+    requests.append(now)
+    return False
+
+
+def _static_rate_limited() -> bool:
+    now = time.monotonic()
+    while _static_request_times and _static_request_times[0] <= now - 60:
+        _static_request_times.popleft()
+    if len(_static_request_times) >= STATIC_RATE_LIMIT_PER_MINUTE:
+        return True
+    _static_request_times.append(now)
+    return False
 
 
 async def _posthog_sync_loop() -> None:
@@ -63,14 +225,27 @@ async def _posthog_sync_loop() -> None:
         await asyncio.sleep(interval)
 
 
+async def _retention_loop() -> None:
+    while True:
+        deleted = await asyncio.to_thread(
+            delete_events_before,
+            _db,
+            time.time() - RETENTION_DAYS * DAY,
+        )
+        if deleted:
+            print(f"[retention] deleted {deleted} expired events", flush=True)
+        await asyncio.sleep(DAY)
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    task = None
+    tasks = [asyncio.create_task(_retention_loop())]
     if os.environ.get("POSTHOG_PERSONAL_API_KEY") and os.environ.get("POSTHOG_PROJECT_ID"):
-        task = asyncio.create_task(_posthog_sync_loop())
+        tasks.append(asyncio.create_task(_posthog_sync_loop()))
     yield
-    if task:
+    for task in tasks:
         task.cancel()
+    for task in tasks:
         with suppress(asyncio.CancelledError):
             await task
 
@@ -157,6 +332,51 @@ def _iso(ts: float | None) -> str | None:
     return datetime.fromtimestamp(ts, timezone.utc).isoformat(timespec="seconds") if ts else None
 
 
+def _human_session_count(since: float, until: float) -> int:
+    if not HUMAN_EVENT_NAMES:
+        return 0
+    clause, params = exclusion_clause(excluded_device_ids())
+    names = list(HUMAN_EVENT_NAMES)
+    placeholders = ",".join("?" for _ in names)
+    return _db.execute(
+        "SELECT COUNT(*) FROM ("
+        " SELECT ts,ts-LAG(ts) OVER (PARTITION BY device_id ORDER BY ts) AS delta"
+        " FROM events WHERE ts >= ? AND ts <= ? AND device_id != ''"
+        + clause
+        + f" AND name IN ({placeholders})"
+        + HUMAN_EVENT_EXCLUSION_SQL
+        + ") WHERE ts >= ? AND (delta IS NULL OR delta > ?)",
+        [
+            since - SESSION_GAP_SECONDS,
+            until,
+            *params,
+            *names,
+            since,
+            SESSION_GAP_SECONDS,
+        ],
+    ).fetchone()[0]
+
+
+def _value_event_count(since: float, until: float) -> int:
+    clause, params = exclusion_clause(excluded_device_ids())
+    value_names = sorted(VALUE_EVENTS)
+    success_names = sorted(VALUE_EVENTS & SUCCESS_PROPERTY_EVENTS)
+    value_placeholders = ",".join("?" for _ in value_names)
+    success_placeholders = ",".join("?" for _ in success_names)
+    success_predicate = (
+        f"(name NOT IN ({success_placeholders})"
+        " OR lower(COALESCE(json_extract(properties,'$.success'),'true')) = 'true')"
+        if success_names
+        else "1=1"
+    )
+    return _db.execute(
+        "SELECT COUNT(*) FROM events WHERE ts >= ? AND ts <= ? AND device_id != ''"
+        + clause
+        + f" AND name IN ({value_placeholders}) AND {success_predicate}",
+        [since, until, *params, *value_names, *success_names],
+    ).fetchone()[0]
+
+
 @app.get("/health")
 async def health() -> dict[str, Any]:
     state = _db.execute(
@@ -168,8 +388,11 @@ async def health() -> dict[str, Any]:
     return {
         "ok": True,
         "version": VERSION,
-        "ingest_enabled": bool(INGEST_TOKEN or ALLOW_UNAUTHENTICATED_INGEST),
-        "ingest_authenticated": bool(INGEST_TOKEN),
+        "ingest_enabled": bool(INGEST_TOKEN or GATEWAY_IDENTITY_URLS),
+        "ingest_authenticated": bool(INGEST_TOKEN or GATEWAY_IDENTITY_URLS),
+        "install_auth": bool(GATEWAY_IDENTITY_URLS),
+        "static_auth": bool(INGEST_TOKEN),
+        "retention_days": RETENTION_DAYS,
         "posthog_sync": bool(os.environ.get("POSTHOG_PERSONAL_API_KEY")),
         "posthog_backfill_complete": not bool(page_state),
         "posthog_cursor": _iso(float(state[0])) if state else None,
@@ -179,11 +402,42 @@ async def health() -> dict[str, Any]:
 
 @app.post("/events")
 async def ingest(request: Request) -> JSONResponse:
-    if not INGEST_TOKEN and not ALLOW_UNAUTHENTICATED_INGEST:
+    if not INGEST_TOKEN and not GATEWAY_IDENTITY_URLS:
         return JSONResponse({"error": "ingest disabled"}, status_code=503)
     supplied_token = request.headers.get("x-ingest-token", "")
-    if INGEST_TOKEN and not hmac.compare_digest(supplied_token, INGEST_TOKEN):
-        return JSONResponse({"error": "bad token"}, status_code=401)
+    static_authenticated = bool(
+        INGEST_TOKEN and hmac.compare_digest(supplied_token, INGEST_TOKEN)
+    )
+    verified_device = None
+    source = "direct-server" if static_authenticated else "direct-client"
+    if static_authenticated:
+        if _static_rate_limited():
+            return JSONResponse(
+                {"error": "rate limited"},
+                status_code=429,
+                headers={"Retry-After": "60"},
+            )
+    else:
+        authorization = request.headers.get("authorization", "")
+        scheme, _, bearer_token = authorization.partition(" ")
+        if scheme.lower() != "bearer" or not bearer_token.strip():
+            return JSONResponse({"error": "missing install token"}, status_code=401)
+        verified_device, status = await _validate_install_token(bearer_token.strip())
+        if verified_device is None:
+            if status == 503:
+                message = "identity service unavailable"
+            elif status == 429:
+                message = "identity validation rate limited"
+            else:
+                message = "bad install token"
+            headers = {"Retry-After": "60"} if status in (429, 503) else None
+            return JSONResponse({"error": message}, status_code=status, headers=headers)
+        if _install_rate_limited(verified_device):
+            return JSONResponse(
+                {"error": "rate limited"},
+                status_code=429,
+                headers={"Retry-After": "60"},
+            )
     try:
         content_length = int(request.headers.get("content-length") or 0)
     except ValueError:
@@ -201,8 +455,14 @@ async def ingest(request: Request) -> JSONResponse:
     if not isinstance(events, list) or len(events) > 500:
         return JSONResponse({"error": "expected ≤500 events"}, status_code=400)
     device = body.get("device_id") if isinstance(body, dict) else None
-    result = insert_events(_db, events, device, source="direct")
-    return JSONResponse({"ok": True, **result})
+    result = insert_events(
+        _db,
+        events,
+        device,
+        source=source,
+        authoritative_device=verified_device,
+    )
+    return JSONResponse({"ok": True, "ingested": result["accepted"], **result})
 
 
 def compute_product(days: float = 30.0) -> dict[str, Any]:
@@ -388,7 +648,10 @@ def compute_product(days: float = 30.0) -> dict[str, Any]:
         )
 
     return {
-        "updated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        # Preserve sub-second precision: /summary reuses this exact timestamp as
+        # its inclusive upper bound. Truncating it to whole seconds made freshly
+        # ingested events disappear until the next poll.
+        "updated_at": datetime.fromtimestamp(now, timezone.utc).isoformat(),
         "window_days": window_days,
         "window_label": label,
         "identity": {
@@ -481,6 +744,25 @@ def summary(days: float = 1.0) -> JSONResponse:
     usage = product["usage"]
     retention = product["retention"]["rates"]
     quality = product["quality"]
+    current = datetime.fromtimestamp(now, REPORTING_TZ)
+    day_start = current.replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+    canonical_dau = product["growth"]["dau"]
+    overview = {
+        "ever_used": installs,
+        "dau": canonical_dau,
+        "wau": product["growth"]["wau"],
+        "mau": product["growth"]["mau"],
+    }
+    if canonical_dau:
+        overview["sessions_per_dau"] = round(
+            _human_session_count(day_start, now) / canonical_dau, 2
+        )
+        # For Memento a "tool" is a successful product value action: a
+        # completed capture/import or an explicit reuse action such as copy,
+        # search, chat response, or accepted structured memory.
+        overview["tools_per_dau"] = round(
+            _value_event_count(day_start, now) / canonical_dau, 2
+        )
     payload = {
         "updated_at": product["updated_at"],
         "window_days": product["window_days"],
@@ -488,12 +770,7 @@ def summary(days: float = 1.0) -> JSONResponse:
         "dau": observed,
         "events": events,
         "errors": errors,
-        "overview": {
-            "ever_used": installs,
-            "dau": product["growth"]["dau"],
-            "wau": product["growth"]["wau"],
-            "mau": product["growth"]["mau"],
-        },
+        "overview": overview,
         "metrics": [
             {"label": "Weekly value devices", "value": str(product["growth"]["weekly_value_devices"])},
             {"label": f"Captured memories {label}", "value": str(usage["captured_memories"])},
@@ -625,10 +902,9 @@ def _retention_cards() -> list[dict]:
 # 02.08). Модуль перечисляет СВОИ человеческие события явно: маска вида
 # «в имени есть tool» отваливается молча, а тихо завышенные сессии хуже
 # отсутствующих. Здесь только то, что эмитится прямо из обработчика жеста.
-# Намеренно снаружи списка:
-#   button_click_start_recording — авто-прослушка сама шлёт
-#     start-recording-from-sidebar (AutoMeetingDetection.tsx), запись
-#     стартует без клика;
+# Особый случай внутри списка:
+#   button_click_start_recording с location=sidebar_auto исключается SQL-
+#     предикатом: авто-прослушка сама запускает этот путь без клика;
 #   summary_generation_started, custom_prompt_used — рядом живёт
 #     setupAutoGeneration (meeting-details/page.tsx); клики по кнопкам
 #     уже покрыты button_click_(re)generate_summary;
@@ -638,6 +914,7 @@ def _retention_cards() -> list[dict]:
 #     *_chat_response_completed — в клиенте нет эмиттера, только план
 #     инструментации (docs/TRACTION_STATS_PLAN.md).
 HUMAN_EVENT_NAMES: tuple[str, ...] = (
+    "button_click_start_recording",
     "button_click_pause_recording",
     "button_click_resume_recording",
     "button_click_stop_recording",
@@ -649,16 +926,44 @@ HUMAN_EVENT_NAMES: tuple[str, ...] = (
     "button_click_enhance_transcript",
     "button_click_detect_speakers",
     "button_click_edit_meeting_title",
+    "button_click_generate_analytics_report",
+    "button_click_cancel_analytics_report",
+    "button_click_skip_analytics_questions",
+    "button_click_submit_analytics_answers",
+    "button_click_skip_analytics_speakers",
+    "button_click_submit_analytics_speakers",
+    "button_click_reveal_analytics_report",
+    "button_click_share_summary_telegram",
+    "button_click_save_changes",
+    "button_click_find_in_summary",
     "transcript_copied",
     "summary_copied",
     "import_audio_started",
     "enhance_transcript_started",
     "meeting_deleted",
+    "microphone_selected",
+    "system_audio_selected",
+    "language_selected",
+    "notification_settings_changed",
+    "storage_folder_opened",
+    "auto_capture_mode_changed",
+    "auto_save_recording_toggled",
+    "default_devices_changed",
+    "feature_used",
+    "settings_changed",
+    "analytics_enabled",
+    "analytics_disabled",
+    "analytics_transparency_viewed",
+    "user_id_copied",
+)
+HUMAN_EVENT_EXCLUSION_SQL = (
+    " AND NOT (name = 'button_click_start_recording'"
+    " AND COALESCE(json_extract(properties,'$.location'),'') = 'sidebar_auto')"
 )
 # Машинные события перечисляются так же явно, а не как «всё остальное»:
 # дополнение к человеческому списку засасывает нейтральное (обновления,
 # версии, технические маркеры) и выдаёт его за работу агента. Здесь —
-# конвейер обработки, все три приходят из колбэков завершения задач:
+# конвейер обработки; события приходят из колбэков завершения задач:
 # listen('import-complete'), listen('retranscription-complete') и опрос
 # статуса LLM. Технические сбои (error, transcription_error) не попадают
 # ни в один список. Пустой кортеж = карточки Agent runtime у модуля нет.
@@ -666,6 +971,7 @@ MACHINE_EVENT_NAMES: tuple[str, ...] = (
     "summary_generation_completed",
     "import_audio_completed",
     "enhance_transcript_completed",
+    "analytics_report_completed",
 )
 # Разрыв, после которого следующее человеческое событие открывает новую
 # сессию (веб-стандарт 30 минут; фрейм Цева — интервалы между user msg,
@@ -706,18 +1012,15 @@ def _canonical_cards(now: float, retention: dict | None = None) -> list[dict]:
         if names:
             # Сессия начинается, когда предыдущее человеческое событие того
             # же актора старше SESSION_GAP_SECONDS (или его вовсе не было).
-            gap_sessions = _db.execute(
-                "SELECT COUNT(*) FROM (SELECT ts - LAG(ts) OVER"
-                " (PARTITION BY device_id ORDER BY ts) AS delta"
-                + window + human + ") WHERE delta IS NULL OR delta > ?",
-                [since, *params, *names, SESSION_GAP_SECONDS]).fetchone()[0]
+            gap_sessions = _human_session_count(since, now)
             cards.append({
                 "label": "Sessions / day · human, 30-min gap · 30 Moscow dates",
                 "value": f"{gap_sessions / 30:.1f}",
             })
             hours = _db.execute(
                 "SELECT COUNT(DISTINCT device_id || ':' || CAST(ts / 3600 AS INT))"
-                + window + human, [since, *params, *names]).fetchone()[0]
+                + window + human + HUMAN_EVENT_EXCLUSION_SQL,
+                [since, *params, *names]).fetchone()[0]
             cards.append({
                 "label": "Sessions / day · human hourly proxy · 30 Moscow dates",
                 "value": f"{hours / 30:.1f}",

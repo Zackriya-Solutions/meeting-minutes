@@ -46,7 +46,7 @@ export default function AnalyticsDataModal({ isOpen, onClose }: AnalyticsDataMod
           <div className="border border-border rounded-lg p-4">
             <h4 className="font-semibold text-foreground mb-2">{t('Where analytics goes')}</h4>
             <p className="text-sm text-muted-foreground">
-              {t('When enabled, anonymous events are sent directly to the Memento PostHog project through the US PostHog ingestion endpoint (us.i.posthog.com). They are visible to the Memento project maintainers in PostHog, not inside the meeting UI. Turning analytics off stops the client immediately.')}
+              {t('When enabled, allowlisted anonymous events are sent to the first-party Memento statistics service at stats.multitool.works. A per-install credential is verified by the Memento gateway; no shared analytics secret or meeting content is sent. Turning analytics off stops the client immediately.')}
             </p>
           </div>
 

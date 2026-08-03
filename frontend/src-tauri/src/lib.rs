@@ -783,6 +783,7 @@ pub fn run() {
             audio::export::export_meeting_audio_mp3,
             save_transcript,
             analytics::commands::init_analytics,
+            analytics::commands::get_analytics_device_id,
             analytics::commands::disable_analytics,
             analytics::commands::track_event,
             analytics::commands::identify_user,

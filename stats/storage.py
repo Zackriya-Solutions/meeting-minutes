@@ -102,6 +102,7 @@ def insert_events(
     events: Any,
     envelope_device: str | None = None,
     source: str = "direct",
+    authoritative_device: str | None = None,
 ) -> dict[str, int]:
     if not isinstance(events, list):
         return {"accepted": 0, "inserted": 0, "duplicates": 0, "rejected": 1}
@@ -113,7 +114,11 @@ def insert_events(
             continue
         name = str(event.get("name") or event.get("event") or "")[:MAX_EVENT_NAME_LENGTH]
         device_id = str(
-            event.get("device_id") or event.get("distinct_id") or envelope_device or ""
+            authoritative_device
+            or event.get("device_id")
+            or event.get("distinct_id")
+            or envelope_device
+            or ""
         )[:MAX_DEVICE_ID_LENGTH]
         ts = parse_timestamp(event.get("ts") or event.get("timestamp"))
         if not name or not EVENT_NAME_RE.fullmatch(name) or ts is None:
@@ -155,6 +160,15 @@ def insert_events(
         "duplicates": len(rows) - inserted,
         "rejected": rejected,
     }
+
+
+def delete_events_before(db: sqlite3.Connection, cutoff: float) -> int:
+    """Delete analytics events outside the documented retention window."""
+    with WRITE_LOCK:
+        before = db.total_changes
+        db.execute("DELETE FROM events WHERE ts < ?", (cutoff,))
+        db.commit()
+        return db.total_changes - before
 
 
 def excluded_device_ids() -> set[str]:

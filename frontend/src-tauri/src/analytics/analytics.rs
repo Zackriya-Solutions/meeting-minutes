@@ -1,5 +1,4 @@
 use chrono::{DateTime, Utc};
-use posthog_rs::{Client, Event};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -43,18 +42,12 @@ fn meeting_started_properties(meeting_id: &str) -> HashMap<String, String> {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnalyticsConfig {
-    pub api_key: String,
-    pub host: Option<String>,
     pub enabled: bool,
 }
 
 impl Default for AnalyticsConfig {
     fn default() -> Self {
-        Self {
-            api_key: String::new(),
-            host: Some("https://us.i.posthog.com".to_string()),
-            enabled: false,
-        }
+        Self { enabled: false }
     }
 }
 
@@ -83,7 +76,6 @@ impl UserSession {
 }
 
 pub struct AnalyticsClient {
-    client: Option<Arc<Client>>,
     config: AnalyticsConfig,
     user_id: Arc<Mutex<Option<String>>>,
     current_session: Arc<Mutex<Option<UserSession>>>,
@@ -92,17 +84,8 @@ pub struct AnalyticsClient {
 
 impl AnalyticsClient {
     pub async fn new(config: AnalyticsConfig) -> Self {
-        let client = if config.enabled && !config.api_key.is_empty() {
-            Some(Arc::new(posthog_rs::client(config.api_key.as_str()).await))
-        } else {
-            None
-        };
-
-        // Traction sink shares the client's lifecycle, so disabling analytics
-        // (dropping the client) stops Traction events too. Гейт — только
-        // config.enabled: init_analytics всегда задаёт enabled и api_key
-        // вместе; если будущий вызов их разведёт, Traction останется привязан
-        // к согласию пользователя (enabled), а не к наличию PostHog-ключа.
+        // The first-party Traction sink shares the client's lifecycle, so
+        // dropping AnalyticsClient immediately stops consent-gated delivery.
         let traction = if config.enabled {
             crate::analytics::traction::TractionSink::new()
         } else {
@@ -110,7 +93,6 @@ impl AnalyticsClient {
         };
 
         Self {
-            client,
             config,
             user_id: Arc::new(Mutex::new(None)),
             current_session: Arc::new(Mutex::new(None)),
@@ -123,29 +105,16 @@ impl AnalyticsClient {
         user_id: String,
         properties: Option<HashMap<String, String>>,
     ) -> Result<(), String> {
-        // Store user ID for future events (Traction needs it even when the
-        // PostHog client is absent)
+        // Store the per-install id for future Traction events.
         *self.user_id.lock().await = Some(user_id.clone());
 
-        let client = match &self.client {
-            Some(client) => Arc::clone(client),
-            None => return Ok(()),
-        };
-
-        let properties = sanitize_analytics_properties(properties.unwrap_or_default());
-
-        let mut event = Event::new("$identify", &user_id);
-
-        // Add user properties
-        for (key, value) in properties {
-            if let Err(e) = event.insert_prop(&key, value) {
-                eprintln!("Failed to add property {}: {}", key, e);
-            }
-        }
-
-        if let Err(e) = client.capture(event).await {
-            eprintln!("Failed to identify user: {}", e);
-        }
+        // Identification properties are deliberately not emitted as a
+        // separate profile. Event-level allowlisted properties are enough for
+        // aggregate product statistics and avoid building user profiles.
+        let property_count = sanitize_analytics_properties(properties.unwrap_or_default()).len();
+        log::trace!(
+            "Traction identify stored the actor and intentionally omitted {property_count} profile properties"
+        );
 
         Ok(())
     }
@@ -170,7 +139,7 @@ impl AnalyticsClient {
         let event_name = event_name.to_string();
         let mut properties = sanitize_analytics_properties(properties.unwrap_or_default());
 
-        // Shared across PostHog and Traction for retry idempotency and deduplication.
+        // Stable across retries for idempotent first-party ingestion.
         properties.insert("event_id".to_string(), Uuid::new_v4().to_string());
 
         // Add app version to all events
@@ -197,29 +166,11 @@ impl AnalyticsClient {
             );
         }
 
-        // Mirror every event to the Traction stats module (batched)
+        // Deliver every event to the first-party Traction stats module.
         if let Some(traction) = &self.traction {
             traction
                 .track(&user_id, &event_name, properties.clone())
                 .await;
-        }
-
-        let client = match &self.client {
-            Some(client) => Arc::clone(client),
-            None => return Ok(()),
-        };
-
-        let mut event = Event::new(&event_name, &user_id);
-
-        // Add event properties
-        for (key, value) in properties {
-            if let Err(e) = event.insert_prop(&key, value) {
-                log::warn!("Failed to add property {}: {}", key, e);
-            }
-        }
-
-        if let Err(e) = client.capture(event).await {
-            log::warn!("Failed to track event {}: {}", event_name, e);
         }
 
         Ok(())
@@ -243,9 +194,11 @@ impl AnalyticsClient {
     }
 
     pub async fn end_session(&self) -> Result<(), String> {
-        let mut session_guard = self.current_session.lock().await;
-
-        if let Some(session) = session_guard.take() {
+        // Release the session mutex before track_event locks it again to add
+        // session metadata. Holding it across the await deadlocks shutdown and
+        // prevents the final Traction flush.
+        let session = self.current_session.lock().await.take();
+        if let Some(session) = session {
             let mut properties = HashMap::new();
             properties.insert("session_id".to_string(), session.session_id.clone());
             properties.insert(
@@ -556,40 +509,18 @@ impl AnalyticsClient {
     }
 
     pub fn is_enabled(&self) -> bool {
-        self.config.enabled && self.client.is_some()
+        self.config.enabled && self.traction.is_some()
     }
 
     pub async fn set_user_properties(
         &self,
         properties: HashMap<String, String>,
     ) -> Result<(), String> {
-        let client = match &self.client {
-            Some(client) => Arc::clone(client),
-            None => return Ok(()),
-        };
-
-        let user_id = match self.user_id.lock().await.clone() {
-            Some(id) => id,
-            None => {
-                eprintln!("Warning: Attempted to set user properties before user identification");
-                return Ok(());
-            }
-        };
-
-        let properties = sanitize_analytics_properties(properties);
-        let mut event = Event::new("$set", &user_id);
-
-        // Add user properties
-        for (key, value) in properties {
-            if let Err(e) = event.insert_prop(&key, value) {
-                eprintln!("Failed to add property {}: {}", key, e);
-            }
-        }
-
-        if let Err(e) = client.capture(event).await {
-            eprintln!("Failed to set user properties: {}", e);
-        }
-
+        // Traction stores events, not mutable user profiles. Keep the public
+        // method for existing callers while intentionally discarding profile
+        // properties.
+        let property_count = sanitize_analytics_properties(properties).len();
+        log::trace!("Traction intentionally omitted {property_count} mutable profile properties");
         Ok(())
     }
 }
@@ -693,5 +624,17 @@ mod tests {
         );
         assert!(properties.contains_key("timestamp"));
         assert!(!properties.contains_key("meeting_title"));
+    }
+
+    #[tokio::test]
+    async fn ending_a_session_does_not_relock_the_session_mutex() {
+        let client = AnalyticsClient::new(AnalyticsConfig { enabled: false }).await;
+        client.identify("device".to_string(), None).await.unwrap();
+        client.start_session("device".to_string()).await.unwrap();
+
+        tokio::time::timeout(std::time::Duration::from_secs(1), client.end_session())
+            .await
+            .expect("end_session deadlocked")
+            .unwrap();
     }
 }
