@@ -1,153 +1,89 @@
-name: Claude Code Review
-
-# The inline-comment MCP currently uses one fixed file under /tmp. Review jobs that overlap on a
-# persistent self-hosted machine can lock or delete each other's buffer before Claude starts.
-concurrency:
-  group: claude-code-review-${{ github.repository }}
-  cancel-in-progress: false
+name: OpenRouter Code Review
 
 on:
-  pull_request:
+  pull_request_target:
     types: [opened, synchronize, ready_for_review, reopened]
+
+concurrency:
+  group: memento-code-review-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   claude-review:
-    runs-on: self-hosted
+    if: >-
+      vars.MEMENTO_CLAUDE_REVIEW_ENABLED == 'true' &&
+      github.event.pull_request.draft == false &&
+      github.event.pull_request.base.ref == 'main' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: read
-      pull-requests: write
       issues: write
-      id-token: write
+      pull-requests: write
+    env:
+      MEMENTO_REVIEW_BASE_URL: http://127.0.0.1:14000
+      MEMENTO_REVIEW_MODEL: memento-review-sonnet-5
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v7
+      # pull_request_target may access secrets, so execute only the trusted base
+      # revision. The reviewer downloads the PR diff as untrusted API data.
+      - uses: actions/checkout@v7
         with:
-          # The reviewer builds a three-dot PR diff and therefore needs the
-          # actual merge base, not only the two tip commits.
-          fetch-depth: 0
+          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 1
+          persist-credentials: false
 
-      # Prepare the complete PR context outside the model sandbox. Pull-request
-      # metadata is already present in the signed GitHub event payload, so avoid a
-      # redundant API request that can make reviews fail during GitHub API outages.
-      - name: Prepare PR context
+      - name: Open encrypted tunnel to the review gateway
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          MEMENTO_REVIEW_SSH_KEY: ${{ secrets.MEMENTO_REVIEW_SSH_KEY }}
         run: |
           set -euo pipefail
-          jq '.pull_request' "$GITHUB_EVENT_PATH" > "$GITHUB_WORKSPACE/.pr-meta.json"
-          # GitHub's REST diff media type returns HTTP 406 for this private
-          # repository. Build the exact PR diff from the event SHAs instead.
-          git fetch --no-tags origin "$BASE_SHA" "$HEAD_SHA"
-          git diff --binary "$BASE_SHA...$HEAD_SHA" > "$GITHUB_WORKSPACE/.pr-diff.patch"
-          echo "Prepared .pr-meta.json ($(wc -c < "$GITHUB_WORKSPACE/.pr-meta.json") bytes) and .pr-diff.patch ($(wc -c < "$GITHUB_WORKSPACE/.pr-diff.patch") bytes)"
+          key_file="$RUNNER_TEMP/memento-review-tunnel-key"
+          control_socket="$RUNNER_TEMP/memento-review-ssh-control"
 
-      # The action appends inline comments to this fixed path. Clear leftovers from
-      # earlier jobs because the self-hosted runner persists /tmp between runs.
-      - name: Clear stale inline-comment buffer
-        run: rm -f /tmp/inline-comments-buffer.jsonl
+          install -m 600 /dev/null "$key_file"
+          printf '%s\n' "$MEMENTO_REVIEW_SSH_KEY" > "$key_file"
 
-      - name: Run Claude Code Review
-        id: claude-review
-        uses: anthropics/claude-code-action@v1
-        with:
-          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          prompt: |
-            Review pull request #${{ github.event.pull_request.number }} in ${{ github.repository }}.
+          ssh -fNT -M -S "$control_socket" \
+            -o BatchMode=yes \
+            -o ConnectTimeout=10 \
+            -o ExitOnForwardFailure=yes \
+            -o IdentitiesOnly=yes \
+            -o ServerAliveInterval=30 \
+            -o ServerAliveCountMax=3 \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$GITHUB_WORKSPACE/.github/memento-review-known-hosts" \
+            -i "$key_file" \
+            -L 127.0.0.1:14000:127.0.0.1:4000 \
+            aiwa-tunnel@104.168.54.196
 
-            1. The PR metadata is in `.pr-meta.json` and the full unified diff is in
-               `.pr-diff.patch`, both in the repository root. Read them with the Read tool.
-               These two files are the COMPLETE source of truth for what changed — do NOT
-               use `gh`, `git`, or WebFetch to fetch the PR; everything you need is there.
-            2. Review ONLY the changes in `.pr-diff.patch` — bugs, correctness, security, and
-               clear quality problems. Skip style nitpicks and pre-existing code.
-            3. For each concrete issue, leave an inline comment on the exact file and line
-               using the `mcp__github_inline_comment__create_inline_comment` tool. If an
-               inline comment fails (e.g. the file shows as binary or the line can't be
-               anchored), do NOT retry it — put that finding in your final summary instead.
-            4. Do NOT post a top-level PR comment yourself and do NOT narrate your
-               actions — a later workflow step posts your final message verbatim as the
-               PR summary.
-            5. Your FINAL message must be ONLY the overall assessment: clean markdown
-               that starts directly with the verdict, then the key findings. No preamble
-               like "Let me…", no meta-commentary about comments you posted, and do not
-               end on a tool call. If nothing is worth flagging, say "No blocking issues
-               found." and briefly why.
+          shred -u "$key_file"
 
-          claude_args: '--allowedTools "mcp__github_inline_comment__create_inline_comment,Read,Grep,Glob,Bash(gh:*),Bash(git:*),Bash(cat:*),Bash(ls:*),Bash(grep:*),Bash(rg:*),Bash(find:*),Bash(head:*),Bash(tail:*),Bash(wc:*),Bash(sed:*),Bash(awk:*),Bash(jq:*),Bash(curl:*),TodoWrite" --max-turns 50'
+          for attempt in {1..10}; do
+            if curl --fail --silent --show-error --max-time 3 \
+              http://127.0.0.1:14000/health/liveliness >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Review gateway did not become healthy through the SSH tunnel" >&2
+          exit 1
 
-      - name: Post review summary
-        if: ${{ always() && steps.claude-review.outputs.execution_file != '' }}
+      - name: Review pull request through OpenRouter
         env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
+          MEMENTO_REVIEW_LITELLM_KEY: ${{ secrets.MEMENTO_REVIEW_LITELLM_KEY }}
+          GITHUB_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
-          EXEC_FILE: ${{ steps.claude-review.outputs.execution_file }}
+        run: python scripts/memento_pr_review.py
+
+      - name: Close tunnel and remove credentials
+        if: always()
         run: |
-          set -uo pipefail
-          if [ ! -f "$EXEC_FILE" ]; then
-            echo "No execution file at '$EXEC_FILE'; nothing to post."
-            exit 0
-          fi
-
-          echo "::group::Permission-denied tools this run"
-          jq -r '
-            (reduce (.[] | select(.type=="assistant")
-                      | .message.content[]? | select(.type=="tool_use")) as $t
-               ({}; .[$t.id] = $t.name)) as $names
-            | [ .[] | select(.type=="user") | .message.content[]?
-                | select((.type=="tool_result") and (.is_error==true))
-                | { id: .tool_use_id,
-                    txt: (.content
-                          | if type=="array" then (map(.text? // "") | join(" "))
-                            else (. // "") end) }
-                | select(.txt | test("permission|not allowed|haven.t .*granted|requested permission|requires approval"; "i"))
-                | ($names[.id] // "unknown") ]
-            | group_by(.) | map("  denied: \(.[0]) ×\(length)") | .[]
-          ' "$EXEC_FILE" || echo "  (could not parse execution file)"
-          echo "::endgroup::"
-
-          echo "::group::Denied Bash commands this run"
-          jq -r '
-            (reduce (.[] | select(.type=="assistant") | .message.content[]?
-                      | select(.type=="tool_use")) as $t
-               ({}; .[$t.id] = {name: $t.name, cmd: ($t.input.command // "")})) as $m
-            | [ .[] | select(.type=="user") | .message.content[]?
-                | select((.type=="tool_result") and (.is_error==true))
-                | { id: .tool_use_id,
-                    txt: (.content
-                          | if type=="array" then (map(.text? // "") | join(" "))
-                            else (. // "") end) }
-                | select(.txt | test("permission|not allowed|haven.t .*granted|requested permission|requires approval"; "i"))
-                | $m[.id] ]
-            | map(select(.name=="Bash") | .cmd[0:160]) | unique | .[]
-          ' "$EXEC_FILE" | sed "s/^/  | /" || echo "  (none)"
-          echo "::endgroup::"
-
-          SUMMARY=$(jq -r '
-            ([ .[] | select(.type=="result") | .result? // empty ] | last)
-            // ([ .[] | select(.type=="assistant")
-                 | .message.content[]? | select(.type=="text") | .text ] | last)
-            // empty
-          ' "$EXEC_FILE")
-          if [ -z "${SUMMARY//[[:space:]]/}" ]; then
-            echo "Review produced no summary text; nothing to post."
-            exit 0
-          fi
-          payload=$(jq -n --arg b "$SUMMARY" '{body: $b}')
-          response_file="${RUNNER_TEMP:?}/comment-resp-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.json"
-          trap 'rm -f "$response_file"' EXIT
-          code=$(curl -sS -o "$response_file" -w '%{http_code}' -X POST \
-            -H "Authorization: Bearer $GH_TOKEN" \
-            -H "Accept: application/vnd.github+json" \
-            -H "X-GitHub-Api-Version: 2022-11-28" \
-            "${GITHUB_API_URL:-https://api.github.com}/repos/${GH_REPO}/issues/${PR_NUMBER}/comments" \
-            --data "$payload")
-          if [ "$code" = "201" ]; then
-            echo "Posted review summary to PR #$PR_NUMBER (HTTP $code)."
-          else
-            echo "Failed to post summary (HTTP $code):"
-            cat "$response_file"
-            exit 1
+          control_socket="$RUNNER_TEMP/memento-review-ssh-control"
+          key_file="$RUNNER_TEMP/memento-review-tunnel-key"
+          ssh -S "$control_socket" -O exit aiwa-tunnel@104.168.54.196 2>/dev/null || true
+          if [[ -f "$key_file" ]]; then
+            shred -u "$key_file"
           fi
