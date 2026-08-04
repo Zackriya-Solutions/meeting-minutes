@@ -115,6 +115,11 @@ export default function ChatPage() {
   }, [loadingHistory, scopeInitialized, send, sending]);
 
   const meetingTitle = (id: string) => meetings.find((m) => m.id === id)?.title ?? id.slice(0, 8);
+  const latestUserMessageIndex = messages.reduce(
+    (latestIndex, message, index) => message.role === 'user' ? index : latestIndex,
+    -1,
+  );
+
   return (
     <ChatDrawerShell>
     <div className="mm-page drawer-elevation-surface !h-full !px-0">
@@ -129,7 +134,7 @@ export default function ChatPage() {
       <MessageScrollerProvider
         key={`${scopeKind}-${collectionId ?? 'all'}-${meetingId ?? 'all'}-${loadingHistory ? 'loading' : 'ready'}`}
         autoScroll
-        defaultScrollPosition="last-anchor"
+        defaultScrollPosition="end"
         scrollPreviousItemPeek={48}
       >
         <MessageScroller className="min-h-0 flex-1">
@@ -154,7 +159,7 @@ export default function ChatPage() {
                     <MessageScrollerItem
                       key={`${msg.role}-${i}`}
                       messageId={`knowledge-chat-${i}`}
-                      scrollAnchor={msg.role === 'user'}
+                      scrollAnchor={i === latestUserMessageIndex}
                     >
                       <MessageBubble msg={msg} meetingTitle={meetingTitle} onCite={openCitation} />
                     </MessageScrollerItem>

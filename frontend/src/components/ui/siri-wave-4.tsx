@@ -11,6 +11,15 @@ type SiriWave4Props = HTMLAttributes<HTMLDivElement> & {
   sensitivity?: number
 }
 
+const BASE_AMPLITUDE = 0.32
+
+function easeInOutCubic(value: number) {
+  const clamped = Math.max(0, Math.min(1, value))
+  return clamped < 0.5
+    ? 4 * clamped * clamped * clamped
+    : 1 - Math.pow(-2 * clamped + 2, 3) / 2
+}
+
 /**
  * Canvas adaptation of the layered visual language used by Wave 4 in
  * nilotic/SiriWave. The original project is SwiftUI-only, so this component
@@ -31,7 +40,7 @@ export function SiriWave4({
   const analyserRef = useRef<AnalyserNode | null>(null)
   const audioContextRef = useRef<AudioContext | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
-  const amplitudeRef = useRef(0.22)
+  const amplitudeRef = useRef(BASE_AMPLITUDE)
   const phaseRef = useRef(0)
 
   useEffect(() => {
@@ -124,7 +133,7 @@ export function SiriWave4({
       const delta = Math.min(40, now - lastTime)
       lastTime = now
 
-      let targetAmplitude = 0.2
+      let targetAmplitude = BASE_AMPLITUDE
       if (active && analyserRef.current) {
         analyserRef.current.getByteTimeDomainData(audioData)
         let energy = 0
@@ -132,24 +141,34 @@ export function SiriWave4({
           const centered = (sample - 128) / 128
           energy += centered * centered
         }
-        targetAmplitude = Math.max(
-          0.22,
-          Math.min(1, Math.sqrt(energy / audioData.length) * 6.2 * sensitivity),
-        )
+        const voiceLevel = Math.sqrt(energy / audioData.length) * 6.2 * sensitivity
+        const easedVoiceLevel = easeInOutCubic(voiceLevel)
+        targetAmplitude = BASE_AMPLITUDE + easedVoiceLevel * (1 - BASE_AMPLITUDE)
       } else if (active) {
-        targetAmplitude = 0.18 + Math.sin(now / 430) * 0.055 + Math.sin(now / 970) * 0.04
+        targetAmplitude = BASE_AMPLITUDE + Math.sin(now / 430) * 0.055 + Math.sin(now / 970) * 0.04
       } else if (processing) {
-        targetAmplitude = 0.13 + Math.sin(now / 360) * 0.045
+        targetAmplitude = 0.26 + Math.sin(now / 360) * 0.045
       }
 
-      amplitudeRef.current += (targetAmplitude - amplitudeRef.current) * 0.09
+      const easingDuration = targetAmplitude > amplitudeRef.current ? 110 : 260
+      const easingProgress = 1 - Math.exp(-delta / easingDuration)
+      amplitudeRef.current += (targetAmplitude - amplitudeRef.current) * easingProgress
       if (!reduceMotion) {
         phaseRef.current -= delta * (0.0019 + amplitudeRef.current * 0.0014)
       }
 
       context.setTransform(dpr, 0, 0, dpr, 0, 0)
       context.clearRect(0, 0, width, canvasHeight)
-      context.strokeStyle = getComputedStyle(canvas).color
+      const styles = getComputedStyle(canvas)
+      const fallbackColor = styles.color
+      const layerColors = [
+        styles.getPropertyValue("--deslop-primary-50").trim() || fallbackColor,
+        styles.getPropertyValue("--deslop-primary-30").trim() || fallbackColor,
+        styles.getPropertyValue("--deslop-primary-20").trim() || fallbackColor,
+        styles.getPropertyValue("--deslop-primary-10").trim() || fallbackColor,
+        styles.getPropertyValue("--deslop-primary-8").trim() || fallbackColor,
+        styles.getPropertyValue("--deslop-primary-5").trim() || fallbackColor,
+      ]
       context.lineCap = "round"
       context.lineJoin = "round"
 
@@ -159,8 +178,9 @@ export function SiriWave4({
 
       layerScales.forEach((layerScale, index) => {
         context.beginPath()
+        context.strokeStyle = layerColors[index]
         context.lineWidth = index === 0 ? 1.5 : 0.75
-        context.globalAlpha = index === 0 ? 0.92 : 0.32 + (5 - index) * 0.035
+        context.globalAlpha = 1
 
         for (let x = 0; x <= width; x += 2) {
           const progress = width > 0 ? x / width : 0

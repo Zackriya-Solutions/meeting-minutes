@@ -124,32 +124,28 @@ function extractMeetingTopics(summary: unknown, transcripts: Transcript[]): stri
 }
 
 export function buildArchivePromptSuggestions(
-  sources: readonly ArchiveSuggestionSource[],
+  _sources: readonly ArchiveSuggestionSource[],
   lang: AppLanguage,
 ): string[] {
-  const archiveSample = spreadAcrossArchive(sources, 4);
-  const titles = uniqueTopics(archiveSample.map((source) => usefulTitle(source.title)));
-  const topics = uniqueTopics(sources.map((source) => source.description), 48).slice(0, 2);
-
   if (lang === "ru") {
-    return uniqueSuggestions([
-      topics[0] ? `Что решили про ${quote(topics[0])}?` : null,
-      titles[0] ? `Что осталось сделать после ${quote(titles[0])}?` : null,
-      titles[1] ? "Сравни последние встречи" : null,
-      topics[1] ? `На каких встречах обсуждали ${quote(topics[1])}?` : null,
-      "Какие решения повторяются?",
-      "Что изменилось недавно?",
-    ]);
+    return [
+      "Кто на встречах самый пассивный?",
+      "Какие встречи самые неэффективные?",
+      "Какие проблемы не решаются?",
+      "Кто самый перегруженный?",
+      "Кто в команде топ‑перформер?",
+      "Какие встречи самые эффективные?",
+    ];
   }
 
-  return uniqueSuggestions([
-    topics[0] ? `What was decided about ${quote(topics[0])}?` : null,
-    titles[0] ? `What is still open after ${quote(titles[0])}?` : null,
-    titles[1] ? `Compare ${quote(titles[0])} and ${quote(titles[1])}` : null,
-    topics[1] ? `Where else was ${quote(topics[1])} discussed?` : null,
-    "Which agreements recur across meetings?",
-    "What changed across the latest meetings?",
-  ]);
+  return [
+    "Who participates least in meetings?",
+    "Which meetings are the least effective?",
+    "Which problems remain unresolved?",
+    "Who has the heaviest workload?",
+    "Who is the top performer on the team?",
+    "Which meetings are the most effective?",
+  ];
 }
 
 export function buildMeetingPromptSuggestions(

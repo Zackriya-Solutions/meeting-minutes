@@ -445,6 +445,7 @@
   }
   .memento-drawer-popup[data-swiping] { transition-duration: 0ms; }
   .memento-drawer-content {
+    position: relative;
     display: flex;
     min-width: 0;
     min-height: 0;
@@ -453,6 +454,7 @@
     overflow: hidden;
     overscroll-behavior: contain;
     border-radius: inherit;
+    background: var(--elevation-2);
     user-select: text;
   }
   .memento-drawer-swipe-handle {
@@ -501,40 +503,55 @@
     --drawer-content-inset: var(--ui-space-24);
     border-radius: 10px;
   }
+  .meeting-route-drawer .memento-drawer-swipe-handle > span {
+    width: 4px;
+    height: 64px;
+    background: var(--primary-20);
+    opacity: 1;
+    transition: width 150ms ease;
+  }
+  .meeting-route-drawer .memento-drawer-swipe-handle:hover > span,
+  .meeting-route-drawer .memento-drawer-swipe-handle:focus-visible > span,
+  .meeting-route-drawer .memento-drawer-swipe-handle:active > span {
+    width: 5px;
+  }
   .meeting-drawer-resize-handle {
     position: absolute;
     top: 0;
     bottom: 0;
     left: 0;
-    z-index: 10;
-    width: 16px;
+    z-index: 20;
+    display: block;
+    width: 20px;
     cursor: ew-resize;
     touch-action: none;
     -webkit-app-region: no-drag;
+    isolation: isolate;
     outline: none;
   }
-  .meeting-drawer-resize-handle::after {
-    content: '';
+  .meeting-drawer-resize-handle-indicator {
     position: absolute;
     top: 50%;
-    left: 6px;
+    left: 50%;
+    z-index: 1;
+    display: block;
     width: 4px;
     height: 64px;
     border-radius: 999px;
-    background: var(--primary-40);
+    background: var(--primary-20);
+    pointer-events: none;
     opacity: 1;
-    transform: translateY(-50%);
+    transform: translate(-50%, -50%);
     transition: opacity 150ms ease, width 150ms ease;
   }
-  .meeting-drawer-resize-handle:hover::after,
-  .meeting-drawer-resize-handle:focus-visible::after,
-  .meeting-drawer-resize-handle:active::after {
+  .meeting-drawer-resize-handle:hover .meeting-drawer-resize-handle-indicator,
+  .meeting-drawer-resize-handle:focus-visible .meeting-drawer-resize-handle-indicator,
+  .meeting-drawer-resize-handle:active .meeting-drawer-resize-handle-indicator {
     opacity: 1;
     width: 5px;
   }
   .meeting-page-surface {
-    background-color: var(--elevation-1);
-    background-image: linear-gradient(var(--deslop-primary-4), var(--deslop-primary-4));
+    background: var(--elevation-2);
   }
   .drawer-elevation-surface {
     background: var(--elevation-2) !important;
@@ -672,7 +689,7 @@
     flex-direction: column;
     align-items: stretch;
     overflow: hidden;
-    border: 1px solid var(--primary-10);
+    border: 0;
     border-radius: 32px;
     background: var(--elevation-2);
     color: inherit;
@@ -691,7 +708,10 @@
   .home-meeting-copy { display: flex; min-width: 0; flex-direction: column; justify-content: center; }
   .home-meeting-title { overflow: hidden; color: hsl(var(--foreground)); font-size: 16px; font-weight: 400; letter-spacing: -.02em; line-height: 1.18; text-overflow: ellipsis; white-space: nowrap; }
   .home-meeting-time { margin-top: 3px; color: hsl(var(--muted-foreground)); font-size: 12px; font-variant-numeric: tabular-nums; line-height: 1.45; }
-  .home-outlook-card { cursor: default; }
+  .home-outlook-card {
+    background: var(--deslop-primary-4);
+    cursor: default;
+  }
   .home-outlook-card__top {
     align-items: flex-start;
     justify-content: space-between;
@@ -722,14 +742,28 @@
     line-height: var(--ui-subtitle-line-height);
   }
   .home-history__list {
+    position: relative;
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    border: 1px solid var(--primary-5);
+    border: 0;
     border-radius: 24px;
-    background: var(--primary-5);
+    background: var(--deslop-primary-4);
   }
-  .home-history__list .home-history-cell { padding-left: 16px; }
+  .home-history__list .home-history-cell {
+    position: relative;
+    z-index: 1;
+    padding-left: 16px;
+  }
+  .home-history__hover-indicator {
+    position: absolute;
+    z-index: 0;
+    pointer-events: none;
+    background: var(--deslop-primary-8);
+  }
+  .home-history__list .home-history-cell:active {
+    background: var(--deslop-primary-10);
+  }
   .home-history-time { color: var(--deslop-primary-60); font-size: var(--ui-subtitle-font-size); font-variant-numeric: tabular-nums; line-height: var(--ui-subtitle-line-height); white-space: nowrap; }
 
   /* Message and summary copy use Body 16/21. Sender labels keep the
@@ -1139,6 +1173,26 @@ input, textarea, button, [role='dialog'], [role='menu'], [role='listbox'] { font
 .mm-md .katex { font-size: 1.02em; color: inherit; word-break: normal; overflow-wrap: normal; }
 .mm-md .katex-display { margin: 8px 0; overflow-x: auto; overflow-y: hidden; }
 .mm-md .katex-display > .katex { text-align: left; }
+
+/* Chat answers are a single editorial text column. Markdown lists and quotes
+   keep their semantic structure without introducing a second left edge. */
+.mm-md-answer,
+.mm-md-answer :where(p, ul, ol, li, blockquote, h1, h2, h3, h4, h5, h6) {
+  text-align: left;
+}
+.mm-md-answer :where(ul, ol) {
+  list-style: none;
+  padding-left: 0;
+}
+.mm-md-answer :where(blockquote) {
+  padding-left: 0;
+  border-left: 0;
+}
+.mm-md-answer :where(h1, h2, h3, h4, h5, h6) {
+  font-family: inherit;
+  font-size: inherit;
+  line-height: inherit;
+}
 
 @theme inline {
   @keyframes spinner-move {

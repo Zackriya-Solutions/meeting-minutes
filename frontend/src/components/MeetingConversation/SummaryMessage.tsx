@@ -30,6 +30,14 @@ interface SummaryMessageProps {
   speakers?: SpeakerInfo[];
 }
 
+type ActionIconProps = { size?: number; strokeWidth?: number; className?: string };
+const RegenerateIcon = ({ size = 16, strokeWidth = 1.5, className }: ActionIconProps) => (
+  <RefreshCw size={size} strokeWidth={strokeWidth} className={className} />
+);
+const CopyIcon = ({ size = 16, strokeWidth = 1.5, className }: ActionIconProps) => (
+  <Copy size={size} strokeWidth={strokeWidth} className={className} />
+);
+
 function formatDuration(seconds: number): string {
   const roundedMinutes = Math.max(1, Math.round(seconds / 60));
   if (roundedMinutes < 60) return `${roundedMinutes} мин`;
@@ -175,27 +183,23 @@ export function SummaryMessage({ summaryPanelProps: p, actualDurationSeconds, sp
           <div className="mt-[18px] flex gap-1">
             <FluidButton
               type="button"
-              variant="ghost"
+              variant="secondary"
               size="sm"
+              leadingIcon={RegenerateIcon}
               className="text-[var(--primary-60)]"
               onClick={() => void p.onRegenerateSummary()}
             >
-              <span className="inline-flex items-center gap-1.5">
-                <RefreshCw size={14} />
-                {t('Regenerate')}
-              </span>
+              {t('Regenerate')}
             </FluidButton>
             <FluidButton
               type="button"
-              variant="ghost"
+              variant="secondary"
               size="sm"
+              leadingIcon={CopyIcon}
               className="text-[var(--primary-60)]"
               onClick={() => void p.onCopySummary()}
             >
-              <span className="inline-flex items-center gap-1.5">
-                <Copy size={14} />
-                {t('Copy')}
-              </span>
+              {t('Copy')}
             </FluidButton>
           </div>
         </>

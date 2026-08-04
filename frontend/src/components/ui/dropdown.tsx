@@ -504,7 +504,7 @@ const DropdownContent = forwardRef<HTMLDivElement, DropdownContentProps>(
           sideOffset={sideOffset}
         >
           <motion.div
-            className="z-50 outline-none"
+            className="z-[100] outline-none"
             initial={{ opacity: 0, y: -4, scaleY: 0.96 }}
             animate={
               open
