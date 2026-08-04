@@ -23,3 +23,17 @@ tokio = { version = "1.32.0", features = ["full"] }
 [profile.release.package.llama-helper]
 codegen-units = 1
 opt-level = "s"
+
+# Debug builds of this workspace are dominated by DWARF, not code: whisper-rs,
+# llama-cpp-sys, cidre and the Tauri tree together produced a 62 GB target/debug.
+# Line tables keep backtraces pointing at file:line for our own crates, which is
+# what we actually read; full DWARF for every dependency is not worth the disk.
+[profile.dev]
+debug = "line-tables-only"
+split-debuginfo = "unpacked"
+
+# "*" applies to dependencies only, never to workspace members, so our code keeps
+# the setting above. This also reaches the -sys crates: Cargo derives the DEBUG
+# env var from the profile, and the cc/cmake builds drop -g when it is false.
+[profile.dev.package."*"]
+debug = false

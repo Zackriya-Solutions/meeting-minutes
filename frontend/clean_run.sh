@@ -118,6 +118,11 @@ echo "Building Next.js application..."
 # Set environment variables for the build
 echo "Setting up build environment..."
 
+# Incremental compilation caches grew to 15 GB in target/debug/incremental. This
+# script already rebuilds from a cleaned frontend each run, so the cache buys
+# little here; unset it locally if you want faster edit-rebuild cycles.
+export CARGO_INCREMENTAL=0
+
 echo "Building Tauri app..."
 "${PNPM[@]}" run tauri dev
 sleep
