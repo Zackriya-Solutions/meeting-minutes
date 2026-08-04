@@ -40,6 +40,9 @@ pnpm run build
 echo "Setting up build environment..."
 
 echo "Building Tauri app..."
-pnpm run tauri dev
-sleep
-
+pnpm run tauri dev &
+TAURI_PID=$!
+echo $TAURI_PID > /tmp/meetily.pid
+echo "Meetily PID: $TAURI_PID (saved to /tmp/meetily.pid)"
+echo "  Kill with: kill \$(cat /tmp/meetily.pid)"
+wait $TAURI_PID
