@@ -407,3 +407,58 @@ $env:RUST_LOG="debug"; ./clean_run_windows.bat
 
 **Whisper Integration**:
 - [frontend/src-tauri/src/whisper_engine/whisper_engine.rs](frontend/src-tauri/src/whisper_engine/whisper_engine.rs) - Whisper model management and transcription
+
+## AI-Run Guides
+
+<!-- ai-run-init:guide-imports start -->
+| Category | Guide Path | Purpose |
+|---|---|---|
+| Architecture | .ai-run/guides/architecture/architecture.md | System design, component responsibilities, dependency rules |
+| Audio Pipeline | .ai-run/guides/architecture/audio-pipeline.md | Audio capture, mixing, VAD, platform specifics |
+| Development | .ai-run/guides/development/development-practices.md | Code style, error handling, logging, build commands |
+| Testing | .ai-run/guides/testing/testing-patterns.md | bun:test and cargo test patterns, mocking, running tests |
+| API | .ai-run/guides/api/tauri-commands.md | Tauri command/event IPC, command registration, patterns |
+| Security | .ai-run/guides/security/platform-permissions.md | Platform permissions, entitlements, file system access |
+| Standards | .ai-run/guides/standards/git-workflow.md | Branch naming, commit format, PR process |
+| Quality Gates | .ai-run/guides/quality-gates.md | Lint, type check, test commands |
+<!-- ai-run-init:guide-imports end -->
+
+<!-- ai-run-init:task-classifier start -->
+| Category | User Intent | Example Requests | P0 Guide | P1 Guide |
+|---|---|---|---|---|
+| Architecture | System design, component boundaries, adding features | "how does X work", "add a new module", "where does Y live" | architecture.md | audio-pipeline.md |
+| Audio Pipeline | Audio capture, mixing, VAD, platform audio | "fix audio dropout", "add Linux audio", "VAD isn't detecting speech" | audio-pipeline.md | architecture.md |
+| Development | Code style, error handling, build | "how do I run this", "add error handling", "build for CUDA" | development-practices.md | — |
+| Testing | Writing or running tests | "write a test", "run tests", "how do I mock X" | testing-patterns.md | — |
+| API | Tauri commands, events, IPC | "add a Tauri command", "listen to events", "invoke from frontend" | tauri-commands.md | architecture.md |
+| Security | Permissions, entitlements, privacy | "request microphone", "entitlement for X", "platform permissions" | platform-permissions.md | — |
+| Git / PR | Branching, commits, pull requests | "create a branch", "commit message format", "open PR" | git-workflow.md | — |
+| Quality Gates | Lint, tests, CI | "run lint", "check types", "what CI checks run" | quality-gates.md | — |
+<!-- ai-run-init:task-classifier end -->
+
+<!-- ai-run-init:critical-rules start -->
+| Rule | Trigger | Action |
+|---|---|---|
+| Check Guides First | ANY task | Match request → category above → load P0 guide BEFORE searching codebase |
+| Testing | "write tests" / "run tests" | Load testing-patterns.md ONLY; use `bun test` for JS, `cargo test` for Rust |
+| Git Operations | "commit" / "push" / "PR" | Load git-workflow.md ONLY; base branches from `main` |
+| Shell | ANY shell command | bash/macOS syntax; run from `frontend/` unless noted |
+| No legacy backend | ANY backend work | `backend/` is an archived FastAPI tier — never add endpoints there |
+| Tauri path APIs | File path operations | Use Tauri path APIs; never hardcode OS-specific paths |
+<!-- ai-run-init:critical-rules end -->
+
+<!-- ai-run-init:commands start -->
+| Action | Command | Directory |
+|---|---|---|
+| Dev run (macOS) | `./clean_run.sh` | repo root |
+| Dev run (debug) | `./clean_run.sh debug` | repo root |
+| Dev run (Metal GPU) | `pnpm run tauri:dev:metal` | `frontend/` |
+| Production build | `./clean_build.sh` | repo root |
+| Install JS deps | `pnpm install` | `frontend/` |
+| TS lint | `pnpm run lint` | `frontend/` |
+| TS type check | `pnpm exec tsc --noEmit` | `frontend/` |
+| JS tests | `bun test` | `frontend/` |
+| Rust tests | `cargo test` | `frontend/` |
+| Rust lint | `cargo clippy -- -D warnings` | `frontend/` |
+| Rust format | `cargo fmt` | `frontend/` |
+<!-- ai-run-init:commands end -->

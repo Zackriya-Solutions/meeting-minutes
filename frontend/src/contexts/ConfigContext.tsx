@@ -59,6 +59,13 @@ interface ConfigContextType {
   selectedLanguage: string;
   setSelectedLanguage: (lang: string) => void;
 
+  // Transcription prompt and dictionary
+  transcriptionDictionary: string[];
+  setTranscriptionDictionary: (terms: string[]) => void;
+  transcriptionPrompts: Record<string, string>;
+  setTranscriptionPrompt: (provider: string, prompt: string) => void;
+  getEffectivePrompt: (provider: string) => string;
+
   // UI preferences
   showConfidenceIndicator: boolean;
   toggleConfidenceIndicator: (checked: boolean) => void;
@@ -143,6 +150,32 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
       return saved || 'auto';
     }
     return 'auto';
+  });
+
+  // Transcription dictionary state (universal across models)
+  const [transcriptionDictionary, setTranscriptionDictionaryState] = useState<string[]>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem('transcriptionDictionary');
+        return saved ? JSON.parse(saved) : [];
+      } catch {
+        return [];
+      }
+    }
+    return [];
+  });
+
+  // Per-provider initial prompt state
+  const [transcriptionPrompts, setTranscriptionPromptsState] = useState<Record<string, string>>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem('transcriptionPrompts');
+        return saved ? JSON.parse(saved) : {};
+      } catch {
+        return {};
+      }
+    }
+    return {};
   });
 
   // UI preferences state
@@ -482,6 +515,62 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     );
   }, []);
 
+  // Compute the effective prompt to send to Whisper: dictionary prepended to per-model prompt
+  const getEffectivePrompt = useCallback((provider: string): string => {
+    const dictPart = transcriptionDictionary.length > 0
+      ? transcriptionDictionary.join(', ') + '.'
+      : '';
+    const modelPrompt = transcriptionPrompts[provider] || '';
+    if (dictPart && modelPrompt) return `${dictPart} ${modelPrompt}`;
+    return dictPart || modelPrompt;
+  }, [transcriptionDictionary, transcriptionPrompts]);
+
+  const syncPromptToRust = useCallback((provider: string, newPrompts: Record<string, string>, newDict: string[]) => {
+    const dictPart = newDict.length > 0 ? newDict.join(', ') + '.' : '';
+    const modelPrompt = newPrompts[provider] || '';
+    const effective = dictPart && modelPrompt
+      ? `${dictPart} ${modelPrompt}`
+      : dictPart || modelPrompt;
+    invoke('set_transcription_prompt', { prompt: effective || null }).catch(err =>
+      console.error('Failed to sync transcription prompt to Rust:', err)
+    );
+  }, []);
+
+  const setTranscriptionDictionary = useCallback((terms: string[]) => {
+    setTranscriptionDictionaryState(terms);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('transcriptionDictionary', JSON.stringify(terms));
+    }
+    // Sync to Rust using current provider (localWhisper)
+    syncPromptToRust('localWhisper', transcriptionPrompts, terms);
+  }, [transcriptionPrompts, syncPromptToRust]);
+
+  const setTranscriptionPrompt = useCallback((provider: string, prompt: string) => {
+    const updated = { ...transcriptionPrompts, [provider]: prompt };
+    setTranscriptionPromptsState(updated);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('transcriptionPrompts', JSON.stringify(updated));
+    }
+    syncPromptToRust(provider, updated, transcriptionDictionary);
+  }, [transcriptionPrompts, transcriptionDictionary, syncPromptToRust]);
+
+  // Sync transcription prompt to Rust on mount
+  useEffect(() => {
+    const provider = 'localWhisper';
+    const dictPart = transcriptionDictionary.length > 0
+      ? transcriptionDictionary.join(', ') + '.'
+      : '';
+    const modelPrompt = transcriptionPrompts[provider] || '';
+    const effective = dictPart && modelPrompt
+      ? `${dictPart} ${modelPrompt}`
+      : dictPart || modelPrompt;
+    if (effective) {
+      invoke('set_transcription_prompt', { prompt: effective })
+        .then(() => console.log('[ConfigContext] Synced transcription prompt to Rust on startup'))
+        .catch(err => console.error('[ConfigContext] Failed to sync transcription prompt:', err));
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   const value: ConfigContextType = useMemo(() => ({
     modelConfig,
     setModelConfig,
@@ -495,6 +584,11 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     setSelectedDevices,
     selectedLanguage,
     setSelectedLanguage: handleSetSelectedLanguage,
+    transcriptionDictionary,
+    setTranscriptionDictionary,
+    transcriptionPrompts,
+    setTranscriptionPrompt,
+    getEffectivePrompt,
     showConfidenceIndicator,
     toggleConfidenceIndicator,
     betaFeatures,
@@ -517,6 +611,11 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     selectedDevices,
     selectedLanguage,
     handleSetSelectedLanguage,
+    transcriptionDictionary,
+    setTranscriptionDictionary,
+    transcriptionPrompts,
+    setTranscriptionPrompt,
+    getEffectivePrompt,
     showConfidenceIndicator,
     toggleConfidenceIndicator,
     betaFeatures,

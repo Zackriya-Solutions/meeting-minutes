@@ -1,12 +1,14 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Input } from './ui/input';
+import { Textarea } from './ui/textarea';
 import { Button } from './ui/button';
 import { Label } from './ui/label';
-import { Eye, EyeOff, Lock, Unlock } from 'lucide-react';
+import { Eye, EyeOff, Lock, Unlock, X, Plus } from 'lucide-react';
 import { ModelManager } from './WhisperModelManager';
 import { ParakeetModelManager } from './ParakeetModelManager';
+import { useConfig } from '@/contexts/ConfigContext';
 
 
 export interface TranscriptModelProps {
@@ -28,6 +30,15 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
     const [isLockButtonVibrating, setIsLockButtonVibrating] = useState<boolean>(false);
     const [uiProvider, setUiProvider] = useState<TranscriptModelProps['provider']>(transcriptModelConfig.provider);
 
+    // Dictionary and prompt state from context
+    const { transcriptionDictionary, setTranscriptionDictionary, transcriptionPrompts, setTranscriptionPrompt } = useConfig();
+    const [newTerm, setNewTerm] = useState('');
+    const [promptText, setPromptText] = useState(transcriptionPrompts['localWhisper'] || '');
+    const promptDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+    const PROMPT_MAX_CHARS = 500;
+    const supportsPrompt = uiProvider === 'localWhisper';
+
     // Sync uiProvider when backend config changes (e.g., after model selection or initial load)
     useEffect(() => {
         setUiProvider(transcriptModelConfig.provider);
@@ -38,6 +49,32 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
             setApiKey(null);
         }
     }, [transcriptModelConfig.provider]);
+
+    // Keep promptText in sync when provider changes or persisted value changes
+    useEffect(() => {
+        setPromptText(transcriptionPrompts[uiProvider] || '');
+    }, [uiProvider, transcriptionPrompts]);
+
+    const handleAddTerm = useCallback(() => {
+        const term = newTerm.trim();
+        if (term && !transcriptionDictionary.includes(term)) {
+            setTranscriptionDictionary([...transcriptionDictionary, term]);
+        }
+        setNewTerm('');
+    }, [newTerm, transcriptionDictionary, setTranscriptionDictionary]);
+
+    const handleRemoveTerm = useCallback((term: string) => {
+        setTranscriptionDictionary(transcriptionDictionary.filter(t => t !== term));
+    }, [transcriptionDictionary, setTranscriptionDictionary]);
+
+    const handlePromptChange = useCallback((value: string) => {
+        const truncated = value.slice(0, PROMPT_MAX_CHARS);
+        setPromptText(truncated);
+        if (promptDebounceRef.current) clearTimeout(promptDebounceRef.current);
+        promptDebounceRef.current = setTimeout(() => {
+            setTranscriptionPrompt(uiProvider, truncated);
+        }, 500);
+    }, [uiProvider, setTranscriptionPrompt]);
 
     const fetchApiKey = async (provider: string) => {
         try {
@@ -172,6 +209,83 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                         </div>
                     )}
 
+
+                    {/* Dictionary section — shown for all providers (dictionary is universal) */}
+                    <div>
+                        <Label className="block text-sm font-medium text-gray-700 mb-1">
+                            Transcription Dictionary
+                        </Label>
+                        <p className="text-xs text-gray-500 mb-2">
+                            Words or terms that will be used as vocabulary hints during transcription (e.g. product names, acronyms).
+                            {supportsPrompt && ' These are automatically prepended to the initial prompt below.'}
+                        </p>
+                        <div className="flex gap-2 mx-1 mb-2">
+                            <Input
+                                value={newTerm}
+                                onChange={e => setNewTerm(e.target.value)}
+                                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleAddTerm(); } }}
+                                placeholder="Add a term..."
+                                className="focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                            />
+                            <Button type="button" size="sm" onClick={handleAddTerm} disabled={!newTerm.trim()}>
+                                <Plus className="h-4 w-4" />
+                            </Button>
+                        </div>
+                        {transcriptionDictionary.length > 0 && (
+                            <div className="mx-1">
+                                <div className="flex flex-wrap gap-1 mb-1">
+                                    {transcriptionDictionary.map(term => (
+                                        <span
+                                            key={term}
+                                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 text-xs font-medium border border-blue-200"
+                                        >
+                                            {term}
+                                            <button
+                                                type="button"
+                                                onClick={() => handleRemoveTerm(term)}
+                                                className="hover:text-blue-900 focus:outline-none"
+                                                aria-label={`Remove ${term}`}
+                                            >
+                                                <X className="h-3 w-3" />
+                                            </button>
+                                        </span>
+                                    ))}
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={() => setTranscriptionDictionary([])}
+                                    className="text-xs text-gray-400 hover:text-gray-600 underline"
+                                >
+                                    Clear all
+                                </button>
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Initial prompt section — shown only for providers that support it */}
+                    {supportsPrompt && (
+                        <div>
+                            <Label className="block text-sm font-medium text-gray-700 mb-1">
+                                Initial Prompt
+                            </Label>
+                            <p className="text-xs text-gray-500 mb-2">
+                                An optional hint for the transcription model (e.g. domain context, speaking style, terminology).
+                                Dictionary terms above are automatically prepended to this prompt.
+                            </p>
+                            <div className="mx-1">
+                                <Textarea
+                                    value={promptText}
+                                    onChange={e => handlePromptChange(e.target.value)}
+                                    placeholder="Optional hint for the transcription model (e.g. domain context, terminology)..."
+                                    className="focus:ring-1 focus:ring-blue-500 focus:border-blue-500 resize-none"
+                                    rows={3}
+                                />
+                                <div className="text-right text-xs text-gray-400 mt-0.5">
+                                    {promptText.length} / {PROMPT_MAX_CHARS}
+                                </div>
+                            </div>
+                        </div>
+                    )}
 
                     {requiresApiKey && (
                         <div>
