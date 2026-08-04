@@ -313,6 +313,11 @@ export const TranscriptView: React.FC<TranscriptViewProps> = ({ transcripts, isR
                         {sizerText}
                       </p>
                       <p className="text-base text-gray-800 leading-relaxed absolute top-0 left-0">
+                        {transcript.speaker && (
+                          <span className={`font-semibold mr-1 ${transcript.speaker === 'You' ? 'text-blue-600' : 'text-orange-500'}`}>
+                            {transcript.speaker}:
+                          </span>
+                        )}
                         {displayText}
                       </p>
                     </div>
@@ -324,6 +329,11 @@ export const TranscriptView: React.FC<TranscriptViewProps> = ({ transcripts, isR
                       {sizerText}
                     </p>
                     <p className="text-base text-gray-800 leading-relaxed absolute top-0 left-0">
+                      {transcript.speaker && (
+                        <span className={`font-semibold mr-1 ${transcript.speaker === 'You' ? 'text-blue-600' : 'text-orange-500'}`}>
+                          {transcript.speaker}:
+                        </span>
+                      )}
                       {displayText}
                     </p>
                   </div>

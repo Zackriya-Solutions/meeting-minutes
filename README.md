@@ -50,7 +50,8 @@ A privacy-first AI meeting assistant that captures, transcribes, and summarizes 
 |---|---------|--------|
 | 1 | **Global keyboard shortcuts** — toggle recording start/stop with a configurable hotkey (default `Ctrl+F8`). Customizable per platform (macOS, Windows, Linux). | ✅ Available |
 | 2 | **User dictionary & transcription initial prompt** — add domain-specific terms (product names, acronyms) as a vocabulary hint, plus a free-text initial prompt per transcription model. Dictionary is automatically appended to the prompt. | ✅ Available |
-| 3 | **Summarization prompt management & templates** — custom summary prompts and reusable templates to tailor meeting summaries to your workflow. | 🔜 Coming soon |
+| 3 | **Channel-based speaker diarization** — microphone audio is labelled **You**, system/speaker audio is labelled **Them**. Labels are shown inline as bold colored prefixes in both the live recording view and the meeting notes review screen. Speaker attribution is preserved through the full save pipeline including Enhance (retranscription). The abstraction is extensible for future per-person identification. | ✅ Available |
+| 4 | **Summarization prompt management & templates** — custom summary prompts and reusable templates to tailor meeting summaries to your workflow. | 🔜 Coming soon |
 
 ---
 
