@@ -10,7 +10,7 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, Mutex,
 };
-use tauri::{AppHandle, Emitter, Manager, Runtime};
+use tauri::{AppHandle, Emitter, Listener, Manager, Runtime};
 use tokio::task::JoinHandle;
 
 use super::{
@@ -44,6 +44,33 @@ static TRANSCRIPTION_TASK: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
 
 // Listener ID for proper cleanup - prevents microphone from staying active after recording stops
 static TRANSCRIPT_LISTENER_ID: Mutex<Option<tauri::EventId>> = Mutex::new(None);
+
+fn register_transcript_persistence_listener<R: Runtime>(app: &AppHandle<R>) {
+    let listener_id = app.listen("transcript-update", move |event: tauri::Event| {
+        if let Ok(update) = serde_json::from_str::<TranscriptUpdate>(event.payload()) {
+            let segment = crate::audio::recording_saver::TranscriptSegment {
+                id: format!("seg_{}", update.sequence_id),
+                text: update.text.clone(),
+                audio_start_time: update.audio_start_time,
+                audio_end_time: update.audio_end_time,
+                duration: update.duration,
+                display_time: update.timestamp.clone(),
+                confidence: update.confidence,
+                sequence_id: update.sequence_id,
+            };
+
+            if let Ok(manager_guard) = RECORDING_MANAGER.lock() {
+                if let Some(manager) = manager_guard.as_ref() {
+                    manager.add_transcript_segment(segment);
+                }
+            }
+        }
+    });
+
+    let mut global_listener = TRANSCRIPT_LISTENER_ID.lock().unwrap();
+    *global_listener = Some(listener_id);
+    info!("✅ Transcript-update event listener registered for history persistence");
+}
 
 // ============================================================================
 // PUBLIC TYPES
@@ -250,52 +277,22 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
     drop(engine_lifecycle_guard);
     reset_speech_detected_flag(); // Reset for new recording session
 
-    // Start optimized parallel transcription task and store handle
-    let task_handle = transcription::start_transcription_task(app.clone(), transcription_receiver);
-    {
-        let mut global_task = TRANSCRIPTION_TASK.lock().unwrap();
-        *global_task = Some(task_handle);
-    }
+    // Establish every consumer before transcription can emit the first segment.
+    register_transcript_persistence_listener(&app);
 
-    // CRITICAL: Listen for transcript-update events and save to recording manager
-    // This enables transcript history persistence for page reload sync
-    // Store listener ID for cleanup during stop_recording to ensure microphone is released
-    {
-        use tauri::Listener;
-        let listener_id = app.listen("transcript-update", move |event: tauri::Event| {
-            // Parse the transcript update from the event payload
-            if let Ok(update) = serde_json::from_str::<TranscriptUpdate>(event.payload()) {
-                // Create structured transcript segment
-                let segment = crate::audio::recording_saver::TranscriptSegment {
-                    id: format!("seg_{}", update.sequence_id),
-                    text: update.text.clone(),
-                    audio_start_time: update.audio_start_time,
-                    audio_end_time: update.audio_end_time,
-                    duration: update.duration,
-                    display_time: update.timestamp.clone(), // Use wall-clock timestamp for display
-                    confidence: update.confidence,
-                    sequence_id: update.sequence_id,
-                };
-
-                // Save to recording manager
-                if let Ok(manager_guard) = RECORDING_MANAGER.lock() {
-                    if let Some(manager) = manager_guard.as_ref() {
-                        manager.add_transcript_segment(segment);
-                    }
-                }
-            }
-        });
-        let mut global_listener = TRANSCRIPT_LISTENER_ID.lock().unwrap();
-        *global_listener = Some(listener_id);
-        info!("✅ Transcript-update event listener registered for history persistence");
-    }
-
-    // Emit success event
+    // Let the frontend reset its session state before transcription starts.
     app.emit("recording-started", serde_json::json!({
         "message": "Recording started successfully with parallel processing",
         "devices": ["Default Microphone", "Default System Audio"],
         "workers": 3
     })).map_err(|e| e.to_string())?;
+
+    // The receiver buffers audio captured while listeners are being prepared.
+    let task_handle = transcription::start_transcription_task(app.clone(), transcription_receiver);
+    {
+        let mut global_task = TRANSCRIPTION_TASK.lock().unwrap();
+        *global_task = Some(task_handle);
+    }
 
     // Update tray menu to reflect recording state
     crate::tray::update_tray_menu(&app);
@@ -421,47 +418,10 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
     drop(engine_lifecycle_guard);
     reset_speech_detected_flag(); // Reset for new recording session
 
-    // Start optimized parallel transcription task and store handle
-    let task_handle = transcription::start_transcription_task(app.clone(), transcription_receiver);
-    {
-        let mut global_task = TRANSCRIPTION_TASK.lock().unwrap();
-        *global_task = Some(task_handle);
-    }
+    // Establish every consumer before transcription can emit the first segment.
+    register_transcript_persistence_listener(&app);
 
-    // CRITICAL: Listen for transcript-update events and save to recording manager
-    // This enables transcript history persistence for page reload sync
-    // Store listener ID for cleanup during stop_recording to ensure microphone is released
-    {
-        use tauri::Listener;
-        let listener_id = app.listen("transcript-update", move |event: tauri::Event| {
-            // Parse the transcript update from the event payload
-            if let Ok(update) = serde_json::from_str::<TranscriptUpdate>(event.payload()) {
-                // Create structured transcript segment
-                let segment = crate::audio::recording_saver::TranscriptSegment {
-                    id: format!("seg_{}", update.sequence_id),
-                    text: update.text.clone(),
-                    audio_start_time: update.audio_start_time,
-                    audio_end_time: update.audio_end_time,
-                    duration: update.duration,
-                    display_time: update.timestamp.clone(), // Use wall-clock timestamp for display
-                    confidence: update.confidence,
-                    sequence_id: update.sequence_id,
-                };
-
-                // Save to recording manager
-                if let Ok(manager_guard) = RECORDING_MANAGER.lock() {
-                    if let Some(manager) = manager_guard.as_ref() {
-                        manager.add_transcript_segment(segment);
-                    }
-                }
-            }
-        });
-        let mut global_listener = TRANSCRIPT_LISTENER_ID.lock().unwrap();
-        *global_listener = Some(listener_id);
-        info!("✅ Transcript-update event listener registered for history persistence");
-    }
-
-    // Emit success event
+    // Let the frontend reset its session state before transcription starts.
     app.emit("recording-started", serde_json::json!({
         "message": "Recording started with custom devices and parallel processing",
         "devices": [
@@ -470,6 +430,13 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
         ],
         "workers": 3
     })).map_err(|e| e.to_string())?;
+
+    // The receiver buffers audio captured while listeners are being prepared.
+    let task_handle = transcription::start_transcription_task(app.clone(), transcription_receiver);
+    {
+        let mut global_task = TRANSCRIPTION_TASK.lock().unwrap();
+        *global_task = Some(task_handle);
+    }
 
     // Update tray menu to reflect recording state
     crate::tray::update_tray_menu(&app);
@@ -537,7 +504,6 @@ pub async fn stop_recording<R: Runtime>(
     // Step 1.5: Clean up transcript listener to release microphone
     // Unlisten transcript-update event to prevent lingering references
     {
-        use tauri::Listener;
         if let Some(listener_id) = TRANSCRIPT_LISTENER_ID.lock().unwrap().take() {
             app.unlisten(listener_id);
             info!("✅ Transcript-update listener removed");

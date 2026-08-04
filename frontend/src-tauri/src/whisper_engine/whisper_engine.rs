@@ -514,7 +514,39 @@ impl WhisperEngine {
     
     /// Transcribe audio with streaming support for partial results and adaptive quality
     pub async fn transcribe_audio_with_confidence(&self, audio_data: Vec<f32>, language: Option<String>) -> Result<(String, f32, bool)> {
-        let ctx_lock = self.current_context.read().await;
+        self.transcribe_audio_with_confidence_mode(audio_data, language, false)
+            .await
+    }
+
+    /// Low-latency decoding for live recording. Batch transcription keeps the
+    /// adaptive beam-search path above for maximum accuracy.
+    pub async fn transcribe_audio_with_confidence_realtime(&self, audio_data: Vec<f32>, language: Option<String>) -> Result<(String, f32, bool)> {
+        self.transcribe_audio_with_confidence_mode(audio_data, language, true)
+            .await
+    }
+
+    async fn transcribe_audio_with_confidence_mode(&self, audio_data: Vec<f32>, language: Option<String>, realtime: bool) -> Result<(String, f32, bool)> {
+        let current_context = Arc::clone(&self.current_context);
+
+        tokio::task::spawn_blocking(move || {
+            Self::transcribe_audio_with_confidence_sync(
+                &current_context,
+                audio_data,
+                language,
+                realtime,
+            )
+        })
+        .await
+        .map_err(|error| anyhow!("Whisper transcription task failed: {}", error))?
+    }
+
+    fn transcribe_audio_with_confidence_sync(
+        current_context: &RwLock<Option<WhisperContext>>,
+        audio_data: Vec<f32>,
+        language: Option<String>,
+        realtime: bool,
+    ) -> Result<(String, f32, bool)> {
+        let ctx_lock = current_context.blocking_read();
         let ctx = ctx_lock.as_ref()
             .ok_or_else(|| anyhow!("No model loaded. Please load a model first."))?;
 
@@ -523,10 +555,15 @@ impl WhisperEngine {
         let adaptive_config = hardware_profile.get_whisper_config();
 
         // ADAPTIVE parameters - optimized for current hardware
-        let mut params = FullParams::new(SamplingStrategy::BeamSearch {
-            beam_size: adaptive_config.beam_size as i32,
-            patience: 1.0
-        });
+        let sampling_strategy = if realtime {
+            SamplingStrategy::Greedy { best_of: 1 }
+        } else {
+            SamplingStrategy::BeamSearch {
+                beam_size: adaptive_config.beam_size as i32,
+                patience: 1.0,
+            }
+        };
+        let mut params = FullParams::new(sampling_strategy);
 
         // Configure with adaptive settings
         // If language is "auto" or None, use automatic language detection (pass None)

@@ -32,7 +32,7 @@ export function useRecordingStart(
 ): UseRecordingStartReturn {
   const [isAutoStarting, setIsAutoStarting] = useState(false);
 
-  const { clearTranscripts, setMeetingTitle } = useTranscripts();
+  const { setMeetingTitle } = useTranscripts();
   const { setIsMeetingActive } = useSidebar();
   const { selectedDevices } = useConfig();
   const { setStatus } = useRecordingState();
@@ -127,7 +127,6 @@ export function useRecordingStart(
       // Note: RECORDING status will be set by RecordingStateContext event listener
       console.log('Setting isRecordingState to true');
       setIsRecording(true); // This will also update the sidebar via the useEffect
-      clearTranscripts(); // Clear previous transcripts when starting new recording
       setIsMeetingActive(true);
       Analytics.trackButtonClick('start_recording', 'home_page');
 
@@ -141,7 +140,7 @@ export function useRecordingStart(
       // Re-throw so RecordingControls can handle device-specific errors
       throw error;
     }
-  }, [generateMeetingTitle, setMeetingTitle, setIsRecording, clearTranscripts, setIsMeetingActive, checkParakeetReady, checkIfModelDownloading, selectedDevices, showModal, setStatus]);
+  }, [generateMeetingTitle, setMeetingTitle, setIsRecording, setIsMeetingActive, checkParakeetReady, checkIfModelDownloading, selectedDevices, showModal, setStatus]);
 
   // Check for autoStartRecording flag and start recording automatically
   useEffect(() => {
@@ -196,7 +195,6 @@ export function useRecordingStart(
             // Note: RECORDING status will be set by RecordingStateContext event listener
             setMeetingTitle(generatedMeetingTitle);
             setIsRecording(true);
-            clearTranscripts();
             setIsMeetingActive(true);
             Analytics.trackButtonClick('start_recording', 'sidebar_auto');
 
@@ -222,7 +220,6 @@ export function useRecordingStart(
     generateMeetingTitle,
     setMeetingTitle,
     setIsRecording,
-    clearTranscripts,
     setIsMeetingActive,
     checkParakeetReady,
     checkIfModelDownloading,
@@ -283,7 +280,6 @@ export function useRecordingStart(
         // Note: RECORDING status will be set by RecordingStateContext event listener
         setMeetingTitle(generatedMeetingTitle);
         setIsRecording(true);
-        clearTranscripts();
         setIsMeetingActive(true);
         Analytics.trackButtonClick('start_recording', 'sidebar_direct');
 
@@ -311,7 +307,6 @@ export function useRecordingStart(
     generateMeetingTitle,
     setMeetingTitle,
     setIsRecording,
-    clearTranscripts,
     setIsMeetingActive,
     checkParakeetReady,
     checkIfModelDownloading,

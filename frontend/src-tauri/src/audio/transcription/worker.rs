@@ -9,6 +9,7 @@ use log::{error, info, warn};
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::Instant;
 use tauri::{AppHandle, Emitter, Runtime};
 
 // Sequence counter for transcript updates
@@ -65,7 +66,13 @@ pub fn start_transcription_task<R: Runtime>(
 
         // Create parallel workers for faster processing while preserving ALL chunks
         const NUM_WORKERS: usize = 1; // Serial processing ensures transcripts emit in chronological order
-        let (work_sender, work_receiver) = tokio::sync::mpsc::unbounded_channel::<AudioChunk>();
+        struct QueuedAudioChunk {
+            chunk: AudioChunk,
+            queued_at: Instant,
+        }
+
+        let (work_sender, work_receiver) =
+            tokio::sync::mpsc::unbounded_channel::<QueuedAudioChunk>();
         let work_receiver = Arc::new(tokio::sync::Mutex::new(work_receiver));
 
         // Track completion: AtomicU64 for chunks queued, AtomicU64 for chunks completed
@@ -118,7 +125,9 @@ pub fn start_transcription_task<R: Runtime>(
                     };
 
                     match chunk {
-                        Some(chunk) => {
+                        Some(queued_chunk) => {
+                            let queue_wait = queued_chunk.queued_at.elapsed();
+                            let chunk = queued_chunk.chunk;
                             // PERFORMANCE OPTIMIZATION: Reduce logging in hot path
                             // Only log every 10th chunk per worker to reduce I/O overhead
                             let should_log_this_chunk = chunk.chunk_id % 10 == 0;
@@ -141,16 +150,25 @@ pub fn start_transcription_task<R: Runtime>(
                             }
 
                             let chunk_timestamp = chunk.timestamp;
+                            let chunk_id = chunk.chunk_id;
                             let chunk_duration = chunk.data.len() as f64 / chunk.sample_rate as f64;
 
                             // Transcribe with provider-agnostic approach
-                            match transcribe_chunk_with_provider(
-                                &engine_clone,
-                                chunk,
-                                &app_clone,
-                            )
-                            .await
-                            {
+                            let transcription_started = Instant::now();
+                            let transcription_result =
+                                transcribe_chunk_with_provider(&engine_clone, chunk, &app_clone)
+                                    .await;
+                            let inference_time = transcription_started.elapsed();
+                            info!(
+                                "⏱️ Transcription timing: chunk={}, audio={:.2}s, queue_wait={}ms, inference={}ms, realtime_factor={:.3}",
+                                chunk_id,
+                                chunk_duration,
+                                queue_wait.as_millis(),
+                                inference_time.as_millis(),
+                                inference_time.as_secs_f64() / chunk_duration.max(0.001)
+                            );
+
+                            match transcription_result {
                                 Ok((transcript, confidence_opt, is_partial)) => {
                                     // Provider-aware confidence threshold
                                     let confidence_threshold = match &engine_clone {
@@ -329,7 +347,10 @@ pub fn start_transcription_task<R: Runtime>(
                 chunk.chunk_id, queued
             );
 
-            if let Err(_) = work_sender.send(chunk) {
+            if let Err(_) = work_sender.send(QueuedAudioChunk {
+                chunk,
+                queued_at: Instant::now(),
+            }) {
                 error!("❌ Failed to send chunk to workers - this should not happen!");
                 break;
             }
@@ -449,7 +470,7 @@ async fn transcribe_chunk_with_provider<R: Runtime>(
             let language = crate::get_language_preference_internal();
 
             match whisper_engine
-                .transcribe_audio_with_confidence(speech_samples, language)
+                .transcribe_audio_with_confidence_realtime(speech_samples, language)
                 .await
             {
                 Ok((text, confidence, is_partial)) => {

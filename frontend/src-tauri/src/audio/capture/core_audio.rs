@@ -2,7 +2,7 @@
 
 #[cfg(target_os = "macos")]
 use std::pin::Pin;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll, Waker};
 use anyhow::Result;
@@ -47,9 +47,11 @@ struct AudioContext {
     producer: HeapProd<f32>,
     waker_state: Arc<Mutex<WakerState>>,
     current_sample_rate: Arc<AtomicU32>,
-    consecutive_drops: Arc<AtomicU32>,
-    should_terminate: Arc<AtomicBool>,
+    dropped_samples: Arc<AtomicU64>,
 }
+
+const CORE_AUDIO_BUFFER_SECONDS: usize = 30;
+const DROP_WARNING_INTERVAL_SAMPLES: u64 = 48_000 * 5;
 
 #[cfg(target_os = "macos")]
 impl CoreAudioCapture {
@@ -257,8 +259,9 @@ impl CoreAudioCapture {
 
         info!("✅ CoreAudio: Tap audio format: {} Hz, {} channels", asbd.sample_rate, asbd.channels_per_frame);
 
-        // Create ring buffer for lock-free audio transfer
-        let buffer_size = 1024 * 128; // 128KB buffer
+        // Keep enough audio to survive short CPU stalls while Whisper is running.
+        // Buffer pressure must not permanently terminate a recording.
+        let buffer_size = (asbd.sample_rate.max(1.0) as usize) * CORE_AUDIO_BUFFER_SECONDS;
         let rb = HeapRb::<f32>::new(buffer_size);
         let (producer, consumer) = rb.split();
 
@@ -275,8 +278,7 @@ impl CoreAudioCapture {
             producer,
             waker_state: waker_state.clone(),
             current_sample_rate: current_sample_rate.clone(),
-            consecutive_drops: Arc::new(AtomicU32::new(0)),
-            should_terminate: Arc::new(AtomicBool::new(false)),
+            dropped_samples: Arc::new(AtomicU64::new(0)),
         });
 
         info!("🎙️ CoreAudio: Starting audio device...");
@@ -304,14 +306,19 @@ fn process_audio_data(ctx: &mut AudioContext, data: &[f32]) {
     let pushed = ctx.producer.push_slice(data);
 
     if pushed < buffer_size {
-        let consecutive = ctx.consecutive_drops.fetch_add(1, Ordering::AcqRel) + 1;
+        let dropped = (buffer_size - pushed) as u64;
+        let previous_total = ctx.dropped_samples.fetch_add(dropped, Ordering::Relaxed);
+        let total = previous_total + dropped;
 
-        if consecutive > 10 {
-            ctx.should_terminate.store(true, Ordering::Release);
-            return;
+        // Logging from the real-time callback is deliberately throttled.
+        if previous_total / DROP_WARNING_INTERVAL_SAMPLES
+            != total / DROP_WARNING_INTERVAL_SAMPLES
+        {
+            warn!(
+                "Core Audio consumer is behind; dropped {} samples in total while keeping capture alive",
+                total
+            );
         }
-    } else {
-        ctx.consecutive_drops.store(0, Ordering::Release);
     }
 
     if pushed > 0 {
@@ -328,6 +335,30 @@ fn process_audio_data(ctx: &mut AudioContext, data: &[f32]) {
         if let Some(waker) = should_wake {
             waker.wake();
         }
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn register_waker_and_retry(
+    consumer: &mut HeapCons<f32>,
+    waker_state: &Arc<Mutex<WakerState>>,
+    cx: &mut Context<'_>,
+) -> Poll<Option<f32>> {
+    {
+        let mut state = waker_state.lock().unwrap();
+        state.has_data = false;
+        state.waker = Some(cx.waker().clone());
+    }
+
+    // The producer can push between the caller's first try_pop and waker
+    // registration. Retry after registration so that sample is not stranded.
+    if let Some(sample) = consumer.try_pop() {
+        let mut state = waker_state.lock().unwrap();
+        state.has_data = true;
+        state.waker = None;
+        Poll::Ready(Some(sample))
+    } else {
+        Poll::Pending
     }
 }
 
@@ -352,31 +383,15 @@ impl Stream for CoreAudioStream {
             return Poll::Ready(Some(sample));
         }
 
-        // Check if we should terminate
-        if self._ctx.should_terminate.load(Ordering::Acquire) {
-            warn!("Stream terminating due to buffer pressure");
-            return match self.consumer.try_pop() {
-                Some(sample) => Poll::Ready(Some(sample)),
-                None => Poll::Ready(None),
-            };
-        }
-
-        // No data available, register waker and return pending
-        {
-            let mut state = self.waker_state.lock().unwrap();
-            state.has_data = false;
-            state.waker = Some(cx.waker().clone());
-        }
-
-        Poll::Pending
+        let waker_state = Arc::clone(&self.waker_state);
+        register_waker_and_retry(&mut self.consumer, &waker_state, cx)
     }
 }
 
 #[cfg(target_os = "macos")]
 impl Drop for CoreAudioStream {
     fn drop(&mut self) {
-        info!("CoreAudioStream dropped, signaling termination");
-        self._ctx.should_terminate.store(true, Ordering::Release);
+        info!("CoreAudioStream dropped");
     }
 }
 
@@ -420,6 +435,35 @@ impl Stream for CoreAudioStream {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn consumes_audio_that_arrives_before_waker_registration() {
+        use futures_util::task::noop_waker;
+
+        let rb = HeapRb::<f32>::new(4);
+        let (mut producer, mut consumer) = rb.split();
+        let waker_state = Arc::new(Mutex::new(WakerState {
+            waker: None,
+            has_data: true,
+        }));
+
+        // Reproduce the race: the consumer observes an empty buffer, then the
+        // callback pushes before the consumer has registered its waker.
+        assert_eq!(consumer.try_pop(), None);
+        producer.try_push(0.25).expect("ring buffer should have room");
+
+        let waker = noop_waker();
+        let mut cx = Context::from_waker(&waker);
+        assert_eq!(
+            register_waker_and_retry(&mut consumer, &waker_state, &mut cx),
+            Poll::Ready(Some(0.25))
+        );
+
+        let state = waker_state.lock().unwrap();
+        assert!(state.has_data);
+        assert!(state.waker.is_none());
+    }
 
     #[tokio::test]
     #[cfg(target_os = "macos")]
