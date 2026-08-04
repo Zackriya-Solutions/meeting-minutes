@@ -54,6 +54,42 @@ function createIcon(symbol: MaterialSymbolName, displayName: string): LucideIcon
   return Component;
 }
 
+const SpinnerIcon = forwardRef<HTMLSpanElement, DeslopIconProps>(function SpinnerIcon(
+  {
+    size = '1em',
+    color,
+    strokeWidth: _strokeWidth,
+    absoluteStrokeWidth: _absoluteStrokeWidth,
+    fill: _fill,
+    width: _width,
+    height: _height,
+    className,
+    style,
+    title,
+    ...props
+  },
+  ref,
+) {
+  const labelled = Boolean(title || props['aria-label'] || props['aria-labelledby']);
+
+  return (
+    <span
+      {...props}
+      ref={ref}
+      title={title}
+      role={props.role ?? (labelled ? 'img' : undefined)}
+      aria-hidden={props['aria-hidden'] ?? (labelled ? undefined : true)}
+      className={['memento-spinner', className].filter(Boolean).join(' ')}
+      style={{
+        color,
+        fontSize: typeof size === 'number' ? `${size}px` : size,
+        ...style,
+      }}
+    />
+  );
+});
+SpinnerIcon.displayName = 'SpinnerIcon';
+
 export const AlertCircle = createIcon('error', 'AlertCircle');
 export const AlertTriangle = createIcon('warning', 'AlertTriangle');
 export const ArrowBigDownDash = createIcon('download', 'ArrowBigDownDash');
@@ -98,7 +134,7 @@ export const KeyRound = createIcon('lock', 'KeyRound');
 export const Languages = createIcon('language', 'Languages');
 export const Layers3 = createIcon('apps', 'Layers3');
 export const List = createIcon('menu', 'List');
-export const Loader2 = createIcon('progress_activity', 'Loader2');
+export const Loader2 = SpinnerIcon;
 export const LoaderCircle = Loader2;
 export const LoaderIcon = Loader2;
 export const Lock = createIcon('lock', 'Lock');

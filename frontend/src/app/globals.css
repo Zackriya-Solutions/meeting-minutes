@@ -2,6 +2,37 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Keep every rotating status indicator on its own visual centre. Font-based
+   symbols otherwise inherit the glyph baseline and can appear to orbit. */
+.animate-spin {
+  transform-origin: 50% 50% !important;
+}
+
+svg.animate-spin {
+  transform-box: fill-box;
+}
+
+.deslop-material-symbol.animate-spin {
+  width: 1em;
+  height: 1em;
+  line-height: 1;
+  transform-box: border-box;
+}
+
+.memento-spinner {
+  box-sizing: border-box;
+  display: inline-block;
+  flex: none;
+  width: 1em;
+  height: 1em;
+  border: max(1.5px, 0.11em) solid currentColor;
+  border-right-color: transparent;
+  border-radius: 9999px;
+  transform-origin: 50% 50%;
+  transform-box: border-box;
+  vertical-align: middle;
+}
+
 @layer components {
   /* Summary preview must retain document structure even if a build accidentally resolves
      the legacy Tailwind config without the typography plugin. */
