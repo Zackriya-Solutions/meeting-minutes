@@ -310,6 +310,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(target_os = "windows")]
     fn hardware_detector_finds_windows_vulkan_loader_in_system32() {
         let temp_dir = tempfile::tempdir().unwrap();
         let system32 = temp_dir.path().join("System32");
@@ -320,6 +321,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(target_os = "windows")]
     fn hardware_detector_rejects_missing_windows_vulkan_loader() {
         let temp_dir = tempfile::tempdir().unwrap();
 

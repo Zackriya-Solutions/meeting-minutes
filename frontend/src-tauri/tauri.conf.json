@@ -12,7 +12,7 @@
     "app": {
         "windows": [
             {
-                "title": "meetily",
+                "title": "Meet4Specs",
                 "width": 1100,
                 "height": 700,
                 "resizable": true,

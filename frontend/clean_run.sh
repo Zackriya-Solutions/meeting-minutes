@@ -23,15 +23,16 @@ echo "Cleaning up previous builds..."
 #rm -rf src-tauri/target
 #rm -rf src-tauri/gen
 
-# Clean up npm and pnp
-echo "Cleaning up npm and pnp..."
+# Clean up npm, pnp and next
+echo "Cleaning up npm, pnp and next..."
 rm -rf node_modules
 rm -rf .pnp.cjs
 rm -rf out
-# ponytail: keep .next between runs. Next.js already invalidates changed files;
-# wiping it forces a cold recompile of the whole app on every run, widening the
-# window where the window is visible but still compiling. Delete it by hand
-# (rm -rf .next) if you ever see a genuinely stale/corrupted cache.
+rm -rf .next
+# ponytail: .next MUST go whenever node_modules is reinstalled — a fresh
+# node_modules can produce different webpack runtime IDs, so a stale .next
+# serves chunks the new build doesn't recognize (ChunkLoadError). Keeping
+# .next is only safe when node_modules stays untouched between runs.
 
 echo "Installing dependencies..."
 pnpm install
@@ -56,15 +57,33 @@ cp "../target/debug/llama-helper${EXE_SUFFIX}" "src-tauri/binaries/llama-helper-
 chmod +x "src-tauri/binaries/llama-helper-${TARGET_TRIPLE}${EXE_SUFFIX}" 2>/dev/null || true
 
 echo "Building Tauri app..."
-if lsof -tiTCP:3118 -sTCP:LISTEN >/dev/null 2>&1; then
-    echo "Port 3118 already in use. Stop existing dev server/Tauri process, then rerun ./clean_run.sh"
-    lsof -nP -iTCP:3118 -sTCP:LISTEN || true
-    exit 1
-fi
 
-if pgrep -af '/home/pc/projects/docker/meet4specs/target/debug/meetily' >/dev/null 2>&1; then
-    echo "Meetily already running. Stop existing app instance, then rerun ./clean_run.sh"
-    pgrep -af '/home/pc/projects/docker/meet4specs/target/debug/meetily' || true
+# Kill any leftover instance (app, orphaned webview, or dev server) from a
+# previous run before starting a new one, so a stale process never leaves the
+# window stuck loading against a dead dev server.
+echo "Stopping any previous Meetily/dev-server instance..."
+pkill -9 -f 'target/debug/meetily' 2>/dev/null || true
+pkill -9 -f 'target/release/meetily' 2>/dev/null || true
+pkill -9 -f 'next dev -p 3118' 2>/dev/null || true
+pkill -9 -f 'WebKitNetworkProcess' 2>/dev/null || true
+pkill -9 -f 'WebKitWebProcess' 2>/dev/null || true
+
+# Condition-based wait instead of a fixed sleep: a killed process's socket
+# isn't always released by the kernel instantly, so poll port 3118 until it's
+# actually free (bounded) rather than guessing a fixed delay is long enough.
+for _ in $(seq 1 20); do
+    port_pids=$(lsof -tiTCP:3118 2>/dev/null || true)
+    if [ -z "$port_pids" ]; then
+        break
+    fi
+    echo "$port_pids" | xargs -r kill -9 2>/dev/null || true
+    sleep 0.5
+done
+
+if lsof -tiTCP:3118 >/dev/null 2>&1; then
+    echo "Port 3118 is still held after 10s of cleanup attempts:"
+    lsof -nP -iTCP:3118 || true
+    echo "Stop it manually, then rerun ./clean_run.sh"
     exit 1
 fi
 

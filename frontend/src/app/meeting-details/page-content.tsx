@@ -13,6 +13,7 @@ import { ModelConfig } from '@/components/ModelSettingsModal';
 // Custom hooks
 import { useMeetingData } from '@/hooks/meeting-details/useMeetingData';
 import { useSummaryGeneration } from '@/hooks/meeting-details/useSummaryGeneration';
+import { useOpenSpecGeneration } from '@/hooks/meeting-details/useOpenSpecGeneration';
 import { useTemplates } from '@/hooks/meeting-details/useTemplates';
 import { useCopyOperations } from '@/hooks/meeting-details/useCopyOperations';
 import { useMeetingOperations } from '@/hooks/meeting-details/useMeetingOperations';
@@ -122,6 +123,11 @@ export default function PageContent({
     onOpenModelSettings: handleOpenModelSettings,
   });
 
+  const openSpecGeneration = useOpenSpecGeneration({
+    meetingId: meeting.id,
+    hasTranscript: meetingData.transcripts.length > 0,
+  });
+
   const copyOperations = useCopyOperations({
     meeting,
     transcripts: meetingData.transcripts,
@@ -226,6 +232,9 @@ export default function PageContent({
           onTemplateSelect={templates.handleTemplateSelection}
           isModelConfigLoading={false}
           onOpenModelSettings={handleRegisterModalOpen}
+          openSpecStatus={openSpecGeneration.openSpecStatus}
+          onGenerateOpenSpec={openSpecGeneration.handleGenerateOpenSpec}
+          onRegenerateOpenSpec={openSpecGeneration.handleRegenerateOpenSpec}
         />
       </div>
     </motion.div>

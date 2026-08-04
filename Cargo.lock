@@ -3678,6 +3678,7 @@ dependencies = [
  "tracing-subscriber",
  "url",
  "uuid",
+ "walkdir",
  "whatlang",
  "which 6.0.3",
  "whisper-rs",

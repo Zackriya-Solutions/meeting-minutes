@@ -59,6 +59,7 @@ which = "6.0.1"
 zip = "2.2"           # ZIP extraction (Windows, macOS)
 tar = "0.4"           # TAR extraction (Linux)
 xz2 = "0.1"           # XZ decompression (Linux)
+walkdir = "2.5"
 
 
 [dependencies]
@@ -110,6 +111,8 @@ thiserror = "2.0.16"                # Error handling for Parakeet
 tokio = { version = "1.32.0", features = ["full", "tracing"] }
 tokio-util = "0.7"  # Utilities for tokio including CancellationToken
 async-trait = "0.1"  # Trait abstraction for async methods
+zip = "2.2"
+walkdir = "2.5"
 
 reqwest = { version = "0.11", features = ["blocking", "multipart", "json", "stream"] }
 
@@ -210,4 +213,3 @@ tracing-subscriber = "0.3.16"
 [patch.crates-io]
 cpal = { git = "https://github.com/RustAudio/cpal", rev = "51c3b43" }
 esaxx-rs = { git = "https://github.com/thewh1teagle/esaxx-rs.git", branch = "feat/dynamic-msvc-link" }
-

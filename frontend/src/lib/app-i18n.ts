@@ -360,6 +360,21 @@ const messages = {
       noMatches: 'Sin coincidencias',
       generationTimedOut: 'La generación del resumen agotó el tiempo de espera tras 15 minutos. Intenta de nuevo o revisa la configuración de tu modelo.'
     },
+    openspec: {
+      generate: 'Generar OpenSpec',
+      generating: 'Generando OpenSpec...',
+      regenerate: 'Regenerar OpenSpec',
+      done: 'OpenSpec listo',
+      error: 'Error generando OpenSpec',
+      nodeRequired: 'Node.js es obligatorio para generar OpenSpec',
+      cliMissing: 'No se encontró OpenSpec CLI',
+      networkError: 'No se pudo descargar OpenSpec (red)',
+      timeout: 'La generación de OpenSpec agotó el tiempo de espera',
+      genericError: 'No se pudo generar OpenSpec',
+      installNode: 'Instalar Node.js',
+      downloadOpenSpec: 'OpenSpec',
+      tryAgain: 'Intentar de nuevo'
+    },
     transcriptionLanguage: {
       title: 'Idioma de transcripción',
       parakeetSupportTitle: 'Compatibilidad de idioma de Parakeet',
@@ -888,6 +903,21 @@ const messages = {
       allLanguages: 'All Languages',
       noMatches: 'No matches',
       generationTimedOut: 'Summary generation timed out after 15 minutes. Please try again or check your model configuration.'
+    },
+    openspec: {
+      generate: 'Generate OpenSpec',
+      generating: 'Generating OpenSpec...',
+      regenerate: 'Regenerate OpenSpec',
+      done: 'OpenSpec ready',
+      error: 'OpenSpec generation failed',
+      nodeRequired: 'Node.js is required to generate OpenSpec',
+      cliMissing: 'OpenSpec CLI was not found',
+      networkError: 'Could not download OpenSpec package (network)',
+      timeout: 'OpenSpec generation timed out',
+      genericError: 'Failed to generate OpenSpec',
+      installNode: 'Install Node.js',
+      downloadOpenSpec: 'OpenSpec',
+      tryAgain: 'Try again'
     },
     transcriptionLanguage: {
       title: 'Transcription language',

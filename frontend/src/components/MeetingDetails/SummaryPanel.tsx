@@ -6,6 +6,7 @@ import { BlockNoteSummaryView, BlockNoteSummaryViewRef } from '@/components/AISu
 import { EmptyStateSummary } from '@/components/EmptyStateSummary';
 import { ModelConfig } from '@/components/ModelSettingsModal';
 import { SummaryGeneratorButtonGroup } from './SummaryGeneratorButtonGroup';
+import { OpenSpecGeneratorButtonGroup } from './OpenSpecGeneratorButtonGroup';
 import { SummaryUpdaterButtonGroup } from './SummaryUpdaterButtonGroup';
 import Analytics from '@/lib/analytics';
 import { useEffect, useRef, useState, RefObject } from 'react';
@@ -61,6 +62,9 @@ interface SummaryPanelProps {
   onTemplateSelect: (templateId: string, templateName: string) => void;
   isModelConfigLoading?: boolean;
   onOpenModelSettings?: (openFn: () => void) => void;
+  openSpecStatus?: 'idle' | 'generating' | 'done' | 'error';
+  onGenerateOpenSpec?: () => Promise<void>;
+  onRegenerateOpenSpec?: () => Promise<void>;
 }
 
 export function SummaryPanel({
@@ -96,7 +100,10 @@ export function SummaryPanel({
   selectedTemplate,
   onTemplateSelect,
   isModelConfigLoading = false,
-  onOpenModelSettings
+  onOpenModelSettings,
+  openSpecStatus = 'idle',
+  onGenerateOpenSpec,
+  onRegenerateOpenSpec,
 }: SummaryPanelProps) {
   const { t } = useI18n();
   const [summaryLang, setSummaryLang] = useState<string | null>(null);
@@ -288,6 +295,14 @@ export function SummaryPanel({
                 onOpenModelSettings={onOpenModelSettings}
                 languageSlot={languageSlot}
               />
+              {onGenerateOpenSpec && onRegenerateOpenSpec && (
+                <OpenSpecGeneratorButtonGroup
+                  hasTranscripts={transcripts.length > 0}
+                  status={openSpecStatus}
+                  onGenerate={onGenerateOpenSpec}
+                  onRegenerate={onRegenerateOpenSpec}
+                />
+              )}
             </div>
 
             {/* Right-aligned: Summary Updater Button Group */}
@@ -328,6 +343,14 @@ export function SummaryPanel({
               isModelConfigLoading={isModelConfigLoading}
               onOpenModelSettings={onOpenModelSettings}
             />
+            {onGenerateOpenSpec && onRegenerateOpenSpec && (
+              <OpenSpecGeneratorButtonGroup
+                hasTranscripts={transcripts.length > 0}
+                status={openSpecStatus}
+                onGenerate={onGenerateOpenSpec}
+                onRegenerate={onRegenerateOpenSpec}
+              />
+            )}
           </div>
           {/* Loading spinner */}
           <div className="flex items-center justify-center flex-1">
@@ -358,6 +381,14 @@ export function SummaryPanel({
               onOpenModelSettings={onOpenModelSettings}
               languageSlot={transcripts.length > 0 ? languageSlot : undefined}
             />
+            {onGenerateOpenSpec && onRegenerateOpenSpec && (
+              <OpenSpecGeneratorButtonGroup
+                hasTranscripts={transcripts.length > 0}
+                status={openSpecStatus}
+                onGenerate={onGenerateOpenSpec}
+                onRegenerate={onRegenerateOpenSpec}
+              />
+            )}
           </div>
           {/* Empty state message */}
           <EmptyStateSummary

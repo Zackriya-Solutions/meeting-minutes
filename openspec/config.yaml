@@ -1,0 +1,12 @@
+project: meet4specs
+stack:
+  frontend: Next.js (App Router) + TypeScript + Tailwind + shadcn, packaged as a Tauri desktop app (pnpm)
+  desktop_shell: Tauri (frontend/src-tauri) + llama-helper (Rust, Cargo workspace)
+  backend: Python whisper server (backend/), Docker-based
+conventions:
+  ui_feature_pattern: frontend/src/components/MeetingDetails/*ButtonGroup.tsx + *Panel.tsx, wired through frontend/src/contexts/TranscriptContext.tsx
+testing:
+  strict_tdd: true
+  notes: no root package.json; test tooling lives under frontend/. Confirm test command before enabling Strict TDD.
+artifact_store:
+  mode: hybrid

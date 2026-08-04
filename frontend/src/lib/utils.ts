@@ -30,3 +30,38 @@ export function isOllamaNotInstalledError(errorMessage: string): boolean {
 
   return patterns.some(pattern => lowerError.includes(pattern));
 }
+
+/**
+ * Detects if an OpenSpec generation error means Node.js/OpenSpec runtime is missing.
+ */
+export function isOpenSpecDependencyError(errorCode?: string, errorMessage?: string): boolean {
+  const normalizedCode = (errorCode || '').toLowerCase();
+  if (normalizedCode === 'node_missing' || normalizedCode === 'cli_missing') return true;
+
+  const lowerError = (errorMessage || '').toLowerCase();
+  const patterns = [
+    'node.js is required',
+    'npx',
+    'openspec cli not found',
+    'neither global openspec nor npx',
+  ];
+
+  return patterns.some(pattern => lowerError.includes(pattern));
+}
+
+export function isOpenSpecNetworkError(errorCode?: string, errorMessage?: string): boolean {
+  if ((errorCode || '').toLowerCase() === 'network_unavailable') return true;
+  const lower = (errorMessage || '').toLowerCase();
+  return [
+    'network',
+    'registry.npmjs.org',
+    'enotfound',
+    'eai_again',
+    'fetch failed',
+  ].some(pattern => lower.includes(pattern));
+}
+
+export function isOpenSpecTimeoutError(errorCode?: string, errorMessage?: string): boolean {
+  if ((errorCode || '').toLowerCase() === 'timeout') return true;
+  return (errorMessage || '').toLowerCase().includes('timed out');
+}
