@@ -1,8 +1,10 @@
 import { useContext, useEffect, useState } from 'react';
 import { Switch } from '@/components/ui/switch';
 import { Button } from '@/components/ui/fluid-button';
-import { Check, Copy, Info } from '@/components/deslop-icons';
-import { createMaterialSymbol } from '@/vendor/deslop/primitives/material-symbols-react';
+import {
+  MaterialSymbol,
+  createMaterialSymbol,
+} from '@/vendor/deslop/primitives/material-symbols-react';
 import { ANALYTICS_CONSENT_MIGRATION_KEY, AnalyticsContext } from './AnalyticsProvider';
 import { load } from '@tauri-apps/plugin-store';
 import { invoke } from '@tauri-apps/api/core';
@@ -11,6 +13,11 @@ import AnalyticsDataModal from './AnalyticsDataModal';
 import { useT } from '@/lib/i18n';
 
 const IconAnalytics = createMaterialSymbol('analytics', 'IconAnalytics');
+
+type FluidIconProps = { size?: number; strokeWidth?: number; className?: string };
+const InfoIcon = ({ size = 16, className }: FluidIconProps) => <MaterialSymbol name="info" size={size} weight={400} className={className} />;
+const CopyIcon = ({ size = 16, className }: FluidIconProps) => <MaterialSymbol name="content_copy" size={size} weight={400} className={className} />;
+const CheckIcon = ({ size = 16, className }: FluidIconProps) => <MaterialSymbol name="check" size={size} weight={400} className={className} />;
 
 export default function AnalyticsConsentSwitch() {
   const t = useT();
@@ -186,7 +193,7 @@ export default function AnalyticsConsentSwitch() {
         <Button
           variant="tertiary"
           size="sm"
-          leadingIcon={Info}
+          leadingIcon={InfoIcon}
           onClick={handleShowDetails}
           className="self-start"
         >
@@ -207,7 +214,7 @@ export default function AnalyticsConsentSwitch() {
               <Button
                 variant="tertiary"
                 size="sm"
-                leadingIcon={isCopied ? Check : Copy}
+                leadingIcon={isCopied ? CheckIcon : CopyIcon}
                 onClick={handleCopyUserId}
                 className="shrink-0"
                 title={t('Copy User ID')}

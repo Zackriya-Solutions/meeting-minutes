@@ -27,7 +27,13 @@ pub struct MeetingSpeaker {
     /// User-confirmed owner identity. Derived from diarization/voice matching, never channel.
     pub is_self: bool,
     pub segment_count: i64,
-    /// Total diarized speech time for this speaker in the meeting, in seconds.
+    /// Summed speech time across this speaker's segments in the meeting, in seconds.
+    ///
+    /// Per-segment durations are summed as-is, so simultaneous speech on the mic and system
+    /// channels counts once per channel and the total across speakers can exceed the meeting's
+    /// wall-clock length. The UI only ever divides it by that total (see
+    /// `SummaryMessage.engagementPercentages`), so it is a relative share of speaking time,
+    /// not an absolute claim about elapsed time.
     pub speech_duration_seconds: f64,
 }
 
@@ -278,6 +284,34 @@ impl SpeakersRepository {
             return Ok(0);
         }
         let placeholders = vec!["?"; merged_ids.len()].join(", ");
+        let mut transaction = pool.begin().await?;
+
+        // The owner voice has to follow its segments. Merging the `is_self` profile away
+        // would otherwise strand the flag on a row that no longer has any transcript rows,
+        // and every "You" label in the meeting would silently disappear — GC keeps that row
+        // alive precisely so the flag survives, so nothing would ever repair it either.
+        let merges_owner_voice: i64 = {
+            let sql = format!(
+                "SELECT EXISTS(SELECT 1 FROM speakers \
+                 WHERE is_self = 1 AND id IN ({placeholders}))"
+            );
+            let mut query = sqlx::query_scalar(&sql);
+            for id in merged_ids {
+                query = query.bind(id);
+            }
+            query.fetch_one(&mut *transaction).await?
+        };
+        if merges_owner_voice != 0 {
+            // Clear before setting: `idx_speakers_single_self` allows only one owner row.
+            sqlx::query("UPDATE speakers SET is_self = 0 WHERE is_self = 1")
+                .execute(&mut *transaction)
+                .await?;
+            sqlx::query("UPDATE speakers SET is_self = 1 WHERE id = ?")
+                .bind(keep_id)
+                .execute(&mut *transaction)
+                .await?;
+        }
+
         let sql = format!(
             "UPDATE transcripts SET speaker_id = ? \
              WHERE meeting_id = ? AND speaker_id IN ({placeholders})"
@@ -286,12 +320,22 @@ impl SpeakersRepository {
         for id in merged_ids {
             query = query.bind(id);
         }
-        let res = query.execute(pool).await?;
+        let res = query.execute(&mut *transaction).await?;
+        transaction.commit().await?;
         Ok(res.rows_affected())
     }
 
     /// Speakers referenced by a meeting's transcripts, with per-meeting segment counts,
     /// most-spoken first.
+    ///
+    /// The `JOIN` is deliberate: this is the meeting's speaker roster, so a profile with no
+    /// segments in THIS meeting is absent — including the owner voice, whose flag is global.
+    /// Callers must not treat "no `is_self` row here" as "no owner voice configured".
+    ///
+    /// The duration branches read the same quantity, not two different ones: the transcription
+    /// worker writes `audio_end_time = audio_start_time + duration`
+    /// (`audio/transcription/worker.rs`), so `duration` is only reached for rows whose audio
+    /// times were never populated (legacy and imported transcripts).
     pub async fn meeting_speakers(
         pool: &SqlitePool,
         meeting_id: &str,
@@ -400,6 +444,12 @@ impl SpeakersRepository {
     /// "Speaker N" rows; without GC they accumulate forever. Confirmed (user-renamed)
     /// speakers are NEVER deleted, even when currently unreferenced — the user's label and
     /// voice profile must survive re-runs. Returns the number of rows deleted.
+    ///
+    /// The owner voice (`is_self = 1`) is retained on the same grounds even when unconfirmed
+    /// and unreferenced: it is the voice profile future runs match the user against, so
+    /// deleting it would silently drop the "You" labels. Retention is bounded to a single row
+    /// by `idx_speakers_single_self`, and [`Self::set_self`] / [`Self::merge_meeting_speakers`]
+    /// are the only ways the flag moves — so this cannot accumulate.
     pub async fn delete_orphaned_unconfirmed(pool: &SqlitePool) -> Result<u64, SqlxError> {
         let res = sqlx::query(
             "DELETE FROM speakers \
@@ -510,6 +560,14 @@ mod tests {
                 is_confirmed INTEGER NOT NULL DEFAULT 0,
                 is_self INTEGER NOT NULL DEFAULT 0
             )",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        // The real migration's single-owner constraint, so tests fail the same way production
+        // would if an owner reassignment ever set the new row before clearing the old one.
+        sqlx::query(
+            "CREATE UNIQUE INDEX idx_speakers_single_self ON speakers(is_self) WHERE is_self = 1",
         )
         .execute(&pool)
         .await
@@ -630,12 +688,178 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn merge_moves_the_owner_voice_to_the_surviving_profile() {
+        let pool = gc_test_pool().await;
+        for id in [1, 2] {
+            sqlx::query("INSERT INTO speakers (id, display_name, is_confirmed) VALUES (?, ?, 0)")
+                .bind(id)
+                .bind(format!("Speaker {id}"))
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+        for (tid, sid) in [("a", 1), ("b", 2)] {
+            sqlx::query("INSERT INTO transcripts (id, meeting_id, speaker_id) VALUES (?, 'm1', ?)")
+                .bind(tid)
+                .bind(sid)
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+        // The user marked speaker 2 as their own voice; the report pass then decides 2 is the
+        // same person as 1 and merges it away.
+        SpeakersRepository::set_self(&pool, 2, true).await.unwrap();
+
+        SpeakersRepository::merge_meeting_speakers(&pool, "m1", 1, &[2])
+            .await
+            .unwrap();
+
+        let owners: Vec<i64> = sqlx::query_scalar("SELECT id FROM speakers WHERE is_self = 1")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            owners,
+            vec![1],
+            "the owner voice follows its segments into the surviving profile"
+        );
+    }
+
+    #[tokio::test]
+    async fn merge_leaves_the_owner_voice_alone_when_it_is_not_merged_away() {
+        let pool = gc_test_pool().await;
+        for id in [1, 2, 3] {
+            sqlx::query("INSERT INTO speakers (id, display_name, is_confirmed) VALUES (?, ?, 0)")
+                .bind(id)
+                .bind(format!("Speaker {id}"))
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+        for (tid, sid) in [("a", 2), ("b", 3)] {
+            sqlx::query("INSERT INTO transcripts (id, meeting_id, speaker_id) VALUES (?, 'm1', ?)")
+                .bind(tid)
+                .bind(sid)
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+        SpeakersRepository::set_self(&pool, 1, true).await.unwrap();
+
+        SpeakersRepository::merge_meeting_speakers(&pool, "m1", 2, &[3])
+            .await
+            .unwrap();
+
+        let owners: Vec<i64> = sqlx::query_scalar("SELECT id FROM speakers WHERE is_self = 1")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+        assert_eq!(owners, vec![1], "an unrelated merge does not move the flag");
+    }
+
+    #[tokio::test]
+    async fn gc_retains_an_unconfirmed_owner_voice_with_no_segments() {
+        let pool = gc_test_pool().await;
+        // The abandoned-run case: the user marked a placeholder as their own voice and it never
+        // got a transcript row. It is kept — it is the profile future runs match against — and
+        // `idx_speakers_single_self` bounds that retention to exactly one row.
+        sqlx::query(
+            "INSERT INTO speakers (id, display_name, is_confirmed) VALUES (7, 'Speaker 7', 0)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        SpeakersRepository::set_self(&pool, 7, true).await.unwrap();
+
+        let deleted = SpeakersRepository::delete_orphaned_unconfirmed(&pool)
+            .await
+            .unwrap();
+        assert_eq!(deleted, 0);
+        assert_eq!(speaker_ids(&pool).await, vec![7]);
+
+        // Clearing the flag makes it collectable again, so the retention is not permanent.
+        SpeakersRepository::set_self(&pool, 7, false).await.unwrap();
+        let deleted = SpeakersRepository::delete_orphaned_unconfirmed(&pool)
+            .await
+            .unwrap();
+        assert_eq!(deleted, 1);
+        assert!(speaker_ids(&pool).await.is_empty());
+    }
+
+    #[tokio::test]
     async fn merge_with_no_ids_is_a_noop() {
         let pool = gc_test_pool().await;
         let moved = SpeakersRepository::merge_meeting_speakers(&pool, "m1", 1, &[])
             .await
             .unwrap();
         assert_eq!(moved, 0);
+    }
+
+    #[tokio::test]
+    async fn meeting_speakers_sums_audio_times_and_falls_back_to_duration() {
+        let pool = gc_test_pool().await;
+        sqlx::query("DROP TABLE transcripts")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "CREATE TABLE transcripts (
+                id TEXT PRIMARY KEY,
+                meeting_id TEXT NOT NULL,
+                speaker_id INTEGER,
+                audio_start_time REAL,
+                audio_end_time REAL,
+                duration REAL
+            )",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        for id in [1, 2] {
+            sqlx::query("INSERT INTO speakers (id, display_name, is_confirmed) VALUES (?, ?, 1)")
+                .bind(id)
+                .bind(format!("Speaker {id}"))
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+        // Speaker 1 mixes the two sources the way a partly-imported meeting does: a row the
+        // live worker wrote (audio times present, and `duration` agreeing with them), and a
+        // legacy row carrying only `duration`. Both must contribute their 4s.
+        for (tid, sid, start, end, duration) in [
+            ("a", 1, Some(0.0), Some(4.0), Some(4.0)),
+            ("b", 1, None, None, Some(4.0)),
+            // Zero-length and negative-length rows contribute nothing rather than skewing.
+            ("c", 2, Some(10.0), Some(10.0), Some(0.0)),
+            ("d", 2, Some(30.0), Some(20.0), None),
+            ("e", 2, Some(0.0), Some(1.5), Some(1.5)),
+        ] {
+            sqlx::query(
+                "INSERT INTO transcripts (id, meeting_id, speaker_id, audio_start_time, audio_end_time, duration) \
+                 VALUES (?, 'm1', ?, ?, ?, ?)",
+            )
+            .bind(tid)
+            .bind(sid)
+            .bind(start)
+            .bind(end)
+            .bind(duration)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+
+        let speakers = SpeakersRepository::meeting_speakers(&pool, "m1")
+            .await
+            .unwrap();
+        let duration_of = |id: i64| {
+            speakers
+                .iter()
+                .find(|s| s.id == id)
+                .expect("speaker in roster")
+                .speech_duration_seconds
+        };
+        assert_eq!(duration_of(1), 8.0);
+        assert_eq!(duration_of(2), 1.5);
     }
 
     #[tokio::test]

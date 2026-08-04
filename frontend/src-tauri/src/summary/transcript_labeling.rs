@@ -3,25 +3,37 @@
 //! `api_process_transcript` receives a `text` string that the frontend concatenated from
 //! transcript segments WITHOUT speaker labels (see
 //! `frontend/src/hooks/meeting-details/useSummaryGeneration.ts::buildSummaryTranscriptPayload`).
-//! When a meeting's stored transcripts carry speaker information — a diarized `speaker_id` or
-//! a diarized speaker profile (or a remote 'system' channel tag) — we rebuild that text
-//! server-side, prefixing each line with
-//! the speaker's display name so the LLM can attribute statements, decisions, and action items.
+//! When a meeting's stored transcripts carry speaker information — a diarized `speaker_id`, or
+//! an audio-channel tag we can still read as identity — we rebuild that text server-side,
+//! prefixing each line with the speaker's display name so the LLM can attribute statements,
+//! decisions, and action items.
 //!
 //! Rebuilding server-side keyed on `meeting_id` means (a) speaker renames are always fresh at
 //! generation time and (b) every frontend call site (Generate + Regenerate) is covered at once.
 //! Transcripts are never edited in place, so the DB is the single source of truth for the text.
 //!
 //! ## Behavior preservation
-//! When NO segment carries any speaker label (every pre-diarization meeting, and unsaved/live
-//! meetings whose transcripts aren't in the DB yet), we keep the caller's original `text`
-//! byte-for-byte — zero behavior change.
+//! When NO segment resolves to a label (a recording with neither diarization nor channel tags,
+//! and unsaved/live meetings whose transcripts aren't in the DB yet), we keep the caller's
+//! original `text` byte-for-byte — zero behavior change.
 //!
 //! ## Label resolution (mirrors the UI's `resolveSpeakerLabel`, frontend/src/types/index.ts)
 //!   1. A diarized profile explicitly marked `is_self` resolves to "You".
 //!   2. Another `speaker_id` resolving to a non-empty display name uses that name.
 //!   3. A remote `system` channel without identity resolves to "Others".
-//!   4. A `mic` channel alone is never identity evidence; it stays unlabeled.
+//!   4. A `mic` channel is identity evidence only as a last resort — see below.
+//!
+//! ## The microphone channel as a last resort
+//! Once a meeting has an owner voice (some segment carries a diarized profile marked
+//! `is_self`), diarization is authoritative and the `mic` channel is never read as identity:
+//! an unattributed mic line may well be a colleague sharing the room, and mislabeling them
+//! "You" corrupts the attribution the owner voice was established to get right.
+//!
+//! Until then there is no diarized identity to defer to, and the mic/system split is the only
+//! signal the recording carries. Dropping it would silently strip the "You" labels from every
+//! meeting recorded before the owner-voice flow existed — the LLM would see one named party
+//! ("Others") talking to an anonymous one. So an unattributed mic line still resolves to "You"
+//! while the meeting has no owner voice, exactly as it did before `is_self` existed.
 //!
 //! ## Line format
 //! We keep the frontend's exact line shape — `<time-prefix> <text>` — and inject
@@ -45,7 +57,8 @@ fn stable_text_fingerprint(text: &str) -> String {
     format!("{:016x}:{}", hash, text.len())
 }
 
-/// Resolve a segment's speaker label, mirroring the UI's `resolveSpeakerLabel`.
+/// Resolve a segment's speaker label from diarized identity, mirroring the UI's
+/// `resolveSpeakerLabel`.
 ///
 /// Note: an empty `display_name` is treated as "not found" (JS truthiness of the string),
 /// falling through to the channel tag — matching the frontend exactly.
@@ -62,6 +75,34 @@ pub fn resolve_segment_label(seg: &TranscriptSpeakerSegment) -> Option<String> {
         Some("system") => Some("Others".to_string()),
         _ => None,
     }
+}
+
+/// Does this meeting have an owner voice — a diarized profile the user marked as their own?
+///
+/// This is what decides whether the `mic` channel may still stand in for identity; see the
+/// module docs.
+fn has_owner_voice(segments: &[TranscriptSpeakerSegment]) -> bool {
+    segments
+        .iter()
+        .any(|seg| seg.speaker_id.is_some() && seg.is_self)
+}
+
+/// Resolve a segment's label with the meeting's identity context.
+///
+/// `owner_voice_known` comes from [`has_owner_voice`] over the meeting's whole segment list:
+/// with an owner voice established, an unattributed `mic` line stays unlabeled; without one it
+/// falls back to "You".
+pub fn resolve_segment_label_in_meeting(
+    seg: &TranscriptSpeakerSegment,
+    owner_voice_known: bool,
+) -> Option<String> {
+    if let Some(label) = resolve_segment_label(seg) {
+        return Some(label);
+    }
+    if !owner_voice_known && seg.speaker_id.is_none() && seg.speaker.as_deref() == Some("mic") {
+        return Some("You".to_string());
+    }
+    None
 }
 
 /// Reproduce the frontend `formatTime` that prefixes each transcript line: `[MM:SS]` derived
@@ -82,14 +123,18 @@ fn format_time_prefix(audio_start_time: Option<f64>, fallback_timestamp: &str) -
 /// keep the original unlabeled `text` (bit-for-bit behavior preservation for pre-diarization
 /// meetings). Returns `Some(labeled_text)` when at least one segment resolves to a label.
 pub fn assemble_labeled_transcript(segments: &[TranscriptSpeakerSegment]) -> Option<String> {
-    if !segments.iter().any(|s| resolve_segment_label(s).is_some()) {
+    let owner_voice_known = has_owner_voice(segments);
+    if !segments
+        .iter()
+        .any(|s| resolve_segment_label_in_meeting(s, owner_voice_known).is_some())
+    {
         return None;
     }
 
     let mut lines = Vec::with_capacity(segments.len());
     for seg in segments {
         let prefix = format_time_prefix(seg.audio_start_time, &seg.timestamp);
-        match resolve_segment_label(seg) {
+        match resolve_segment_label_in_meeting(seg, owner_voice_known) {
             Some(label) => lines.push(format!("{} {}: {}", prefix, label, seg.text)),
             None => lines.push(format!("{} {}", prefix, seg.text)),
         }
@@ -103,9 +148,13 @@ pub fn assemble_labeled_transcript(segments: &[TranscriptSpeakerSegment]) -> Opt
 /// the summary prompt. A rename or re-diarization therefore invalidates the snapshot, while a
 /// transcript typo correction does not masquerade as a speaker-name change.
 pub fn speaker_attribution_fingerprint(segments: &[TranscriptSpeakerSegment]) -> Option<String> {
+    // The fingerprint tracks the labels actually rendered into the prompt, so it must apply the
+    // same meeting-level identity context: marking an owner voice retires the mic fallback and
+    // must therefore show up as an attribution change.
+    let owner_voice_known = has_owner_voice(segments);
     if !segments
         .iter()
-        .any(|segment| resolve_segment_label(segment).is_some())
+        .any(|segment| resolve_segment_label_in_meeting(segment, owner_voice_known).is_some())
     {
         return None;
     }
@@ -120,7 +169,7 @@ pub fn speaker_attribution_fingerprint(segments: &[TranscriptSpeakerSegment]) ->
                     .speaker_id
                     .map(|speaker_id| speaker_id.to_string())
                     .unwrap_or_else(|| "channel".to_string()),
-                resolve_segment_label(segment).unwrap_or_default()
+                resolve_segment_label_in_meeting(segment, owner_voice_known).unwrap_or_default()
             )
         })
         .collect::<Vec<_>>()
@@ -222,9 +271,17 @@ mod tests {
             resolve_segment_label(&seg("hi", "t", Some(0.0), Some("system"), Some(9), None)),
             Some("Others".to_string())
         );
-        // A mic channel cannot identify the user when the diarized profile is missing.
+        // A diarized mic segment whose profile carries no usable name stays unlabeled: the
+        // segment IS attributed, just to a nameless profile, so the channel adds nothing.
         assert_eq!(
             resolve_segment_label(&seg("hi", "t", Some(0.0), Some("mic"), Some(9), Some(""))),
+            None
+        );
+        assert_eq!(
+            resolve_segment_label_in_meeting(
+                &seg("hi", "t", Some(0.0), Some("mic"), Some(9), Some("")),
+                false
+            ),
             None
         );
     }
@@ -271,7 +328,8 @@ mod tests {
                 None,
                 None,
             ),
-            // Shared microphone channel without diarized identity: deliberately unlabeled.
+            // Microphone channel without diarized identity, and no owner voice anywhere in the
+            // meeting -> the channel is the only signal left, so it still resolves to "You".
             seg("отлично", "00:00:07", Some(7.0), Some("mic"), None, None),
             // No speaker info at all -> unlabeled line, but still contributes (mixed meeting).
             seg("(тишина)", "00:00:09", Some(65.0), None, None, None),
@@ -282,9 +340,92 @@ mod tests {
             out,
             "[00:00] Андрей: ну давайте начнем\n\
              [00:03] Others: да, я готов\n\
-             [00:07] отлично\n\
+             [00:07] You: отлично\n\
              [01:05] (тишина)"
         );
+    }
+
+    #[test]
+    fn mic_fallback_applies_only_until_an_owner_voice_exists() {
+        let unattributed_mic = seg("отлично", "00:00:07", Some(7.0), Some("mic"), None, None);
+
+        // No owner voice yet: the mic channel stands in for the user, as it did before
+        // `is_self` existed.
+        assert_eq!(
+            resolve_segment_label_in_meeting(&unattributed_mic, false),
+            Some("You".to_string())
+        );
+        // Owner voice established: an unattributed mic line may be a colleague in the room.
+        assert_eq!(
+            resolve_segment_label_in_meeting(&unattributed_mic, true),
+            None
+        );
+    }
+
+    #[test]
+    fn assemble_keeps_mic_labels_for_meetings_recorded_before_owner_voice() {
+        // The realistic pre-migration meeting: is_self is 0 everywhere, nothing is diarized.
+        let segments = vec![
+            seg("привет", "00:00:01", Some(0.0), Some("mic"), None, None),
+            seg(
+                "да, слышу",
+                "00:00:03",
+                Some(3.0),
+                Some("system"),
+                None,
+                None,
+            ),
+        ];
+
+        assert_eq!(
+            assemble_labeled_transcript(&segments).expect("channel tags still label"),
+            "[00:00] You: привет\n[00:03] Others: да, слышу"
+        );
+    }
+
+    #[test]
+    fn assemble_drops_mic_guess_once_the_owner_voice_is_known() {
+        let mut own = seg("привет", "00:00:01", Some(0.0), Some("mic"), Some(1), None);
+        own.is_self = true;
+        let segments = vec![
+            own,
+            // Same channel, but diarization did not attribute this line to anyone.
+            seg(
+                "а я добавлю",
+                "00:00:05",
+                Some(5.0),
+                Some("mic"),
+                None,
+                None,
+            ),
+        ];
+
+        assert_eq!(
+            assemble_labeled_transcript(&segments).expect("has labels"),
+            "[00:00] You: привет\n[00:05] а я добавлю"
+        );
+    }
+
+    #[test]
+    fn marking_an_owner_voice_changes_the_attribution_fingerprint() {
+        let before = vec![
+            seg("привет", "00:00:01", Some(0.0), Some("mic"), Some(1), None),
+            seg(
+                "а я добавлю",
+                "00:00:05",
+                Some(5.0),
+                Some("mic"),
+                None,
+                None,
+            ),
+        ];
+        let mut after = before.clone();
+        after[0].is_self = true;
+
+        let before_fp = speaker_attribution_fingerprint(&before).expect("labeled");
+        let after_fp = speaker_attribution_fingerprint(&after).expect("labeled");
+        // Retiring the mic fallback is an attribution change: the saved summary is now stale.
+        assert_ne!(before_fp, after_fp);
     }
 
     #[test]
@@ -360,8 +501,26 @@ mod tests {
     }
 
     #[test]
-    fn microphone_only_transcript_stays_unlabeled_without_diarized_identity() {
+    fn assemble_uses_wall_clock_when_audio_time_missing() {
         let segments = vec![seg("hola", "14:30:05", None, Some("mic"), None, None)];
-        assert_eq!(assemble_labeled_transcript(&segments), None);
+        assert_eq!(
+            assemble_labeled_transcript(&segments),
+            Some("14:30:05 You: hola".to_string())
+        );
+    }
+
+    #[test]
+    fn microphone_only_transcript_stays_unlabeled_once_an_owner_voice_exists() {
+        let mut owner = seg("привет", "14:30:05", Some(0.0), Some("mic"), Some(3), None);
+        owner.is_self = true;
+        let segments = vec![
+            owner,
+            seg("hola", "14:30:09", Some(4.0), Some("mic"), None, None),
+        ];
+
+        assert_eq!(
+            assemble_labeled_transcript(&segments).expect("owner voice labels its own line"),
+            "[00:00] You: привет\n[00:04] hola"
+        );
     }
 }

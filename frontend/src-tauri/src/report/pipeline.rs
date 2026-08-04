@@ -1855,17 +1855,29 @@ mod tests {
                 id INTEGER PRIMARY KEY,
                 display_name TEXT NOT NULL,
                 voice_embedding BLOB,
-                is_confirmed INTEGER NOT NULL DEFAULT 0
+                is_confirmed INTEGER NOT NULL DEFAULT 0,
+                is_self INTEGER NOT NULL DEFAULT 0
             )",
         )
         .execute(&pool)
         .await
         .unwrap();
         sqlx::query(
+            "CREATE UNIQUE INDEX idx_speakers_single_self ON speakers(is_self) WHERE is_self = 1",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        // The timing columns are part of the subset because `meeting_speakers` sums speech
+        // duration; without them the roster read fails and every decision looks unknown.
+        sqlx::query(
             "CREATE TABLE transcripts (
                 id TEXT PRIMARY KEY,
                 meeting_id TEXT NOT NULL,
-                speaker_id INTEGER
+                speaker_id INTEGER,
+                audio_start_time REAL,
+                audio_end_time REAL,
+                duration REAL
             )",
         )
         .execute(&pool)
