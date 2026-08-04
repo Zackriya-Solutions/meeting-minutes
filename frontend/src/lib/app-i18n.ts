@@ -232,7 +232,12 @@ const messages = {
       parakeetOption: '⚡ Parakeet (Recomendado - Tiempo real / Preciso)',
       localWhisperOption: '🏠 Whisper local (Alta precisión)',
       languageLabel: 'Idioma',
-      languagePlaceholder: 'Seleccionar idioma'
+      languagePlaceholder: 'Seleccionar idioma',
+      parakeetCtcEsName: 'Parakeet CTC ES',
+      parakeetCtcEsTagline: 'Beta • Español LATAM, Spanglish y mezcla con inglés técnico',
+      parakeetCtcEsDisclaimer: 'Beta opcional en Configuración. Parakeet TDT sigue siendo la opción recomendada y predeterminada.',
+      parakeetBetaBadge: 'Beta',
+      parakeetUsingModel: 'Usando {model} para la transcripción'
     },
     deviceSelection: {
       title: 'Dispositivos de audio',
@@ -776,7 +781,12 @@ const messages = {
       parakeetOption: '⚡ Parakeet (Recommended - Real-time / Accurate)',
       localWhisperOption: '🏠 Local Whisper (High Accuracy)',
       languageLabel: 'Language',
-      languagePlaceholder: 'Select language'
+      languagePlaceholder: 'Select language',
+      parakeetCtcEsName: 'Parakeet CTC ES',
+      parakeetCtcEsTagline: 'Beta • LATAM Spanish, Spanglish, and technical English mix',
+      parakeetCtcEsDisclaimer: 'Optional beta in Settings. Parakeet TDT remains the recommended default path.',
+      parakeetBetaBadge: 'Beta',
+      parakeetUsingModel: 'Using {model} for transcription'
     },
     deviceSelection: {
       title: 'Audio Devices',

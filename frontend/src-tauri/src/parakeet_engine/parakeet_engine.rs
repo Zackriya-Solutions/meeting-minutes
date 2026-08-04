@@ -173,6 +173,7 @@ impl ParakeetEngine {
         // Sizes match actual download sizes (encoder + decoder + preprocessor + vocab)
         let model_configs = [
             ("parakeet-tdt-0.6b-v3-int8", 670, QuantizationType::Int8, "Ultra Fast (v3)", "Real time on M4 Max, latest version with int8 quantization"),
+            ("parakeet-ctc-es-0.6b-int8", 658, QuantizationType::Int8, "Beta Spanish", "Beta for Spanish-first LATAM and Spanglish-heavy live transcription"),
             ("parakeet-tdt-0.6b-v2-int8", 661, QuantizationType::Int8, "Fast (v2)", "Previous version with int8 quantization, good balance of speed and accuracy"),
         ];
 
@@ -1084,5 +1085,29 @@ impl ParakeetEngine {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn discover_models_includes_ctc_es_beta_variant() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "parakeet-discover-models-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let engine = ParakeetEngine::new_with_models_dir(Some(temp_dir.clone())).unwrap();
+        let models = engine.discover_models().await.unwrap();
+
+        assert!(models.iter().any(|model| model.name == "parakeet-ctc-es-0.6b-int8"));
+
+        let _ = std::fs::remove_dir_all(temp_dir);
     }
 }

@@ -164,7 +164,10 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                     )}
 
                     {uiProvider === 'parakeet' && (
-                        <div className="mt-6">
+                        <div className="mt-6 space-y-2">
+                            <p className="text-xs text-gray-500 mx-1">
+                                {t('transcriptSettings.parakeetCtcEsDisclaimer')}
+                            </p>
                             <ParakeetModelManager
                                 selectedModel={transcriptModelConfig.provider === 'parakeet' ? transcriptModelConfig.model : undefined}
                                 onModelSelect={handleParakeetModelSelect}
