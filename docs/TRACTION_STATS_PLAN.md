@@ -8,22 +8,23 @@ version, not silently changing the query.
 
 The weekly review should answer four questions:
 
-1. Are more opted-in devices receiving value from Memento?
+1. Are more analytics-enabled devices receiving value from Memento?
 2. Do they return for that value?
 3. Where does the activation path break?
 4. Is growth being bought with worse recording, transcription, or summary
    reliability?
 
 `device_id` is an anonymous installation identifier, not a person or account.
-All product metrics cover only devices that explicitly enabled analytics. The
-dashboard must never label them as all users or use them to estimate analytics
-opt-in rate: opted-out installations are deliberately invisible.
+All product metrics cover only devices with analytics enabled. Analytics starts
+automatically, but users can disable it at any time. The dashboard must never
+label observed devices as all users or use them to estimate the opt-out rate:
+disabled installations are deliberately invisible.
 
 ## KPI hierarchy
 
 ### Primary outcome
 
-**Weekly Value Devices (WVD)** — distinct opted-in devices with at least one
+**Weekly Value Devices (WVD)** — distinct analytics-enabled devices with at least one
 value event in the trailing 7 days.
 
 Value events currently available:
@@ -95,8 +96,9 @@ sufficient and must not be treated as read access.
 
 ## Delivery contract for the next desktop release
 
-- Analytics remains explicit opt-in and off by default. The V2 migration that
-  silently enabled it is treated as invalid consent and reset once.
+- Analytics is enabled automatically for fresh and existing installs. A V4
+  migration replaces the legacy forced-off preference once; explicit choices
+  made after that migration remain durable, including opt-out.
 - The PostHog client and upstream US project token are removed.
 - The app sends allowlisted event batches directly to the Memento Traction
   module using its per-install managed-gateway JWT.
@@ -115,7 +117,7 @@ sufficient and must not be treated as read access.
 | Structured-memory adoption | generated/reviewed/accepted events for Standup, 1:1, Interview | Local database state never leaves the device. |
 | Diarization adoption and quality | requested/completed/failed plus speaker-count buckets | Existing events only expose transcript segment count. |
 | Auto-detection funnel | detected → prompt shown → accepted/dismissed → recording started | Settings toggles do not measure real detections. |
-| Exact first-value latency | stable install timestamp + first value event | First observed analytics event can happen long after install/opt-in. |
+| Exact first-value latency | stable install timestamp + first value event | First observed analytics event can happen long after install or analytics activation. |
 | Historical local archive | one consent-gated aggregate `analytics_snapshot_v1` | Traction cannot see meetings created before analytics was enabled. |
 | Perceived output quality | explicit thumbs up/down or reason buckets | Success status only means the pipeline completed. |
 

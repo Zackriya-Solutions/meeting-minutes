@@ -5,7 +5,7 @@ import {
   MaterialSymbol,
   createMaterialSymbol,
 } from '@/vendor/deslop/primitives/material-symbols-react';
-import { ANALYTICS_CONSENT_MIGRATION_KEY, AnalyticsContext } from './AnalyticsProvider';
+import { ANALYTICS_PREFERENCE_MIGRATION_KEY, AnalyticsContext } from './AnalyticsProvider';
 import { load } from '@tauri-apps/plugin-store';
 import { invoke } from '@tauri-apps/api/core';
 import { Analytics } from '@/lib/analytics';
@@ -80,11 +80,11 @@ export default function AnalyticsConsentSwitch() {
       const store = await load('analytics.json', {
         autoSave: false,
         defaults: {
-          analyticsOptedIn: false
+          analyticsOptedIn: true
         }
       });
       await store.set('analyticsOptedIn', enabled);
-      await store.set(ANALYTICS_CONSENT_MIGRATION_KEY, true);
+      await store.set(ANALYTICS_PREFERENCE_MIGRATION_KEY, true);
       await store.save();
 
       if (enabled) {
@@ -187,7 +187,7 @@ export default function AnalyticsConsentSwitch() {
 
       <div className="flex flex-col gap-3 border-t border-[var(--primary-10)] px-4 py-4">
         <p className="settings-cell__caption">
-          {t('Usage analytics is off by default. You can turn it on to share anonymous product and performance data; no personal content is collected.')}
+          {t('Usage analytics is enabled automatically to share anonymous product and performance data; no meeting content or personal data is collected. You can turn it off at any time.')}
         </p>
 
         <Button
