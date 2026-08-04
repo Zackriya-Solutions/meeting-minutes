@@ -77,3 +77,9 @@ experiments/
 target/
 
 frontend/src-tauri/binaries/
+
+# Local AI/Claude tooling
+.ai-run/
+.ai/
+.claude/
+docs/superpowers/
