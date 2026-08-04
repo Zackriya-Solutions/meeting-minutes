@@ -453,8 +453,9 @@ async fn transcribe_chunk_with_provider<R: Runtime>(
             // Get language preference from global state
             let language = crate::get_language_preference_internal();
 
+            let prompt = crate::get_transcription_prompt_internal();
             match whisper_engine
-                .transcribe_audio_with_confidence(speech_samples, language)
+                .transcribe_audio_with_confidence(speech_samples, language, prompt)
                 .await
             {
                 Ok((text, confidence, is_partial)) => {

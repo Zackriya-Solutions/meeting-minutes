@@ -44,6 +44,16 @@ A privacy-first AI meeting assistant that captures, transcribes, and summarizes 
 
 ---
 
+## This fork overview
+
+| # | Feature | Status |
+|---|---------|--------|
+| 1 | **Global keyboard shortcuts** — toggle recording start/stop with a configurable hotkey (default `Ctrl+F8`). Customizable per platform (macOS, Windows, Linux). | ✅ Available |
+| 2 | **User dictionary & transcription initial prompt** — add domain-specific terms (product names, acronyms) as a vocabulary hint, plus a free-text initial prompt per transcription model. Dictionary is automatically appended to the prompt. | ✅ Available |
+| 3 | **Summarization prompt management & templates** — custom summary prompts and reusable templates to tailor meeting summaries to your workflow. | 🔜 Coming soon |
+
+---
+
 > **Meetily PRO Upgrade Offer** - Meetily PRO is available for users who need enhanced accuracy, advanced exports, custom summary workflows, and team-ready features. Use coupon code **LAUNCH20** for **20% off** until the next Meetily Community Edition release. Speaker diarization is also planned for PRO in mid-June. [Explore Meetily PRO →](https://meetily.ai/pro/)
 
 ---
@@ -100,6 +110,8 @@ Whether you're a defense consultant, enterprise executive, legal professional, o
 - **Multi-Platform:** Works on macOS, Windows, and Linux.
 - **Open Source:** Meetily is open source and free to use.
 - **Flexible AI Provider Support:** Choose from Ollama (local), Claude, Groq, OpenRouter, or use your own OpenAI-compatible endpoint.
+- **Global Recording Shortcuts:** Start and stop recording from anywhere with a configurable keyboard shortcut.
+- **User Dictionary & Initial Prompt:** Fine-tune transcription accuracy with domain vocabulary hints and a per-model initial prompt.
 
 ## Installation
 
