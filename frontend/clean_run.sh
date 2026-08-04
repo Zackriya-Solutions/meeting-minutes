@@ -33,12 +33,19 @@ DEV_PID=$!
 
 echo "Waiting for Next.js to be ready (http://localhost:3118)..."
 pnpm exec wait-on "http://localhost:3118" --timeout 120000
+
+# Pre-warm the page so Next.js compiles all chunks before the Tauri webview opens.
+# Without this, Tauri loads the HTML immediately but the JS chunks aren't ready yet,
+# causing a ChunkLoadError ("Loading chunk app/layout failed").
+echo "Pre-warming Next.js page compilation..."
+curl -s -o /dev/null -w "%{http_code}" "http://localhost:3118/" | grep -q "200" || true
+sleep 1
 echo "Next.js ready."
 
 # Run Tauri with beforeDevCommand disabled so it reuses the server above.
 echo "Building Tauri app..."
 TAURI_SKIP_DEVSERVER_CHECK=true \
-  pnpm exec tauri dev --no-watch -- --features platform-default &
+  pnpm exec tauri dev -- --features platform-default &
 TAURI_PID=$!
 echo $TAURI_PID > /tmp/meetily.pid
 echo "Meetily PID: $TAURI_PID (saved to /tmp/meetily.pid)"
