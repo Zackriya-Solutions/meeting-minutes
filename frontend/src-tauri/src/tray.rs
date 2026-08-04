@@ -23,7 +23,7 @@ pub fn create_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
 
     TrayIconBuilder::with_id("main-tray")
         .menu(&menu)
-        .tooltip("Meetily")
+        .tooltip("Meet4Specs")
         .icon(app.default_window_icon().unwrap().clone())
         .on_menu_event(|app, event| handle_menu_event(app, event.id.as_ref()))
         .build(app)?;
@@ -323,57 +323,74 @@ fn build_menu<R: Runtime>(
     // If recording is not allowed (during onboarding, no transcription model), show disabled message
     if !can_record {
         builder = builder.item(
-            &MenuItemBuilder::new("⏳ Downloading transcription model...")
+            &MenuItemBuilder::new(crate::i18n::tray_downloading_model())
                 .enabled(false)
                 .build(app)?,
         );
     } else {
         match state {
             RecordingState::Stopped => {
-                builder = builder
-                    .item(&MenuItemBuilder::with_id("toggle_recording", "Start Recording").build(app)?);
+                builder = builder.item(
+                    &MenuItemBuilder::with_id("toggle_recording", crate::i18n::tray_start_recording())
+                        .build(app)?,
+                );
             }
             RecordingState::Starting => {
                 builder = builder.item(
-                    &MenuItemBuilder::new("🔄 Starting Recording...")
+                    &MenuItemBuilder::new(crate::i18n::tray_starting_recording())
                         .enabled(false)
                         .build(app)?,
                 );
             }
             RecordingState::Recording => {
                 builder = builder
-                    .item(&MenuItemBuilder::with_id("pause_recording", "⏸ Pause Recording").build(app)?)
-                    .item(&MenuItemBuilder::with_id("stop_recording", "⏹ Stop Recording").build(app)?);
+                    .item(
+                        &MenuItemBuilder::with_id("pause_recording", crate::i18n::tray_pause_recording())
+                            .build(app)?,
+                    )
+                    .item(
+                        &MenuItemBuilder::with_id("stop_recording", crate::i18n::tray_stop_recording())
+                            .build(app)?,
+                    );
             }
             RecordingState::Pausing => {
                 builder = builder
                     .item(
-                        &MenuItemBuilder::new("⏸ Pausing...")
+                        &MenuItemBuilder::new(crate::i18n::tray_pausing())
                             .enabled(false)
                             .build(app)?,
                     )
-                    .item(&MenuItemBuilder::with_id("stop_recording", "⏹ Stop Recording").build(app)?);
+                    .item(
+                        &MenuItemBuilder::with_id("stop_recording", crate::i18n::tray_stop_recording())
+                            .build(app)?,
+                    );
             }
             RecordingState::Paused => {
                 builder = builder
                     .item(
-                        &MenuItemBuilder::with_id("resume_recording", "▶ Resume Recording")
+                        &MenuItemBuilder::with_id("resume_recording", crate::i18n::tray_resume_recording())
                             .build(app)?,
                     )
-                    .item(&MenuItemBuilder::with_id("stop_recording", "⏹ Stop Recording").build(app)?);
+                    .item(
+                        &MenuItemBuilder::with_id("stop_recording", crate::i18n::tray_stop_recording())
+                            .build(app)?,
+                    );
             }
             RecordingState::Resuming => {
                 builder = builder
                     .item(
-                        &MenuItemBuilder::new("▶ Resuming...")
+                        &MenuItemBuilder::new(crate::i18n::tray_resuming())
                             .enabled(false)
                             .build(app)?,
                     )
-                    .item(&MenuItemBuilder::with_id("stop_recording", "⏹ Stop Recording").build(app)?);
+                    .item(
+                        &MenuItemBuilder::with_id("stop_recording", crate::i18n::tray_stop_recording())
+                            .build(app)?,
+                    );
             }
             RecordingState::Stopping => {
                 builder = builder.item(
-                    &MenuItemBuilder::new("⏹ Stopping...")
+                    &MenuItemBuilder::new(crate::i18n::tray_stopping())
                         .enabled(false)
                         .build(app)?,
                 );
@@ -383,11 +400,11 @@ fn build_menu<R: Runtime>(
 
     builder
         .item(&PredefinedMenuItem::separator(app)?)
-        .item(&MenuItemBuilder::with_id("open_window", "Open Main Window").build(app)?)
-        .item(&MenuItemBuilder::with_id("settings", "Settings").build(app)?)
-        .item(&MenuItemBuilder::with_id("check_updates", "Check for Updates").build(app)?)
+        .item(&MenuItemBuilder::with_id("open_window", crate::i18n::tray_open_main_window()).build(app)?)
+        .item(&MenuItemBuilder::with_id("settings", crate::i18n::tray_settings()).build(app)?)
+        .item(&MenuItemBuilder::with_id("check_updates", crate::i18n::tray_check_updates()).build(app)?)
         .item(&PredefinedMenuItem::separator(app)?)
-        .item(&MenuItemBuilder::with_id("quit", "Quit").build(app)?)
+        .item(&MenuItemBuilder::with_id("quit", crate::i18n::tray_quit()).build(app)?)
         .build()
 }
 

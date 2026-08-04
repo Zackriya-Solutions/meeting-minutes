@@ -3,16 +3,18 @@ import { CheckCircle2, Loader2, XCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import type { PermissionRowProps } from '@/types/onboarding';
+import { useI18n } from '@/hooks/useI18n';
 
 export function PermissionRow({ icon, title, description, status, isPending = false, onAction }: PermissionRowProps) {
+  const { t } = useI18n();
   const isAuthorized = status === 'authorized';
   const isDenied = status === 'denied';
   const isChecking = isPending;
 
   const getButtonText = () => {
-    if (isChecking) return 'Checking...';
-    if (isDenied) return 'Open Settings';
-    return 'Enable';
+    if (isChecking) return t('onboarding.checking');
+    if (isDenied) return t('onboarding.openSettings');
+    return t('onboarding.enable');
   };
 
   return (
@@ -42,12 +44,12 @@ export function PermissionRow({ icon, title, description, status, isPending = fa
             {isAuthorized ? (
               <span className="text-green-600 flex items-center gap-1">
                 <CheckCircle2 className="w-3.5 h-3.5" />
-                Access Granted
+                {t('onboarding.accessGranted')}
               </span>
             ) : isDenied ? (
               <span className="text-red-500 flex items-center gap-1">
                 <XCircle className="w-3.5 h-3.5" />
-                Access Denied - Please grant in System Settings
+                {t('onboarding.accessDenied')}
               </span>
             ) : (
               <span>{description}</span>

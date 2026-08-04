@@ -80,3 +80,8 @@ frontend/src-tauri/binaries/
 # Local Pi runtime state
 .atl/
 .pi/
+.claude/
+.codegraph/
+.serena/
+.github/
+commit_context.md

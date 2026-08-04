@@ -43,6 +43,7 @@ pub mod audio;
 pub mod config;
 pub mod console_utils;
 pub mod database;
+pub mod i18n;
 pub mod notifications;
 pub mod ollama;
 pub mod onboarding;
@@ -66,9 +67,13 @@ use tokio::sync::RwLock;
 
 static RECORDING_FLAG: AtomicBool = AtomicBool::new(false);
 
-// Global language preference storage (default to "auto-translate" for automatic translation to English)
+// Global transcription language preference storage
 static LANGUAGE_PREFERENCE: std::sync::LazyLock<StdMutex<String>> =
     std::sync::LazyLock::new(|| StdMutex::new("auto-translate".to_string()));
+
+// Global UI language storage for visible app text
+static UI_LANGUAGE: std::sync::LazyLock<StdMutex<String>> =
+    std::sync::LazyLock::new(|| StdMutex::new("es".to_string()));
 
 #[derive(Debug, Deserialize)]
 struct RecordingArgs {
@@ -389,6 +394,25 @@ pub fn get_language_preference_internal() -> Option<String> {
     LANGUAGE_PREFERENCE.lock().ok().map(|lang| lang.clone())
 }
 
+#[tauri::command]
+async fn set_ui_language<R: Runtime>(app: AppHandle<R>, language: String) -> Result<(), String> {
+    let normalized = if language == "en" { "en" } else { "es" }.to_string();
+    {
+        let mut ui_lang = UI_LANGUAGE
+            .lock()
+            .map_err(|e| format!("Failed to set UI language: {}", e))?;
+        log_info!("Setting UI language to: {}", normalized);
+        *ui_lang = normalized;
+    }
+    // Re-render tray labels/tooltip in the new language, same as recording state changes do.
+    tray::update_tray_menu(&app);
+    Ok(())
+}
+
+pub fn get_ui_language_internal() -> Option<String> {
+    UI_LANGUAGE.lock().ok().map(|lang| lang.clone())
+}
+
 pub fn run() {
     log::set_max_level(log::LevelFilter::Info);
 
@@ -694,6 +718,7 @@ pub fn run() {
             audio::recording_preferences::get_audio_backend_info,
             // Language preference commands
             set_language_preference,
+            set_ui_language,
             // Notification system commands
             notifications::commands::get_notification_settings,
             notifications::commands::set_notification_settings,

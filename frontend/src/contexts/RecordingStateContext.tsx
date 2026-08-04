@@ -2,6 +2,14 @@
 
 import React, { createContext, useContext, useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { recordingService } from '@/services/recordingService';
+import { translate, AppLanguage } from '@/lib/app-i18n';
+
+// This provider is mounted above ConfigProvider in the tree, so it cannot use useI18n/useConfig.
+// Read the persisted app language directly instead.
+function getAppLanguage(): AppLanguage {
+  if (typeof window === 'undefined') return 'es';
+  return (localStorage.getItem('appLanguage') as AppLanguage) || 'es';
+}
 
 /**
  * Recording state synchronized with backend
@@ -167,7 +175,7 @@ export function RecordingStateProvider({ children }: { children: React.ReactNode
             return {
               ...prev,
               status: newStatus,
-              statusMessage: newStatus === RecordingStatus.STOPPING ? 'Stopping recording...' : prev.statusMessage,
+              statusMessage: newStatus === RecordingStatus.STOPPING ? translate(getAppLanguage(), 'recording.stoppingRecording') : prev.statusMessage,
               isRecording: false,
               isPaused: false,
               isActive: false,
