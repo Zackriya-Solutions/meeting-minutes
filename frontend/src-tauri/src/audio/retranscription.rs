@@ -420,16 +420,51 @@ async fn run_retranscription<R: Runtime>(
     emit_progress(&app, &meeting_id, "saving", 80, "Saving transcripts...");
 
     // Create transcript segments with proper timestamps from VAD
-    let segments = create_transcript_segments(&all_transcripts);
+    let mut segments = create_transcript_segments(&all_transcripts);
 
     // Save to database
     let app_state = app
         .try_state::<AppState>()
         .ok_or_else(|| anyhow!("App state not available"))?;
 
-    // Wrap delete+insert+update in a transaction to prevent data loss
     let pool = app_state.db_manager.pool();
     let mut conn = pool.acquire().await.map_err(|e| anyhow!("DB error: {}", e))?;
+
+    // Read existing speaker labels before deleting so we can re-assign them.
+    // Each row: (audio_start_time, audio_end_time, speaker)
+    let existing: Vec<(Option<f64>, Option<f64>, Option<String>)> =
+        sqlx::query_as(
+            "SELECT audio_start_time, audio_end_time, speaker FROM transcripts WHERE meeting_id = ?"
+        )
+        .bind(&meeting_id)
+        .fetch_all(&mut *conn)
+        .await
+        .unwrap_or_default();
+
+    // Re-assign speakers: for each new segment find the old segment with
+    // the greatest time overlap and carry its speaker forward.
+    if !existing.is_empty() {
+        for seg in &mut segments {
+            let new_start = seg.audio_start_time.unwrap_or(0.0);
+            let new_end   = seg.audio_end_time.unwrap_or(new_start);
+            let mut best_overlap = 0.0f64;
+            let mut best_speaker: Option<String> = None;
+            for (old_start, old_end, speaker) in &existing {
+                let os = old_start.unwrap_or(0.0);
+                let oe = old_end.unwrap_or(os);
+                let overlap = f64::min(new_end, oe) - f64::max(new_start, os);
+                if overlap > best_overlap {
+                    best_overlap = overlap;
+                    best_speaker = speaker.clone();
+                }
+            }
+            if best_overlap > 0.0 {
+                seg.speaker = best_speaker;
+            }
+        }
+    }
+
+    // Wrap delete+insert+update in a transaction to prevent data loss
     let mut tx = sqlx::Connection::begin(&mut *conn)
         .await
         .map_err(|e| anyhow!("Failed to start transaction: {}", e))?;
@@ -442,8 +477,8 @@ async fn run_retranscription<R: Runtime>(
 
     for segment in &segments {
         sqlx::query(
-            "INSERT INTO transcripts (id, meeting_id, transcript, timestamp, audio_start_time, audio_end_time, duration)
-             VALUES (?, ?, ?, ?, ?, ?, ?)"
+            "INSERT INTO transcripts (id, meeting_id, transcript, timestamp, audio_start_time, audio_end_time, duration, speaker)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
         )
         .bind(&segment.id)
         .bind(&meeting_id)
@@ -452,6 +487,7 @@ async fn run_retranscription<R: Runtime>(
         .bind(segment.audio_start_time)
         .bind(segment.audio_end_time)
         .bind(segment.duration)
+        .bind(segment.speaker.as_deref())
         .execute(&mut *tx)
         .await
         .map_err(|e| anyhow!("Failed to insert transcript: {}", e))?;
