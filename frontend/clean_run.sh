@@ -24,25 +24,26 @@ rm -rf node_modules .pnp.cjs out
 echo "Installing dependencies..."
 pnpm install
 
-# Pre-warm the Next.js dev server so all chunks are compiled before
-# Tauri opens the webview. Once warm, kill it — tauri dev restarts it
-# instantly from the .next cache (no ChunkLoadError).
-echo "Pre-warming Next.js dev server..."
+# Start the Next.js dev server and keep it running throughout.
+# Wait until it is fully compiled before opening Tauri, so the
+# webview always finds all chunks ready (no ChunkLoadError).
+echo "Starting Next.js dev server..."
 pnpm dev &
-DEV_WARM_PID=$!
-echo "Waiting for Next.js to finish compiling..."
-pnpm exec wait-on "http://localhost:3118/_next/static/chunks/main-app.js" \
-     "http://localhost:3118/_next/static/chunks/app/layout.js" \
-     --timeout 120000 2>/dev/null \
-  || pnpm exec wait-on "http://localhost:3118" --timeout 120000
-echo "Next.js ready — handing off to Tauri dev..."
-kill $DEV_WARM_PID 2>/dev/null || true
-wait $DEV_WARM_PID 2>/dev/null || true
+DEV_PID=$!
 
+echo "Waiting for Next.js to be ready (http://localhost:3118)..."
+pnpm exec wait-on "http://localhost:3118" --timeout 120000
+echo "Next.js ready."
+
+# Run Tauri with beforeDevCommand disabled so it reuses the server above.
 echo "Building Tauri app..."
-pnpm run tauri dev &
+TAURI_SKIP_DEVSERVER_CHECK=true \
+  pnpm exec tauri dev --no-watch -- --features platform-default &
 TAURI_PID=$!
 echo $TAURI_PID > /tmp/meetily.pid
 echo "Meetily PID: $TAURI_PID (saved to /tmp/meetily.pid)"
 echo "  Kill with: kill \$(cat /tmp/meetily.pid)"
+
+# Wait for either process to exit; clean up both on exit
+trap "kill $DEV_PID $TAURI_PID 2>/dev/null" EXIT
 wait $TAURI_PID
