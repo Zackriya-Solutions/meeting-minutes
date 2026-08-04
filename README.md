@@ -44,7 +44,7 @@ A privacy-first AI meeting assistant that captures, transcribes, and summarizes 
 
 ---
 
-## ✨ What's New
+## This fork overview
 
 | # | Feature | Status |
 |---|---------|--------|
