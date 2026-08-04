@@ -3,17 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
-import {
-  Copy,
-  Languages,
-  Loader2,
-  MoreHorizontal,
-  Pencil,
-  Save,
-  Send,
-  Settings,
-  Trash2,
-} from '@/components/deslop-icons';
+import { MaterialSymbol } from '@/vendor/deslop/primitives/material-symbols-react';
 import {
   DropdownContent,
   DropdownMenu,
@@ -131,7 +121,7 @@ export function MeetingOverflowMenu({
             data-no-window-drag
             className="no-drag h-[38px] w-[38px] rounded-full shadow-none [&>span:first-child]:!bg-[var(--primary-5)]"
           >
-            <MoreHorizontal size={18} />
+            <MaterialSymbol name="more_horiz" size={18} weight={400} />
           </FluidButton>
           )}
         />
@@ -143,7 +133,7 @@ export function MeetingOverflowMenu({
         >
           <MenuItem
             index={0}
-            icon={Pencil}
+            iconName="edit"
             label={t('Rename meeting')}
             onSelect={onRenameMeeting}
           />
@@ -152,7 +142,7 @@ export function MeetingOverflowMenu({
 
           <MenuItem
             index={1}
-            icon={Copy}
+            iconName="content_copy"
             label={t('Copy summary')}
             disabled={!hasSummary}
             onSelect={() => void onCopySummary()}
@@ -160,7 +150,7 @@ export function MeetingOverflowMenu({
 
           <MenuItem
             index={2}
-            icon={Save}
+            iconName="save"
             label={t('Save to note')}
             disabled={!hasSummary}
             onSelect={() => void onSaveSummary()}
@@ -169,7 +159,7 @@ export function MeetingOverflowMenu({
           {canShareToTelegram && onShareSummaryToTelegram && (
             <MenuItem
               index={3}
-              icon={Send}
+              iconName="send"
               label={t('Send to Telegram')}
               disabled={!hasSummary}
               onSelect={() => void onShareSummaryToTelegram()}
@@ -178,7 +168,7 @@ export function MeetingOverflowMenu({
 
           <MenuItem
             index={4}
-            icon={Languages}
+            iconName="language"
             label={t('Summary language')}
             trailing={languageLabel}
             onSelect={() => setLanguageOpen(true)}
@@ -186,7 +176,7 @@ export function MeetingOverflowMenu({
 
           <MenuItem
             index={5}
-            icon={Settings}
+            iconName="settings"
             label={t('AI Model')}
             trailing={modelLabel}
             onSelect={() => setModelOpen(true)}
@@ -196,7 +186,7 @@ export function MeetingOverflowMenu({
 
           <MenuItem
             index={6}
-            icon={deleting ? Loader2 : Trash2}
+            iconName={deleting ? 'progress_activity' : 'delete'}
             label={t('Delete meeting')}
             disabled={deleting}
             closeOnClick={false}

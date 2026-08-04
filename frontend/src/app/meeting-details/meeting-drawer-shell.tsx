@@ -226,7 +226,6 @@ export function MeetingDrawerShell({ children }: { children: ReactNode }) {
           onOpenChangeComplete={onOpenChangeComplete}
           modal={false}
           disablePointerDismissal
-          showSwipeHandle
           swipeDirection="right"
         >
           <DrawerContent
@@ -248,7 +247,12 @@ export function MeetingDrawerShell({ children }: { children: ReactNode }) {
               onPointerUp={(event) => finishResize(event, true)}
               onPointerCancel={(event) => finishResize(event, false)}
               onKeyDown={handleResizeKeyDown}
-            />
+            >
+              <span
+                aria-hidden="true"
+                className="meeting-drawer-resize-handle-indicator"
+              />
+            </div>
             <DrawerTitle className="sr-only">{t("Meeting")}</DrawerTitle>
             <DrawerDescription className="sr-only">
               {t("Meeting details")}

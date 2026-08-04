@@ -152,6 +152,7 @@
   --deslop-primary-4: #1111110a;
   --primary-50: #11111180;
   --primary-40: #11111166;
+  --primary-20: var(--deslop-primary-20);
   --primary-5: #1111110d;
   --primary-10: #1111111a;
 }
@@ -177,6 +178,7 @@
   --deslop-primary-4: #ffffff0a;
   --primary-50: #ffffff80;
   --primary-40: #ffffff66;
+  --primary-20: var(--deslop-primary-20);
   --primary-5: #ffffff0d;
   --primary-10: #ffffff1a;
 }

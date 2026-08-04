@@ -529,6 +529,25 @@
     isolation: isolate;
     outline: none;
   }
+  .meeting-drawer-resize-handle-indicator {
+    position: absolute;
+    top: 50%;
+    left: 8px;
+    z-index: 1;
+    display: block;
+    width: 4px;
+    height: 64px;
+    border-radius: 999px;
+    background: var(--primary-20);
+    pointer-events: none;
+    transform: translateY(-50%);
+    transition: width 150ms ease;
+  }
+  .meeting-drawer-resize-handle:hover .meeting-drawer-resize-handle-indicator,
+  .meeting-drawer-resize-handle:focus-visible .meeting-drawer-resize-handle-indicator,
+  .meeting-drawer-resize-handle:active .meeting-drawer-resize-handle-indicator {
+    width: 5px;
+  }
   .meeting-page-surface {
     background: var(--elevation-2);
   }
