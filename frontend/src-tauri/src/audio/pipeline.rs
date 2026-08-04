@@ -822,6 +822,19 @@ impl AudioPipeline {
                     // STEP 2: Mix audio in fixed windows when both streams have sufficient data
                     while self.ring_buffer.can_mix() {
                         if let Some((mic_window, sys_window)) = self.ring_buffer.extract_window() {
+                            // Determine dominant source by RMS energy for speaker attribution
+                            let mic_rms: f32 = if mic_window.is_empty() { 0.0 } else {
+                                (mic_window.iter().map(|&s| s * s).sum::<f32>() / mic_window.len() as f32).sqrt()
+                            };
+                            let sys_rms: f32 = if sys_window.is_empty() { 0.0 } else {
+                                (sys_window.iter().map(|&s| s * s).sum::<f32>() / sys_window.len() as f32).sqrt()
+                            };
+                            let dominant_device = if sys_rms > mic_rms {
+                                DeviceType::System
+                            } else {
+                                DeviceType::Microphone
+                            };
+
                             // Simple mixing without aggressive ducking
                             let mixed_clean = self.mixer.mix_window(&mic_window, &sys_window);
 
@@ -846,7 +859,7 @@ impl AudioPipeline {
                                                 sample_rate: 16000,
                                                 timestamp: segment.start_timestamp_ms / 1000.0,
                                                 chunk_id: self.chunk_id_counter,
-                                                device_type: DeviceType::Microphone,  // Mixed audio
+                                                device_type: dominant_device.clone(),
                                             };
 
                                             if let Err(e) = self.transcription_sender.send(transcription_chunk) {
