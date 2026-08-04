@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { cn } from '@/lib/utils';
 import { useT } from '@/lib/i18n';
@@ -9,6 +10,7 @@ import { Badge } from '@/components/ui/fluid-badge';
 import { Message, MessageAvatar, MessageContent } from '@/components/ui/message';
 import { ChatMarkdown } from './ChatMarkdown';
 import type { ChatMessage, Citation } from '@/hooks/useMeetingChat';
+import StreamingText from '@/vendor/deslop/mini-app/StreamingText';
 
 /**
  * Chat primitives shared by the archive/collection chat page and the embedded
@@ -34,6 +36,7 @@ export function MessageBubble({
   const senderName = isUser ? t('You') : 'Memento';
   const avatarGradient = avatarGradients[isUser ? 0 : 2];
   const avatarInitials = isUser ? senderName.slice(0, 1).toUpperCase() : 'M';
+  const [showFormattedAnswer, setShowFormattedAnswer] = useState(!msg.animate);
 
   return (
     <motion.div
@@ -63,15 +66,28 @@ export function MessageBubble({
                 !msg.error && '!bg-[var(--primary-5)] !text-[var(--deslop-primary)]',
               )}
             >
-              <div className="flex flex-col items-start gap-1 text-left">
+              <div className="flex flex-col items-start gap-0.5 text-left">
                 <span className="text-xs font-medium text-[var(--deslop-primary-60)]">
                   {senderName}
                 </span>
 
                 <div className={cn('w-full text-left', isUser && 'whitespace-pre-wrap')}>
-                  {isUser || msg.error
-                    ? <div className="whitespace-pre-wrap">{msg.content}</div>
-                    : <ChatMarkdown content={msg.content} className="mm-md-answer" />}
+                  {isUser || msg.error ? (
+                    <div className="whitespace-pre-wrap">{msg.content}</div>
+                  ) : showFormattedAnswer ? (
+                    <ChatMarkdown content={msg.content} className="mm-md-answer" />
+                  ) : (
+                    <div className="whitespace-pre-wrap">
+                      <StreamingText
+                        mode="word"
+                        speed="fast"
+                        replayKey={`${msg.role}-${msg.content}`}
+                        onComplete={() => setShowFormattedAnswer(true)}
+                      >
+                        {msg.content}
+                      </StreamingText>
+                    </div>
+                  )}
 
                   {!!msg.citations?.length && (
                     <div className="mt-2.5 flex w-full flex-wrap items-center justify-start gap-1.5">

@@ -19,9 +19,11 @@ const RAG_CANDIDATE_K: usize = RAG_TOP_K * 5;
 fn rag_system_prompt() -> String {
     format!(
         "Отвечай только на основе фрагментов и цитируй источники как [N]. \
-         Если подтверждена лишь часть вопроса, ответь на подтверждённую часть и явно \
-         перечисли, чего не хватает. Только если фрагменты не отвечают ни на одну \
-         существенную часть, верни ровно: «{RAG_NOT_FOUND}»."
+         Учитывай синонимы и косвенные признаки. Для оценочного вопроса без прямой \
+         метрики дай осторожный вывод, явно назови его косвенным и не выдавай за \
+         объективную оценку. Если подтверждена лишь часть вопроса, ответь на неё и \
+         укажи, чего не хватает. Только если нет ни прямых, ни косвенных признаков, \
+         верни ровно: «{RAG_NOT_FOUND}»."
     )
 }
 
@@ -403,7 +405,7 @@ pub async fn ask(
         }
     }
     let user = prompts::fill(
-        prompts::rag_answer_v2(),
+        prompts::rag_answer_v3(),
         &[("question", query), ("context", &context)],
     ) + &history_block;
     let system = rag_system_prompt();
@@ -593,7 +595,8 @@ mod tests {
     #[test]
     fn system_prompt_supports_partial_grounded_answers() {
         let prompt = rag_system_prompt();
-        assert!(prompt.contains("подтверждённую часть"));
+        assert!(prompt.contains("косвенные признаки"));
+        assert!(prompt.contains("осторожный вывод"));
         assert!(prompt.contains(RAG_NOT_FOUND));
     }
 

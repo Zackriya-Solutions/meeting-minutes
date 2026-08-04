@@ -14,6 +14,7 @@ import {
   MessageScroller,
   MessageScrollerButton,
   MessageScrollerContent,
+  MessageScrollerInitialPosition,
   MessageScrollerItem,
   MessageScrollerProvider,
   MessageScrollerViewport,
@@ -132,8 +133,8 @@ export default function ChatPage() {
 
       {/* Messages */}
       <MessageScrollerProvider
-        key={`${scopeKind}-${collectionId ?? 'all'}-${meetingId ?? 'all'}-${loadingHistory ? 'loading' : 'ready'}`}
-        autoScroll
+        key={`${scopeKind}-${collectionId ?? 'all'}-${meetingId ?? 'all'}`}
+        autoScroll={false}
         defaultScrollPosition="end"
         scrollPreviousItemPeek={48}
       >
@@ -174,6 +175,12 @@ export default function ChatPage() {
             </MessageScrollerContent>
           </MessageScrollerViewport>
           <MessageScrollerButton />
+          <MessageScrollerInitialPosition
+            ready={!loadingHistory}
+            resetKey={`${scopeKind}-${collectionId ?? 'all'}-${meetingId ?? 'all'}-${latestUserMessageIndex}`}
+            messageId={latestUserMessageIndex >= 0 ? `knowledge-chat-${latestUserMessageIndex}` : undefined}
+            scrollMargin={48}
+          />
         </MessageScroller>
       </MessageScrollerProvider>
 

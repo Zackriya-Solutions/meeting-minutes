@@ -14,6 +14,7 @@ interface EditableTitleProps {
   onChange: (value: string) => void;
   onDelete?: () => void;
   showEditButton?: boolean;
+  seamlessEditing?: boolean;
 }
 
 export const EditableTitle: React.FC<EditableTitleProps> = ({
@@ -24,6 +25,7 @@ export const EditableTitle: React.FC<EditableTitleProps> = ({
   onChange,
   onDelete,
   showEditButton = true,
+  seamlessEditing = false,
 }) => {
   const t = useT();
   const titleInputRef = useRef<HTMLTextAreaElement>(null);
@@ -56,8 +58,12 @@ export const EditableTitle: React.FC<EditableTitleProps> = ({
             onFinishEditing();
           }
         }}
-        className="memento-screen-title w-full resize-none overflow-hidden"
-        style={{ minWidth: '300px', minHeight: '40px' }}
+        className={`memento-screen-title w-full resize-none overflow-hidden ${
+          seamlessEditing
+            ? 'min-h-0 rounded-none border-0 bg-transparent p-0 shadow-none outline-none ring-0 focus-visible:outline-none focus-visible:ring-0'
+            : ''
+        }`}
+        style={seamlessEditing ? undefined : { minWidth: '300px', minHeight: '40px' }}
         autoFocus
         rows={1}
       />

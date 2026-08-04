@@ -6,6 +6,7 @@ import { ConfidenceIndicator } from './ConfidenceIndicator';
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
 import { motion } from 'framer-motion';
 import { useT } from '@/lib/i18n';
+import StreamingText from '@/vendor/deslop/mini-app/StreamingText';
 
 interface TranscriptViewProps {
   transcripts: Transcript[];
@@ -118,13 +119,8 @@ export const TranscriptView: React.FC<TranscriptViewProps> = ({ transcripts, isR
     shouldShowListening: !isStopping && isRecording && !isPaused && !isProcessing && transcripts.length > 0
   });
 
-  // Streaming effect state
-  const [streamingTranscript, setStreamingTranscript] = useState<{
-    id: string;
-    visibleText: string;
-    fullText: string;
-  } | null>(null);
-  const streamingIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  // New live segments are revealed by the deslop StreamingText component.
+  const [streamingTranscriptId, setStreamingTranscriptId] = useState<string | null>(null);
   const lastStreamedIdRef = useRef<string | null>(null); // Track which transcript we've streamed
 
   // Load preference for showing confidence indicator
@@ -172,15 +168,10 @@ export const TranscriptView: React.FC<TranscriptViewProps> = ({ transcripts, isR
     };
   }, [isRecording]);
 
-  // Streaming effect: animate new transcripts character-by-character
+  // Mark each new transcript once; the component handles word-by-word reveal.
   useEffect(() => {
     if (!enableStreaming || !isRecording) {
-      // Clean up if streaming is disabled
-      if (streamingIntervalRef.current) {
-        clearInterval(streamingIntervalRef.current);
-        streamingIntervalRef.current = null;
-      }
-      setStreamingTranscript(null);
+      setStreamingTranscriptId(null);
       lastStreamedIdRef.current = null;
       return;
     }
@@ -193,59 +184,14 @@ export const TranscriptView: React.FC<TranscriptViewProps> = ({ transcripts, isR
 
     // Check if this is a new transcript we haven't streamed yet (using ref to avoid dependency issues)
     if (lastStreamedIdRef.current !== latestTranscript.id) {
-      // Clear any existing streaming interval
-      if (streamingIntervalRef.current) {
-        clearInterval(streamingIntervalRef.current);
-        streamingIntervalRef.current = null;
-      }
-
-      // Mark this transcript as being streamed
       lastStreamedIdRef.current = latestTranscript.id;
-
-      const fullText = latestTranscript.text;
-
-      // Fast typewriter effect - complete in 0.8 seconds for snappy feel
-      const TOTAL_DURATION_MS = 800; // 0.8 seconds total - fast and snappy!
-      const INTERVAL_MS = 15; // Update every 15ms for smooth animation
-      const totalTicks = TOTAL_DURATION_MS / INTERVAL_MS; // ~53 ticks
-      const charsPerTick = Math.max(2, Math.ceil(fullText.length / totalTicks)); // At least 2 chars per tick for speed
-      const INITIAL_CHARS = Math.min(5, fullText.length); // Start with first 5 chars visible
-      let charIndex = INITIAL_CHARS;
-
-      setStreamingTranscript({
-        id: latestTranscript.id,
-        visibleText: fullText.substring(0, INITIAL_CHARS),
-        fullText: fullText
-      });
-
-      streamingIntervalRef.current = setInterval(() => {
-        charIndex += charsPerTick;
-
-        if (charIndex >= fullText.length) {
-          // Streaming complete
-          clearInterval(streamingIntervalRef.current!);
-          streamingIntervalRef.current = null;
-          setStreamingTranscript(null);
-        } else {
-          setStreamingTranscript(prev => {
-            if (!prev) return null;
-            return {
-              ...prev,
-              visibleText: fullText.substring(0, charIndex)
-            };
-          });
-        }
-      }, INTERVAL_MS);
+      setStreamingTranscriptId(latestTranscript.id);
     }
   }, [transcripts, enableStreaming, isRecording]);
 
-  // Cleanup streaming interval on unmount
+  // Forget the last segment on unmount so a future recording starts cleanly.
   useEffect(() => {
     return () => {
-      if (streamingIntervalRef.current) {
-        clearInterval(streamingIntervalRef.current);
-        streamingIntervalRef.current = null;
-      }
       lastStreamedIdRef.current = null;
     };
   }, []);
@@ -253,8 +199,8 @@ export const TranscriptView: React.FC<TranscriptViewProps> = ({ transcripts, isR
   return (
     <div className="px-4 py-2">
       {transcripts?.map((transcript, index) => {
-        const isStreaming = streamingTranscript?.id === transcript.id;
-        const textToShow = isStreaming ? streamingTranscript.visibleText : transcript.text;
+        const isStreaming = streamingTranscriptId === transcript.id;
+        const textToShow = transcript.text;
         // Clean up text for display - remove repetitions and filler words
         const filteredText = cleanStopWords(textToShow);
         // Show [Silence] ONLY if the ORIGINAL transcript was empty (not just after filtering)
@@ -262,7 +208,7 @@ export const TranscriptView: React.FC<TranscriptViewProps> = ({ transcripts, isR
         const displayText = originalWasEmpty && !isStreaming ? t('[Silence]') : filteredText;
 
         // Sizer text: use cleaned version for proper sizing, fallback to [Silence] only if original was empty
-        const sizerText = cleanStopWords(isStreaming ? streamingTranscript.fullText : transcript.text)
+        const sizerText = cleanStopWords(transcript.text)
           || (originalWasEmpty && !isStreaming ? t('[Silence]') : '');
 
         // Speaker attribution label ("You" for mic, "Others" for system audio)
@@ -308,16 +254,10 @@ export const TranscriptView: React.FC<TranscriptViewProps> = ({ transcripts, isR
               </div>
               <div className="flex-1">
                 {isStreaming ? (
-                  // Streaming transcript - show in bubble (full width)
-                  <div className="bg-muted border border-border rounded-lg px-3 py-2">
-                    <div className="relative">
-                      <p className="text-base text-foreground leading-relaxed" style={{ visibility: 'hidden' }}>
-                        {sizerText}
-                      </p>
-                      <p className="text-base text-foreground leading-relaxed absolute top-0 left-0">
-                        {displayText}
-                      </p>
-                    </div>
+                  <div className="rounded-lg border border-border bg-muted px-3 py-2 text-base leading-relaxed text-foreground">
+                    <StreamingText mode="word" speed="fast" replayKey={transcript.id}>
+                      {displayText}
+                    </StreamingText>
                   </div>
                 ) : (
                   // Regular transcript - simple text

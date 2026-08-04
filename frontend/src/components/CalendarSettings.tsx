@@ -56,7 +56,7 @@ export function CalendarSettings({ variant = 'settings', onOpenMeeting }: Calend
   const [upcomingMeetings, setUpcomingMeetings] = useState<LocalOutlookMeeting[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [homeCardVisible, setHomeCardVisible] = useState(true);
+  const [homeCardVisible, setHomeCardVisible] = useState(false);
 
   const refreshStatus = useCallback(async () => {
     const nextStatus = await getLocalOutlookCalendarStatus();
@@ -141,10 +141,14 @@ export function CalendarSettings({ variant = 'settings', onOpenMeeting }: Calend
   }, [enabled, loadCalendarState, upcomingMeetings, variant]);
 
   useEffect(() => {
-    if (variant !== 'home' || loading || saving || !enabled) {
+    if (variant !== 'home' || loading) return;
+
+    if (!enabled) {
       setHomeCardVisible(true);
       return;
     }
+
+    if (saving) return;
 
     const hideTimer = window.setTimeout(() => setHomeCardVisible(false), 1_000);
     return () => window.clearTimeout(hideTimer);
@@ -154,6 +158,7 @@ export function CalendarSettings({ variant = 'settings', onOpenMeeting }: Calend
     const previous = enabled;
     setEnabled(next);
     setSaving(true);
+    if (variant === 'home') setHomeCardVisible(true);
 
     try {
       if (next) {

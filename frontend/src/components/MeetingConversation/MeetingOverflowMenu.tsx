@@ -119,7 +119,7 @@ export function MeetingOverflowMenu({
             aria-label={t('More actions')}
             title={t('More actions')}
             data-no-window-drag
-            className="no-drag h-[38px] w-[38px] rounded-full shadow-none [&>span:first-child]:!bg-[var(--primary-5)]"
+            className="no-drag h-10 w-10 rounded-full shadow-none [&>span:first-child]:!bg-[var(--primary-5)]"
           >
             <MaterialSymbol name="more_horiz" size={18} weight={400} />
           </FluidButton>

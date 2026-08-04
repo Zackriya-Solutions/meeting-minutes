@@ -81,6 +81,65 @@ function MessageScrollerItem({
   )
 }
 
+function MessageScrollerInitialPosition({
+  ready,
+  resetKey,
+  messageId,
+  scrollMargin = 0,
+  className,
+}: {
+  ready: boolean
+  resetKey: string
+  messageId?: string
+  scrollMargin?: number
+  className?: string
+}) {
+  const { scrollToEnd, scrollToMessage } = useMessageScroller()
+  const [positionedKey, setPositionedKey] = React.useState<string | null>(null)
+
+  React.useLayoutEffect(() => {
+    if (!ready) {
+      setPositionedKey(null)
+      return
+    }
+
+    let frame = 0
+    let attempts = 0
+    const position = () => {
+      const positioned = messageId
+        ? scrollToMessage(messageId, {
+            align: "start",
+            behavior: "auto",
+            scrollMargin,
+          })
+        : scrollToEnd({ behavior: "auto" })
+
+      if (positioned || attempts >= 3) {
+        setPositionedKey(resetKey)
+        return
+      }
+
+      attempts += 1
+      frame = window.requestAnimationFrame(position)
+    }
+
+    position()
+    return () => window.cancelAnimationFrame(frame)
+  }, [messageId, ready, resetKey, scrollMargin, scrollToEnd, scrollToMessage])
+
+  if (ready && positionedKey === resetKey) return null
+
+  return (
+    <div
+      aria-hidden="true"
+      className={cn(
+        "pointer-events-none absolute inset-0 z-10 bg-[var(--elevation-2)]",
+        className
+      )}
+    />
+  )
+}
+
 function MessageScrollerButton({
   direction = "end",
   className,
@@ -123,6 +182,7 @@ export {
   MessageScrollerViewport,
   MessageScrollerContent,
   MessageScrollerItem,
+  MessageScrollerInitialPosition,
   MessageScrollerButton,
   useMessageScroller,
   useMessageScrollerScrollable,
