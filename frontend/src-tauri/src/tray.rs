@@ -391,6 +391,10 @@ fn build_menu<R: Runtime>(
         .build()
 }
 
+pub async fn toggle_recording_via_shortcut<R: Runtime>(app: &AppHandle<R>) {
+    toggle_recording_handler(app);
+}
+
 pub(crate) fn focus_main_window<R: Runtime>(app: &AppHandle<R>) {
     if let Some(window) = app.get_webview_window("main") {
         if let Err(e) = window.unminimize() {

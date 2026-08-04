@@ -1,12 +1,12 @@
 {
     "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
     "productName": "meetily",
-    "version": "0.4.0",
+    "version": "0.4.1",
     "identifier": "com.meetily.ai",
     "build": {
         "frontendDist": "../out",
         "devUrl": "http://localhost:3118",
-        "beforeDevCommand": "pnpm dev",
+        "beforeDevCommand": "",
         "beforeBuildCommand": "pnpm build"
     },
     "app": {
@@ -65,6 +65,10 @@
                         "notification:allow-is-permission-granted",
                         "updater:default",
                         "process:default",
+                        "global-shortcut:allow-register",
+                        "global-shortcut:allow-unregister",
+                        "global-shortcut:allow-unregister-all",
+                        "global-shortcut:allow-is-registered",
                         {
                             "identifier": "fs:scope",
                             "allow": [

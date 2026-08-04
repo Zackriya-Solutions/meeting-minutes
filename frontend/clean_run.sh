@@ -3,7 +3,6 @@
 # Exit on error
 set -e
 
-# Add log level selector with default to INFO
 LOG_LEVEL=${1:-info}
 
 case $LOG_LEVEL in
@@ -16,30 +15,42 @@ case $LOG_LEVEL in
         ;;
 esac
 
-# Clean up previous builds
-echo "Cleaning up previous builds..."
-#rm -rf target/
-#rm -rf src-tauri/target
-#rm -rf src-tauri/gen
-
-# Clean up npm, pnp and next
-echo "Cleaning up npm, pnp and next..."
-rm -rf node_modules
-rm -rf .next
-rm -rf .pnp.cjs
-rm -rf out
+# Clean deps and generated output, but keep .next compilation cache
+# to avoid a cold-start race where Tauri opens the window before
+# Next.js finishes compiling its chunks.
+echo "Cleaning up..."
+rm -rf node_modules .pnp.cjs out
 
 echo "Installing dependencies..."
 pnpm install
 
-# Build the Next.js application first
-echo "Building Next.js application..."
-pnpm run build
+# Start the Next.js dev server and keep it running throughout.
+# Wait until it is fully compiled before opening Tauri, so the
+# webview always finds all chunks ready (no ChunkLoadError).
+echo "Starting Next.js dev server..."
+pnpm dev &
+DEV_PID=$!
 
-# Set environment variables for the build
-echo "Setting up build environment..."
+echo "Waiting for Next.js to be ready (http://localhost:3118)..."
+pnpm exec wait-on "http://localhost:3118" --timeout 120000
 
+# Pre-warm the page so Next.js compiles all chunks before the Tauri webview opens.
+# Without this, Tauri loads the HTML immediately but the JS chunks aren't ready yet,
+# causing a ChunkLoadError ("Loading chunk app/layout failed").
+echo "Pre-warming Next.js page compilation..."
+curl -s -o /dev/null -w "%{http_code}" "http://localhost:3118/" | grep -q "200" || true
+sleep 1
+echo "Next.js ready."
+
+# Run Tauri with beforeDevCommand disabled so it reuses the server above.
 echo "Building Tauri app..."
-pnpm run tauri dev
-sleep
+TAURI_SKIP_DEVSERVER_CHECK=true \
+  pnpm exec tauri dev -- --features platform-default &
+TAURI_PID=$!
+echo $TAURI_PID > /tmp/meetily.pid
+echo "Meetily PID: $TAURI_PID (saved to /tmp/meetily.pid)"
+echo "  Kill with: kill \$(cat /tmp/meetily.pid)"
 
+# Wait for either process to exit; clean up both on exit
+trap "kill $DEV_PID $TAURI_PID 2>/dev/null" EXIT
+wait $TAURI_PID
