@@ -523,6 +523,10 @@ const DropdownContent = forwardRef<HTMLDivElement, DropdownContentProps>(
               <Elevated
                 offset={2}
                 shadowLevel={3}
+                style={{
+                  background: "var(--elevation-2)",
+                  boxShadow: "var(--shadow-3)",
+                }}
                 ref={(node: HTMLDivElement | null) => {
                   (
                     containerRef as React.MutableRefObject<HTMLDivElement | null>

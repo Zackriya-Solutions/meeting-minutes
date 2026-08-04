@@ -529,27 +529,6 @@
     isolation: isolate;
     outline: none;
   }
-  .meeting-drawer-resize-handle-indicator {
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    z-index: 1;
-    display: block;
-    width: 4px;
-    height: 64px;
-    border-radius: 999px;
-    background: var(--primary-20);
-    pointer-events: none;
-    opacity: 1;
-    transform: translate(-50%, -50%);
-    transition: opacity 150ms ease, width 150ms ease;
-  }
-  .meeting-drawer-resize-handle:hover .meeting-drawer-resize-handle-indicator,
-  .meeting-drawer-resize-handle:focus-visible .meeting-drawer-resize-handle-indicator,
-  .meeting-drawer-resize-handle:active .meeting-drawer-resize-handle-indicator {
-    opacity: 1;
-    width: 5px;
-  }
   .meeting-page-surface {
     background: var(--elevation-2);
   }
