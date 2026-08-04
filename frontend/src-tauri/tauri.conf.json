@@ -7,8 +7,7 @@
         "frontendDist": "../out",
         "devUrl": "http://127.0.0.1:3118",
         "beforeDevCommand": "pnpm dev",
-        "beforeBuildCommand": "pnpm build",
-        "beforeBundleCommand": "./src-tauri/scripts/build-macos-icon.sh"
+        "beforeBuildCommand": "pnpm build"
     },
     "app": {
         "windows": [

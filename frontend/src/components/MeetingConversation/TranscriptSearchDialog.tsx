@@ -61,24 +61,29 @@ export function TranscriptSearchDialog({
   const [allTranscripts, setAllTranscripts] = useState(transcripts);
   const [isLoading, setIsLoading] = useState(false);
   const loadedMeetingRef = useRef<string | null>(null);
+  const loadedCountRef = useRef(0);
 
   useEffect(() => {
     setAllTranscripts(transcripts);
     loadedMeetingRef.current = null;
+    loadedCountRef.current = 0;
     setQuery('');
   }, [meetingId]);
 
+  // Until a full set has been fetched, mirror the prop so segments that arrive
+  // while a recording runs stay searchable.
   useEffect(() => {
     if (loadedMeetingRef.current === meetingId) return;
     setAllTranscripts(transcripts);
   }, [meetingId, transcripts]);
 
   const loadFullTranscript = useCallback(async () => {
-    if (loadedMeetingRef.current === meetingId || totalCount <= transcripts.length) {
-      loadedMeetingRef.current = meetingId;
-      setAllTranscripts(transcripts);
-      return;
-    }
+    // The prop already carries every segment, so the effect above is enough. Not
+    // marking the meeting as loaded is deliberate: it keeps that mirroring alive.
+    if (totalCount <= transcripts.length) return;
+
+    // A paginated meeting: fetch once, and again only if it has grown since.
+    if (loadedMeetingRef.current === meetingId && loadedCountRef.current >= totalCount) return;
 
     setIsLoading(true);
     try {
@@ -89,8 +94,10 @@ export function TranscriptSearchDialog({
       });
       setAllTranscripts(response.transcripts);
       loadedMeetingRef.current = meetingId;
+      loadedCountRef.current = totalCount;
     } catch (error) {
       console.warn('Failed to load the full transcript for local search:', error);
+      loadedMeetingRef.current = null;
       setAllTranscripts(transcripts);
     } finally {
       setIsLoading(false);

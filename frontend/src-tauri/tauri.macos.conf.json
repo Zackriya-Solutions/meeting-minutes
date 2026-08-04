@@ -1,5 +1,8 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "build": {
+    "beforeBundleCommand": "./src-tauri/scripts/build-macos-icon.sh"
+  },
   "app": {
     "windows": [
       {

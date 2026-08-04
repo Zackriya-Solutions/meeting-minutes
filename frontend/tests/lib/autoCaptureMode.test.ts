@@ -29,12 +29,19 @@ describe("mode <-> flags", () => {
     expect(flagsForMode("off")).toEqual(flags(false, false, false));
     expect(flagsForMode("ask")).toEqual(flags(true, false, false));
     expect(flagsForMode("live")).toEqual(flags(true, true, false));
-    expect(flagsForMode("silent")).toEqual(flags(true, false, true));
+  });
+
+  test("no mode can write the removed silent-capture flag", () => {
+    // Silent background capture was removed from the product; the flag survives
+    // in the API shape only so older stored settings can be migrated.
+    for (const mode of AUTO_CAPTURE_MODES) {
+      expect(flagsForMode(mode).background_auto_recording).toBe(false);
+    }
   });
 
   test("switching modes never leaves a stale recording flag behind", () => {
-    // Going live -> ask must clear auto_listening, and silent -> ask must clear
-    // background capture; otherwise the detector would keep recording.
+    // Going live -> ask must clear auto_listening; otherwise the detector would
+    // keep recording.
     for (const mode of AUTO_CAPTURE_MODES) {
       const written = flagsForMode(mode);
       expect(written.auto_listening && written.background_auto_recording).toBe(false);
@@ -66,11 +73,17 @@ describe("reading legacy and inconsistent stored flags", () => {
   test("detection alone is the confirmation-only mode", () => {
     expect(modeFromFlags(flags(true, false, false))).toBe("ask");
   });
+
+  test("a legacy background-only install reads as ask", () => {
+    // The backend clears background_auto_recording before detection starts, so
+    // 'ask' is what this install now behaves like.
+    expect(modeFromFlags(flags(true, false, true))).toBe("ask");
+  });
 });
 
 describe("platform support", () => {
-  test("only the recording modes need the microphone-session signal", () => {
+  test("only the live recording mode needs the microphone-session signal", () => {
     const needing = AUTO_CAPTURE_MODES.filter(modeNeedsMicrophoneSignal);
-    expect(needing).toEqual(["live", "silent"] as AutoCaptureMode[]);
+    expect(needing).toEqual(["live"] as AutoCaptureMode[]);
   });
 });

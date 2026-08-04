@@ -421,17 +421,33 @@ export function ImportAudioDialog({
                   </Button>
                 </div>
               ) : (
-                <button
-                  type="button"
-                  className="flex min-h-48 w-full min-w-0 cursor-pointer items-center justify-center rounded-lg border-2 border-dashed border-border p-5 text-center transition-colors hover:bg-primary/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-wait disabled:opacity-60 sm:p-8"
-                  aria-label={t('Select Audio File')}
-                  onClick={handleSelectFile}
-                  disabled={status === 'validating'}
-                >
-                  <p className="text-sm text-muted-foreground">
-                    {t('MP4, WAV, MP3, FLAC, OGG, MKV, WebM, WMA')}
-                  </p>
-                </button>
+                <div className="space-y-2">
+                  <button
+                    type="button"
+                    className="flex min-h-48 w-full min-w-0 cursor-pointer items-center justify-center rounded-lg border-2 border-dashed border-border p-5 text-center transition-colors hover:bg-primary/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-wait disabled:opacity-60 sm:p-8"
+                    aria-label={status === 'validating' ? t('Validating...') : t('Select Audio File')}
+                    onClick={handleSelectFile}
+                    disabled={status === 'validating'}
+                  >
+                    <p className="text-sm text-muted-foreground">
+                      {status === 'validating'
+                        ? t('Validating...')
+                        : t('MP4, WAV, MP3, FLAC, OGG, MKV, WebM, WMA')}
+                    </p>
+                  </button>
+                  {/* Folder import has no other entry point: batchFiles is only ever
+                      populated here, and the batch view's "Choose Different Folder"
+                      is unreachable until it is. */}
+                  <Button
+                    variant="tertiary"
+                    size="md"
+                    className="w-full"
+                    onClick={handleSelectFolder}
+                    disabled={status === 'validating'}
+                  >
+                    {t('Select Audio Folder')}
+                  </Button>
+                </div>
               )}
 
               {/* Advanced options (collapsible) */}
