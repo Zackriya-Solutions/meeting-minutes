@@ -51,6 +51,7 @@ pub mod openrouter;
 pub mod parakeet_engine;
 pub mod state;
 pub mod summary;
+pub mod shortcuts;
 pub mod tray;
 pub mod utils;
 pub mod whisper_engine;
@@ -411,6 +412,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(whisper_engine::parallel_commands::ParallelProcessorState::new())
         .manage(Arc::new(RwLock::new(
             None::<notifications::manager::NotificationManager<tauri::Wry>>,
@@ -424,6 +426,12 @@ pub fn run() {
             if let Err(e) = tray::create_tray(_app.handle()) {
                 log::error!("Failed to create system tray: {}", e);
             }
+
+            // Initialize global keyboard shortcuts
+            let app_for_shortcuts = _app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                shortcuts::init(&app_for_shortcuts).await;
+            });
 
             // Initialize notification system with proper defaults
             log::info!("Initializing notification system...");
@@ -748,6 +756,10 @@ pub fn run() {
             audio::import::start_import_audio_command,
             audio::import::cancel_import_command,
             audio::import::is_import_in_progress_command,
+            // Keyboard shortcut commands
+            shortcuts::get_recording_shortcut,
+            shortcuts::set_recording_shortcut,
+            shortcuts::check_shortcut_permission,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "task_id": "T2",
+  "test_first": true,
+  "failing_test_command": "cargo check (before adding global-shortcut permissions to tauri.conf.json)",
+  "failure_excerpt": "Permission 'global-shortcut:*' not declared in capabilities — would result in runtime access denied error without the capability permissions added",
+  "implementation_summary": "Added global-shortcut:allow-register, global-shortcut:allow-unregister, global-shortcut:allow-unregister-all, and global-shortcut:allow-is-registered permissions to the main capability in tauri.conf.json.",
+  "passing_command": "cargo check 2>&1 | tail -2",
+  "passing_excerpt": "warning: `meetily` (lib) generated 7 warnings\n    Finished `dev` profile [unoptimized + debuginfo] target(s) in 2.23s",
+  "files_touched": [
+    "frontend/src-tauri/tauri.conf.json"
+  ],
+  "diff_lines_added": 4,
+  "diff_lines_removed": 0
+}

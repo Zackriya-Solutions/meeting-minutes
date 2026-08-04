@@ -1,0 +1,38 @@
+{
+  "run_id": "20260804-1341-main",
+  "mode": "autonomous",
+  "started_at": "2026-08-04T13:41:00Z",
+  "task_input": "create a new feature to allow shortcuts for start and stop recording. Make the default shortcut Control+F8, and also update the UI to be able to configure these shortcuts. Make sure the permissions request is properly aligned with different platforms like macOS, Windows, and so on, but it must work on macOS first.",
+  "branch": "enhance/recording-keyboard-shortcuts",
+  "work_item": {
+    "canonical_path": null,
+    "run_mirror": "docs/superpowers/runs/20260804-1341-main/work-item.md",
+    "event_ledger": "docs/superpowers/runs/20260804-1341-main/work-item-events.jsonl"
+  },
+  "current_phase": 6,
+  "status": "running",
+  "escalate_on": ["security", "breaking-change"],
+  "branch_guard": {
+    "current_branch": "main",
+    "base_branch": "main",
+    "target_branch": "enhance/recording-keyboard-shortcuts",
+    "working_tree": "dirty",
+    "upstream": "in-sync",
+    "target_branch_exists": false,
+    "base_refreshed": true,
+    "decision": "stash",
+    "stash_ref": "stash@{0}"
+  },
+  "phases": {
+    "0": {"status": "completed", "started_at": "2026-08-04T13:41:00Z", "completed_at": "2026-08-04T13:42:00Z"},
+    "1": {"status": "completed", "started_at": "2026-08-04T13:42:00Z", "completed_at": "2026-08-04T13:43:00Z"},
+    "2": {"status": "completed", "started_at": "2026-08-04T13:43:00Z", "completed_at": "2026-08-04T13:44:00Z"},
+    "3": {"status": "completed", "started_at": "2026-08-04T13:44:00Z", "completed_at": "2026-08-04T13:44:30Z"},
+    "4": {"status": "skipped"},
+    "5": {"status": "completed", "started_at": "2026-08-04T13:44:30Z", "completed_at": "2026-08-04T13:46:00Z"},
+    "6": {"status": "running", "started_at": "2026-08-04T13:46:00Z"},
+    "7": {"status": "pending"},
+    "8": {"status": "pending"},
+    "9": {"status": "pending"}
+  }
+}

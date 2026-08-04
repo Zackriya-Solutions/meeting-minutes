@@ -1,0 +1,17 @@
+{
+  "source": "heuristic",
+  "affected_file_estimate": 7,
+  "keyword_signals": {
+    "security": false,
+    "auth": false,
+    "migration": false,
+    "breaking": false,
+    "provider": false,
+    "integration": false,
+    "refactor": false
+  },
+  "goal_word_count": 58,
+  "score": 18,
+  "routing": "writing-plans",
+  "rationale": "Multi-file feature addition with clear scope — new Tauri plugin + UI settings component. No risk keywords, no system integration complexity beyond the well-documented tauri-plugin-global-shortcut pattern. Contained to known files."
+}
