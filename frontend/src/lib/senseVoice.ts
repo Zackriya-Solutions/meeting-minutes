@@ -23,7 +23,7 @@ export const SenseVoiceAPI = {
   downloadModel: (modelName: string) =>
     invoke<void>('sense_voice_download_model', { modelName }),
   cancelDownload: () => invoke<void>('sense_voice_cancel_download'),
-  deleteModel: () => invoke<void>('sense_voice_delete_model'),
+  deleteModel: (modelName: string) => invoke<void>('sense_voice_delete_model', { modelName }),
   openModelsFolder: () => invoke<void>('open_sense_voice_models_folder'),
 };
 

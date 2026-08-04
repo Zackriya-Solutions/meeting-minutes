@@ -1,9 +1,8 @@
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 use super::coreml::CoreMlSenseVoiceModel;
 use super::model::{
-    inspect_model, mark_model_verified, model_info, verify_model_file, verify_model_hashes,
-    DownloadProgress, ModelInfo, ModelStatus, MODEL_BASE_URL, MODEL_FILES, MODEL_REVISION,
-    MODEL_SIZE_BYTES, SENSE_VOICE_MODEL,
+    inspect_model, mark_model_verified, model_definition, model_files, model_info, model_size,
+    verify_model_file, verify_model_hashes, DownloadProgress, ModelInfo, ModelStatus,
 };
 use crate::audio::transcription::provider::{
     TranscriptResult, TranscriptionError, TranscriptionProvider,
@@ -56,16 +55,23 @@ impl SenseVoiceEngine {
         })
     }
 
-    pub fn discover_model(&self) -> ModelInfo {
-        let mut info = model_info(&self.models_dir);
-        if self.downloading.load(Ordering::SeqCst) {
-            info.status = ModelStatus::Downloading { progress: 0 };
-        }
-        info
+    pub fn discover_models(&self) -> Vec<ModelInfo> {
+        super::model::MODEL_DEFINITIONS
+            .iter()
+            .map(|definition| {
+                let mut info = model_info(&self.models_dir, definition);
+                if self.downloading.load(Ordering::SeqCst) {
+                    info.status = ModelStatus::Downloading { progress: 0 };
+                }
+                info
+            })
+            .collect()
     }
 
     pub async fn load_model(&self, model_name: &str) -> Result<()> {
-        if model_name != SENSE_VOICE_MODEL {
+        let definition = model_definition(model_name)
+            .ok_or_else(|| anyhow!("Unknown SenseVoice model: {model_name}"))?;
+        if model_files(model_name).is_none() {
             return Err(anyhow!("Unknown SenseVoice model: {model_name}"));
         }
         if self.current_model.read().await.as_deref() == Some(model_name)
@@ -82,7 +88,7 @@ impl SenseVoiceEngine {
         }
 
         let model_dir = self.models_dir.join(model_name);
-        if inspect_model(&model_dir) != ModelStatus::Available {
+        if inspect_model(model_name, &model_dir) != ModelStatus::Available {
             return Err(anyhow!(
                 "SenseVoice model is not downloaded or is incomplete: {}",
                 model_dir.display()
@@ -91,7 +97,8 @@ impl SenseVoiceEngine {
 
         self.model.write().await.take();
         self.current_model.write().await.take();
-        let model = tokio::task::spawn_blocking(move || create_model(&model_dir))
+        let encoder_dir = definition.encoder_dir;
+        let model = tokio::task::spawn_blocking(move || create_model(&model_dir, encoder_dir))
             .await
             .map_err(|error| anyhow!("SenseVoice model loading task failed: {error}"))??;
 
@@ -144,7 +151,7 @@ impl SenseVoiceEngine {
         Ok(text)
     }
 
-    pub async fn download_model<F>(&self, progress: F) -> Result<()>
+    pub async fn download_model<F>(&self, model_name: &str, progress: F) -> Result<()>
     where
         F: Fn(DownloadProgress) + Send + Sync,
     {
@@ -156,28 +163,40 @@ impl SenseVoiceEngine {
             return Err(anyhow!("SenseVoice model download is already running"));
         }
         self.cancel_download.store(false, Ordering::SeqCst);
-        let result = self.download_model_inner(&progress).await;
+        let result = self.download_model_inner(model_name, &progress).await;
         self.downloading.store(false, Ordering::SeqCst);
         result
     }
 
-    async fn download_model_inner<F>(&self, progress: &F) -> Result<()>
+    async fn download_model_inner<F>(&self, model_name: &str, progress: &F) -> Result<()>
     where
         F: Fn(DownloadProgress) + Send + Sync,
     {
-        let model_dir = self.models_dir.join(SENSE_VOICE_MODEL);
+        let model_name = model_name.to_string();
+        let definition = model_definition(&model_name)
+            .ok_or_else(|| anyhow!("Unknown SenseVoice model: {model_name}"))?;
+        let files = model_files(&model_name)
+            .ok_or_else(|| anyhow!("Unknown SenseVoice model: {model_name}"))?;
+        let total_size = model_size(&model_name).expect("model definition has files");
+        let model_dir = self.models_dir.join(&model_name);
         tokio::fs::create_dir_all(&model_dir).await?;
         let client = reqwest::Client::builder()
             .connect_timeout(std::time::Duration::from_secs(30))
             .timeout(std::time::Duration::from_secs(7_200))
             .build()?;
         let started = Instant::now();
-        let mut completed_bytes = existing_valid_bytes(&model_dir).await;
+        let mut completed_bytes = existing_valid_bytes(&model_dir, &files).await;
         let initial_bytes = completed_bytes;
         let mut last_progress_emit = Instant::now();
-        emit_progress(progress, completed_bytes, initial_bytes, started);
+        emit_progress(
+            progress,
+            completed_bytes,
+            initial_bytes,
+            total_size,
+            started,
+        );
 
-        for file in MODEL_FILES {
+        for file in files {
             if self.cancel_download.load(Ordering::SeqCst) {
                 return Err(anyhow!("SenseVoice model download cancelled"));
             }
@@ -212,7 +231,7 @@ impl SenseVoiceEngine {
             };
             let url = format!(
                 "{}/{}/{}",
-                MODEL_BASE_URL, MODEL_REVISION, file.relative_path
+                definition.base_url, definition.revision, file.relative_path
             );
             let mut request = client.get(url);
             if resume_from > 0 {
@@ -246,7 +265,13 @@ impl SenseVoiceEngine {
                 output.write_all(&chunk).await?;
                 completed_bytes += chunk.len() as u64;
                 if last_progress_emit.elapsed() >= std::time::Duration::from_millis(250) {
-                    emit_progress(progress, completed_bytes, initial_bytes, started);
+                    emit_progress(
+                        progress,
+                        completed_bytes,
+                        initial_bytes,
+                        total_size,
+                        started,
+                    );
                     last_progress_emit = Instant::now();
                 }
             }
@@ -261,23 +286,32 @@ impl SenseVoiceEngine {
                     file.size
                 ));
             }
-            emit_progress(progress, completed_bytes, initial_bytes, started);
+            emit_progress(
+                progress,
+                completed_bytes,
+                initial_bytes,
+                total_size,
+                started,
+            );
         }
 
         let verification_dir = model_dir.clone();
+        let verification_model_name = model_name.clone();
         tokio::task::spawn_blocking(move || {
-            verify_model_hashes(&verification_dir).map_err(anyhow::Error::msg)?;
-            mark_model_verified(&verification_dir).map_err(anyhow::Error::msg)
+            verify_model_hashes(&verification_model_name, &verification_dir)
+                .map_err(anyhow::Error::msg)?;
+            mark_model_verified(&verification_model_name, &verification_dir)
+                .map_err(anyhow::Error::msg)
         })
         .await
         .map_err(|error| anyhow!("SenseVoice verification task failed: {error}"))??;
-        if inspect_model(&model_dir) != ModelStatus::Available {
+        if inspect_model(&model_name, &model_dir) != ModelStatus::Available {
             return Err(anyhow!(
                 "Downloaded SenseVoice model failed final validation"
             ));
         }
         cleanup_obsolete_model_files(&model_dir).await;
-        emit_progress(progress, MODEL_SIZE_BYTES, initial_bytes, started);
+        emit_progress(progress, total_size, initial_bytes, total_size, started);
         Ok(())
     }
 
@@ -290,9 +324,14 @@ impl SenseVoiceEngine {
         }
     }
 
-    pub async fn delete_model(&self) -> Result<()> {
-        self.unload_model().await;
-        let model_dir = self.models_dir.join(SENSE_VOICE_MODEL);
+    pub async fn delete_model(&self, model_name: &str) -> Result<()> {
+        if model_definition(model_name).is_none() {
+            return Err(anyhow!("Unknown SenseVoice model: {model_name}"));
+        }
+        if self.get_current_model().await.as_deref() == Some(model_name) {
+            self.unload_model().await;
+        }
+        let model_dir = self.models_dir.join(model_name);
         if model_dir.exists() {
             tokio::fs::remove_dir_all(model_dir).await?;
         }
@@ -305,12 +344,12 @@ impl SenseVoiceEngine {
 }
 
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-fn create_model(model_dir: &Path) -> Result<LoadedSenseVoiceModel> {
-    CoreMlSenseVoiceModel::new(model_dir).map_err(anyhow::Error::new)
+fn create_model(model_dir: &Path, encoder_dir: &str) -> Result<LoadedSenseVoiceModel> {
+    CoreMlSenseVoiceModel::new(model_dir, encoder_dir).map_err(anyhow::Error::new)
 }
 
 #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
-fn create_model(model_dir: &Path) -> Result<LoadedSenseVoiceModel> {
+fn create_model(model_dir: &Path, _encoder_dir: &str) -> Result<LoadedSenseVoiceModel> {
     let mut config = OfflineRecognizerConfig::default();
     config.model_config.sense_voice = OfflineSenseVoiceModelConfig {
         model: Some(path_string(model_dir.join("model.int8.onnx"))?),
@@ -348,9 +387,9 @@ fn path_string(path: PathBuf) -> Result<String> {
         .map_err(|_| anyhow!("SenseVoice model path is not valid UTF-8"))
 }
 
-async fn existing_valid_bytes(model_dir: &Path) -> u64 {
+async fn existing_valid_bytes(model_dir: &Path, files: &[super::model::ModelFile]) -> u64 {
     let mut total = 0;
-    for file in MODEL_FILES {
+    for file in files {
         if let Ok(metadata) = tokio::fs::metadata(model_dir.join(file.relative_path)).await {
             if metadata.len() <= file.size {
                 total += metadata.len();
@@ -360,18 +399,23 @@ async fn existing_valid_bytes(model_dir: &Path) -> u64 {
     total
 }
 
-fn emit_progress<F>(callback: &F, downloaded_bytes: u64, initial_bytes: u64, started: Instant)
-where
+fn emit_progress<F>(
+    callback: &F,
+    downloaded_bytes: u64,
+    initial_bytes: u64,
+    total_bytes: u64,
+    started: Instant,
+) where
     F: Fn(DownloadProgress),
 {
-    let downloaded_bytes = downloaded_bytes.min(MODEL_SIZE_BYTES);
+    let downloaded_bytes = downloaded_bytes.min(total_bytes);
     let elapsed = started.elapsed().as_secs_f64().max(0.001);
     callback(DownloadProgress {
-        percent: ((downloaded_bytes as f64 / MODEL_SIZE_BYTES as f64) * 100.0) as u8,
+        percent: ((downloaded_bytes as f64 / total_bytes as f64) * 100.0) as u8,
         downloaded_bytes,
-        total_bytes: MODEL_SIZE_BYTES,
+        total_bytes,
         downloaded_mb: downloaded_bytes as f64 / 1_048_576.0,
-        total_mb: MODEL_SIZE_BYTES as f64 / 1_048_576.0,
+        total_mb: total_bytes as f64 / 1_048_576.0,
         speed_mbps: downloaded_bytes.saturating_sub(initial_bytes) as f64 / 1_048_576.0 / elapsed,
     });
 }

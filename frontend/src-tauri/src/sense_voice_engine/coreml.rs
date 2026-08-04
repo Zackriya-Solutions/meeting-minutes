@@ -4,7 +4,6 @@ use std::path::Path;
 use std::sync::Mutex;
 
 const PREPROCESSOR_DIR: &str = "SenseVoicePreprocessor.mlmodelc";
-const ENCODER_DIR: &str = "SenseVoiceSmall_int8.mlmodelc";
 const VOCAB_FILE: &str = "vocab.json";
 const FEATURE_DIM: usize = 560;
 const FEATURE_BUCKETS: [usize; 5] = [128, 256, 512, 1024, 1800];
@@ -29,8 +28,8 @@ pub struct CoreMlSenseVoiceModel {
 }
 
 impl CoreMlSenseVoiceModel {
-    pub fn new(model_dir: &Path) -> Result<Self, CoreMlSenseVoiceError> {
-        let pipeline = CoreMlSenseVoicePipeline::load(model_dir)?;
+    pub fn new(model_dir: &Path, encoder_dir: &str) -> Result<Self, CoreMlSenseVoiceError> {
+        let pipeline = CoreMlSenseVoicePipeline::load(model_dir, encoder_dir)?;
         Ok(Self {
             pipeline: Mutex::new(pipeline),
         })
@@ -72,11 +71,11 @@ struct CoreMlSenseVoicePipeline {
 }
 
 impl CoreMlSenseVoicePipeline {
-    fn load(model_dir: &Path) -> Result<Self, CoreMlSenseVoiceError> {
+    fn load(model_dir: &Path, encoder_dir: &str) -> Result<Self, CoreMlSenseVoiceError> {
         let preprocessor = Model::load(model_dir.join(PREPROCESSOR_DIR), ComputeUnits::CpuOnly)
             .map_err(|error| CoreMlSenseVoiceError::Initialization(error.to_string()))?;
         let encoder = Model::load(
-            model_dir.join(ENCODER_DIR),
+            model_dir.join(encoder_dir),
             ComputeUnits::CpuAndNeuralEngine,
         )
         .map_err(|error| CoreMlSenseVoiceError::Initialization(error.to_string()))?;

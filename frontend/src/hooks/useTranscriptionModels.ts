@@ -99,7 +99,7 @@ export function useTranscriptionModels(transcriptModelConfig: TranscriptModelCon
         .map((m) => ({
           provider: 'senseVoice' as const,
           name: m.name,
-          displayName: '🗣️ SenseVoice: Small Int8',
+          displayName: `🗣️ SenseVoice: Small ${m.name.endsWith('fp32') ? 'FP32' : m.name.endsWith('fp16') ? 'FP16' : 'Int8'}`,
           size_mb: m.size_mb,
         }));
       allModels.push(...availableSenseVoice);

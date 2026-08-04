@@ -1,4 +1,4 @@
-use super::{ModelStatus, SenseVoiceEngine, SENSE_VOICE_MODEL};
+use super::{model::model_definition, ModelStatus, SenseVoiceEngine, SENSE_VOICE_MODEL};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager, Runtime};
@@ -47,7 +47,7 @@ pub async fn sense_voice_init() -> Result<(), String> {
 
 #[tauri::command]
 pub async fn sense_voice_get_available_models() -> Result<Vec<super::ModelInfo>, String> {
-    Ok(vec![engine()?.discover_model()])
+    Ok(engine()?.discover_models())
 }
 
 #[tauri::command]
@@ -87,19 +87,30 @@ pub async fn sense_voice_is_model_loaded() -> Result<bool, String> {
 }
 
 #[tauri::command]
-pub async fn sense_voice_validate_model_ready() -> Result<String, String> {
+pub async fn sense_voice_validate_model_ready(
+    model_name: Option<String>,
+) -> Result<String, String> {
     let engine = engine()?;
-    if engine.get_current_model().await.as_deref() == Some(SENSE_VOICE_MODEL) {
-        return Ok(SENSE_VOICE_MODEL.to_string());
+    let model_name = model_name.unwrap_or_else(|| SENSE_VOICE_MODEL.to_string());
+    if model_definition(&model_name).is_none() {
+        return Err(format!("Unknown SenseVoice model: {model_name}"));
     }
-    if engine.discover_model().status != ModelStatus::Available {
+    if engine.get_current_model().await.as_deref() == Some(model_name.as_str()) {
+        return Ok(model_name);
+    }
+    let model = engine
+        .discover_models()
+        .into_iter()
+        .find(|model| model.name == model_name)
+        .ok_or_else(|| format!("Unknown SenseVoice model: {model_name}"))?;
+    if model.status != ModelStatus::Available {
         return Err("SenseVoice model is not downloaded. Download it from Transcript Settings before recording.".to_string());
     }
     engine
-        .load_model(SENSE_VOICE_MODEL)
+        .load_model(&model_name)
         .await
         .map_err(|error| error.to_string())?;
-    Ok(SENSE_VOICE_MODEL.to_string())
+    Ok(model_name)
 }
 
 #[tauri::command]
@@ -115,14 +126,15 @@ pub async fn sense_voice_download_model<R: Runtime>(
     app: AppHandle<R>,
     model_name: String,
 ) -> Result<(), String> {
-    if model_name != SENSE_VOICE_MODEL {
+    if model_definition(&model_name).is_none() {
         return Err(format!("Unknown SenseVoice model: {model_name}"));
     }
     let engine = engine()?;
     let progress_app = app.clone();
     let progress_model = model_name.clone();
+    let download_model = model_name.clone();
     let result = engine
-        .download_model(move |progress| {
+        .download_model(&download_model, move |progress| {
             let _ = progress_app.emit(
                 "sense-voice-model-download-progress",
                 serde_json::json!({
@@ -167,9 +179,9 @@ pub async fn sense_voice_cancel_download() -> Result<(), String> {
 }
 
 #[tauri::command]
-pub async fn sense_voice_delete_model() -> Result<(), String> {
+pub async fn sense_voice_delete_model(model_name: String) -> Result<(), String> {
     engine()?
-        .delete_model()
+        .delete_model(&model_name)
         .await
         .map_err(|error| error.to_string())
 }

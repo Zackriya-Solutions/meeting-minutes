@@ -8,4 +8,4 @@ mod engine;
 mod model;
 
 pub use engine::SenseVoiceEngine;
-pub use model::{DownloadProgress, ModelInfo, ModelStatus, SENSE_VOICE_MODEL};
+pub use model::{model_definition, DownloadProgress, ModelInfo, ModelStatus, SENSE_VOICE_MODEL};

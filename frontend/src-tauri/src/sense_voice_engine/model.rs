@@ -4,20 +4,8 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 
 pub const SENSE_VOICE_MODEL: &str = "sense-voice-small-int8";
-#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-pub const MODEL_REVISION: &str = "cdea3526163035c19915d4a10268992d018ebd46";
-#[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
-pub const MODEL_REVISION: &str = "2365baeacb507f821a0c8120fcee3d484dba7a07";
-#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-pub const MODEL_BASE_URL: &str =
-    "https://huggingface.co/FluidInference/sensevoice-small-coreml/resolve";
-#[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
-pub const MODEL_BASE_URL: &str =
-    "https://huggingface.co/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/resolve";
-#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-pub const MODEL_SIZE_BYTES: u64 = 239_913_642;
-#[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
-pub const MODEL_SIZE_BYTES: u64 = 239_549_806;
+pub const SENSE_VOICE_FP16_MODEL: &str = "sense-voice-small-fp16";
+pub const SENSE_VOICE_FP32_MODEL: &str = "sense-voice-small-fp32";
 pub const REVISION_MARKER: &str = ".meetily-model-revision";
 
 #[derive(Debug, Clone, Copy)]
@@ -27,8 +15,25 @@ pub struct ModelFile {
     pub sha256: &'static str,
 }
 
-#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-pub const MODEL_FILES: [ModelFile; 9] = [
+#[derive(Debug, Clone, Copy)]
+pub struct ModelDefinition {
+    pub name: &'static str,
+    pub revision: &'static str,
+    pub base_url: &'static str,
+    pub encoder_dir: &'static str,
+    pub description: &'static str,
+}
+
+const COREML_REVISION: &str = "cdea3526163035c19915d4a10268992d018ebd46";
+const COREML_BASE_URL: &str =
+    "https://huggingface.co/FluidInference/sensevoice-small-coreml/resolve";
+#[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+const ONNX_REVISION: &str = "2365baeacb507f821a0c8120fcee3d484dba7a07";
+#[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+const ONNX_BASE_URL: &str =
+    "https://huggingface.co/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/resolve";
+
+const PREPROCESSOR_FILES: [ModelFile; 4] = [
     ModelFile {
         relative_path: "SenseVoicePreprocessor.mlmodelc/analytics/coremldata.bin",
         size: 243,
@@ -49,6 +54,15 @@ pub const MODEL_FILES: [ModelFile; 9] = [
         size: 3_037_504,
         sha256: "69c630a115da5e4db36ec41662f0b776c0ef33ec6776d86f8cdaaba022518396",
     },
+];
+const VOCAB_FILE: ModelFile = ModelFile {
+    relative_path: "vocab.json",
+    size: 352_064,
+    sha256: "a2594fc1474e78973149cba8cd1f603ebed8c39c7decb470631f66e70ce58e97",
+};
+
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+const INT8_FILES: [ModelFile; 4] = [
     ModelFile {
         relative_path: "SenseVoiceSmall_int8.mlmodelc/analytics/coremldata.bin",
         size: 243,
@@ -69,15 +83,55 @@ pub const MODEL_FILES: [ModelFile; 9] = [
         size: 235_373_118,
         sha256: "dab122c65d5043cba5b47561d5c1d3a049dd123c662e802d9dbce8fdd0505a38",
     },
+];
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+const FP16_FILES: [ModelFile; 4] = [
     ModelFile {
-        relative_path: "vocab.json",
-        size: 352_064,
-        sha256: "a2594fc1474e78973149cba8cd1f603ebed8c39c7decb470631f66e70ce58e97",
+        relative_path: "SenseVoiceSmall.mlmodelc/analytics/coremldata.bin",
+        size: 243,
+        sha256: "2dd2919d1ef534ecd4d0c9843dea078b0ad337e0918e692d9811cb16a31fb02b",
+    },
+    ModelFile {
+        relative_path: "SenseVoiceSmall.mlmodelc/coremldata.bin",
+        size: 436,
+        sha256: "8af6326236369150e5540e15996877a71b281e98cb9ede6b646c2f4b3d9be88c",
+    },
+    ModelFile {
+        relative_path: "SenseVoiceSmall.mlmodelc/model.mil",
+        size: 1_003_095,
+        sha256: "c53547bea5b26f36f603a0ef4bda5b47b72a409bf9fd9eafae1d21cfbd51aedf",
+    },
+    ModelFile {
+        relative_path: "SenseVoiceSmall.mlmodelc/weights/weight.bin",
+        size: 468_060_094,
+        sha256: "f435f29513464bcda175e449fd72e28ef5183b963f116394a38eadbbc12ca694",
     },
 ];
-
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+const FP32_FILES: [ModelFile; 4] = [
+    ModelFile {
+        relative_path: "SenseVoiceSmall_fp32.mlmodelc/analytics/coremldata.bin",
+        size: 243,
+        sha256: "09bdfe5eee1fd3cc70fc39e1e144ede5118e138c3c2dd52a2822d0d72fbb91f8",
+    },
+    ModelFile {
+        relative_path: "SenseVoiceSmall_fp32.mlmodelc/coremldata.bin",
+        size: 396,
+        sha256: "ba5e9b5d9bf9b1b85ef2d1f69717e1f4424cc72e7316fc3edb0b604e449f9919",
+    },
+    ModelFile {
+        relative_path: "SenseVoiceSmall_fp32.mlmodelc/model.mil",
+        size: 915_059,
+        sha256: "4569b5ac67d69a50b993c1d3918e6d569f2d22b3a129653cc4e6c8f0c270cc9e",
+    },
+    ModelFile {
+        relative_path: "SenseVoiceSmall_fp32.mlmodelc/weights/weight.bin",
+        size: 940_100_992,
+        sha256: "62919f3a37419a1e4ede3763d6efcf2ae9ed320e6bd9fb4a37d2b15ef891b92d",
+    },
+];
 #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
-pub const MODEL_FILES: [ModelFile; 3] = [
+const ONNX_FILES: [ModelFile; 3] = [
     ModelFile {
         relative_path: "model.int8.onnx",
         size: 239_233_841,
@@ -95,6 +149,52 @@ pub const MODEL_FILES: [ModelFile; 3] = [
     },
 ];
 
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+pub const MODEL_DEFINITIONS: [ModelDefinition; 3] = [
+    ModelDefinition { name: SENSE_VOICE_MODEL, revision: COREML_REVISION, base_url: COREML_BASE_URL, encoder_dir: "SenseVoiceSmall_int8.mlmodelc", description: "Fast multilingual recognition with INT8 weights, accelerated by Apple Neural Engine" },
+    ModelDefinition { name: SENSE_VOICE_FP16_MODEL, revision: COREML_REVISION, base_url: COREML_BASE_URL, encoder_dir: "SenseVoiceSmall.mlmodelc", description: "Balanced multilingual recognition with FP16 weights, accelerated by Apple Neural Engine" },
+    ModelDefinition { name: SENSE_VOICE_FP32_MODEL, revision: COREML_REVISION, base_url: COREML_BASE_URL, encoder_dir: "SenseVoiceSmall_fp32.mlmodelc", description: "Highest-fidelity multilingual recognition with FP32 weights; uses substantially more disk and memory" },
+];
+#[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+pub const MODEL_DEFINITIONS: [ModelDefinition; 1] = [ModelDefinition {
+    name: SENSE_VOICE_MODEL,
+    revision: ONNX_REVISION,
+    base_url: ONNX_BASE_URL,
+    encoder_dir: "",
+    description: "Fast multilingual recognition with INT8 ONNX weights",
+}];
+
+pub fn model_definition(name: &str) -> Option<&'static ModelDefinition> {
+    MODEL_DEFINITIONS
+        .iter()
+        .find(|definition| definition.name == name)
+}
+pub fn model_files(name: &str) -> Option<Vec<ModelFile>> {
+    let mut files = Vec::new();
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    {
+        files.extend(PREPROCESSOR_FILES);
+        files.extend(match name {
+            SENSE_VOICE_MODEL => INT8_FILES,
+            SENSE_VOICE_FP16_MODEL => FP16_FILES,
+            SENSE_VOICE_FP32_MODEL => FP32_FILES,
+            _ => return None,
+        });
+        files.push(VOCAB_FILE);
+    }
+    #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+    {
+        if name != SENSE_VOICE_MODEL {
+            return None;
+        }
+        files.extend(ONNX_FILES);
+    }
+    Some(files)
+}
+pub fn model_size(name: &str) -> Option<u64> {
+    model_files(name).map(|files| files.iter().map(|file| file.size).sum())
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum ModelStatus {
     Available,
@@ -103,7 +203,6 @@ pub enum ModelStatus {
     Error(String),
     Corrupted { file_size: u64, expected_size: u64 },
 }
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelInfo {
     pub name: String,
@@ -112,7 +211,6 @@ pub struct ModelInfo {
     pub status: ModelStatus,
     pub description: String,
 }
-
 #[derive(Debug, Clone, Serialize)]
 pub struct DownloadProgress {
     pub percent: u8,
@@ -123,28 +221,25 @@ pub struct DownloadProgress {
     pub speed_mbps: f64,
 }
 
-pub fn model_info(models_dir: &Path) -> ModelInfo {
-    let model_dir = models_dir.join(SENSE_VOICE_MODEL);
+pub fn model_info(models_dir: &Path, definition: &ModelDefinition) -> ModelInfo {
+    let model_dir = models_dir.join(definition.name);
     ModelInfo {
-        name: SENSE_VOICE_MODEL.to_string(),
+        name: definition.name.to_string(),
         path: model_dir.clone(),
-        size_mb: MODEL_SIZE_BYTES / 1_048_576,
-        status: inspect_model(&model_dir),
-        description: if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
-            "Fast multilingual recognition accelerated by Apple Neural Engine".to_string()
-        } else {
-            "Fast Mandarin, Cantonese, English, Japanese, and Korean recognition".to_string()
-        },
+        size_mb: model_size(definition.name).unwrap_or_default() / 1_048_576,
+        status: inspect_model(definition.name, &model_dir),
+        description: definition.description.to_string(),
     }
 }
-
-pub fn inspect_model(model_dir: &Path) -> ModelStatus {
+pub fn inspect_model(name: &str, model_dir: &Path) -> ModelStatus {
+    let Some(files) = model_files(name) else {
+        return ModelStatus::Error(format!("Unknown SenseVoice model: {name}"));
+    };
+    let expected_size = files.iter().map(|file| file.size).sum();
     let mut present_bytes = 0;
     let mut present_files = 0;
-
-    for file in MODEL_FILES {
-        let path = model_dir.join(file.relative_path);
-        match std::fs::metadata(path) {
+    for file in &files {
+        match std::fs::metadata(model_dir.join(file.relative_path)) {
             Ok(metadata) => {
                 present_files += 1;
                 present_bytes += metadata.len();
@@ -159,13 +254,14 @@ pub fn inspect_model(model_dir: &Path) -> ModelStatus {
             Err(error) => return ModelStatus::Error(error.to_string()),
         }
     }
-
-    if present_files == MODEL_FILES.len() && present_bytes == MODEL_SIZE_BYTES {
+    if present_files == files.len() && present_bytes == expected_size {
         match std::fs::read_to_string(model_dir.join(REVISION_MARKER)) {
-            Ok(revision) if revision.trim() == MODEL_REVISION => ModelStatus::Available,
+            Ok(revision) if revision.trim() == model_definition(name).unwrap().revision => {
+                ModelStatus::Available
+            }
             _ => ModelStatus::Corrupted {
                 file_size: present_bytes,
-                expected_size: MODEL_SIZE_BYTES,
+                expected_size,
             },
         }
     } else if present_files == 0 {
@@ -173,18 +269,16 @@ pub fn inspect_model(model_dir: &Path) -> ModelStatus {
     } else {
         ModelStatus::Corrupted {
             file_size: present_bytes,
-            expected_size: MODEL_SIZE_BYTES,
+            expected_size,
         }
     }
 }
-
-pub fn verify_model_hashes(model_dir: &Path) -> Result<(), String> {
-    for file in MODEL_FILES {
+pub fn verify_model_hashes(name: &str, model_dir: &Path) -> Result<(), String> {
+    for file in model_files(name).ok_or_else(|| format!("Unknown SenseVoice model: {name}"))? {
         verify_model_file(&file, &model_dir.join(file.relative_path))?;
     }
     Ok(())
 }
-
 pub fn verify_model_file(file: &ModelFile, path: &Path) -> Result<(), String> {
     let input = std::fs::File::open(path)
         .map_err(|error| format!("Failed to open {}: {error}", path.display()))?;
@@ -211,21 +305,28 @@ pub fn verify_model_file(file: &ModelFile, path: &Path) -> Result<(), String> {
     }
     Ok(())
 }
-
-pub fn mark_model_verified(model_dir: &Path) -> Result<(), String> {
-    std::fs::write(model_dir.join(REVISION_MARKER), MODEL_REVISION)
+pub fn mark_model_verified(name: &str, model_dir: &Path) -> Result<(), String> {
+    let revision = model_definition(name)
+        .ok_or_else(|| format!("Unknown SenseVoice model: {name}"))?
+        .revision;
+    std::fs::write(model_dir.join(REVISION_MARKER), revision)
         .map_err(|error| format!("Failed to write SenseVoice revision marker: {error}"))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
-    fn pinned_model_size_matches_files() {
-        assert_eq!(
-            MODEL_FILES.iter().map(|file| file.size).sum::<u64>(),
-            MODEL_SIZE_BYTES
-        );
+    fn pinned_model_sizes_match_files() {
+        for definition in MODEL_DEFINITIONS {
+            assert_eq!(
+                model_files(definition.name)
+                    .unwrap()
+                    .iter()
+                    .map(|file| file.size)
+                    .sum::<u64>(),
+                model_size(definition.name).unwrap()
+            );
+        }
     }
 }
