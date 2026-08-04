@@ -1,10 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
-  Upload,
   Globe,
-  Loader2,
-  AlertCircle,
-  CheckCircle2,
   Cpu,
   FileAudio,
   Clock,
@@ -38,8 +34,6 @@ import { useTranscriptionModels, ModelOption } from '@/hooks/useTranscriptionMod
 import { useT } from '@/lib/i18n';
 
 type FluidIconProps = { size?: number; strokeWidth?: number; className?: string };
-const UploadIcon = ({ size = 16, className }: FluidIconProps) => <MaterialSymbol name="upload" size={size} weight={400} className={className} />;
-const CancelIcon = ({ size = 16, className }: FluidIconProps) => <MaterialSymbol name="close" size={size} weight={400} className={className} />;
 const ExpandIcon = ({ size = 16, className }: FluidIconProps) => <MaterialSymbol name="expand_more" size={size} weight={400} className={className} />;
 const CollapseIcon = ({ size = 16, className }: FluidIconProps) => <MaterialSymbol name="expand_less" size={size} weight={400} className={className} />;
 
@@ -310,28 +304,14 @@ export function ImportAudioDialog({
         onInteractOutside={handleInteractOutside}
       >
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            {isProcessing ? (
-              <>
-                <Loader2 className="h-5 w-5 animate-spin text-primary" />
-                {t('Importing Audio...')}
-              </>
-            ) : error ? (
-              <>
-                <AlertCircle className="h-5 w-5 text-destructive" />
-                {t('Import Failed')}
-              </>
-            ) : status === 'complete' ? (
-              <>
-                <CheckCircle2 className="h-5 w-5 text-success" />
-                {t('Import Complete')}
-              </>
-            ) : (
-              <>
-                <Upload className="h-5 w-5 text-primary" />
-                {t('Import Audio File')}
-              </>
-            )}
+          <DialogTitle>
+            {isProcessing
+              ? t('Importing Audio...')
+              : error
+                ? t('Import Failed')
+                : status === 'complete'
+                  ? t('Import Complete')
+                  : t('Import Audio File')}
           </DialogTitle>
           <DialogDescription>
             {isProcessing
@@ -594,7 +574,6 @@ export function ImportAudioDialog({
                 className="min-w-0"
                 variant="primary"
                 size="md"
-                leadingIcon={UploadIcon}
                 disabled={
                   (!fileInfo && batchFiles.length === 0)
                   || Boolean(fileInfo?.existing_meeting)
@@ -608,7 +587,7 @@ export function ImportAudioDialog({
             </>
           )}
           {isProcessing && (
-            <Button variant="ghost" size="md" leadingIcon={CancelIcon} onClick={handleCancel}>
+            <Button variant="ghost" size="md" onClick={handleCancel}>
               {t('Cancel')}
             </Button>
           )}
