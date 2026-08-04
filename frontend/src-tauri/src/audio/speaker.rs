@@ -26,8 +26,8 @@ pub struct SpeakerLabel {
 impl SpeakerLabel {
     pub fn for_channel(channel: &SpeakerChannel) -> Self {
         let display_name = match channel {
-            SpeakerChannel::Microphone => "U",
-            SpeakerChannel::System => "ZEM",
+            SpeakerChannel::Microphone => "You",
+            SpeakerChannel::System => "Them",
         };
         SpeakerLabel {
             display_name: display_name.to_string(),

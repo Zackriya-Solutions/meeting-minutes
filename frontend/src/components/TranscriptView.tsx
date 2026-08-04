@@ -282,15 +282,6 @@ export const TranscriptView: React.FC<TranscriptViewProps> = ({ transcripts, isR
             className="mb-3"
           >
             <div className="flex items-start gap-2">
-              {transcript.speaker && (
-                <span
-                  className={`text-xs font-mono mt-1 flex-shrink-0 font-semibold ${
-                    transcript.speaker === 'U' ? 'text-blue-600' : 'text-orange-600'
-                  }`}
-                >
-                  [{transcript.speaker}]
-                </span>
-              )}
               <Tooltip>
                 <TooltipTrigger>
                   <span className="text-xs text-gray-400 mt-1 flex-shrink-0 min-w-[50px]">
@@ -322,6 +313,11 @@ export const TranscriptView: React.FC<TranscriptViewProps> = ({ transcripts, isR
                         {sizerText}
                       </p>
                       <p className="text-base text-gray-800 leading-relaxed absolute top-0 left-0">
+                        {transcript.speaker && (
+                          <span className={`font-semibold mr-1 ${transcript.speaker === 'You' ? 'text-blue-600' : 'text-orange-500'}`}>
+                            {transcript.speaker}:
+                          </span>
+                        )}
                         {displayText}
                       </p>
                     </div>
@@ -333,6 +329,11 @@ export const TranscriptView: React.FC<TranscriptViewProps> = ({ transcripts, isR
                       {sizerText}
                     </p>
                     <p className="text-base text-gray-800 leading-relaxed absolute top-0 left-0">
+                      {transcript.speaker && (
+                        <span className={`font-semibold mr-1 ${transcript.speaker === 'You' ? 'text-blue-600' : 'text-orange-500'}`}>
+                          {transcript.speaker}:
+                        </span>
+                      )}
                       {displayText}
                     </p>
                   </div>

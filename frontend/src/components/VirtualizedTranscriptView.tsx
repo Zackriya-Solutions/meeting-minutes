@@ -86,15 +86,6 @@ const TranscriptSegment = memo(function TranscriptSegment({
     return (
         <div id={`segment-${id}`} className="mb-3">
             <div className="flex items-start gap-2">
-                {speaker && (
-                    <span
-                        className={`text-xs font-mono mt-1 flex-shrink-0 font-semibold ${
-                            speaker === 'U' ? 'text-blue-600' : 'text-orange-600'
-                        }`}
-                    >
-                        [{speaker}]
-                    </span>
-                )}
                 <Tooltip>
                     <TooltipTrigger>
                         <span className="text-xs text-gray-400 mt-1 flex-shrink-0 min-w-[50px]">
@@ -110,10 +101,24 @@ const TranscriptSegment = memo(function TranscriptSegment({
                 <div className="flex-1">
                     {isStreaming ? (
                         <div className="bg-gray-100 border border-gray-200 rounded-lg px-3 py-2">
-                            <p className="text-base text-gray-800 leading-relaxed">{displayText}</p>
+                            <p className="text-base text-gray-800 leading-relaxed">
+                                {speaker && (
+                                    <span className={`font-semibold mr-1 ${speaker === 'You' ? 'text-blue-600' : 'text-orange-500'}`}>
+                                        {speaker}:
+                                    </span>
+                                )}
+                                {displayText}
+                            </p>
                         </div>
                     ) : (
-                        <p className="text-base text-gray-800 leading-relaxed">{displayText}</p>
+                        <p className="text-base text-gray-800 leading-relaxed">
+                            {speaker && (
+                                <span className={`font-semibold mr-1 ${speaker === 'You' ? 'text-blue-600' : 'text-orange-500'}`}>
+                                    {speaker}:
+                                </span>
+                            )}
+                            {displayText}
+                        </p>
                     )}
                 </div>
             </div>
