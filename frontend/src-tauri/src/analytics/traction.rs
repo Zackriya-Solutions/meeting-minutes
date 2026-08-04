@@ -3,9 +3,10 @@
 //! Every event that passes through `AnalyticsClient::track_event` is
 //! queued here and flushed in batches to the Memento stats module ingest
 //! (`stats/server.py` in this repo). The sink lives inside `AnalyticsClient`,
-//! so it inherits the app's analytics opt-in: no consent — no client — no
-//! events. Release builds authenticate with the existing per-install Memento
-//! gateway credential; a shared ingest secret is never embedded in the app.
+//! so it inherits the app's analytics preference: when disabled there is no
+//! client and no event delivery. Release builds authenticate with the existing
+//! per-install Memento gateway credential; a shared ingest secret is never
+//! embedded in the app.
 
 use serde::Serialize;
 use std::collections::HashMap;
