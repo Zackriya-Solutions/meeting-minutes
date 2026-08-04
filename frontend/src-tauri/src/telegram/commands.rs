@@ -36,10 +36,7 @@ async fn ensure_sharing_allowed(pool: &sqlx::SqlitePool) -> Result<(), String> {
 /// [`DRAFT_TEXT_BUDGET`] because longer links get mangled silently; the summary body
 /// reaches the chat through the clipboard.
 #[tauri::command]
-pub async fn telegram_share_text(
-    state: State<'_, AppState>,
-    text: String,
-) -> Result<(), String> {
+pub async fn telegram_share_text(state: State<'_, AppState>, text: String) -> Result<(), String> {
     ensure_sharing_allowed(state.db_manager.pool()).await?;
 
     let text = text.trim();
@@ -65,9 +62,8 @@ pub async fn telegram_share_text(
         Err(scheme_err) => {
             // Telegram is probably not installed; t.me works in a browser.
             log::info!("[telegram] tg:// unavailable ({scheme_err}); falling back to t.me");
-            open_url(&web_url).map_err(|web_err| {
-                format!("Не удалось открыть Telegram: {scheme_err}; {web_err}")
-            })
+            open_url(&web_url)
+                .map_err(|web_err| format!("Не удалось открыть Telegram: {scheme_err}; {web_err}"))
         }
     }
 }
@@ -88,10 +84,11 @@ pub async fn save_summary_markdown_file<R: Runtime>(
         return Err("Нечего сохранять: суммаризация пуста".to_string());
     }
 
-    let folder_path = MeetingsRepository::get_meeting_metadata(state.db_manager.pool(), &meeting_id)
-        .await
-        .map_err(|e| format!("Failed to load meeting: {e}"))?
-        .and_then(|m| m.folder_path);
+    let folder_path =
+        MeetingsRepository::get_meeting_metadata(state.db_manager.pool(), &meeting_id)
+            .await
+            .map_err(|e| format!("Failed to load meeting: {e}"))?
+            .and_then(|m| m.folder_path);
 
     let ts = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -100,7 +97,11 @@ pub async fn save_summary_markdown_file<R: Runtime>(
     let filename = format!("summary_{ts}.md");
 
     // 1) Meeting's own folder, alongside its audio and transcript.
-    if let Some(fp) = folder_path.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+    if let Some(fp) = folder_path
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
         let dir = PathBuf::from(fp);
         if dir.is_dir() || std::fs::create_dir_all(&dir).is_ok() {
             let path = dir.join(&filename);
@@ -129,7 +130,13 @@ pub async fn save_summary_markdown_file<R: Runtime>(
 
 fn sanitize_component(id: &str) -> String {
     id.chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect()
 }
 

@@ -5,7 +5,7 @@
     "identifier": "com.meetily.ai",
     "build": {
         "frontendDist": "../out",
-        "devUrl": "http://localhost:3118",
+        "devUrl": "http://127.0.0.1:3118",
         "beforeDevCommand": "pnpm dev",
         "beforeBuildCommand": "pnpm build"
     },
@@ -15,6 +15,7 @@
                 "title": "Memento",
                 "width": 1100,
                 "height": 700,
+                "minWidth": 1068,
                 "resizable": true,
                 "fullscreen": false,
                 "decorations": true
@@ -28,6 +29,14 @@
                 "img-src": "'self' asset: https://asset.localhost data:",
                 "media-src": "'self' asset: https://asset.localhost http://127.0.0.1:* blob:",
                 "connect-src": "'self' http://localhost:11434 http://localhost:5167 http://localhost:8178 https://api.ollama.ai"
+            },
+            "devCsp": {
+                "default-src": "'self'",
+                "script-src": "'self' 'unsafe-eval' 'unsafe-inline'",
+                "style-src": "'self' 'unsafe-inline'",
+                "img-src": "'self' asset: https://asset.localhost data:",
+                "media-src": "'self' asset: https://asset.localhost http://127.0.0.1:* blob:",
+                "connect-src": "'self' http://127.0.0.1:3118 ws://127.0.0.1:3118 http://localhost:11434 http://localhost:5167 http://localhost:8178 https://api.ollama.ai"
             },
             "assetProtocol": {
                 "enable": true,
@@ -58,6 +67,9 @@
                         "core:window:allow-set-theme",
                         "core:window:allow-set-background-color",
                         "core:window:allow-set-effects",
+                        "core:window:allow-set-min-size",
+                        "core:window:allow-set-size",
+                        "core:window:allow-start-dragging",
                         "core:app:default",
                         "core:resources:default",
                         "core:menu:default",

@@ -41,8 +41,8 @@ pub mod analytics;
 pub mod anthropic;
 pub mod api;
 pub mod audio;
-pub mod calendar;
 pub mod background_capture;
+pub mod calendar;
 pub mod collections;
 pub mod config;
 pub mod console_utils;
@@ -713,6 +713,7 @@ pub fn run() {
             pipeline::diarization_commands::diarize_meeting,
             pipeline::diarization_commands::get_meeting_speakers,
             pipeline::diarization_commands::rename_speaker,
+            pipeline::diarization_commands::set_self_speaker,
             pipeline::diarization_commands::set_meeting_diarization_prefs,
             learning::identity::get_identity_review,
             learning::identity::review_speaker_identity,

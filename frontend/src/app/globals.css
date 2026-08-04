@@ -81,7 +81,7 @@
 
 @keyframes fade-in {
   0% {
-    opacity: 0;
+    opacity: .65;
     transform: translateY(-4px);
   }
 
@@ -151,6 +151,31 @@
     --chart-3: 197 37% 24%;
     --chart-4: 43 74% 66%;
     --chart-5: 27 87% 67%;
+    --sidebar-background: 0 0% 98%;
+    --sidebar-foreground: 240 5.3% 26.1%;
+    --sidebar-primary: 240 5.9% 10%;
+    --sidebar-primary-foreground: 0 0% 98%;
+    --sidebar-accent: 240 4.8% 95.9%;
+    --sidebar-accent-foreground: 240 5.9% 10%;
+    --sidebar-border: 220 13% 91%;
+    --sidebar-ring: 217.2 91.2% 59.8%;
+    --surface-1: #FAFAFA;
+    --surface-2: #FCFCFC;
+    --surface-3: #FFFFFF;
+    --surface-4: #FFFFFF;
+    --surface-5: #FFFFFF;
+    --surface-6: #FFFFFF;
+    --surface-7: #FFFFFF;
+    --surface-8: #FFFFFF;
+    --shadow-color: rgb(0 0 0 / 0.06);
+    --shadow-1: 0 0 0 1px var(--shadow-color);
+    --shadow-2: 0 0 0 1px var(--shadow-color), 0 1px 1px -0.5px var(--shadow-color);
+    --shadow-3: 0 0 0 1px var(--shadow-color), 0 1px 1px -0.5px var(--shadow-color), 0 3px 3px -1.5px var(--shadow-color);
+    --shadow-4: 0 0 0 1px var(--shadow-color), 0 1px 1px -0.5px var(--shadow-color), 0 3px 3px -1.5px var(--shadow-color), 0 6px 6px -3px var(--shadow-color);
+    --shadow-5: 0 0 0 1px var(--shadow-color), 0 1px 1px -0.5px var(--shadow-color), 0 3px 3px -1.5px var(--shadow-color), 0 6px 6px -3px var(--shadow-color), 0 12px 12px -6px var(--shadow-color);
+    --shadow-6: 0 0 0 1px var(--shadow-color), 0 1px 1px -0.5px var(--shadow-color), 0 3px 3px -1.5px var(--shadow-color), 0 6px 6px -3px var(--shadow-color), 0 12px 12px -6px var(--shadow-color), 0 24px 24px -12px var(--shadow-color);
+    --shadow-7: 0 0 0 1px var(--shadow-color), 0 1px 1px -0.5px var(--shadow-color), 0 3px 3px -1.5px var(--shadow-color), 0 6px 6px -3px var(--shadow-color), 0 12px 12px -6px var(--shadow-color), 0 24px 24px -12px var(--shadow-color), 0 48px 48px -24px var(--shadow-color);
+    --shadow-8: 0 0 0 1px var(--shadow-color), 0 1px 1px -0.5px var(--shadow-color), 0 3px 3px -1.5px var(--shadow-color), 0 6px 6px -3px var(--shadow-color), 0 12px 12px -6px var(--shadow-color), 0 24px 24px -12px var(--shadow-color), 0 48px 48px -24px var(--shadow-color), 0 96px 96px -48px var(--shadow-color);
   }
 
   .dark {
@@ -179,6 +204,56 @@
     --chart-3: 30 80% 55%;
     --chart-4: 280 65% 60%;
     --chart-5: 340 75% 55%;
+    --sidebar-background: 240 5.9% 10%;
+    --sidebar-foreground: 240 4.8% 95.9%;
+    --sidebar-primary: 224.3 76.3% 48%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 240 3.7% 15.9%;
+    --sidebar-accent-foreground: 240 4.8% 95.9%;
+    --sidebar-border: 240 3.7% 15.9%;
+    --sidebar-ring: 217.2 91.2% 59.8%;
+    --surface-1: #171717;
+    --surface-2: #1E1E1E;
+    --surface-3: #252525;
+    --surface-4: #2C2C2C;
+    --surface-5: #333333;
+    --surface-6: #3A3A3A;
+    --surface-7: #414141;
+    --surface-8: #484848;
+    --dm-hi-base: rgba(255,255,255,0.01);
+    --dm-hi-mid: rgba(255,255,255,0.02);
+    --dm-hi-high: rgba(255,255,255,0.04);
+    --dm-hi-peak: rgba(255,255,255,0.06);
+    --dm-ring-base: rgba(255,255,255,0.02);
+    --dm-ring-mid: rgba(255,255,255,0.04);
+    --dm-ring-high: rgba(255,255,255,0.06);
+    --dm-drop: rgba(0,0,0,0.18);
+    --shadow-1: inset 0 0 0 1px var(--dm-ring-base);
+    --shadow-2: inset 0 1px 0 0 var(--dm-hi-base), inset 0 0 0 1px var(--dm-ring-base), 0 1px 1px -0.5px var(--dm-drop);
+    --shadow-3: inset 0 1px 0 0 var(--dm-hi-mid), inset 0 0 0 1px var(--dm-ring-base), 0 0 0 1px rgba(0,0,0,0.12), 0 1px 1px -0.5px var(--dm-drop), 0 3px 3px -1.5px var(--dm-drop);
+    --shadow-4: inset 0 1px 0 0 var(--dm-hi-mid), inset 0 0 0 1px var(--dm-ring-mid), 0 0 0 1px rgba(0,0,0,0.14), 0 1px 1px -0.5px var(--dm-drop), 0 3px 3px -1.5px var(--dm-drop), 0 6px 6px -3px var(--dm-drop);
+    --shadow-5: inset 0 1px 0 0 var(--dm-hi-high), inset 0 0 0 1px var(--dm-ring-mid), 0 0 0 1px rgba(0,0,0,0.16), 0 1px 1px -0.5px var(--dm-drop), 0 3px 3px -1.5px var(--dm-drop), 0 6px 6px -3px var(--dm-drop), 0 12px 12px -6px var(--dm-drop);
+    --shadow-6: inset 0 1px 0 0 var(--dm-hi-high), inset 0 0 0 1px var(--dm-ring-high), 0 0 0 1px rgba(0,0,0,0.18), 0 1px 1px -0.5px var(--dm-drop), 0 3px 3px -1.5px var(--dm-drop), 0 6px 6px -3px var(--dm-drop), 0 12px 12px -6px var(--dm-drop), 0 24px 24px -12px var(--dm-drop);
+    --shadow-7: inset 0 1px 0 0 var(--dm-hi-peak), inset 0 0 0 1px var(--dm-ring-high), 0 0 0 1px rgba(0,0,0,0.20), 0 1px 1px -0.5px var(--dm-drop), 0 3px 3px -1.5px var(--dm-drop), 0 6px 6px -3px var(--dm-drop), 0 12px 12px -6px var(--dm-drop), 0 24px 24px -12px var(--dm-drop), 0 48px 48px -24px var(--dm-drop);
+    --shadow-8: inset 0 1px 0 0 var(--dm-hi-peak), inset 0 0 0 1px var(--dm-ring-high), 0 0 0 1px rgba(0,0,0,0.22), 0 1px 1px -0.5px var(--dm-drop), 0 3px 3px -1.5px var(--dm-drop), 0 6px 6px -3px var(--dm-drop), 0 12px 12px -6px var(--dm-drop), 0 24px 24px -12px var(--dm-drop), 0 48px 48px -24px var(--dm-drop), 0 96px 96px -48px var(--dm-drop);
+  }
+  .theme {
+    --color-surface-1: var(--surface-1);
+    --color-surface-2: var(--surface-2);
+    --color-surface-3: var(--surface-3);
+    --color-surface-4: var(--surface-4);
+    --color-surface-5: var(--surface-5);
+    --color-surface-6: var(--surface-6);
+    --color-surface-7: var(--surface-7);
+    --color-surface-8: var(--surface-8);
+    --shadow-surface-1: var(--shadow-1);
+    --shadow-surface-2: var(--shadow-2);
+    --shadow-surface-3: var(--shadow-3);
+    --shadow-surface-4: var(--shadow-4);
+    --shadow-surface-5: var(--shadow-5);
+    --shadow-surface-6: var(--shadow-6);
+    --shadow-surface-7: var(--shadow-7);
+    --shadow-surface-8: var(--shadow-8);
   }
 }
 
@@ -198,29 +273,39 @@
     overflow: hidden;
   }
 
-  /* The actual blur is NSVisualEffectView via Tauri's macOS windowEffects.
-     These overrides only uncover it; browsers and other platforms keep the
-     standard opaque background. */
+  /* Desktop-app chrome: static copy should never turn into accidental blue
+     selections while the user is trying to move the window. Editable surfaces
+     retain native selection so text inputs and editors keep working. */
+  body,
+  body * {
+    -webkit-user-select: none !important;
+    user-select: none !important;
+  }
+
+  input,
+  textarea,
+  [contenteditable="true"],
+  .ProseMirror {
+    -webkit-user-select: text !important;
+    user-select: text !important;
+  }
+
+  /* The native material stays visible only through the permanent sidebar. */
   html.native-macos-vibrancy,
   html.native-macos-vibrancy body {
     background: transparent !important;
   }
 
-  html.native-macos-vibrancy .memento-shell,
-  html.native-macos-vibrancy .mm-page {
-    background: var(--background-secondary) !important;
-  }
-
   html.native-macos-vibrancy [data-home-scroll-container] {
-    background: transparent !important;
+    background: var(--elevation-1) !important;
   }
 
-  /* Drawer routes render a live copy of the home screen behind the panel.
-     Give that route-level scroll container the same screen scrim as
-     `.memento-shell`; otherwise swapping between the two briefly exposes the
-     raw native vibrancy and looks like a white/dark flash. */
-  html.native-macos-vibrancy .route-drawer-background {
-    background: var(--background-secondary) !important;
+  html.native-macos-vibrancy .home-ask-backdrop {
+    background: linear-gradient(
+      to bottom,
+      transparent,
+      var(--elevation-1)
+    );
   }
 
   /* Make the window draggable */
@@ -313,7 +398,7 @@
     flex-direction: column;
     overflow: hidden;
     border: 1px solid hsl(var(--border));
-    background: var(--elevation-1);
+    background: var(--elevation-2);
     box-shadow: none;
     outline: none;
     transform: translate3d(var(--drawer-translate-x, 0), var(--drawer-translate-y, 0), 0);
@@ -410,14 +495,49 @@
   }
   .meeting-route-drawer {
     --drawer-inset: 12px;
-    --drawer-width: min(calc(100vw - 24px), 500px);
+    --drawer-width: min(calc(100vw - 24px), 450px);
     --drawer-height: calc(100dvh - 24px);
     --drawer-max-height: calc(100dvh - 24px);
     --drawer-content-inset: var(--ui-space-24);
-    border-radius: 22px;
+    border-radius: 10px;
+  }
+  .meeting-drawer-resize-handle {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 10;
+    width: 16px;
+    cursor: ew-resize;
+    touch-action: none;
+    -webkit-app-region: no-drag;
+    outline: none;
+  }
+  .meeting-drawer-resize-handle::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 6px;
+    width: 4px;
+    height: 64px;
+    border-radius: 999px;
+    background: var(--primary-40);
+    opacity: 1;
+    transform: translateY(-50%);
+    transition: opacity 150ms ease, width 150ms ease;
+  }
+  .meeting-drawer-resize-handle:hover::after,
+  .meeting-drawer-resize-handle:focus-visible::after,
+  .meeting-drawer-resize-handle:active::after {
+    opacity: 1;
+    width: 5px;
+  }
+  .meeting-page-surface {
+    background-color: var(--elevation-1);
+    background-image: linear-gradient(var(--deslop-primary-4), var(--deslop-primary-4));
   }
   .drawer-elevation-surface {
-    background: var(--elevation-1) !important;
+    background: var(--elevation-2) !important;
   }
   .recording-route-drawer .mm-record-overlay {
     width: 100%;
@@ -426,53 +546,84 @@
   .route-drawer-background {
     position: relative;
     z-index: 1;
-    background: transparent;
+    /* The exposed area around an indented route drawer is the same canvas as
+       the home screen — never the transparent WebView/native material. */
+    background: var(--elevation-1);
     transform: none !important;
-  }
-  /* Every route drawer participates in the desktop layout like a right
-     sidebar. Shrinking this shared background wrapper re-centres the home
-     column inside the unobscured area instead of placing it under the drawer. */
-  @media (min-width: 1024px) {
-    .route-drawer-background {
-      --route-drawer-reserved-width: 512px;
-      width: 100%;
-      transition: width 450ms cubic-bezier(.22, 1, .36, 1);
-      will-change: width;
-    }
-    .route-drawer-background[data-active] {
-      width: calc(100% - var(--route-drawer-reserved-width));
-    }
-    .route-drawer-background[data-active] .home-ask-dock {
-      left: calc((100vw - var(--route-drawer-reserved-width)) / 2);
-    }
   }
   .route-drawer-background-surface {
     position: fixed;
-    inset: 0;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: var(--sidebar-width, 0px);
     z-index: 0;
-    /* This layer is exposed in the inset around a route drawer. It must use
-       the same Deslop screen surface as the home page, never the white page
-       background, or opening a drawer visibly changes the window colour. */
-    background: var(--background-secondary);
+    background: var(--elevation-1);
     pointer-events: none;
+  }
+  /* Treat the route drawer like a right sidebar without animating layout.
+     Changing the wrapper width forced every meeting card to reflow on every
+     animation frame. Moving the fixed-width home column on the compositor
+     keeps card geometry stable while preserving the same visual centering. */
+  @media (min-width: 1024px) {
+    .route-drawer-background {
+      --route-drawer-reserved-width: 462px;
+      width: 100%;
+      transition: none;
+      will-change: auto;
+    }
+    .route-drawer-background .home-screen__inner {
+      transition: transform 450ms cubic-bezier(.22, 1, .36, 1);
+      will-change: transform;
+    }
+    .route-drawer-background[data-active] .home-screen__inner {
+      transform: translate3d(
+        calc(var(--route-drawer-reserved-width) / -2),
+        0,
+        0
+      );
+    }
+    .route-drawer-background[data-active] .home-ask-dock {
+      --home-ask-surface-width: calc(
+        100vw - var(--sidebar-width, 0px) - var(--route-drawer-reserved-width)
+      );
+      left: calc(
+        var(--sidebar-width, 0px) +
+        (100vw - var(--sidebar-width, 0px) - var(--route-drawer-reserved-width)) / 2
+      );
+      width: min(
+        calc(
+          100vw - var(--sidebar-width, 0px) - var(--route-drawer-reserved-width) -
+          var(--home-column-gutter) - var(--home-column-gutter)
+        ),
+        calc(var(--home-column-width) - var(--home-column-gutter) - var(--home-column-gutter))
+      );
+    }
   }
   @media (max-width: 760px) {
     .meeting-route-drawer {
       --drawer-inset: 6px;
-      --drawer-width: min(calc(100vw - 12px), 500px);
+      --drawer-width: min(calc(100vw - 12px), 450px);
       --drawer-height: calc(100dvh - 12px);
       --drawer-max-height: calc(100dvh - 12px);
-      border-radius: 18px;
+      border-radius: 6px;
     }
   }
   @media (prefers-reduced-motion: reduce) {
     .memento-drawer-overlay,
     .memento-drawer-popup,
-    .route-drawer-background { transition-duration: 1ms; }
+    .route-drawer-background .home-screen__inner { transition-duration: 1ms; }
   }
 
-  .memento-shell { background: hsl(var(--background)); color: hsl(var(--foreground)); }
+  .memento-shell { background: var(--elevation-1); color: hsl(var(--foreground)); }
   .memento-sidebar { background: hsl(var(--background)); border-color: hsl(var(--border) / 0.6); }
+  .memento-settings-sidebar {
+    border-right: 1px solid var(--primary-10) !important;
+  }
+  .memento-settings-sidebar [data-sidebar="sidebar"] {
+    background: transparent !important;
+    border-right: 0;
+  }
   .memento-logo { color: hsl(var(--foreground)); font-size: 21px; font-weight: 600; letter-spacing: -0.04em; }
   .memento-nav-item { position: relative; border-radius: 12px; padding: 0 12px; color: hsl(var(--muted-foreground)); font-size: 14px; font-weight: 500; transition: background 180ms ease, color 180ms ease; }
   .memento-nav-item:hover { background: hsl(var(--accent)); color: hsl(var(--foreground)); }
@@ -540,6 +691,25 @@
   .home-meeting-copy { display: flex; min-width: 0; flex-direction: column; justify-content: center; }
   .home-meeting-title { overflow: hidden; color: hsl(var(--foreground)); font-size: 16px; font-weight: 400; letter-spacing: -.02em; line-height: 1.18; text-overflow: ellipsis; white-space: nowrap; }
   .home-meeting-time { margin-top: 3px; color: hsl(var(--muted-foreground)); font-size: 12px; font-variant-numeric: tabular-nums; line-height: 1.45; }
+  .home-outlook-card { cursor: default; }
+  .home-outlook-card__top {
+    align-items: flex-start;
+    justify-content: space-between;
+    border-bottom: 0;
+    background: transparent;
+    padding-top: 20px;
+  }
+  .home-outlook-card__main {
+    display: flex;
+    grid-template-columns: none;
+    gap: 0;
+  }
+  .home-outlook-card__main .home-meeting-time {
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
   .home-history { padding: 0; }
   .home-history__groups { display: flex; flex-direction: column; gap: 18px; }
   .home-history__group h3 {
@@ -555,13 +725,11 @@
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    padding-block: 4px;
-    border: 1px solid var(--primary-10);
+    border: 1px solid var(--primary-5);
     border-radius: 24px;
-    background: var(--elevation-2);
+    background: var(--primary-5);
   }
-  .home-history-icon { display: flex; width: 40px; height: 40px; align-items: center; justify-content: center; border: 1px solid hsl(var(--border)); border-radius: 999px; background: var(--primary-5); color: hsl(var(--muted-foreground)); }
-  .home-history-emoji { display: block; font-family: system-ui, sans-serif; font-size: 16px; font-weight: 400; line-height: 1; }
+  .home-history__list .home-history-cell { padding-left: 16px; }
   .home-history-time { color: var(--deslop-primary-60); font-size: var(--ui-subtitle-font-size); font-variant-numeric: tabular-nums; line-height: var(--ui-subtitle-line-height); white-space: nowrap; }
 
   /* Message and summary copy use Body 16/21. Sender labels keep the
@@ -580,12 +748,18 @@
     line-height: var(--ui-title-24-line-height) !important;
   }
   .prompt-input-fade {
-    --prompt-input-fade-color: var(--background-secondary);
+    --prompt-input-fade-color: hsl(var(--background));
     position: relative;
     isolation: isolate;
   }
   .meeting-conversation .prompt-input-fade {
+    --prompt-input-fade-color: var(--elevation-2);
+  }
+  html.native-macos-vibrancy .prompt-input-fade {
     --prompt-input-fade-color: var(--elevation-1);
+  }
+  html.native-macos-vibrancy .meeting-conversation .prompt-input-fade {
+    --prompt-input-fade-color: var(--elevation-2);
   }
   .prompt-input-fade::before {
     position: absolute;
@@ -601,10 +775,17 @@
     );
   }
   .home-screen .home-ask-dock {
+    --home-ask-surface-width: calc(100vw - var(--sidebar-width, 0px));
     position: fixed;
     z-index: 20;
     bottom: 30px;
-    left: 50%;
+    /* Fixed elements do not participate in the flex layout that reserves the
+       left sidebar. Centre the composer in the same usable canvas as the
+       meeting column instead of in the whole window. */
+    left: calc(
+      var(--sidebar-width, 0px) +
+      (100vw - var(--sidebar-width, 0px)) / 2
+    );
     width: min(
       calc(100% - var(--home-column-gutter) - var(--home-column-gutter)),
       calc(var(--home-column-width) - var(--home-column-gutter) - var(--home-column-gutter))
@@ -612,14 +793,16 @@
     transform: translateX(-50%);
   }
   .home-screen .home-ask-dock::before {
-    bottom: -40px;
+    inset: -96px auto -40px 50%;
+    width: var(--home-ask-surface-width);
+    transform: translateX(-50%);
   }
   .home-screen .home-ask {
     width: 100%;
     overflow: clip;
     border: 1px solid var(--primary-10);
     border-radius: 24px;
-    background: color-mix(in srgb, var(--elevation-1) 72%, transparent);
+    background: var(--elevation-2);
     -webkit-backdrop-filter: blur(16px);
     backdrop-filter: blur(16px);
     box-shadow: 0 8px 20px rgb(0 0 0 / .05);
@@ -639,7 +822,12 @@
   .settings-screen {
     --settings-column-width: 600px;
     --settings-column-gutter: clamp(22px, 4vw, 42px);
-    min-height: 100vh;
+    height: 100%;
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    background: var(--elevation-1);
     color: hsl(var(--foreground));
   }
   .settings-screen__inner {
@@ -650,22 +838,28 @@
   .settings-screen__header {
     display: flex;
     align-items: center;
-    gap: 14px;
     margin-bottom: 24px;
   }
-  .settings-screen__back {
-    display: inline-flex;
-    width: 40px;
-    height: 40px;
-    flex: 0 0 auto;
-    align-items: center;
-    justify-content: center;
-    border: 1px solid var(--primary-10);
-    border-radius: 999px;
-    background: var(--elevation-2);
-    color: hsl(var(--foreground));
-  }
   .settings-screen__content {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 32px;
+  }
+  .settings-screen__group {
+    min-width: 0;
+    scroll-margin-top: 24px;
+  }
+  .settings-screen__section-title {
+    margin: 0 0 10px;
+    padding: 0 var(--ui-layout-content-inset);
+    color: var(--deslop-primary-60);
+    font-size: var(--ui-subtitle-font-size);
+    font-weight: var(--ui-subtitle-font-weight);
+    letter-spacing: var(--ui-subtitle-letter-spacing);
+    line-height: var(--ui-subtitle-line-height);
+  }
+  .settings-screen__section-content {
     display: flex;
     min-width: 0;
     flex-direction: column;
@@ -673,11 +867,89 @@
   }
   .settings-section {
     min-width: 0;
-    border: 1px solid var(--primary-10);
+    border: 1px solid var(--primary-5);
     border-radius: 24px;
-    background: var(--elevation-2);
+    background: var(--primary-5);
     padding: 20px;
     box-shadow: none;
+  }
+  .settings-section.settings-cell {
+    overflow: hidden;
+    padding: 0;
+  }
+  .settings-cell__row {
+    display: flex;
+    min-height: 50px;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: var(--ui-space-9) 16px var(--ui-space-9) 12px;
+  }
+  .settings-cell__avatar {
+    display: flex;
+    width: 40px;
+    height: 40px;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid hsl(var(--border));
+    border-radius: 999px;
+    background: var(--primary-5);
+    color: hsl(var(--muted-foreground));
+  }
+  .settings-cell__text {
+    display: flex;
+    min-width: 0;
+    flex: 1;
+    flex-direction: column;
+    font-family: var(--ui-font-interface);
+  }
+  .settings-cell__label {
+    color: var(--deslop-primary);
+    font-size: var(--ui-body-font-size);
+    font-weight: 500;
+    letter-spacing: var(--ui-body-letter-spacing);
+    line-height: var(--ui-body-line-height);
+  }
+  .settings-cell__caption {
+    margin-top: 2px;
+    color: var(--deslop-primary-60);
+    font-size: var(--ui-subtitle-font-size);
+    font-weight: var(--ui-subtitle-font-weight);
+    letter-spacing: var(--ui-subtitle-letter-spacing);
+    line-height: var(--ui-subtitle-line-height);
+  }
+  .settings-cell__select {
+    width: fit-content;
+    min-width: 0;
+    border-radius: 999px;
+    font-family: var(--ui-font-interface);
+  }
+  .settings-cell__device-select {
+    width: 100%;
+    max-width: none;
+  }
+  .settings-cell__control {
+    display: flex;
+    width: min(45%, 220px);
+    min-width: 0;
+    flex: 0 0 min(45%, 220px);
+    justify-content: flex-end;
+    margin-left: auto;
+  }
+  .settings-cell__control > * {
+    min-width: 0;
+  }
+  @media (max-width: 720px) {
+    .settings-cell__row { flex-wrap: wrap; }
+    .settings-cell__select { width: fit-content; min-width: 0; }
+    .settings-cell__control {
+      width: 100%;
+      max-width: 100%;
+      flex-basis: 100%;
+      padding-left: 56px;
+    }
+    .settings-cell__device-select { width: 100%; max-width: 100%; }
   }
   .settings-subsection {
     border: 1px solid var(--primary-10);
@@ -788,6 +1060,7 @@
 
 input, textarea, button, [role='dialog'], [role='menu'], [role='listbox'] { font-family: inherit; }
 [data-sonner-toaster], [data-sonner-toast] { font-family: var(--ui-font-interface) !important; }
+[data-sonner-toast] { background: var(--elevation-2) !important; }
 .font-mono { font-family: var(--ui-font-mono); font-variant-numeric: tabular-nums; }
 
 /* Standalone glyphs stay quiet. Icons inside actions inherit the action color,
@@ -800,6 +1073,9 @@ input, textarea, button, [role='dialog'], [role='menu'], [role='listbox'] { font
 .mm-hover { transition: background 180ms cubic-bezier(0.2, 0, 0, 1), color 180ms cubic-bezier(0.2, 0, 0, 1); }
 .mm-hover:hover { background: hsl(var(--accent)); color: hsl(var(--accent-foreground)); }
 .global-header-action { background: var(--elevation-2); }
+.fluid-sidebar-action {
+  color: var(--deslop-primary-60);
+}
 .mm-press { transition: transform 180ms cubic-bezier(0.2, 0, 0, 1); }
 .mm-press:active { transform: scale(0.985); }
 .mm-numeric { font-family: var(--ui-font-interface); font-variant-numeric: tabular-nums; }
@@ -863,3 +1139,19 @@ input, textarea, button, [role='dialog'], [role='menu'], [role='listbox'] { font
 .mm-md .katex { font-size: 1.02em; color: inherit; word-break: normal; overflow-wrap: normal; }
 .mm-md .katex-display { margin: 8px 0; overflow-x: auto; overflow-y: hidden; }
 .mm-md .katex-display > .katex { text-align: left; }
+
+@theme inline {
+  @keyframes spinner-move {
+  to {
+    stroke-dashoffset: -100;
+    }
+  }
+  @keyframes spinner-dash {
+  0%, 100% {
+    stroke-dasharray: 15 85;
+    }
+  50% {
+    stroke-dasharray: 40 60;
+    }
+  }
+}

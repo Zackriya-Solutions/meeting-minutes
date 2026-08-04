@@ -5,6 +5,10 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { Download, CheckCircle2, Loader2, AlertTriangle } from '@/components/deslop-icons';
 import { useT } from '@/lib/i18n';
+import { Button } from '@/components/ui/fluid-button';
+import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/fluid-select';
+import { Badge } from '@/components/ui/fluid-badge';
+import { createMaterialSymbol } from '@/vendor/deslop/primitives/material-symbols-react';
 
 interface VariantInfo {
   id: string;
@@ -38,6 +42,8 @@ interface DownloadProgress {
   stage: 'downloading' | 'extracting' | 'compiling';
 }
 
+const IconTranscribe = createMaterialSymbol('graphic_eq', 'IconTranscribe');
+
 function mb(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(0)} MB`;
 }
@@ -47,7 +53,7 @@ function mb(bytes: number): string {
  * quality testing, download it, and see load status. The transcript provider is set to
  * `gigaam` by the parent when this is shown.
  */
-export function GigaamModelManager() {
+export function GigaamModelManager({ compact = false }: { compact?: boolean }) {
   const [status, setStatus] = useState<GigaamStatus | null>(null);
   const [downloading, setDownloading] = useState(false);
   const [switching, setSwitching] = useState(false);
@@ -167,6 +173,58 @@ export function GigaamModelManager() {
   // The selected variant is the one actually running only if it's loaded AND matches.
   const selectedActive = loaded && status?.loaded_variant === status?.selected;
 
+  if (compact) {
+    return (
+      <section className="settings-section settings-cell">
+        <div className="settings-cell__row">
+          <span className="settings-cell__avatar" aria-hidden="true">
+            <IconTranscribe size={20} weight={400} />
+          </span>
+          <div className="settings-cell__text">
+            <h3 className="settings-cell__label">{t('Transcription engine')}</h3>
+            <p className="settings-cell__caption">
+              {downloading
+                ? `${t('Downloading')} ${progress?.percent ?? 0}%`
+                : t('Meetings are transcribed on this device.')}
+            </p>
+          </div>
+          {present ? (
+            <div className="settings-cell__control">
+              <Select
+                value={status?.selected ?? 'e2e-rnnt-fp32'}
+                onValueChange={selectVariant}
+                disabled={!status || downloading || switching}
+              >
+                <SelectTrigger className="settings-cell__select settings-cell__device-select" placeholder={t('Model variant')} />
+                <SelectContent>
+                  {(status?.variants ?? []).map((variant, index) => {
+                    const unsupported = variant.neural_engine && !status?.neural_engine_supported;
+                    return (
+                      <SelectItem key={variant.id} index={index} value={variant.id} disabled={unsupported}>
+                        {variant.label}
+                      </SelectItem>
+                    );
+                  })}
+                </SelectContent>
+              </Select>
+            </div>
+          ) : (
+            <Button
+              variant="tertiary"
+              onClick={download}
+              disabled={!status || downloading}
+              className="shrink-0 rounded-full"
+            >
+              {downloading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+              {t('Download variant (~')}{selected?.size_mb ?? '?'}{t(' MB)')}
+            </Button>
+          )}
+        </div>
+        {error && <p className="px-4 pb-3 text-xs text-destructive">{error}</p>}
+      </section>
+    );
+  }
+
   return (
     <div className="rounded-xl border border-border p-5">
       <div className="mb-1 flex items-center justify-between">
@@ -177,37 +235,39 @@ export function GigaamModelManager() {
           </p>
         </div>
         {selectedActive ? (
-          <span className="flex items-center gap-1 rounded-full bg-success/10 px-2 py-0.5 text-xs font-medium text-success">
+          <Badge color="green" size="sm" className="gap-1">
             <CheckCircle2 className="h-3.5 w-3.5" /> {t('Active')}
-          </span>
+          </Badge>
         ) : present ? (
-          <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">{t('Installed — restart to load')}</span>
+          <Badge color="gray" size="sm">{t('Installed — restart to load')}</Badge>
         ) : (
-          <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">{t('Not downloaded')}</span>
+          <Badge color="gray" size="sm">{t('Not downloaded')}</Badge>
         )}
       </div>
 
       {/* Variant selector for A/B quality testing */}
       <div className="mt-4">
         <label className="mb-1 block text-xs font-medium text-muted-foreground">{t('Model variant')}</label>
-        <select
+        <Select
           value={status?.selected ?? 'e2e-rnnt-fp32'}
-          onChange={(e) => selectVariant(e.target.value)}
+          onValueChange={selectVariant}
           disabled={!status || downloading || switching}
-          className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground focus:border-primary/40 focus:outline-none disabled:opacity-50"
         >
-          {(status?.variants ?? []).map((v) => {
+          <SelectTrigger className="w-full" placeholder={t('Model variant')} />
+          <SelectContent>
+          {(status?.variants ?? []).map((v, index) => {
             // An Apple Silicon Mac on macOS 13 lists the Neural Engine model but cannot load
             // it, so the option stays visible (and explains itself) instead of being selectable.
             const unsupported = v.neural_engine && !status?.neural_engine_supported;
             return (
-              <option key={v.id} value={v.id} disabled={unsupported}>
+              <SelectItem key={v.id} index={index} value={v.id} disabled={unsupported}>
                 {v.label} · ~{v.size_mb}{t(' MB')}
                 {unsupported ? t(' · needs macOS 14') : v.present ? t(' · installed') : ''}
-              </option>
+              </SelectItem>
             );
           })}
-        </select>
+          </SelectContent>
+        </Select>
         <p className="mt-1 text-xs text-muted-foreground">
           {selected?.neural_engine
             ? t('The encoder runs on the Apple Neural Engine (macOS 14+): the same transcripts as fp32, several times faster and much lighter on the CPU. The first load takes about a minute while macOS optimizes the model for this Mac.')
@@ -247,13 +307,13 @@ export function GigaamModelManager() {
             {t('Ready — recordings will transcribe with this variant')}
           </div>
         ) : (
-          <button
+          <Button variant="tertiary"
             onClick={download}
             className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
           >
             <Download className="h-4 w-4" />
             {present ? t('Re-download variant') : `${t('Download variant (~')}${selected?.size_mb ?? '?'}${t(' MB)')}`}
-          </button>
+          </Button>
         )}
 
         {/* Loaded-vs-selected mismatch hint (e.g. selected a new variant that still needs a download) */}

@@ -100,7 +100,15 @@ impl BackgroundCaptureState {
 
         // Write both marker files up front: a crash leaves a folder that still looks
         // like a Memento meeting, and the discard path can delete it safely.
-        write_metadata(&folder, &meeting_id, &title, started, "recording", None, None)?;
+        write_metadata(
+            &folder,
+            &meeting_id,
+            &title,
+            started,
+            "recording",
+            None,
+            None,
+        )?;
         write_empty_transcripts(&folder, started)?;
 
         let recorder = match BackgroundRecorder::start(folder.clone()).await {
@@ -273,7 +281,8 @@ async fn register_meeting(
 
     // Automatically captured meetings enter the reviewable Inbox first. A
     // classifier failure must never make an otherwise-saved meeting fail.
-    if let Err(error) = crate::learning::classification::prepare_saved_meeting(pool, meeting_id).await
+    if let Err(error) =
+        crate::learning::classification::prepare_saved_meeting(pool, meeting_id).await
     {
         log::warn!("Could not prepare background capture {meeting_id} for classification: {error}");
     }
@@ -364,7 +373,9 @@ async fn notify_recording_started(app: &AppHandle<Wry>, title: &str) {
     let state = app.state::<NotificationManagerState<Wry>>();
     let manager = state.read().await;
     if let Some(manager) = manager.as_ref() {
-        let _ = manager.show_recording_started(Some(title.to_string())).await;
+        let _ = manager
+            .show_recording_started(Some(title.to_string()))
+            .await;
     }
 }
 

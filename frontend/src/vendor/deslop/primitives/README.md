@@ -17,3 +17,22 @@
 
 - [Цвета](colors.md)
 - [Типографика](TYPOGRAPHY.md)
+
+## Иконки
+
+Локальный шрифт содержит полный набор Material Symbols Rounded и не требует
+сетевого подключения во время работы приложения. Часто используемые иконки
+доступны как именованные экспорты, остальные создаются лениво по официальному
+имени символа:
+
+```tsx
+import {
+  MaterialSymbol,
+  getIconComponent,
+} from './material-symbols-react';
+
+<MaterialSymbol name="calendar_today" size={20} weight={400} />;
+
+const IconRocketLaunch = getIconComponent('rocket_launch');
+<IconRocketLaunch size={20} weight={400} />;
+```

@@ -4,8 +4,9 @@ import './globals.css'
 import '@/vendor/deslop/deslop-primitives.css'
 import { LanguageProvider } from '@/lib/i18n'
 import { SidebarProvider } from '@/components/Sidebar/SidebarProvider'
+import { AppSidebar } from '@/components/AppSidebar'
+import { SidebarInset, SidebarProvider as ShadcnSidebarProvider } from '@/components/ui/sidebar'
 import MainContent from '@/components/MainContent'
-import { GlobalSettingsButton } from '@/components/GlobalSettingsButton'
 import AnalyticsProvider from '@/components/AnalyticsProvider'
 import { toast } from 'sonner'
 import { Toaster } from '@/components/ui/sonner'
@@ -18,7 +19,7 @@ import { TooltipProvider } from '@/components/ui/tooltip'
 import { RecordingStateProvider } from '@/contexts/RecordingStateContext'
 import { OllamaDownloadProvider } from '@/contexts/OllamaDownloadContext'
 import { TranscriptProvider } from '@/contexts/TranscriptContext'
-import { ConfigProvider, useConfig } from '@/contexts/ConfigContext'
+import { ConfigProvider } from '@/contexts/ConfigContext'
 import { OnboardingProvider } from '@/contexts/OnboardingContext'
 import { loadBetaFeatures } from '@/types/betaFeatures'
 import { DownloadProgressToastProvider } from '@/components/shared/DownloadProgressToast'
@@ -46,6 +47,66 @@ function NativeWindowThemeSync() {
   return null
 }
 
+const WINDOW_DRAG_BLOCK_SELECTOR = [
+  'button',
+  'a[href]',
+  'input',
+  'textarea',
+  'select',
+  'option',
+  'label',
+  'summary',
+  '[contenteditable="true"]',
+  '[draggable="true"]',
+  '[tabindex]:not([tabindex="-1"])',
+  '[role="button"]',
+  '[role="link"]',
+  '[role="menuitem"]',
+  '[role="option"]',
+  '[role="tab"]',
+  '[role="switch"]',
+  '[role="checkbox"]',
+  '[role="radio"]',
+  '[role="slider"]',
+  '.no-drag',
+  '.memento-drawer-swipe-handle',
+  '[data-no-window-drag]',
+].join(',')
+
+function NativeWindowBackgroundDrag() {
+  useEffect(() => {
+    if (!isTauri()) return
+
+    const handleMouseDown = (event: MouseEvent) => {
+      if (
+        event.button !== 0 ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.altKey ||
+        event.shiftKey
+      ) return
+
+      const target = event.target
+      if (!(target instanceof Element) || target.closest(WINDOW_DRAG_BLOCK_SELECTOR)) return
+
+      window.getSelection()?.removeAllRanges()
+      event.preventDefault()
+      getCurrentWindow().startDragging().catch((error) => {
+        console.warn('[Layout] Failed to start native window drag', error)
+      })
+    }
+
+    // Bubble after the target has had a chance to identify itself as an
+    // interactive control. Capture-phase preventDefault can cancel the
+    // browser's follow-up click in WebKit, which makes otherwise normal
+    // buttons (including archive cells) appear dead.
+    window.addEventListener('mousedown', handleMouseDown)
+    return () => window.removeEventListener('mousedown', handleMouseDown)
+  }, [])
+
+  return null
+}
+
 // Module-level component — stable reference across RootLayout re-renders.
 // Defined here (not inside RootLayout) so React never sees a new function type
 // on re-render, which would cause unmount/remount and break initialization logic.
@@ -58,13 +119,6 @@ function ConditionalImportDialog({
   handleImportDialogClose: (open: boolean) => void;
   importFilePath: string | null;
 }) {
-  const { betaFeatures } = useConfig();
-
-  // Only mount ImportAudioDialog (and its hooks/listeners) when feature is enabled
-  if (!betaFeatures.importAndRetranscribe) {
-    return null;
-  }
-
   return (
     <ImportAudioDialog
       open={showImportDialog}
@@ -235,6 +289,7 @@ export default function RootLayout({
           storageKey="memento-theme"
         >
           <NativeWindowThemeSync />
+          <NativeWindowBackgroundDrag />
           <LanguageProvider>
             <AnalyticsProvider>
               <RecordingStateProvider>
@@ -244,19 +299,19 @@ export default function RootLayout({
                       <OnboardingProvider>
                         <UpdateCheckProvider>
                           <SidebarProvider>
-                            <TooltipProvider>
-                              <RecordingPostProcessingProvider>
-                                <ImportDialogProvider onOpen={handleOpenImportDialog}>
+                            <ImportDialogProvider onOpen={handleOpenImportDialog}>
+                              <ShadcnSidebarProvider defaultOpen>
+                                <AppSidebar />
+                                <SidebarInset className="min-w-0 bg-transparent">
+                              <TooltipProvider>
+                                <RecordingPostProcessingProvider>
                                   {/* Download progress toast provider - listens for background downloads */}
                                   <DownloadProgressToastProvider />
                                   <ManagedDefaultsMigrationDialog />
                                   <AutoMeetingDetection />
                                   <RecordingNavigationGuard />
 
-                                  <div>
-                                    <GlobalSettingsButton />
-                                    <MainContent>{children}</MainContent>
-                                  </div>
+                                  <MainContent>{children}</MainContent>
                                   {/* Import audio overlay and dialog */}
                                   <ImportDropOverlay visible={showDropOverlay} />
                                   <ConditionalImportDialog
@@ -264,9 +319,11 @@ export default function RootLayout({
                                     handleImportDialogClose={handleImportDialogClose}
                                     importFilePath={importFilePath}
                                   />
-                                </ImportDialogProvider>
-                              </RecordingPostProcessingProvider>
-                            </TooltipProvider>
+                                </RecordingPostProcessingProvider>
+                              </TooltipProvider>
+                                </SidebarInset>
+                              </ShadcnSidebarProvider>
+                            </ImportDialogProvider>
                           </SidebarProvider>
                         </UpdateCheckProvider>
                       </OnboardingProvider>
@@ -276,7 +333,7 @@ export default function RootLayout({
               </RecordingStateProvider>
             </AnalyticsProvider>
 
-            <Toaster position="bottom-center" richColors closeButton />
+            <Toaster position="bottom-center" />
           </LanguageProvider>
         </ThemeProvider>
       </body>

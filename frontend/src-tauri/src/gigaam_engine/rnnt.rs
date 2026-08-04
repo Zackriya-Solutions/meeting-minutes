@@ -150,7 +150,12 @@ impl RnntModel {
     /// plus the encoder frame each piece was emitted at.
     pub fn transcribe_with_words(&mut self, waveform: &[f32]) -> Result<Vec<TimedWord>> {
         let (tokens, frames, frame_ms) = self.decode_greedy(waveform)?;
-        Ok(tokens_to_timed_words(&self.vocab, &tokens, &frames, frame_ms))
+        Ok(tokens_to_timed_words(
+            &self.vocab,
+            &tokens,
+            &frames,
+            frame_ms,
+        ))
     }
 
     /// Greedy transducer decode → (token ids, emission encoder-frame per token, ms per
@@ -210,7 +215,11 @@ impl RnntModel {
     /// the ONNX path can wrap it without a copy). Returns owned `encoded` [1,D,T'] flattened
     /// row-major, D, T', and the valid time length (clamped to T'), whichever backend is
     /// loaded.
-    fn encode(&mut self, features: Vec<f32>, frames: usize) -> Result<(Vec<f32>, usize, usize, usize)> {
+    fn encode(
+        &mut self,
+        features: Vec<f32>,
+        frames: usize,
+    ) -> Result<(Vec<f32>, usize, usize, usize)> {
         match &mut self.encoder {
             EncoderBackend::Onnx(_) => {
                 let features = Array3::from_shape_vec((1, N_MELS, frames), features)
@@ -474,7 +483,10 @@ mod tests {
         };
         let dir = std::path::PathBuf::from(dir);
         let wav = std::env::var("GIGAAM_TEST_WAV").expect("set GIGAAM_TEST_WAV");
-        let (w_start, w_end) = match std::env::var("WINDOW_MS").unwrap_or_default().split_once(',') {
+        let (w_start, w_end) = match std::env::var("WINDOW_MS")
+            .unwrap_or_default()
+            .split_once(',')
+        {
             Some((a, b)) => (
                 a.trim().parse::<usize>().unwrap(),
                 b.trim().parse::<usize>().unwrap(),

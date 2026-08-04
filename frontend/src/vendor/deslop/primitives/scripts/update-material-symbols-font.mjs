@@ -6,10 +6,11 @@ const root = fileURLToPath(new URL("../", import.meta.url));
 const config = JSON.parse(await readFile(`${root}/material-symbols.json`, "utf8"));
 const approvedNames = [...new Set(config.names)].sort();
 const names = approvedNames.join(",");
+const includeAll = config.includeAll === true;
 const family = "Material Symbols Rounded:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200";
 const cssUrl = new URL("https://fonts.googleapis.com/css2");
 cssUrl.searchParams.set("family", family);
-cssUrl.searchParams.set("icon_names", names);
+if (!includeAll) cssUrl.searchParams.set("icon_names", names);
 cssUrl.searchParams.set("display", "block");
 
 const cssResponse = await fetch(cssUrl, {
@@ -46,7 +47,9 @@ const manifest = {
     opticalSize: [20, 48],
     weight: [100, 700],
   },
-  names: approvedNames.length,
+  names: includeAll ? "all" : approvedNames.length,
+  approvedNames: approvedNames.length,
+  includeAll,
   registryHash: digest(JSON.stringify(approvedNames)),
   fontHash: digest(font),
   byteLength: font.length,
@@ -63,4 +66,8 @@ await Promise.all([
 
 await rm(`${root}/fonts/MaterialSymbolsOutlined-Variable.woff2`, { force: true });
 
-console.log(`Updated Material Symbols subset: ${config.names.length} names, ${font.length} bytes.`);
+console.log(
+  includeAll
+    ? `Updated full Material Symbols font: ${font.length} bytes.`
+    : `Updated Material Symbols subset: ${config.names.length} names, ${font.length} bytes.`,
+);

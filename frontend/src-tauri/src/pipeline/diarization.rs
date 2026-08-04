@@ -1884,10 +1884,19 @@ mod tests {
         // voice). Without exclusion it echoes cluster 0 back; excluding it attaches
         // to the actual second voice when that still clears the floor.
         let blend = [0.8, 0.5, 0.0];
-        assert_eq!(nearest_cluster_excluding(&blend, &centroids, &[], 0.3), Some(0));
-        assert_eq!(nearest_cluster_excluding(&blend, &centroids, &[0], 0.3), Some(1));
+        assert_eq!(
+            nearest_cluster_excluding(&blend, &centroids, &[], 0.3),
+            Some(0)
+        );
+        assert_eq!(
+            nearest_cluster_excluding(&blend, &centroids, &[0], 0.3),
+            Some(1)
+        );
         // Everything excluded → dropped, never a forced guess.
-        assert_eq!(nearest_cluster_excluding(&blend, &centroids, &[0, 1], 0.3), None);
+        assert_eq!(
+            nearest_cluster_excluding(&blend, &centroids, &[0, 1], 0.3),
+            None
+        );
         // Excluded-but-only-noise-remains → dropped by the floor.
         assert_eq!(
             nearest_cluster_excluding(&[0.9, 0.0, 0.1], &centroids, &[0], 0.3),
@@ -1910,7 +1919,11 @@ mod tests {
 
     #[test]
     fn multiple_interjections_carve_multiple_slices() {
-        let turns = vec![turn(0, 20_000, 0), turn(4_000, 5_000, 1), turn(10_000, 11_500, 2)];
+        let turns = vec![
+            turn(0, 20_000, 0),
+            turn(4_000, 5_000, 1),
+            turn(10_000, 11_500, 2),
+        ];
         let out = split_turns_at_interjections(&turns, 250);
         assert_eq!(
             out,
@@ -2818,7 +2831,9 @@ mod tests {
             for x in window_buf.iter_mut().skip(n) {
                 *x = 0.0;
             }
-            let active = diarizer.run_segmentation(&window_buf).expect("segmentation");
+            let active = diarizer
+                .run_segmentation(&window_buf)
+                .expect("segmentation");
             let num_frames = active.len();
             if num_frames > 0 {
                 let frame_ms = SEG_WINDOW_MS / num_frames as f64;

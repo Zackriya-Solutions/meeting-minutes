@@ -3,7 +3,19 @@
   font-style: normal;
   font-weight: 100 700;
   font-display: block;
-  src: url("./fonts/MaterialSymbolsRounded-Variable.woff2") format("woff2");
+  src: url("./fonts/MaterialSymbolsRounded-Variable.woff2?v=full") format("woff2");
+}
+
+/* `construction` is not included by Google's large icon-name subset query,
+   even though it is part of the Material Symbols font. Keep its primitive
+   glyph in a tiny companion subset instead of rendering the raw word as a
+   fallback character. */
+@font-face {
+  font-family: "Material Symbols Rounded Construction";
+  font-style: normal;
+  font-weight: 100 700;
+  font-display: block;
+  src: url("./fonts/MaterialSymbolsRounded-Construction.woff2") format("woff2");
 }
 
 .deslop-material-symbol {
@@ -22,4 +34,8 @@
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
   font-feature-settings: "liga";
+}
+
+.deslop-material-symbol--construction {
+  font-family: "Material Symbols Rounded Construction", "Material Symbols Rounded" !important;
 }

@@ -5,14 +5,11 @@ import {
   Loader2,
   AlertCircle,
   CheckCircle2,
-  X,
   Cpu,
   FileAudio,
   Clock,
   HardDrive,
   FolderOpen,
-  ChevronDown,
-  ChevronUp,
 } from '@/components/deslop-icons';
 import {
   Dialog,
@@ -21,16 +18,16 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '../ui/dialog';
-import { Button } from '../ui/button';
-import { Input } from '../ui/input';
+} from '../ui/fluid-dialog';
+import { Button } from '../ui/fluid-button';
+import { Input } from '../ui/fluid-input';
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
-  SelectValue,
-} from '../ui/select';
+} from '../ui/fluid-select';
+import { MaterialSymbol } from '@/vendor/deslop/primitives/material-symbols-react';
 import { toast } from 'sonner';
 import { useConfig } from '@/contexts/ConfigContext';
 import { useImportAudio, BatchImportResult, ExistingAudioMeeting, ImportResult } from '@/hooks/useImportAudio';
@@ -39,6 +36,13 @@ import { useSidebar } from '../Sidebar/SidebarProvider';
 import { getLanguageDisplayName, LANGUAGES } from '@/constants/languages';
 import { useTranscriptionModels, ModelOption } from '@/hooks/useTranscriptionModels';
 import { useT } from '@/lib/i18n';
+
+type FluidIconProps = { size?: number; strokeWidth?: number; className?: string };
+const UploadIcon = ({ size = 16, className }: FluidIconProps) => <MaterialSymbol name="upload" size={size} weight={400} className={className} />;
+const FolderIcon = ({ size = 16, className }: FluidIconProps) => <MaterialSymbol name="folder_open" size={size} weight={400} className={className} />;
+const CancelIcon = ({ size = 16, className }: FluidIconProps) => <MaterialSymbol name="close" size={size} weight={400} className={className} />;
+const ExpandIcon = ({ size = 16, className }: FluidIconProps) => <MaterialSymbol name="expand_more" size={size} weight={400} className={className} />;
+const CollapseIcon = ({ size = 16, className }: FluidIconProps) => <MaterialSymbol name="expand_less" size={size} weight={400} className={className} />;
 
 
 interface ImportAudioDialogProps {
@@ -301,7 +305,8 @@ export function ImportAudioDialog({
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent
-        className="max-h-[calc(100vh-2rem)] w-[calc(100vw-2rem)] max-w-[760px] overflow-x-hidden overflow-y-auto sm:max-w-[760px]"
+        size="lg"
+        className="flex max-h-[calc(100vh-2rem)] flex-col overflow-hidden"
         onEscapeKeyDown={handleEscapeKeyDown}
         onInteractOutside={handleInteractOutside}
       >
@@ -338,7 +343,7 @@ export function ImportAudioDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="min-w-0 space-y-4 py-4">
+        <div className="min-h-0 min-w-0 flex-1 space-y-4 overflow-x-hidden overflow-y-auto py-4">
           {/* File selection / info */}
           {!isProcessing && !error && (
             <>
@@ -379,7 +384,7 @@ export function ImportAudioDialog({
                       <div>{t('and')} {batchFiles.length - 20} {t('more files')}</div>
                     )}
                   </div>
-                  <Button variant="outline" size="sm" onClick={handleSelectFolder} className="w-full">
+                  <Button variant="tertiary" size="md" onClick={handleSelectFolder} className="w-full">
                     {t('Choose Different Folder')}
                   </Button>
                 </div>
@@ -408,8 +413,8 @@ export function ImportAudioDialog({
                       <p className="text-sm font-medium text-foreground">{t('Audio already imported')}</p>
                       <p className="mt-1 text-xs text-muted-foreground">{fileInfo.existing_meeting.title}</p>
                       <Button
-                        variant="outline"
-                        size="sm"
+                        variant="tertiary"
+                        size="md"
                         className="mt-3 w-full"
                         onClick={() => handleDuplicate(fileInfo.existing_meeting!)}
                       >
@@ -432,7 +437,7 @@ export function ImportAudioDialog({
                     />
                   </div>
 
-                  <Button variant="outline" size="sm" onClick={handleSelectFile} className="w-full">
+                  <Button variant="tertiary" size="md" onClick={handleSelectFile} className="w-full">
                     {t('Choose Different File')}
                   </Button>
                 </div>
@@ -440,21 +445,25 @@ export function ImportAudioDialog({
                 <div className="min-w-0 border-2 border-dashed border-border rounded-lg p-5 text-center sm:p-8">
                   <FileAudio className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
                   <div className="flex min-w-0 flex-col justify-center gap-2 sm:flex-row sm:flex-wrap">
-                    <Button className="min-w-0 whitespace-normal" onClick={handleSelectFile} disabled={status === 'validating'}>
-                      {status === 'validating' ? (
-                        <>
-                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                          {t('Validating...')}
-                        </>
-                      ) : (
-                        <>
-                          <Upload className="h-4 w-4 mr-2" />
-                          {t('Select Audio File')}
-                        </>
-                      )}
+                    <Button
+                      className="min-w-0"
+                      variant="primary"
+                      size="md"
+                      leadingIcon={UploadIcon}
+                      loading={status === 'validating'}
+                      onClick={handleSelectFile}
+                      disabled={status === 'validating'}
+                    >
+                      {status === 'validating' ? t('Validating...') : t('Select Audio File')}
                     </Button>
-                    <Button className="min-w-0 whitespace-normal" variant="outline" onClick={handleSelectFolder} disabled={status === 'validating'}>
-                      <FolderOpen className="h-4 w-4 mr-2" />
+                    <Button
+                      className="min-w-0"
+                      variant="secondary"
+                      size="md"
+                      leadingIcon={FolderIcon}
+                      onClick={handleSelectFolder}
+                      disabled={status === 'validating'}
+                    >
                       {t('Select Audio Folder')}
                     </Button>
                   </div>
@@ -465,17 +474,16 @@ export function ImportAudioDialog({
               {/* Advanced options (collapsible) */}
               {(fileInfo || batchFiles.length > 0) && (
                 <div className="border rounded-lg">
-                  <button
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="md"
+                    trailingIcon={showAdvanced ? CollapseIcon : ExpandIcon}
                     onClick={() => setShowAdvanced(!showAdvanced)}
-                    className="w-full flex items-center justify-between p-3 text-sm font-medium text-muted-foreground hover:bg-background"
+                    className="w-full"
                   >
-                    <span>{t('Advanced Options')}</span>
-                    {showAdvanced ? (
-                      <ChevronUp className="h-4 w-4" />
-                    ) : (
-                      <ChevronDown className="h-4 w-4" />
-                    )}
-                  </button>
+                    {t('Advanced Options')}
+                  </Button>
 
                   {showAdvanced && (
                     <div className="p-3 pt-0 space-y-4 border-t">
@@ -487,12 +495,10 @@ export function ImportAudioDialog({
                             <span className="text-sm font-medium">{t('Language')}</span>
                           </div>
                           <Select value={selectedLang} onValueChange={setSelectedLang}>
-                            <SelectTrigger className="w-full">
-                              <SelectValue placeholder={t('Select language')} />
-                            </SelectTrigger>
+                            <SelectTrigger className="w-full" placeholder={t('Select language')} />
                             <SelectContent className="max-h-60">
-                              {LANGUAGES.map((lang) => (
-                                <SelectItem key={lang.code} value={lang.code}>
+                              {LANGUAGES.map((lang, index) => (
+                                <SelectItem key={lang.code} index={index} value={lang.code}>
                                   {getLanguageDisplayName(lang.code)}
                                 </SelectItem>
                               ))}
@@ -527,13 +533,12 @@ export function ImportAudioDialog({
                             onValueChange={setSelectedModelKey}
                             disabled={loadingModels}
                           >
-                            <SelectTrigger className="w-full">
-                              <SelectValue placeholder={loadingModels ? t('Loading models...') : t('Select model')} />
-                            </SelectTrigger>
+                            <SelectTrigger className="w-full" placeholder={loadingModels ? t('Loading models...') : t('Select model')} />
                             <SelectContent>
-                              {availableModels.map((model) => (
+                              {availableModels.map((model, index) => (
                                 <SelectItem
                                   key={`${model.provider}:${model.name}`}
+                                  index={index}
                                   value={`${model.provider}:${model.name}`}
                                 >
                                   {model.displayName}
@@ -595,15 +600,18 @@ export function ImportAudioDialog({
           )}
         </div>
 
-        <DialogFooter className="min-w-0 gap-2 sm:flex-wrap sm:space-x-0">
+        <DialogFooter className="min-w-0 shrink-0 gap-2 sm:flex-wrap sm:space-x-0">
           {!isProcessing && !error && (
             <>
-              <Button className="min-w-0" variant="outline" onClick={() => onOpenChange(false)}>
+              <Button className="min-w-0" variant="ghost" size="md" onClick={() => onOpenChange(false)}>
                 {t('Cancel')}
               </Button>
               <Button
                 onClick={handleStartImport}
-                className="min-w-0 whitespace-normal bg-primary hover:bg-primary/90"
+                className="min-w-0"
+                variant="primary"
+                size="md"
+                leadingIcon={UploadIcon}
                 disabled={
                   (!fileInfo && batchFiles.length === 0)
                   || Boolean(fileInfo?.existing_meeting)
@@ -612,23 +620,21 @@ export function ImportAudioDialog({
                   || !selectedModel
                 }
               >
-                <Upload className="h-4 w-4 mr-2" />
                 {batchFiles.length > 0 ? `${t('Import')} ${importableBatchFiles.length}` : t('Import')}
               </Button>
             </>
           )}
           {isProcessing && (
-            <Button variant="outline" onClick={handleCancel}>
-              <X className="h-4 w-4 mr-2" />
+            <Button variant="ghost" size="md" leadingIcon={CancelIcon} onClick={handleCancel}>
               {t('Cancel')}
             </Button>
           )}
           {error && (
             <>
-              <Button variant="outline" onClick={() => onOpenChange(false)}>
+              <Button variant="ghost" size="md" onClick={() => onOpenChange(false)}>
                 {t('Close')}
               </Button>
-              <Button onClick={reset} variant="outline">
+              <Button onClick={reset} variant="secondary" size="md">
                 {t('Try Again')}
               </Button>
             </>

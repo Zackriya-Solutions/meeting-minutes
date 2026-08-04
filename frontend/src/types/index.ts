@@ -16,7 +16,7 @@ export interface Transcript {
   audio_start_time?: number; // Seconds from recording start (e.g., 125.3)
   audio_end_time?: number;   // Seconds from recording start (e.g., 128.6)
   duration?: number;          // Segment duration in seconds (e.g., 3.3)
-  // Audio-channel source: 'mic' (local user) | 'system' (remote participants)
+  // Audio-channel source only. It does not identify the person speaking.
   speaker?: string | null;
   // Resolved diarized speaker profile id (takes precedence once available)
   speaker_id?: number | null;
@@ -34,7 +34,7 @@ export interface TranscriptUpdate {
   audio_start_time: number; // Seconds from recording start
   audio_end_time: number;   // Seconds from recording start
   duration: number;          // Segment duration in seconds
-  // Audio-channel source: 'mic' (local user) | 'system' (remote participants)
+  // Audio-channel source only. It does not identify the person speaking.
   speaker?: string | null;
 }
 
@@ -44,8 +44,8 @@ export interface TranscriptUpdate {
  * Precedence:
  *  1. Diarized identity — when a `speakersById` map is supplied and the segment
  *     has a `speaker_id` present in it, the speaker's display name wins.
- *  2. Audio-channel tag (`speaker`) — 'mic' is the local user ("You"),
- *     'system' is the remote participants ("Others").
+ *  2. A remote `system` channel without a diarized identity is shown as "Others".
+ *     A `mic` channel is deliberately unlabeled: one microphone can capture many people.
  * Returns null when the speaker is unknown (render nothing).
  */
 export function resolveSpeakerLabel(
@@ -57,8 +57,6 @@ export function resolveSpeakerLabel(
     if (name) return name;
   }
   switch (input.speaker) {
-    case 'mic':
-      return 'You';
     case 'system':
       return 'Others';
     default:
@@ -85,7 +83,11 @@ export interface SpeakerInfo {
   id: number;
   display_name: string;
   is_confirmed: boolean;
+  /** Explicit owner identity attached to this diarized voice profile. */
+  is_self: boolean;
   segment_count: number;
+  /** Total diarized speech time for this speaker in the meeting, in seconds. */
+  speech_duration_seconds: number;
 }
 
 /** Result of the `diarization_status` command. */
@@ -186,7 +188,7 @@ export interface TranscriptSegmentData {
   endTime?: number; // audio_end_time in seconds
   text: string;
   confidence?: number;
-  // Audio-channel source: 'mic' (local user) | 'system' (remote participants)
+  // Audio-channel source only. It does not identify the person speaking.
   speaker?: string | null;
   // Resolved diarized speaker profile id (takes precedence once available)
   speaker_id?: number | null;

@@ -1,6 +1,6 @@
 "use client";
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { Summary, SummaryResponse } from '@/types';
+import { SpeakerInfo, Summary, SummaryResponse } from '@/types';
 import { getMarkedMoments } from '@/lib/markedMoments';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
 import Analytics from '@/lib/analytics';
@@ -46,8 +46,11 @@ export default function PageContent({
   onLoadMore,
   seekToSeconds = null,
   speakersById = null,
+  speakers = [],
+  selfSpeakerIds = null,
   speakerCount = 0,
   onRenameSpeaker,
+  onSetSelfSpeaker,
   onSpeakersDetected,
 }: {
   meeting: any;
@@ -70,8 +73,11 @@ export default function PageContent({
   seekToSeconds?: number | null;
   // Speaker diarization props
   speakersById?: Map<number, string> | null;
+  speakers?: SpeakerInfo[];
+  selfSpeakerIds?: ReadonlySet<number> | null;
   speakerCount?: number;
   onRenameSpeaker?: (speakerId: number, displayName: string) => Promise<void> | void;
+  onSetSelfSpeaker?: (speakerId: number, isSelf: boolean) => Promise<void> | void;
   onSpeakersDetected?: () => Promise<void> | void;
 }) {
   const t = useT();
@@ -278,8 +284,11 @@ export default function PageContent({
         seekToSeconds={seekToSeconds}
         markedMoments={markedMoments}
         speakersById={speakersById}
+        speakers={speakers}
+        selfSpeakerIds={selfSpeakerIds}
         speakerCount={speakerCount}
         onRenameSpeaker={onRenameSpeaker}
+        onSetSelfSpeaker={onSetSelfSpeaker}
         onSpeakersDetected={onSpeakersDetected}
       />
     </>

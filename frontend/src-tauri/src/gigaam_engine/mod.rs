@@ -38,7 +38,10 @@ impl LoadedModel {
 
     /// Word-level transcription. `Ok(None)` when the loaded variant doesn't expose
     /// per-token timing (CTC — derivable from frame argmax, just not implemented).
-    fn transcribe_with_words(&mut self, waveform: &[f32]) -> anyhow::Result<Option<Vec<TimedWord>>> {
+    fn transcribe_with_words(
+        &mut self,
+        waveform: &[f32],
+    ) -> anyhow::Result<Option<Vec<TimedWord>>> {
         match self {
             LoadedModel::Ctc(_) => Ok(None),
             LoadedModel::Rnnt(m) => m.transcribe_with_words(waveform).map(Some),
@@ -167,9 +170,10 @@ pub async fn transcribe_with_words(
     }
     tokio::task::spawn_blocking(move || {
         let mut guard = ENGINE.lock().unwrap();
-        guard
-            .as_mut()
-            .map(|m| m.transcribe_with_words(&waveform).map_err(|e| e.to_string()))
+        guard.as_mut().map(|m| {
+            m.transcribe_with_words(&waveform)
+                .map_err(|e| e.to_string())
+        })
     })
     .await
     .ok()

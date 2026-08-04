@@ -55,49 +55,58 @@ export function MessageBubble({
           <span aria-hidden="true">{avatarInitials}</span>
         </MessageAvatar>
         <MessageContent>
-          <MessageHeader>{senderName}</MessageHeader>
           <Bubble
             align={isUser ? 'end' : 'start'}
             variant={msg.error ? 'destructive' : isUser ? 'default' : 'muted'}
           >
             <BubbleContent
-              className={cn(isUser && 'whitespace-pre-wrap')}
+              className={cn(
+                !msg.error && '!bg-[var(--primary-5)] !text-[var(--deslop-primary)]',
+              )}
             >
-              {notFound && (
-                <div className="mb-1 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-                  <Icon name="search" size={14} />
-                  {t('Not found in your meetings')}
+              <div className="flex flex-col items-start gap-1 text-left">
+                <span className="text-xs font-medium text-[var(--deslop-primary-60)]">
+                  {senderName}
+                </span>
+
+                <div className={cn('w-full', isUser && 'whitespace-pre-wrap')}>
+                  {notFound && (
+                    <div className="mb-1 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                      <Icon name="search" size={14} />
+                      {t('Not found in your meetings')}
+                    </div>
+                  )}
+
+                  {isUser || msg.error
+                    ? <div className="whitespace-pre-wrap">{msg.content}</div>
+                    : <ChatMarkdown content={msg.content} />}
+
+                  {notFound && msg.diagnostics && <RetrievalExplanation diagnostics={msg.diagnostics} />}
+
+                  {msg.warning && (
+                    <div className="mt-2 flex items-center gap-1.5 text-xs text-primary">
+                      <Icon name="alert" size={14} />
+                      {msg.warning}
+                    </div>
+                  )}
+
+                  {!!msg.citations?.length && (
+                    <div className="mt-2.5 flex flex-wrap gap-1.5">
+                      {msg.citations.map((c) => (
+                        <button
+                          key={c.index}
+                          onClick={() => onCite(c)}
+                          title={t('Open the meeting at this moment')}
+                          className="mm-numeric inline-flex items-center gap-1 rounded-md bg-muted px-2 py-0.5 text-[11px] font-semibold text-muted-foreground transition-colors hover:text-foreground"
+                        >
+                          <span>[{c.index}]</span>
+                          {showMeetingLabel && <span className="max-w-[160px] truncate font-normal">{meetingTitle(c.meeting_id)}</span>}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
-              )}
-
-              {isUser || msg.error
-                ? <div className="whitespace-pre-wrap">{msg.content}</div>
-                : <ChatMarkdown content={msg.content} />}
-
-              {notFound && msg.diagnostics && <RetrievalExplanation diagnostics={msg.diagnostics} />}
-
-              {msg.warning && (
-                <div className="mt-2 flex items-center gap-1.5 text-xs text-primary">
-                  <Icon name="alert" size={14} />
-                  {msg.warning}
-                </div>
-              )}
-
-              {!!msg.citations?.length && (
-                <div className="mt-2.5 flex flex-wrap gap-1.5">
-                  {msg.citations.map((c) => (
-                    <button
-                      key={c.index}
-                      onClick={() => onCite(c)}
-                      title={t('Open the meeting at this moment')}
-                      className="mm-numeric inline-flex items-center gap-1 rounded-md bg-muted px-2 py-0.5 text-[11px] font-semibold text-muted-foreground transition-colors hover:text-foreground"
-                    >
-                      <span>[{c.index}]</span>
-                      {showMeetingLabel && <span className="max-w-[160px] truncate font-normal">{meetingTitle(c.meeting_id)}</span>}
-                    </button>
-                  ))}
-                </div>
-              )}
+              </div>
             </BubbleContent>
           </Bubble>
         </MessageContent>

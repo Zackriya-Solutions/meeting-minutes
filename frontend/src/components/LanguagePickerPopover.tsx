@@ -5,6 +5,8 @@ import { LANGUAGE_OPTIONS } from "@/lib/summary-languages";
 import { useRecentLanguages } from "@/hooks/useRecentLanguages";
 import { Icon } from "@/components/memento/Icon";
 import { useT } from "@/lib/i18n";
+import { Button } from "@/components/ui/fluid-button";
+import { Input } from "@/components/ui/fluid-input";
 
 interface LanguagePickerPopoverProps {
   value: string | null;
@@ -90,7 +92,7 @@ export function LanguagePickerPopover({
     >
       <div className="flex items-center gap-2 px-3 py-2.5 border-b border-border">
         <Icon name="search" size={16} className="text-muted-foreground" />
-        <input
+        <Input
           ref={inputRef}
           type="text"
           value={query}
@@ -107,12 +109,12 @@ export function LanguagePickerPopover({
               {t('Recently Used')}
             </div>
             {recentsResolved.map((opt) => (
-              <button
+              <Button variant="ghost"
                 key={`recent-${opt.code}`}
                 type="button"
                 aria-pressed={value === opt.code}
                 onClick={() => onChange(opt.code)}
-                className={`flex w-full items-center justify-between px-3 py-1.5 text-sm hover:bg-background text-left ${
+                className={`flex h-auto w-full items-center justify-between px-3 py-1.5 text-sm hover:bg-background text-left ${
                   value === opt.code ? "text-primary font-medium" : "text-foreground"
                 }`}
               >
@@ -121,18 +123,18 @@ export function LanguagePickerPopover({
                   <span className="text-xs text-muted-foreground">({opt.code})</span>
                 </span>
                 {value === opt.code && <span className="text-primary" aria-hidden="true">✓</span>}
-              </button>
+              </Button>
             ))}
             <div className="my-1 h-px bg-muted" />
           </>
         )}
 
         {showAuto && (
-          <button
+          <Button variant="ghost"
             type="button"
             aria-pressed={value === null}
             onClick={() => onChange(null)}
-            className={`flex w-full items-center justify-between px-3 py-1.5 text-sm hover:bg-background text-left ${
+            className={`flex h-auto w-full items-center justify-between px-3 py-1.5 text-sm hover:bg-background text-left ${
               value === null ? "text-primary font-medium" : "text-foreground"
             }`}
           >
@@ -143,7 +145,7 @@ export function LanguagePickerPopover({
               )}
             </span>
             {value === null && <span className="text-primary" aria-hidden="true">✓</span>}
-          </button>
+          </Button>
         )}
 
         {filteredAll.length > 0 && (
@@ -153,12 +155,12 @@ export function LanguagePickerPopover({
         )}
 
         {filteredAll.map((opt) => (
-          <button
+          <Button variant="ghost"
             key={`all-${opt.code}`}
             type="button"
             aria-pressed={value === opt.code}
             onClick={() => onChange(opt.code)}
-            className={`flex w-full items-center justify-between px-3 py-1.5 text-sm hover:bg-background text-left ${
+            className={`flex h-auto w-full items-center justify-between px-3 py-1.5 text-sm hover:bg-background text-left ${
               value === opt.code ? "text-primary font-medium" : "text-foreground"
             }`}
           >
@@ -167,7 +169,7 @@ export function LanguagePickerPopover({
               <span className="text-xs text-muted-foreground">({opt.code})</span>
             </span>
             {value === opt.code && <span className="text-primary" aria-hidden="true">✓</span>}
-          </button>
+          </Button>
         ))}
 
         {hasNoResults && (

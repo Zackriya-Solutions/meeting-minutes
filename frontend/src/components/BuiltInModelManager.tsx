@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { Button } from '@/components/ui/button';
+import { Button } from '@/components/ui/fluid-button';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { cn } from '@/lib/utils';
 import { Download, RefreshCw, BadgeAlert, Trash2 } from '@/components/deslop-icons';
@@ -422,7 +422,7 @@ export function BuiltInModelManager({
                   )}
                   {/* Available - Show small trash icon (only if not currently selected) */}
                   {isAvailable && !modelIsDownloading && selectedModel !== model.name && (
-                    <button
+                    <Button variant="ghost"
                       className="p-2 rounded hover:bg-muted transition-colors text-muted-foreground hover:text-destructive"
                       onClick={(e) => {
                         e.stopPropagation();
@@ -431,7 +431,7 @@ export function BuiltInModelManager({
                       title={t('Delete model')}
                     >
                       <Trash2 className="h-4 w-4" />
-                    </button>
+                    </Button>
                   )}
                 </div>
               </div>

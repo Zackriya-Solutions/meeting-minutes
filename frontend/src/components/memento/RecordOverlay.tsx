@@ -1,5 +1,5 @@
 import { Button } from '@/components/ui/button';
-import { LiveWaveform } from '@/components/ui/live-waveform';
+import { SiriWave4 } from '@/components/ui/siri-wave-4';
 import { useT } from '@/lib/i18n';
 
 interface RecordOverlayProps {
@@ -17,16 +17,11 @@ export function RecordOverlay({ onStop, isFinalizing = false }: RecordOverlayPro
       className="flex w-full min-w-[320px] flex-col gap-3"
       aria-label={t('Meeting recording')}
     >
-      <LiveWaveform
+      <SiriWave4
         active={!isFinalizing}
-        mode="static"
+        processing={isFinalizing}
         height={64}
-        barWidth={3}
-        barGap={2}
-        barRadius={2}
-        fadeWidth={32}
-        sensitivity={1.35}
-        smoothingTimeConstant={0.85}
+        sensitivity={1.55}
         className="text-foreground"
       />
       <Button

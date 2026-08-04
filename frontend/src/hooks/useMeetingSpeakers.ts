@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { SpeakerInfo, DiarizationCompletePayload } from "@/types";
@@ -19,10 +19,14 @@ interface UseMeetingSpeakersReturn {
     speakers: SpeakerInfo[];
     /** id → display_name lookup passed into `resolveSpeakerLabel`. */
     speakersById: Map<number, string>;
+    /** Diarized profile ids explicitly confirmed as the local user. */
+    selfSpeakerIds: ReadonlySet<number>;
     /** Re-load speakers from the backend. */
     refetchSpeakers: () => Promise<void>;
     /** Persist a new name via `rename_speaker` and update the local map so labels re-render. */
     renameSpeaker: (speakerId: number, displayName: string) => Promise<void>;
+    /** Persist the owner identity on the voice profile, never on an audio channel. */
+    setSelfSpeaker: (speakerId: number, isSelf: boolean) => Promise<void>;
 }
 
 /**
@@ -39,6 +43,10 @@ export function useMeetingSpeakers({
 }: UseMeetingSpeakersProps): UseMeetingSpeakersReturn {
     const [speakers, setSpeakers] = useState<SpeakerInfo[]>([]);
     const [speakersById, setSpeakersById] = useState<Map<number, string>>(new Map());
+    const selfSpeakerIds = useMemo(
+        () => new Set(speakers.filter((speaker) => speaker.is_self).map((speaker) => speaker.id)),
+        [speakers],
+    );
 
     const refetchSpeakers = useCallback(async () => {
         if (!meetingId) {
@@ -88,6 +96,14 @@ export function useMeetingSpeakers({
         });
     }, []);
 
+    const setSelfSpeaker = useCallback(async (speakerId: number, isSelf: boolean) => {
+        await invoke("set_self_speaker", { speakerId, isSelf });
+        setSpeakers((previous) => previous.map((speaker) => ({
+            ...speaker,
+            is_self: speaker.id === speakerId ? isSelf : (isSelf ? false : speaker.is_self),
+        })));
+    }, []);
+
     // Live refresh: when the backend finishes diarizing this meeting, reload
     // speakers and let the caller refresh transcripts.
     const onDiarizedRef = useRef(onDiarized);
@@ -127,5 +143,12 @@ export function useMeetingSpeakers({
         };
     }, [meetingId, refetchSpeakers]);
 
-    return { speakers, speakersById, refetchSpeakers, renameSpeaker };
+    return {
+        speakers,
+        speakersById,
+        selfSpeakerIds,
+        refetchSpeakers,
+        renameSpeaker,
+        setSelfSpeaker,
+    };
 }

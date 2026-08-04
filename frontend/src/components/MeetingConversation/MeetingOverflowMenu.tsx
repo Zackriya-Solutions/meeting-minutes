@@ -14,14 +14,14 @@ import {
   Settings,
   Trash2,
 } from '@/components/deslop-icons';
-import { Button } from '@/components/ui/button';
 import {
+  DropdownContent,
   DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
+  DropdownSeparator,
+  DropdownTrigger,
+} from '@/components/ui/dropdown';
+import { MenuItem } from '@/components/ui/menu-item';
+import { Button as FluidButton } from '@/components/ui/fluid-button';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { ModelSettingsModal, type ModelConfig } from '@/components/ModelSettingsModal';
 import { LanguagePickerPopover } from '@/components/LanguagePickerPopover';
@@ -31,9 +31,8 @@ import { useT } from '@/lib/i18n';
 import { useMeetingDrawer } from '@/contexts/MeetingDrawerContext';
 
 /**
- * The "⋯" menu for the meeting conversation. Composed from shadcn DropdownMenu
- * primitives so focus management, keyboard navigation, positioning, and dismissal
- * follow the same accessible interaction model as the rest of the application.
+ * The "⋯" menu for the meeting conversation. Composed from Fluid Functionalism's
+ * Dropdown so proximity hover and spring motion match the rest of the interface.
  *
  * The language picker and model settings open as dialogs rather than swapping the
  * menu's contents in place: a dropdown that resizes under the pointer fights the
@@ -120,97 +119,90 @@ export function MeetingOverflowMenu({
   return (
     <div className="no-drag relative z-[1]">
       <DropdownMenu open={open} onOpenChange={setOpen}>
-        <DropdownMenuTrigger asChild>
-          <Button
+        <DropdownTrigger
+          render={(
+          <FluidButton
             type="button"
-            variant="outline"
+            variant="secondary"
             size="icon"
+            active={open}
             aria-label={t('More actions')}
             title={t('More actions')}
-            className="h-[38px] w-[38px] rounded-full bg-transparent shadow-none"
+            className="h-[38px] w-[38px] rounded-full !bg-[var(--primary-5)] shadow-none hover:!bg-[var(--primary-5)]"
           >
             <MoreHorizontal size={18} />
-          </Button>
-        </DropdownMenuTrigger>
+          </FluidButton>
+          )}
+        />
 
-        <DropdownMenuContent
+        <DropdownContent
           align="end"
           sideOffset={6}
-          className="w-[248px] rounded-[14px] p-1.5"
+          className="w-[248px]"
         >
-          <DropdownMenuItem
+          <MenuItem
+            index={0}
+            icon={Pencil}
+            label={t('Rename meeting')}
             onSelect={onRenameMeeting}
-            className="rounded-[9px] px-2.5 py-[9px]"
-          >
-            <Pencil size={16} />
-            <span>{t('Rename meeting')}</span>
-          </DropdownMenuItem>
+          />
 
-          <DropdownMenuSeparator className="mx-1.5 my-1" />
+          <DropdownSeparator />
 
-          <DropdownMenuItem
+          <MenuItem
+            index={1}
+            icon={Copy}
+            label={t('Copy summary')}
             disabled={!hasSummary}
             onSelect={() => void onCopySummary()}
-            className="rounded-[9px] px-2.5 py-[9px]"
-          >
-            <Copy size={16} />
-            <span>{t('Copy summary')}</span>
-          </DropdownMenuItem>
+          />
 
-          <DropdownMenuItem
+          <MenuItem
+            index={2}
+            icon={Save}
+            label={t('Save to note')}
             disabled={!hasSummary}
             onSelect={() => void onSaveSummary()}
-            className="rounded-[9px] px-2.5 py-[9px]"
-          >
-            <Save size={16} />
-            <span>{t('Save to note')}</span>
-          </DropdownMenuItem>
+          />
 
           {canShareToTelegram && onShareSummaryToTelegram && (
-            <DropdownMenuItem
+            <MenuItem
+              index={3}
+              icon={Send}
+              label={t('Send to Telegram')}
               disabled={!hasSummary}
               onSelect={() => void onShareSummaryToTelegram()}
-              className="rounded-[9px] px-2.5 py-[9px]"
-            >
-              <Send size={16} />
-              <span>{t('Send to Telegram')}</span>
-            </DropdownMenuItem>
+            />
           )}
 
-          <DropdownMenuItem
+          <MenuItem
+            index={4}
+            icon={Languages}
+            label={t('Summary language')}
+            trailing={languageLabel}
             onSelect={() => setLanguageOpen(true)}
-            className="rounded-[9px] px-2.5 py-[9px]"
-          >
-            <Languages size={16} />
-            <span className="flex-1">{t('Summary language')}</span>
-            <span className="text-[11px] text-[var(--fg3)]">{languageLabel}</span>
-          </DropdownMenuItem>
+          />
 
-          <DropdownMenuItem
+          <MenuItem
+            index={5}
+            icon={Settings}
+            label={t('AI Model')}
+            trailing={modelLabel}
             onSelect={() => setModelOpen(true)}
-            className="rounded-[9px] px-2.5 py-[9px]"
-          >
-            <Settings size={16} />
-            <span className="flex-1">{t('AI Model')}</span>
-            <span className="text-[11px] text-[var(--fg3)]">{modelLabel}</span>
-          </DropdownMenuItem>
+          />
 
-          <DropdownMenuSeparator className="mx-1.5 my-1" />
+          <DropdownSeparator />
 
-          <DropdownMenuItem
+          <MenuItem
+            index={6}
+            icon={deleting ? Loader2 : Trash2}
+            label={t('Delete meeting')}
             disabled={deleting}
-            onSelect={(event) => {
-              // Deleting is async and goes through window.confirm(); keep the menu
-              // mounted so the spinner has somewhere to render.
-              event.preventDefault();
-              void handleDelete();
-            }}
+            closeOnClick={false}
+            onSelect={() => void handleDelete()}
             className="rounded-[9px] px-2.5 py-[9px] text-[var(--danger)] focus:text-[var(--danger)]"
-          >
-            {deleting ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
-            <span>{t('Delete meeting')}</span>
-          </DropdownMenuItem>
-        </DropdownMenuContent>
+          />
+        </DropdownContent>
       </DropdownMenu>
 
       <Dialog open={languageOpen} onOpenChange={setLanguageOpen}>

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { HardDrive, MessageSquare, Sparkles, type LucideIcon } from '@/components/deslop-icons';
 import { Switch } from '@/components/ui/switch';
 import { useT } from '@/lib/i18n';
 
@@ -77,53 +78,38 @@ export function PrivacySettings() {
   }
 
   return (
-    <div className="mt-6 max-w-2xl space-y-5">
-      <div className="rounded-lg border border-border bg-background p-6">
-        <SettingRow
-          title={t('Keep meeting content on this device')}
-          description={t(
-            'Blocks cloud transcription, cloud speaker detection, remote summaries, extraction, and chat before credentials or network clients are used. Local transcription and local AI remain available.',
-          )}
-          checked={settings.localOnly}
-          disabled={savingKey !== null}
-          onCheckedChange={(enabled) => update('localOnly', 'privacy.local_only', enabled)}
-        />
-        {settings.localOnly && (
-          <p className="mt-4 rounded-md bg-primary/10 p-3 text-xs text-primary">
-            {t('Local-only mode is active. Choose an on-device transcription engine and a local summary model.')}
-          </p>
+    <div className="space-y-4">
+      <SettingRow
+        icon={HardDrive}
+        title={t('Keep meeting content on this device')}
+        description={t(
+          'Blocks cloud transcription, cloud speaker detection, remote summaries, extraction, and chat before credentials or network clients are used. Local transcription and local AI remain available.',
         )}
-      </div>
+        checked={settings.localOnly}
+        disabled={savingKey !== null}
+        onCheckedChange={(enabled) => update('localOnly', 'privacy.local_only', enabled)}
+      />
 
-      <div className="rounded-lg border border-border bg-background p-6">
-        <h3 className="mb-1 text-lg font-semibold text-foreground">{t('Remote AI permissions')}</h3>
-        <p className="mb-5 text-sm text-muted-foreground">
-          {t('These permissions apply only when local-only mode is off. Summary generation remains controlled by the selected local or cloud provider.')}
-        </p>
-        <div className="divide-y divide-border">
-          <SettingRow
-            title={t('Entity and action extraction')}
-            description={t('Allow meeting text to be sent to the configured provider to identify people, topics, and action items.')}
-            checked={settings.extractionEnabled}
-            disabled={settings.localOnly || savingKey !== null}
-            onCheckedChange={(enabled) =>
-              update('extractionEnabled', 'privacy.extraction_enabled', enabled)
-            }
-          />
-          <SettingRow
-            title={t('Chat and archive questions')}
-            description={t('Allow retrieved meeting fragments to be sent to the configured provider when answering questions.')}
-            checked={settings.chatEnabled}
-            disabled={settings.localOnly || savingKey !== null}
-            onCheckedChange={(enabled) => update('chatEnabled', 'privacy.chat_enabled', enabled)}
-            className="pt-5"
-          />
-        </div>
-      </div>
+      <SettingRow
+        icon={Sparkles}
+        title={t('Entity and action extraction')}
+        description={t('Allow meeting text to be sent to the configured provider to identify people, topics, and action items.')}
+        checked={settings.extractionEnabled}
+        disabled={settings.localOnly || savingKey !== null}
+        onCheckedChange={(enabled) =>
+          update('extractionEnabled', 'privacy.extraction_enabled', enabled)
+        }
+      />
 
-      <p className="text-xs text-muted-foreground">
-        {t('Provider credentials are stored locally and are never returned to the app interface after saving.')}
-      </p>
+      <SettingRow
+        icon={MessageSquare}
+        title={t('Chat and archive questions')}
+        description={t('Allow retrieved meeting fragments to be sent to the configured provider when answering questions.')}
+        checked={settings.chatEnabled}
+        disabled={settings.localOnly || savingKey !== null}
+        onCheckedChange={(enabled) => update('chatEnabled', 'privacy.chat_enabled', enabled)}
+      />
+
       {error && (
         <p role="alert" className="text-sm text-destructive">
           {error}
@@ -134,32 +120,38 @@ export function PrivacySettings() {
 }
 
 function SettingRow({
+  icon: Icon,
   title,
   description,
   checked,
   disabled,
   onCheckedChange,
-  className = '',
 }: {
+  icon: LucideIcon;
   title: string;
   description: string;
   checked: boolean;
   disabled: boolean;
   onCheckedChange: (enabled: boolean) => void;
-  className?: string;
 }) {
   return (
-    <div className={`flex items-start justify-between gap-6 ${className}`}>
-      <div>
-        <h4 className="font-medium text-foreground">{title}</h4>
-        <p className="mt-1 text-sm leading-5 text-muted-foreground">{description}</p>
+    <section className="settings-section settings-cell">
+      <div className="settings-cell__row">
+        <span className="settings-cell__avatar" aria-hidden="true">
+          <Icon size={20} />
+        </span>
+        <div className="settings-cell__text">
+          <h3 className="settings-cell__label">{title}</h3>
+          <p className="settings-cell__caption">{description}</p>
+        </div>
+        <Switch
+          className="shrink-0"
+          checked={checked}
+          disabled={disabled}
+          onCheckedChange={onCheckedChange}
+          aria-label={title}
+        />
       </div>
-      <Switch
-        checked={checked}
-        disabled={disabled}
-        onCheckedChange={onCheckedChange}
-        aria-label={title}
-      />
-    </div>
+    </section>
   );
 }

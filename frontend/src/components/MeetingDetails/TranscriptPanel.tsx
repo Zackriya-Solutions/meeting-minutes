@@ -63,8 +63,10 @@ interface TranscriptPanelProps {
 
   // Speaker diarization props
   speakersById?: Map<number, string> | null;
+  selfSpeakerIds?: ReadonlySet<number> | null;
   speakerCount?: number;
   onRenameSpeaker?: (speakerId: number, displayName: string) => Promise<void> | void;
+  onSetSelfSpeaker?: (speakerId: number, isSelf: boolean) => Promise<void> | void;
   /** Refresh speakers + transcripts after a successful detect. */
   onSpeakersDetected?: () => Promise<void> | void;
 
@@ -105,8 +107,10 @@ export function TranscriptPanel({
   markedMoments = [],
   onSeekToMoment,
   speakersById = null,
+  selfSpeakerIds = null,
   speakerCount = 0,
   onRenameSpeaker,
+  onSetSelfSpeaker,
   onSpeakersDetected,
   showToolbar = true,
   showContextField = true,
@@ -312,7 +316,9 @@ export function TranscriptPanel({
           onLoadMore={onLoadMore}
           scrollToTimestamp={scrollToTimestamp}
           speakersById={speakersById}
+          selfSpeakerIds={selfSpeakerIds}
           onRenameSpeaker={onRenameSpeaker}
+          onSetSelfSpeaker={onSetSelfSpeaker}
           onPlayTimestamp={handlePlayTimestamp}
           playbackTime={audioSources.length > 0 && (audio.isPlaying || audio.currentTime > 0) ? audio.currentTime : null}
           onCorrectTranscript={meetingId ? handleCorrectTranscript : undefined}

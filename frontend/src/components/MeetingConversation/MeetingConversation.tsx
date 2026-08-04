@@ -1,8 +1,8 @@
 "use client";
 
-import { type ComponentProps, useCallback, useEffect, useMemo, useState } from 'react';
+import { type ComponentProps, type UIEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import { Loader2 } from '@/components/deslop-icons';
-import { Transcript, TranscriptSegmentData } from '@/types';
+import { SpeakerInfo, Transcript, TranscriptSegmentData } from '@/types';
 import { EditableTitle } from '@/components/EditableTitle';
 import { SummaryPanel } from '@/components/MeetingDetails/SummaryPanel';
 import { useMeetingChat, type Citation } from '@/hooks/useMeetingChat';
@@ -13,7 +13,13 @@ import { TranscriptCard } from './TranscriptCard';
 import { SummaryMessage } from './SummaryMessage';
 import { MeetingComposer } from './MeetingComposer';
 import { MeetingOverflowMenu } from './MeetingOverflowMenu';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { buildMeetingPromptSuggestions } from '@/lib/promptSuggestions';
+import {
+  FluidTabs,
+  FluidTabsContent,
+  FluidTabsList,
+  FluidTabsTrigger,
+} from '@/components/ui/fluid-tabs';
 import {
   MessageScroller,
   MessageScrollerButton,
@@ -21,7 +27,20 @@ import {
   MessageScrollerItem,
   MessageScrollerProvider,
   MessageScrollerViewport,
+  useMessageScrollerScrollable,
 } from '@/components/ui/message-scroller';
+
+type ScrollEdges = { start: boolean; end: boolean };
+
+function ScrollEdgesObserver({ onChange }: { onChange: (edges: ScrollEdges) => void }) {
+  const edges = useMessageScrollerScrollable();
+
+  useEffect(() => {
+    onChange({ start: edges.start, end: edges.end });
+  }, [edges.end, edges.start, onChange]);
+
+  return null;
+}
 
 /**
  * Variant 2a — the meeting screen as a single vertical conversation.
@@ -38,12 +57,6 @@ import {
  * scrolls as a whole. Clicking a citation expands the transcript pin and scrolls
  * it to the cited segment (by start_ms) in place, instead of routing away.
  */
-
-const MEETING_SUGGESTIONS = [
-  'What tasks are due this week?',
-  'What are the risks to the deadlines?',
-  'Make a list of action items.',
-];
 
 interface MeetingConversationProps {
   meetingId: string;
@@ -96,8 +109,11 @@ interface MeetingConversationProps {
   } | null;
   markedMoments?: number[];
   speakersById?: Map<number, string> | null;
+  speakers?: SpeakerInfo[];
+  selfSpeakerIds?: ReadonlySet<number> | null;
   speakerCount?: number;
   onRenameSpeaker?: (speakerId: number, displayName: string) => Promise<void> | void;
+  onSetSelfSpeaker?: (speakerId: number, isSelf: boolean) => Promise<void> | void;
   onSpeakersDetected?: () => Promise<void> | void;
 }
 
@@ -130,24 +146,65 @@ export function MeetingConversation({
   playbackRequest = null,
   markedMoments = [],
   speakersById = null,
+  speakers = [],
+  selfSpeakerIds = null,
   speakerCount = 0,
   onRenameSpeaker,
+  onSetSelfSpeaker,
   onSpeakersDetected,
 }: MeetingConversationProps) {
   const { t, lang } = useLanguage();
   const locale = lang === 'ru' ? 'ru-RU' : 'en-US';
   const chat = useMeetingChat({ scope: 'meeting', collectionId: null, meetingId, enabled: true });
   const { messages, input, setInput, sending, loadingHistory, send, onKeyDown, inputRef } = chat;
-
+  const meetingSuggestions = useMemo(
+    () => buildMeetingPromptSuggestions({
+      title: meetingTitle || meeting.title,
+      summary: summaryPanelProps.aiSummary,
+      transcripts,
+    }, lang),
+    [lang, meeting.title, meetingTitle, summaryPanelProps.aiSummary, transcripts],
+  );
   const [seekTarget, setSeekTarget] = useState<number | null>(seekToSeconds);
   const [activeTab, setActiveTab] = useState<'summary' | 'transcript'>(
     seekToSeconds == null ? 'summary' : 'transcript',
   );
+  const [tabScrollEdges, setTabScrollEdges] = useState({
+    summary: { start: false, end: false },
+    transcript: { start: false, end: false },
+  });
+
+  const setSummaryScrollEdges = useCallback((edges: ScrollEdges) => {
+    setTabScrollEdges((current) => (
+      current.summary.start === edges.start && current.summary.end === edges.end
+        ? current
+        : { ...current, summary: edges }
+    ));
+  }, []);
+
+  const handleThreadScrollCapture = useCallback((event: UIEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLElement;
+    if (target.dataset.slot !== 'message-scroller-viewport') return;
+
+    const edges = {
+      start: target.scrollTop > 1,
+      end: target.scrollHeight - target.scrollTop - target.clientHeight > 1,
+    };
+    setTabScrollEdges((current) => (
+      current[activeTab].start === edges.start && current[activeTab].end === edges.end
+        ? current
+        : { ...current, [activeTab]: edges }
+    ));
+  }, [activeTab]);
 
   // Drop a stale seek when the meeting changes.
   useEffect(() => {
     setSeekTarget(null);
     setActiveTab('summary');
+    setTabScrollEdges({
+      summary: { start: false, end: false },
+      transcript: { start: false, end: false },
+    });
   }, [meetingId]);
 
   // Honor the ?t= deep link / citation from another screen: expand + scroll.
@@ -199,29 +256,32 @@ export function MeetingConversation({
 
   const meetingTitleFor = useCallback(() => meetingTitle || meeting.title, [meetingTitle, meeting.title]);
 
-  const metaLine = useMemo(() => {
-    const startedAt = new Date(meeting.occurred_at || meeting.created_at);
-    if (Number.isNaN(startedAt.getTime())) return '';
-
+  const actualDurationSeconds = useMemo(() => {
     const durationSource = segments && segments.length > 0
       ? segments.map((s) => s.endTime ?? s.timestamp)
       : transcripts.map((tr) => tr.audio_end_time ?? tr.audio_start_time ?? 0);
     const transcriptDuration = durationSource.length ? Math.max(...durationSource) : 0;
-    const durationSeconds = meeting.duration_seconds && meeting.duration_seconds > 0
+    return meeting.duration_seconds && meeting.duration_seconds > 0
       ? meeting.duration_seconds
       : transcriptDuration;
+  }, [meeting.duration_seconds, segments, transcripts]);
+
+  const metaLine = useMemo(() => {
+    const startedAt = new Date(meeting.occurred_at || meeting.created_at);
+    if (Number.isNaN(startedAt.getTime())) return '';
+
     const timeFormatter = new Intl.DateTimeFormat(locale, {
       hour: '2-digit',
       minute: '2-digit',
     });
 
-    if (durationSeconds <= 0) return timeFormatter.format(startedAt);
-    const endedAt = new Date(startedAt.getTime() + durationSeconds * 1_000);
+    if (actualDurationSeconds <= 0) return timeFormatter.format(startedAt);
+    const endedAt = new Date(startedAt.getTime() + actualDurationSeconds * 1_000);
     return `${timeFormatter.format(startedAt)}\u00a0–\u00a0${timeFormatter.format(endedAt)}`;
-  }, [meeting.created_at, meeting.duration_seconds, meeting.occurred_at, segments, transcripts, locale]);
+  }, [actualDurationSeconds, meeting.created_at, meeting.occurred_at, locale]);
 
   return (
-    <div className="meeting-conversation flex h-full flex-col bg-[var(--elevation-1)]">
+    <div className="meeting-conversation meeting-page-surface flex h-full flex-col">
       {/* Top bar */}
       <div className="flex items-center gap-3 px-[var(--drawer-content-inset)] pb-3 pt-4">
         <div className="min-w-0 flex-1">
@@ -251,34 +311,47 @@ export function MeetingConversation({
 
       {reviewSlot && <div className="shrink-0">{reviewSlot}</div>}
 
-      <Tabs
+      <FluidTabs
         value={activeTab}
         onValueChange={(value) => setActiveTab(value as 'summary' | 'transcript')}
+        onScrollCapture={handleThreadScrollCapture}
         className="flex min-h-0 flex-1 flex-col"
       >
-        <TabsList className="mx-[var(--drawer-content-inset)] mb-3 grid h-10 w-auto shrink-0 grid-cols-2 rounded-xl bg-[var(--primary-5)] p-1">
-          <TabsTrigger value="summary" className="h-8 w-full rounded-lg px-4 shadow-none data-[state=active]:bg-[var(--elevation-1)] data-[state=active]:shadow-none">
+        <FluidTabsList className="mx-[var(--drawer-content-inset)] mb-3 w-auto shrink-0 grid-cols-2">
+          <FluidTabsTrigger value="summary" className="shadow-none">
             {t('Summary tab')}
-          </TabsTrigger>
-          <TabsTrigger value="transcript" className="h-8 w-full rounded-lg px-4 shadow-none data-[state=active]:bg-[var(--elevation-1)] data-[state=active]:shadow-none">
+          </FluidTabsTrigger>
+          <FluidTabsTrigger value="transcript" className="shadow-none">
             {t('Transcript tab')}
-          </TabsTrigger>
-        </TabsList>
+          </FluidTabsTrigger>
+        </FluidTabsList>
 
-        <TabsContent value="summary" className="mt-0 min-h-0 flex-1 data-[state=active]:flex data-[state=active]:flex-col data-[state=inactive]:hidden">
+        <div
+          aria-hidden="true"
+          className={`h-px w-full shrink-0 bg-[var(--primary-10)] transition-opacity duration-150 ${
+            tabScrollEdges[activeTab].start ? 'opacity-100' : 'opacity-0'
+          }`}
+        />
+
+        <FluidTabsContent value="summary" className="mt-0 min-h-0 flex-1 data-[state=active]:flex data-[state=active]:flex-col data-[state=inactive]:hidden">
           <MessageScrollerProvider
             key={`${meetingId}-${loadingHistory ? 'loading' : 'ready'}`}
             autoScroll
             defaultScrollPosition="last-anchor"
             scrollPreviousItemPeek={48}
           >
+            <ScrollEdgesObserver onChange={setSummaryScrollEdges} />
             <div className="relative flex min-h-0 flex-1 flex-col">
               <MessageScroller className="min-h-0 flex-1">
                 <MessageScrollerViewport className="scroll-pb-28 px-[var(--drawer-content-inset)] pb-28 pt-1.5">
                   <MessageScrollerContent className="mx-auto max-w-[720px] gap-6 pb-4">
                     {showSummaryContent && (
                       <MessageScrollerItem messageId={`${meetingId}-summary`}>
-                        <SummaryMessage summaryPanelProps={summaryProps} />
+                        <SummaryMessage
+                          summaryPanelProps={summaryProps}
+                          actualDurationSeconds={actualDurationSeconds}
+                          speakers={speakers}
+                        />
                       </MessageScrollerItem>
                     )}
 
@@ -324,12 +397,14 @@ export function MeetingConversation({
                 sending={sending}
                 disabled={loadingHistory}
                 inputRef={inputRef}
+                suggestions={meetingSuggestions}
+                showSeparator={tabScrollEdges.summary.start || tabScrollEdges.summary.end}
               />
             </div>
           </MessageScrollerProvider>
-        </TabsContent>
+        </FluidTabsContent>
 
-        <TabsContent value="transcript" className="mt-0 min-h-0 flex-1 overflow-hidden data-[state=inactive]:hidden">
+        <FluidTabsContent value="transcript" className="mt-0 min-h-0 flex-1 overflow-hidden data-[state=inactive]:hidden">
           <TranscriptCard
             meetingId={meetingId}
             meetingFolderPath={meetingFolderPath}
@@ -347,13 +422,15 @@ export function MeetingConversation({
             markedMoments={markedMoments}
             onSeekToMoment={handleSeekToMoment}
             speakersById={speakersById}
+            selfSpeakerIds={selfSpeakerIds}
             speakerCount={speakerCount}
             onRenameSpeaker={onRenameSpeaker}
+            onSetSelfSpeaker={onSetSelfSpeaker}
             onSpeakersDetected={onSpeakersDetected}
             transcriptViewportClassName="px-[var(--drawer-content-inset)]"
           />
-        </TabsContent>
-      </Tabs>
+        </FluidTabsContent>
+      </FluidTabs>
     </div>
   );
 }

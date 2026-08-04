@@ -1,8 +1,8 @@
 "use client"
 
 import * as React from "react"
+import { AnimatePresence, motion } from "framer-motion"
 import { Loader2 } from "@/components/deslop-icons"
-import { Icon } from "@/components/memento/Icon"
 import {
   InputGroup,
   InputGroupAddon,
@@ -10,6 +10,8 @@ import {
   InputGroupTextarea,
 } from "@/components/ui/input-group"
 import { cn } from "@/lib/utils"
+import { IconArrowUp } from "@/vendor/deslop/primitives/material-symbols-react"
+import { useRotatingPlaceholder } from "@/hooks/useRotatingPlaceholder"
 
 type PromptInputProps = Omit<
   React.ComponentProps<"textarea">,
@@ -23,6 +25,8 @@ type PromptInputProps = Omit<
   containerClassName?: string
   sendLabel: string
   submitButtonType?: "button" | "submit"
+  placeholderSuggestions?: readonly string[]
+  placeholderIntervalMs?: number
 }
 
 export function PromptInputContainer({
@@ -32,7 +36,7 @@ export function PromptInputContainer({
   return (
     <InputGroup
       className={cn(
-        "min-h-[50px] items-center rounded-[24px] border-[var(--primary-10)] bg-[var(--elevation-1)] py-0 pl-4 pr-2 shadow-none dark:bg-[var(--elevation-1)]",
+        "min-h-[50px] items-center rounded-[24px] border-[var(--primary-10)] bg-[var(--elevation-2)] py-0 pl-4 pr-2 shadow-none dark:bg-[var(--elevation-2)]",
         "focus-within:border-[var(--primary-10)] has-[[data-slot=input-group-control]:focus-visible]:ring-0",
         className,
       )}
@@ -57,12 +61,20 @@ export function PromptInput({
   className,
   sendLabel,
   submitButtonType = "button",
+  placeholder,
+  placeholderSuggestions = [],
+  placeholderIntervalMs,
   onKeyDown,
   rows = 1,
   ...props
 }: PromptInputProps) {
   const controlRef = React.useRef<HTMLTextAreaElement | null>(null)
   const canSend = !disabled && !sending && value.trim().length > 0
+  const rotatingPlaceholder = useRotatingPlaceholder(
+    placeholderSuggestions,
+    placeholder ?? "",
+    placeholderIntervalMs,
+  )
 
   const resize = React.useCallback((node: HTMLTextAreaElement | null) => {
     if (!node) return
@@ -84,11 +96,32 @@ export function PromptInput({
 
   return (
     <PromptInputContainer className={containerClassName}>
+      <div
+        aria-hidden="true"
+        className={cn(
+          "pointer-events-none absolute left-4 right-14 top-0 z-[1] flex h-12 min-w-0 items-center overflow-hidden",
+          value.length > 0 && "invisible",
+        )}
+      >
+        <AnimatePresence initial={false} mode="wait">
+          <motion.span
+            key={rotatingPlaceholder}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.15, ease: "easeOut" }}
+            className="block min-w-0 truncate text-sm leading-6 text-muted-foreground"
+          >
+            {rotatingPlaceholder}
+          </motion.span>
+        </AnimatePresence>
+      </div>
       <InputGroupTextarea
         ref={setControlRef}
         value={value}
         disabled={disabled}
         rows={rows}
+        placeholder={rotatingPlaceholder}
         onChange={(event) => {
           onValueChange(event.target.value)
           resize(event.currentTarget)
@@ -108,7 +141,7 @@ export function PromptInput({
           else onSubmit?.()
         }}
         className={cn(
-          "h-auto min-h-[48px] max-h-[240px] resize-none overflow-y-auto pb-[10px] pl-0 pr-1 pt-[14px] text-sm leading-6",
+          "h-auto min-h-[48px] max-h-[240px] resize-none overflow-y-auto pb-[10px] pl-0 pr-1 pt-[14px] text-sm leading-6 placeholder:text-transparent",
           className,
         )}
         {...props}
@@ -126,7 +159,11 @@ export function PromptInput({
           aria-label={sendLabel}
           className="h-9 w-9 rounded-full bg-[var(--primary-5)] text-muted-foreground hover:bg-[var(--primary-10)] hover:text-foreground"
         >
-          {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Icon name="send" size={17} />}
+          {sending ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <IconArrowUp size={20} weight={400} />
+          )}
         </InputGroupButton>
       </InputGroupAddon>
     </PromptInputContainer>

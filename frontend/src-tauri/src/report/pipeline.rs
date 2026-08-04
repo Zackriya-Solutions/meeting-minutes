@@ -32,8 +32,8 @@ use crate::llm::{ensure_outbound_allowed, Purpose};
 use crate::report::dynamics::{self, DynSegment, Dynamics};
 use crate::report::prompts::{
     self, Clarify, ClarifyAnswer, ClarifyQuestion, Classification, Commitments,
-    DisagreementsConcepts, Insights, Numbers, Roles, SpeakerDecision, SpeakerGuesses,
-    SpeakerLine, SpeakerSuggestion, ThreadsRisks, Topics,
+    DisagreementsConcepts, Insights, Numbers, Roles, SpeakerDecision, SpeakerGuesses, SpeakerLine,
+    SpeakerSuggestion, ThreadsRisks, Topics,
 };
 use crate::report::render::{compute_score, render_report, RenderInput};
 
@@ -249,7 +249,10 @@ fn build_segment_views(
             speaker_label: speaker_label(s),
         })
         .collect();
-    let seg_labels: Vec<String> = dyn_segments.iter().map(|d| d.speaker_label.clone()).collect();
+    let seg_labels: Vec<String> = dyn_segments
+        .iter()
+        .map(|d| d.speaker_label.clone())
+        .collect();
     let seg_texts: Vec<String> = dyn_segments.iter().map(|d| d.text.clone()).collect();
     (dyn_segments, seg_labels, seg_texts)
 }
@@ -321,7 +324,11 @@ impl SpeakerContext<'_> {
         };
         let total: f64 = (0..self.segments.len()).map(dur).sum();
         let mine: f64 = idx.iter().copied().map(dur).sum();
-        let share = if total > 0.0 { (mine / total) as f32 } else { 0.0 };
+        let share = if total > 0.0 {
+            (mine / total) as f32
+        } else {
+            0.0
+        };
         let first = idx
             .first()
             .map(|&i| prompts::fmt_mmss(self.timed.get(i).map(|t| t.start).unwrap_or(0.0)))
@@ -340,7 +347,11 @@ impl SpeakerContext<'_> {
             .copied()
             .filter(|&i| self.char_len(i) >= MIN_SAMPLE_CHARS)
             .collect();
-        let pool = if substantive.is_empty() { &all } else { &substantive };
+        let pool = if substantive.is_empty() {
+            &all
+        } else {
+            &substantive
+        };
         let n = pool.len();
         if n == 0 || limit == 0 {
             return Vec::new();
@@ -614,7 +625,9 @@ async fn apply_speaker_decisions(
             continue;
         }
         if let Some(target) = d.merge_into {
-            if target == d.speaker_id || !current.contains_key(&target) || merged_ids.contains(&target)
+            if target == d.speaker_id
+                || !current.contains_key(&target)
+                || merged_ids.contains(&target)
             {
                 log::warn!(
                     "[report] dropping invalid merge decision {} -> {target} for meeting {meeting_id}",
@@ -625,7 +638,12 @@ async fn apply_speaker_decisions(
             groups.entry(target).or_default().push(d.speaker_id);
             continue;
         }
-        if let Some(name) = d.display_name.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        if let Some(name) = d
+            .display_name
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
             if current.get(&d.speaker_id).copied() != Some(name) {
                 renames.push((d.speaker_id, name.to_string()));
             }
@@ -870,20 +888,21 @@ pub async fn run_report_pipeline<R: Runtime>(
     let start = Instant::now();
 
     // ---- transcript (hard requirement) ----
-    let mut segments = match SpeakersRepository::meeting_transcript_segments(&pool, &meeting_id).await {
-        Ok(s) => s,
-        Err(e) => {
-            fail(
-                &app,
-                &pool,
-                &report_id,
-                &meeting_id,
-                &format!("Не удалось прочитать транскрипт: {e}"),
-            )
-            .await;
-            return;
-        }
-    };
+    let mut segments =
+        match SpeakersRepository::meeting_transcript_segments(&pool, &meeting_id).await {
+            Ok(s) => s,
+            Err(e) => {
+                fail(
+                    &app,
+                    &pool,
+                    &report_id,
+                    &meeting_id,
+                    &format!("Не удалось прочитать транскрипт: {e}"),
+                )
+                .await;
+                return;
+            }
+        };
     if segments.is_empty() {
         fail(
             &app,
@@ -1036,11 +1055,8 @@ pub async fn run_report_pipeline<R: Runtime>(
     let timed = dynamics::timeline(&dyn_segments);
     let dyn_metrics = Dynamics::from_timed(&dyn_segments, &timed);
 
-    let transcript = prompts::truncate_transcript(&prompts::format_transcript(
-        &timed,
-        &seg_labels,
-        &seg_texts,
-    ));
+    let transcript =
+        prompts::truncate_transcript(&prompts::format_transcript(&timed, &seg_labels, &seg_texts));
 
     // ---- stage 3: classify ----
     start_stage(&app, &pool, &report_id, &meeting_id, 2).await;
@@ -1382,19 +1398,25 @@ mod tests {
                 id: 1,
                 display_name: "Speaker 1".into(),
                 is_confirmed: false,
+                is_self: false,
                 segment_count: 40,
+                speech_duration_seconds: 0.0,
             },
             MeetingSpeaker {
                 id: 2,
                 display_name: "Speaker 2".into(),
                 is_confirmed: false,
+                is_self: false,
                 segment_count: 10,
+                speech_duration_seconds: 0.0,
             },
             MeetingSpeaker {
                 id: 3,
                 display_name: "Аня".into(),
                 is_confirmed: true,
+                is_self: false,
                 segment_count: 5,
+                speech_duration_seconds: 0.0,
             },
         ]
     }
@@ -1449,14 +1471,19 @@ mod tests {
         assert!(s[1].suggested_name.is_none());
         assert_eq!(s[1].merge_into, Some(1));
         assert_eq!(s[1].merge_reason.as_deref(), Some("одна манера речи"));
-        assert!(s[2].merge_into.is_none(), "chained merge group must be dropped");
+        assert!(
+            s[2].merge_into.is_none(),
+            "chained merge group must be dropped"
+        );
     }
 
     #[test]
     fn speaker_suggestions_without_guesses_list_the_whole_roster() {
         let s = build_speaker_suggestions(&roster3(), None);
         assert_eq!(s.len(), 3);
-        assert!(s.iter().all(|x| x.suggested_name.is_none() && x.merge_into.is_none()));
+        assert!(s
+            .iter()
+            .all(|x| x.suggested_name.is_none() && x.merge_into.is_none()));
         assert_eq!(s[2].current_name, "Аня");
         assert!(s[2].is_confirmed);
     }
@@ -1469,26 +1496,47 @@ mod tests {
             speaker: None,
             speaker_id,
             display_name: speaker_id.map(|id| format!("Speaker {id}")),
+            is_self: false,
         }
     }
 
     /// A 10-line conversation: speaker 1 and 2 alternate, 3 chimes in twice late.
     fn convo() -> Vec<TranscriptSpeakerSegment> {
         vec![
-            seg("Всем привет, меня зовут Андрей, я сегодня веду встречу", Some(1)),
+            seg(
+                "Всем привет, меня зовут Андрей, я сегодня веду встречу",
+                Some(1),
+            ),
             seg("Привет, Андрей, я готова начинать обсуждение", Some(2)),
             seg("Отлично, тогда давайте по первому пункту повестки", Some(1)),
             seg("Да", Some(2)),
-            seg("Нам нужно посчитать бюджет на следующий квартал внимательно", Some(1)),
-            seg("Я подготовлю смету к пятнице и пришлю всем участникам", Some(2)),
-            seg("Коллеги, извините что вклиниваюсь, у меня есть вопрос", Some(3)),
+            seg(
+                "Нам нужно посчитать бюджет на следующий квартал внимательно",
+                Some(1),
+            ),
+            seg(
+                "Я подготовлю смету к пятнице и пришлю всем участникам",
+                Some(2),
+            ),
+            seg(
+                "Коллеги, извините что вклиниваюсь, у меня есть вопрос",
+                Some(3),
+            ),
             seg("Конечно, спрашивайте, мы как раз обсуждаем бюджет", Some(1)),
-            seg("Спасибо, вопрос про сроки поставки оборудования в регионы", Some(3)),
-            seg("Хорошо, зафиксировали, обсудим это отдельно на следующей встрече", Some(1)),
+            seg(
+                "Спасибо, вопрос про сроки поставки оборудования в регионы",
+                Some(3),
+            ),
+            seg(
+                "Хорошо, зафиксировали, обсудим это отдельно на следующей встрече",
+                Some(1),
+            ),
         ]
     }
 
-    fn ctx_for(segments: &[TranscriptSpeakerSegment]) -> (Vec<dynamics::TimedSegment>, Vec<String>) {
+    fn ctx_for(
+        segments: &[TranscriptSpeakerSegment],
+    ) -> (Vec<dynamics::TimedSegment>, Vec<String>) {
         let (dyn_segs, labels, _) = build_segment_views(segments);
         (dynamics::timeline(&dyn_segs), labels)
     }
@@ -1497,7 +1545,11 @@ mod tests {
     fn samples_spread_across_the_meeting_and_skip_filler() {
         let segments = convo();
         let (timed, labels) = ctx_for(&segments);
-        let ctx = SpeakerContext { segments: &segments, timed: &timed, labels: &labels };
+        let ctx = SpeakerContext {
+            segments: &segments,
+            timed: &timed,
+            labels: &labels,
+        };
 
         let s1 = ctx.samples(1, 4);
         assert_eq!(s1.len(), 4);
@@ -1520,7 +1572,11 @@ mod tests {
     fn samples_fall_back_to_filler_when_nothing_longer_exists() {
         let segments = vec![seg("Да", Some(7)), seg("Угу", Some(7))];
         let (timed, labels) = ctx_for(&segments);
-        let ctx = SpeakerContext { segments: &segments, timed: &timed, labels: &labels };
+        let ctx = SpeakerContext {
+            segments: &segments,
+            timed: &timed,
+            labels: &labels,
+        };
         let s = ctx.samples(7, 4);
         assert_eq!(s.len(), 2);
         assert_eq!(s[0].text, "Да");
@@ -1530,7 +1586,11 @@ mod tests {
     fn evidence_window_highlights_the_quoted_line_with_context() {
         let segments = convo();
         let (timed, labels) = ctx_for(&segments);
-        let ctx = SpeakerContext { segments: &segments, timed: &timed, labels: &labels };
+        let ctx = SpeakerContext {
+            segments: &segments,
+            timed: &timed,
+            labels: &labels,
+        };
 
         let i = ctx
             .locate_evidence(0, "меня зовут Андрей", 1)
@@ -1548,7 +1608,11 @@ mod tests {
     fn evidence_lookup_survives_a_wrong_reported_index() {
         let segments = convo();
         let (timed, labels) = ctx_for(&segments);
-        let ctx = SpeakerContext { segments: &segments, timed: &timed, labels: &labels };
+        let ctx = SpeakerContext {
+            segments: &segments,
+            timed: &timed,
+            labels: &labels,
+        };
 
         // Model reported the wrong line but quoted accurately -> text search wins.
         assert_eq!(ctx.locate_evidence(5, "меня зовут Андрей", 1), Some(0));
@@ -1564,7 +1628,11 @@ mod tests {
     fn pair_excerpt_picks_where_both_speakers_are_closest() {
         let segments = convo();
         let (timed, labels) = ctx_for(&segments);
-        let ctx = SpeakerContext { segments: &segments, timed: &timed, labels: &labels };
+        let ctx = SpeakerContext {
+            segments: &segments,
+            timed: &timed,
+            labels: &labels,
+        };
 
         // Speakers 1 and 3 are adjacent at segments 6-7.
         let p = ctx.pair(1, 3, 6);
@@ -1583,12 +1651,37 @@ mod tests {
 
         let segments = convo();
         let (timed, labels) = ctx_for(&segments);
-        let ctx = SpeakerContext { segments: &segments, timed: &timed, labels: &labels };
+        let ctx = SpeakerContext {
+            segments: &segments,
+            timed: &timed,
+            labels: &labels,
+        };
 
         let roster = vec![
-            MeetingSpeaker { id: 1, display_name: "Speaker 1".into(), is_confirmed: false, segment_count: 5 },
-            MeetingSpeaker { id: 2, display_name: "Speaker 2".into(), is_confirmed: false, segment_count: 3 },
-            MeetingSpeaker { id: 3, display_name: "Speaker 3".into(), is_confirmed: false, segment_count: 2 },
+            MeetingSpeaker {
+                id: 1,
+                display_name: "Speaker 1".into(),
+                is_confirmed: false,
+                is_self: false,
+                segment_count: 5,
+                speech_duration_seconds: 0.0,
+            },
+            MeetingSpeaker {
+                id: 2,
+                display_name: "Speaker 2".into(),
+                is_confirmed: false,
+                is_self: false,
+                segment_count: 3,
+                speech_duration_seconds: 0.0,
+            },
+            MeetingSpeaker {
+                id: 3,
+                display_name: "Speaker 3".into(),
+                is_confirmed: false,
+                is_self: false,
+                segment_count: 2,
+                speech_duration_seconds: 0.0,
+            },
         ];
         let guesses = SpeakerGuesses {
             names: vec![SpeakerNameGuess {
@@ -1627,8 +1720,14 @@ mod tests {
             .iter()
             .map(|l| l.speaker_id)
             .collect();
-        assert!(ctx_ids.contains(&Some(1)) && ctx_ids.contains(&Some(3)), "got {ctx_ids:?}");
-        assert!(suggestions[0].merge_context.is_empty(), "the kept speaker has no merge excerpt");
+        assert!(
+            ctx_ids.contains(&Some(1)) && ctx_ids.contains(&Some(3)),
+            "got {ctx_ids:?}"
+        );
+        assert!(
+            suggestions[0].merge_context.is_empty(),
+            "the kept speaker has no merge excerpt"
+        );
     }
 
     #[test]
@@ -1636,7 +1735,11 @@ mod tests {
         let long = "я".repeat(LINE_CHARS + 50);
         let segments = vec![seg(&long, Some(1))];
         let (timed, labels) = ctx_for(&segments);
-        let ctx = SpeakerContext { segments: &segments, timed: &timed, labels: &labels };
+        let ctx = SpeakerContext {
+            segments: &segments,
+            timed: &timed,
+            labels: &labels,
+        };
         let line = ctx.line(0, false);
         assert_eq!(line.text.chars().count(), LINE_CHARS + 1); // + ellipsis
         assert!(line.text.ends_with('…'));
@@ -1650,20 +1753,39 @@ mod tests {
         // near each other. The old clamp truncated the excerpt before the second turn.
         let mut segments = vec![seg("Здравствуйте, начнём совещание прямо сейчас", Some(1))];
         for _ in 0..10 {
-            segments.push(seg("Довольно длинная реплика третьего участника встречи", Some(3)));
+            segments.push(seg(
+                "Довольно длинная реплика третьего участника встречи",
+                Some(3),
+            ));
         }
-        segments.push(seg("Спасибо, у меня короткое дополнение по срокам", Some(2)));
+        segments.push(seg(
+            "Спасибо, у меня короткое дополнение по срокам",
+            Some(2),
+        ));
         let (timed, labels) = ctx_for(&segments);
-        let ctx = SpeakerContext { segments: &segments, timed: &timed, labels: &labels };
+        let ctx = SpeakerContext {
+            segments: &segments,
+            timed: &timed,
+            labels: &labels,
+        };
 
         let last = (segments.len() - 1) as i64;
         let p = ctx.pair(1, 2, PAIR_LINES);
         let segs: Vec<i64> = p.iter().map(|l| l.seg).collect();
         assert!(segs.contains(&0), "first speaker's turn missing: {segs:?}");
-        assert!(segs.contains(&last), "second speaker's turn missing: {segs:?}");
+        assert!(
+            segs.contains(&last),
+            "second speaker's turn missing: {segs:?}"
+        );
         assert!(p.len() <= PAIR_LINES, "excerpt exceeds budget: {segs:?}");
-        assert!(p.iter().any(|l| l.speaker_id == Some(1)), "speaker 1 absent");
-        assert!(p.iter().any(|l| l.speaker_id == Some(2)), "speaker 2 absent");
+        assert!(
+            p.iter().any(|l| l.speaker_id == Some(1)),
+            "speaker 1 absent"
+        );
+        assert!(
+            p.iter().any(|l| l.speaker_id == Some(2)),
+            "speaker 2 absent"
+        );
     }
 
     #[test]
@@ -1672,7 +1794,11 @@ mod tests {
 
         let segments = convo();
         let (timed, labels) = ctx_for(&segments);
-        let ctx = SpeakerContext { segments: &segments, timed: &timed, labels: &labels };
+        let ctx = SpeakerContext {
+            segments: &segments,
+            timed: &timed,
+            labels: &labels,
+        };
 
         // The model emitted TWO guesses for speaker 1. The FIRST drives the displayed
         // name, so the evidence line must come from the FIRST guess's seg too. The first
@@ -1703,7 +1829,11 @@ mod tests {
         assert_eq!(s[0].suggested_name.as_deref(), Some("Андрей"));
         enrich_suggestions(&mut s, &ctx, Some(&guesses));
 
-        let highlighted = s[0].evidence_context.iter().find(|l| l.highlight).map(|l| l.seg);
+        let highlighted = s[0]
+            .evidence_context
+            .iter()
+            .find(|l| l.highlight)
+            .map(|l| l.seg);
         assert_eq!(
             highlighted,
             Some(0),
@@ -1725,17 +1855,29 @@ mod tests {
                 id INTEGER PRIMARY KEY,
                 display_name TEXT NOT NULL,
                 voice_embedding BLOB,
-                is_confirmed INTEGER NOT NULL DEFAULT 0
+                is_confirmed INTEGER NOT NULL DEFAULT 0,
+                is_self INTEGER NOT NULL DEFAULT 0
             )",
         )
         .execute(&pool)
         .await
         .unwrap();
         sqlx::query(
+            "CREATE UNIQUE INDEX idx_speakers_single_self ON speakers(is_self) WHERE is_self = 1",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        // The timing columns are part of the subset because `meeting_speakers` sums speech
+        // duration; without them the roster read fails and every decision looks unknown.
+        sqlx::query(
             "CREATE TABLE transcripts (
                 id TEXT PRIMARY KEY,
                 meeting_id TEXT NOT NULL,
-                speaker_id INTEGER
+                speaker_id INTEGER,
+                audio_start_time REAL,
+                audio_end_time REAL,
+                duration REAL
             )",
         )
         .execute(&pool)
@@ -1826,11 +1968,10 @@ mod tests {
         }];
         let changed = apply_speaker_decisions(&pool, "m1", &roster3(), &decisions).await;
         assert!(!changed);
-        let confirmed: i64 =
-            sqlx::query_scalar("SELECT is_confirmed FROM speakers WHERE id = 1")
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+        let confirmed: i64 = sqlx::query_scalar("SELECT is_confirmed FROM speakers WHERE id = 1")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
         assert_eq!(confirmed, 0, "untouched speaker must stay unconfirmed");
     }
 }
