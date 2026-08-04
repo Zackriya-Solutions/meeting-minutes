@@ -377,8 +377,9 @@ async fn run_retranscription<R: Runtime>(
             (text, 0.9f32)
         } else {
             let engine = whisper_engine.as_ref().unwrap();
+            let prompt = crate::get_transcription_prompt_internal();
             let (text, conf, _) = engine
-                .transcribe_audio_with_confidence(segment.samples.clone(), language.clone())
+                .transcribe_audio_with_confidence(segment.samples.clone(), language.clone(), prompt)
                 .await
                 .map_err(|e| anyhow!("Whisper transcription failed on segment {}: {}", i, e))?;
             (text, conf)

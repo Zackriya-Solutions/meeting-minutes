@@ -69,6 +69,10 @@ static RECORDING_FLAG: AtomicBool = AtomicBool::new(false);
 static LANGUAGE_PREFERENCE: std::sync::LazyLock<StdMutex<String>> =
     std::sync::LazyLock::new(|| StdMutex::new("auto-translate".to_string()));
 
+// Global transcription prompt storage (initial_prompt passed to Whisper for vocabulary hints)
+static TRANSCRIPTION_PROMPT: std::sync::LazyLock<StdMutex<Option<String>>> =
+    std::sync::LazyLock::new(|| StdMutex::new(None));
+
 #[derive(Debug, Deserialize)]
 struct RecordingArgs {
     save_path: String,
@@ -388,6 +392,38 @@ pub fn get_language_preference_internal() -> Option<String> {
     LANGUAGE_PREFERENCE.lock().ok().map(|lang| lang.clone())
 }
 
+#[tauri::command]
+async fn set_transcription_prompt(prompt: Option<String>) -> Result<(), String> {
+    let mut stored = TRANSCRIPTION_PROMPT
+        .lock()
+        .map_err(|e| format!("Failed to set transcription prompt: {}", e))?;
+    log_info!("Setting transcription prompt: {:?}", prompt.as_deref().map(|p| &p[..p.len().min(50)]));
+    *stored = prompt.map(|p| truncate_transcription_prompt(&p).to_string());
+    Ok(())
+}
+
+#[tauri::command]
+async fn get_transcription_prompt() -> Result<Option<String>, String> {
+    TRANSCRIPTION_PROMPT
+        .lock()
+        .map(|p| p.clone())
+        .map_err(|e| format!("Failed to get transcription prompt: {}", e))
+}
+
+pub fn get_transcription_prompt_internal() -> Option<String> {
+    TRANSCRIPTION_PROMPT.lock().ok().and_then(|p| p.clone())
+}
+
+fn truncate_transcription_prompt(s: &str) -> &str {
+    // Whisper's initial_prompt is capped at ~224 tokens / ~1000 chars
+    if s.len() <= 1000 {
+        s
+    } else {
+        // Truncate at a word boundary near 1000 chars
+        &s[..s[..1000].rfind(' ').unwrap_or(1000)]
+    }
+}
+
 pub fn run() {
     log::set_max_level(log::LevelFilter::Info);
 
@@ -700,6 +736,9 @@ pub fn run() {
             audio::recording_preferences::get_audio_backend_info,
             // Language preference commands
             set_language_preference,
+            // Transcription prompt commands
+            set_transcription_prompt,
+            get_transcription_prompt,
             // Notification system commands
             notifications::commands::get_notification_settings,
             notifications::commands::set_notification_settings,
