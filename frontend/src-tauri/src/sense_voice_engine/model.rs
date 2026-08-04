@@ -117,7 +117,7 @@ const FP32_FILES: [ModelFile; 4] = [
     ModelFile {
         relative_path: "SenseVoiceSmall_fp32.mlmodelc/coremldata.bin",
         size: 396,
-        sha256: "ba5e9b5d9bf9b1b85ef2d1f69717e1f4424cc72e7316fc3edb0b604e449f9919",
+        sha256: "ba5a1b5d9bf9b1b85ef2d1f69717e1f4424cc72e7316fc3edb0b604e449f9919",
     },
     ModelFile {
         relative_path: "SenseVoiceSmall_fp32.mlmodelc/model.mil",

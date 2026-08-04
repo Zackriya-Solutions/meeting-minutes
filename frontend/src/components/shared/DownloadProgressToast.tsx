@@ -47,16 +47,6 @@ function categorizeError(error: string): string {
   return error;
 }
 
-function senseVoiceDownloadDetails(modelName: string) {
-  if (modelName.endsWith('fp32')) {
-    return { displayName: 'SenseVoice Small FP32 / Quality', totalMiB: 900.7 };
-  }
-  if (modelName.endsWith('fp16')) {
-    return { displayName: 'SenseVoice Small FP16 / Balanced', totalMiB: 450.6 };
-  }
-  return { displayName: 'SenseVoice Small INT8 / Fast', totalMiB: 228.8 };
-}
-
 // Custom toast component for download progress
 function DownloadToastContent({
   download,
@@ -355,68 +345,6 @@ export function useDownloadProgressToast() {
         updateDownload(payload.modelName, {
           modelName: payload.modelName,
           displayName: 'Qwen3-ASR 0.6B Int8',
-          status: cancelled ? 'cancelled' : 'error',
-          error: cancelled ? undefined : categorizeError(payload.error),
-        });
-        cleanupDownload(payload.modelName, cancelled ? 6000 : 11000);
-      }
-    );
-
-    return () => {
-      unlistenProgress.then((fn) => fn());
-      unlistenComplete.then((fn) => fn());
-      unlistenError.then((fn) => fn());
-    };
-  }, [updateDownload, cleanupDownload]);
-
-  // Listen to SenseVoice download events so progress survives closing Settings.
-  useEffect(() => {
-    const unlistenProgress = listen<{
-      modelName: string;
-      progress: number;
-      downloaded_mb: number;
-      total_mb: number;
-      speed_mbps: number;
-    }>('sense-voice-model-download-progress', ({ payload }) => {
-      const { displayName } = senseVoiceDownloadDetails(payload.modelName);
-      updateDownload(payload.modelName, {
-        modelName: payload.modelName,
-        displayName,
-        progress: payload.progress,
-        downloadedMb: payload.downloaded_mb,
-        totalMb: payload.total_mb,
-        speedMbps: payload.speed_mbps,
-        unitLabel: 'MiB',
-        status: payload.progress >= 100 ? 'completed' : 'downloading',
-      });
-    });
-
-    const unlistenComplete = listen<{ modelName: string }>(
-      'sense-voice-model-download-complete',
-      ({ payload }) => {
-        const { displayName, totalMiB } = senseVoiceDownloadDetails(payload.modelName);
-        updateDownload(payload.modelName, {
-          modelName: payload.modelName,
-          displayName,
-          progress: 100,
-          downloadedMb: totalMiB,
-          totalMb: totalMiB,
-          speedMbps: 0,
-          unitLabel: 'MiB',
-          status: 'completed',
-        });
-        cleanupDownload(payload.modelName, 4000);
-      }
-    );
-
-    const unlistenError = listen<{ modelName: string; error: string }>(
-      'sense-voice-model-download-error',
-      ({ payload }) => {
-        const { displayName } = senseVoiceDownloadDetails(payload.modelName);
-        const cancelled = payload.error.toLowerCase().includes('cancelled');
-        updateDownload(payload.modelName, {
-          modelName: payload.modelName,
-          displayName,
           status: cancelled ? 'cancelled' : 'error',
           error: cancelled ? undefined : categorizeError(payload.error),
         });
