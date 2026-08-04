@@ -24,8 +24,8 @@ struct AudioMixerRingBuffer {
 
 impl AudioMixerRingBuffer {
     fn new(sample_rate: u32) -> Self {
-        // Use 50ms windows for mixing
-        let window_ms = 600.0;
+        // Keep the live pipeline responsive while still smoothing device jitter.
+        let window_ms = 50.0;
         let window_size_samples = (sample_rate as f32 * window_ms / 1000.0) as usize;
 
         // CRITICAL FIX: Increase max buffer to 400ms for system audio stability
@@ -726,22 +726,24 @@ impl AudioPipeline {
 
         let redemption_time = if cfg!(target_os = "macos") { 400 } else { 400 };
 
-        let vad_processor = match ContinuousVadProcessor::new(sample_rate, redemption_time) {
-            Ok(processor) => {
-                info!("VAD-driven pipeline: VAD segments will be sent directly to Whisper (no time-based accumulation)");
-                processor
-            }
-            Err(e) => {
-                error!("Failed to create VAD processor: {}", e);
-                panic!("VAD processor creation failed: {}", e);
-            }
-        };
+        let vad_processor =
+            match ContinuousVadProcessor::new_realtime(sample_rate, redemption_time) {
+                Ok(processor) => {
+                    info!("Live transcription pipeline: continuous 8-second audio coverage enabled");
+                    processor
+                }
+                Err(e) => {
+                    error!("Failed to create VAD processor: {}", e);
+                    panic!("VAD processor creation failed: {}", e);
+                }
+            };
 
         // Initialize professional audio mixing components
         let ring_buffer = AudioMixerRingBuffer::new(sample_rate);
         let mixer = ProfessionalAudioMixer::new(sample_rate);
 
-        // Note: target_chunk_duration_ms is ignored - VAD controls segmentation now
+        // target_chunk_duration_ms is retained for API compatibility. Live VAD
+        // applies its own hard segment limit so continuous speech remains realtime.
         let _ = target_chunk_duration_ms;
 
         Self {
@@ -765,7 +767,7 @@ impl AudioPipeline {
 
     /// Run the VAD-driven audio processing pipeline
     pub async fn run(mut self) -> Result<()> {
-        info!("VAD-driven audio pipeline started - segments sent in real-time based on speech detection");
+        info!("Live audio pipeline started - continuous segments sent without VAD audio loss");
 
         // CRITICAL FIX: Continue processing until channel is closed, not based on recording state
         // This ensures ALL chunks are processed during shutdown, fixing premature meeting completion
@@ -831,14 +833,14 @@ impl AudioPipeline {
                             // Previous 2x gain was causing excessive limiting/distortion
                             let mixed_with_gain = mixed_clean;
 
-                            // STEP 3: Send mixed audio for transcription (VAD + Whisper)
+                            // STEP 3: Send mixed audio for continuous live transcription
                             match self.vad_processor.process_audio(&mixed_with_gain) {
                                 Ok(speech_segments) => {
                                     for segment in speech_segments {
                                         let duration_ms = segment.end_timestamp_ms - segment.start_timestamp_ms;
 
                                         if segment.samples.len() >= 800 {  // Minimum 50ms at 16kHz - matches Parakeet capability
-                                            info!("📤 Sending VAD segment: {:.1}ms, {} samples",
+                                            info!("📤 Sending live audio segment: {:.1}ms, {} samples",
                                                   duration_ms, segment.samples.len());
 
                                             let transcription_chunk = AudioChunk {
@@ -893,7 +895,7 @@ impl AudioPipeline {
         // Flush any remaining VAD segments
         self.flush_remaining_audio()?;
 
-        info!("VAD-driven audio pipeline ended");
+        info!("Live audio pipeline ended");
         Ok(())
     }
 
