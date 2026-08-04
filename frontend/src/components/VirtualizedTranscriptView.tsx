@@ -71,6 +71,7 @@ const TranscriptSegment = memo(function TranscriptSegment({
     confidence,
     isStreaming,
     showConfidence,
+    speaker,
 }: {
     id: string;
     timestamp: number;
@@ -78,12 +79,22 @@ const TranscriptSegment = memo(function TranscriptSegment({
     confidence?: number;
     isStreaming: boolean;
     showConfidence: boolean;
+    speaker?: string;
 }) {
     const displayText = cleanStopWords(text) || (text.trim() === '' ? '[Silence]' : text);
 
     return (
         <div id={`segment-${id}`} className="mb-3">
             <div className="flex items-start gap-2">
+                {speaker && (
+                    <span
+                        className={`text-xs font-mono mt-1 flex-shrink-0 font-semibold ${
+                            speaker === 'U' ? 'text-blue-600' : 'text-orange-600'
+                        }`}
+                    >
+                        [{speaker}]
+                    </span>
+                )}
                 <Tooltip>
                     <TooltipTrigger>
                         <span className="text-xs text-gray-400 mt-1 flex-shrink-0 min-w-[50px]">
@@ -296,6 +307,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                         confidence={segment.confidence}
                                         isStreaming={isStreaming}
                                         showConfidence={showConfidence}
+                                        speaker={segment.speaker}
                                     />
                                 </div>
                             );
@@ -352,6 +364,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                         confidence={segment.confidence}
                                         isStreaming={isStreaming}
                                         showConfidence={showConfidence}
+                                        speaker={segment.speaker}
                                     />
                                 </motion.div>
                             );
