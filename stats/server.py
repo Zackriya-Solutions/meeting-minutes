@@ -655,7 +655,7 @@ def compute_product(days: float = 30.0) -> dict[str, Any]:
         "window_days": window_days,
         "window_label": label,
         "identity": {
-            "unit": "opted-in anonymous device",
+            "unit": "analytics-enabled anonymous device",
             "observed_devices": len(observed),
             "total_seen_devices": coverage[0],
             "excluded_internal_devices": len(excluded),

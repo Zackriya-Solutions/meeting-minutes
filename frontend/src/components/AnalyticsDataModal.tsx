@@ -38,7 +38,7 @@ export default function AnalyticsDataModal({ isOpen, onClose }: AnalyticsDataMod
               <Info className="w-5 h-5 text-success mt-0.5 flex-shrink-0" />
               <div className="text-sm text-success">
                 <p className="font-semibold mb-1">{t('Your Privacy is Protected')}</p>
-                <p>{t('Analytics is off by default. If you enable it, we collect ')}<strong>{t('anonymous usage data only')}</strong>{t('. No meeting content, names, file paths, or personal information is ever collected.')}</p>
+                <p>{t('Analytics is enabled automatically and collects anonymous usage data only. No meeting content, names, file paths, or personal information is ever collected. You can turn analytics off at any time.')}</p>
               </div>
             </div>
           </div>

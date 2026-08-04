@@ -99,7 +99,7 @@
   <header>
     <div>
       <h1>Memento product statistics</h1>
-      <div class="sub" id="sub">Loading opted-in product activity…</div>
+      <div class="sub" id="sub">Loading analytics-enabled product activity…</div>
     </div>
     <nav class="periods" id="periods" role="tablist" aria-label="Reporting window">
       <button role="tab" aria-selected="false" data-state="inactive" data-days="7">7 dates</button><button role="tab" aria-selected="true" data-state="active" data-days="30" class="on">30 dates</button><button role="tab" aria-selected="false" data-state="inactive" data-days="90">90 dates</button>
@@ -110,7 +110,7 @@
     <div class="grid">
       <section class="panel wide">
         <h2>Daily value devices and captured memories</h2>
-        <div class="caption" id="trend-caption">Moscow date · opted-in anonymous devices</div>
+        <div class="caption" id="trend-caption">Moscow date · analytics-enabled anonymous devices</div>
         <div class="chart" id="trend"><div class="empty">Loading…</div></div>
         <div class="legend"><span><i style="background:var(--blue)"></i>value devices</span><span><i style="background:var(--gold)"></i>captured memories</span></div>
       </section>
@@ -209,7 +209,7 @@
   async function refresh() {
     try {
       const data = await fetch(`product?days=${days}`, {cache:'no-store'}).then(response => { if (!response.ok) throw new Error(`HTTP ${response.status}`); return response.json(); });
-      document.getElementById('sub').textContent = `Updated ${data.updated_at} · ${number(data.identity.observed_devices)} opted-in devices in ${data.window_label}`;
+      document.getElementById('sub').textContent = `Updated ${data.updated_at} · ${number(data.identity.observed_devices)} analytics-enabled devices in ${data.window_label}`;
       document.getElementById('trend-caption').textContent = `Moscow date · ${data.window_label} window · same count scale for both series`;
       renderKpis(data); renderTrend(data.daily); renderFunnel(data.funnel); renderRetention(data.retention); renderQuality(data.quality); renderVersions(data.versions);
       const source = Object.entries(data.data_quality.sources).map(([key,value])=>`${key} ${number(value)}`).join(' · ') || 'no window events';

@@ -6,7 +6,7 @@ in [`docs/TRACTION_STATS_PLAN.md`](../docs/TRACTION_STATS_PLAN.md).
 
 The dashboard is deliberately value-led:
 
-- **Weekly Value Devices**: opted-in anonymous devices that completed a
+- **Weekly Value Devices**: analytics-enabled anonymous devices that completed a
   recording/import or reused a transcript/summary in the trailing 7 days;
 - captured memories and hours;
 - device-level activation reach and rolling value retention D1/D7/D30;
@@ -14,9 +14,10 @@ The dashboard is deliberately value-led:
 - coverage/source notes, app-version adoption, and reversible internal-device
   exclusions.
 
-`device_id` means an opted-in installation, not a person or account. Opted-out
-devices are intentionally invisible, so this module cannot report analytics
-opt-in rate or total product population.
+`device_id` means an analytics-enabled installation, not a person or account.
+Analytics is enabled automatically in the desktop app and can be disabled by
+the user. Disabled devices are intentionally invisible, so this module cannot
+report the opt-out rate or total product population.
 
 ## Sources
 

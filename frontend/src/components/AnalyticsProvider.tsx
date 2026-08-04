@@ -4,7 +4,11 @@ import React, { useEffect, ReactNode, useRef, useState, createContext } from 're
 import Analytics from '@/lib/analytics';
 import { load } from '@tauri-apps/plugin-store';
 
-export const ANALYTICS_CONSENT_MIGRATION_KEY = 'analyticsExplicitConsentV3';
+// V4 changes the product default from explicit opt-in to automatic anonymous
+// analytics. Existing installs cross this migration once; after that, a user's
+// explicit choice in Settings is preserved across launches.
+export const ANALYTICS_PREFERENCE_MIGRATION_KEY = 'analyticsAutoEnabledV4';
+const ANALYTICS_DEFAULT_ENABLED = true;
 
 interface AnalyticsProviderProps {
   children: ReactNode;
@@ -34,30 +38,30 @@ export default function AnalyticsProvider({ children }: AnalyticsProviderProps) 
       const store = await load('analytics.json', {
         autoSave: false,
         defaults: {
-          analyticsOptedIn: false
+          analyticsOptedIn: ANALYTICS_DEFAULT_ENABLED
         }
       });
 
       if (!(await store.has('analyticsOptedIn'))) {
-        await store.set('analyticsOptedIn', false);
+        await store.set('analyticsOptedIn', ANALYTICS_DEFAULT_ENABLED);
       }
 
       const storedAnalyticsOptIn = await store.get<unknown>('analyticsOptedIn');
       let analyticsOptedIn = storedAnalyticsOptIn === true;
-      // V2 silently enabled analytics for existing installs. Its stored value
-      // is not explicit consent, so every install crosses this boundary once
-      // in the safe (off) state and may opt in again from Settings.
-      if (!(await store.has(ANALYTICS_CONSENT_MIGRATION_KEY))) {
-        analyticsOptedIn = false;
-        await store.set('analyticsOptedIn', false);
-        await store.set(ANALYTICS_CONSENT_MIGRATION_KEY, true);
+      // Earlier releases forced analytics off. Enable it once for both fresh
+      // and existing installs, including those carrying that legacy value.
+      // The migration marker is also written by the Settings switch, so any
+      // later explicit opt-out remains durable.
+      if (!(await store.has(ANALYTICS_PREFERENCE_MIGRATION_KEY))) {
+        analyticsOptedIn = ANALYTICS_DEFAULT_ENABLED;
+        await store.set('analyticsOptedIn', ANALYTICS_DEFAULT_ENABLED);
+        await store.set(ANALYTICS_PREFERENCE_MIGRATION_KEY, true);
         await store.save();
       } else if (typeof storedAnalyticsOptIn !== 'boolean') {
-        analyticsOptedIn = false;
+        analyticsOptedIn = ANALYTICS_DEFAULT_ENABLED;
         // Repair stale/non-boolean values instead of coercing them only for
-        // this process. Already-valid false values are left untouched, so
-        // opted-out users do not incur a store write on every launch.
-        await store.set('analyticsOptedIn', false);
+        // this process. Already-valid choices are left untouched.
+        await store.set('analyticsOptedIn', ANALYTICS_DEFAULT_ENABLED);
         await store.save();
       }
 
@@ -86,7 +90,7 @@ export default function AnalyticsProvider({ children }: AnalyticsProviderProps) 
       const store = await load('analytics.json', {
         autoSave: false,
         defaults: {
-          analyticsOptedIn: false
+          analyticsOptedIn: ANALYTICS_DEFAULT_ENABLED
         }
       });
       await store.set('platform', deviceInfo.platform);
