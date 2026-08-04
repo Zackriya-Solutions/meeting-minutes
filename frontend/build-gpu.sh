@@ -68,17 +68,9 @@ fi
 # Detect GPU feature if not already set
 if [ -z "$TAURI_GPU_FEATURE" ]; then
     echo -e "${BLUE}🔍 Detecting GPU features...${NC}"
-    # Run the detection script and capture output
-    # We need to run it from frontend dir
-    if [ "$FRONTEND_DIR" != "." ]; then
-        cd "$FRONTEND_DIR"
-    fi
-    
+    # We are already inside FRONTEND_DIR at this point (see cd above), so
+    # run the detection script relative to the current directory.
     TAURI_GPU_FEATURE=$(node scripts/auto-detect-gpu.js)
-    
-    if [ "$FRONTEND_DIR" != "." ]; then
-        cd ..
-    fi
 fi
 
 if [ -n "$TAURI_GPU_FEATURE" ]; then
