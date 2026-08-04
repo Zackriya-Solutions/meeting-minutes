@@ -515,22 +515,22 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     );
   }, []);
 
-  // Compute the effective prompt to send to Whisper: dictionary prepended to per-model prompt
+  // Compute the effective prompt to send to Whisper: per-model prompt followed by dictionary terms
   const getEffectivePrompt = useCallback((provider: string): string => {
     const dictPart = transcriptionDictionary.length > 0
       ? transcriptionDictionary.join(', ') + '.'
       : '';
     const modelPrompt = transcriptionPrompts[provider] || '';
-    if (dictPart && modelPrompt) return `${dictPart} ${modelPrompt}`;
-    return dictPart || modelPrompt;
+    if (modelPrompt && dictPart) return `${modelPrompt} ${dictPart}`;
+    return modelPrompt || dictPart;
   }, [transcriptionDictionary, transcriptionPrompts]);
 
   const syncPromptToRust = useCallback((provider: string, newPrompts: Record<string, string>, newDict: string[]) => {
     const dictPart = newDict.length > 0 ? newDict.join(', ') + '.' : '';
     const modelPrompt = newPrompts[provider] || '';
-    const effective = dictPart && modelPrompt
-      ? `${dictPart} ${modelPrompt}`
-      : dictPart || modelPrompt;
+    const effective = modelPrompt && dictPart
+      ? `${modelPrompt} ${dictPart}`
+      : modelPrompt || dictPart;
     invoke('set_transcription_prompt', { prompt: effective || null }).catch(err =>
       console.error('Failed to sync transcription prompt to Rust:', err)
     );
@@ -541,7 +541,6 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     if (typeof window !== 'undefined') {
       localStorage.setItem('transcriptionDictionary', JSON.stringify(terms));
     }
-    // Sync to Rust using current provider (localWhisper)
     syncPromptToRust('localWhisper', transcriptionPrompts, terms);
   }, [transcriptionPrompts, syncPromptToRust]);
 
@@ -561,9 +560,9 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
       ? transcriptionDictionary.join(', ') + '.'
       : '';
     const modelPrompt = transcriptionPrompts[provider] || '';
-    const effective = dictPart && modelPrompt
-      ? `${dictPart} ${modelPrompt}`
-      : dictPart || modelPrompt;
+    const effective = modelPrompt && dictPart
+      ? `${modelPrompt} ${dictPart}`
+      : modelPrompt || dictPart;
     if (effective) {
       invoke('set_transcription_prompt', { prompt: effective })
         .then(() => console.log('[ConfigContext] Synced transcription prompt to Rust on startup'))

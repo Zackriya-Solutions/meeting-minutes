@@ -216,8 +216,8 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                             Transcription Dictionary
                         </Label>
                         <p className="text-xs text-gray-500 mb-2">
-                            Words or terms that will be used as vocabulary hints during transcription (e.g. product names, acronyms).
-                            {supportsPrompt && ' These are automatically prepended to the initial prompt below.'}
+                            Words or terms used as vocabulary hints during transcription (e.g. product names, acronyms).
+                            {supportsPrompt && ' These are automatically appended after the initial prompt below.'}
                         </p>
                         <div className="flex gap-2 mx-1 mb-2">
                             <Input
@@ -269,8 +269,8 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                 Initial Prompt
                             </Label>
                             <p className="text-xs text-gray-500 mb-2">
-                                An optional hint for the transcription model (e.g. domain context, speaking style, terminology).
-                                Dictionary terms above are automatically prepended to this prompt.
+                                An optional hint for the transcription model (e.g. domain context, speaking style).
+                                Dictionary terms above are automatically appended after this prompt.
                             </p>
                             <div className="mx-1">
                                 <Textarea

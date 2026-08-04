@@ -5,8 +5,8 @@ import { describe, test, expect, beforeEach } from 'bun:test';
 function getEffectivePrompt(dictionary: string[], prompts: Record<string, string>, provider: string): string {
   const dictPart = dictionary.length > 0 ? dictionary.join(', ') + '.' : '';
   const modelPrompt = prompts[provider] || '';
-  if (dictPart && modelPrompt) return `${dictPart} ${modelPrompt}`;
-  return dictPart || modelPrompt;
+  if (modelPrompt && dictPart) return `${modelPrompt} ${dictPart}`;
+  return modelPrompt || dictPart;
 }
 
 describe('getEffectivePrompt', () => {
@@ -20,9 +20,9 @@ describe('getEffectivePrompt', () => {
     expect(result).toBe('Technical meeting about AI');
   });
 
-  test('both dictionary and prompt → dictionary prepended with space', () => {
+  test('both dictionary and prompt → dictionary appended after prompt', () => {
     const result = getEffectivePrompt(['Tauri', 'Rust'], { localWhisper: 'Desktop app discussion' }, 'localWhisper');
-    expect(result).toBe('Tauri, Rust. Desktop app discussion');
+    expect(result).toBe('Desktop app discussion Tauri, Rust.');
   });
 
   test('neither → empty string', () => {
