@@ -47,6 +47,16 @@ function categorizeError(error: string): string {
   return error;
 }
 
+function senseVoiceDownloadDetails(modelName: string) {
+  if (modelName.endsWith('fp32')) {
+    return { displayName: 'SenseVoice Small FP32 / Quality', totalMiB: 900.7 };
+  }
+  if (modelName.endsWith('fp16')) {
+    return { displayName: 'SenseVoice Small FP16 / Balanced', totalMiB: 450.6 };
+  }
+  return { displayName: 'SenseVoice Small INT8 / Fast', totalMiB: 228.8 };
+}
+
 // Custom toast component for download progress
 function DownloadToastContent({
   download,
@@ -361,8 +371,6 @@ export function useDownloadProgressToast() {
 
   // Listen to SenseVoice download events so progress survives closing Settings.
   useEffect(() => {
-    const displayName = 'SenseVoice Small Int8';
-    const totalMiB = 228.5;
     const unlistenProgress = listen<{
       modelName: string;
       progress: number;
@@ -370,6 +378,7 @@ export function useDownloadProgressToast() {
       total_mb: number;
       speed_mbps: number;
     }>('sense-voice-model-download-progress', ({ payload }) => {
+      const { displayName } = senseVoiceDownloadDetails(payload.modelName);
       updateDownload(payload.modelName, {
         modelName: payload.modelName,
         displayName,
@@ -385,6 +394,7 @@ export function useDownloadProgressToast() {
     const unlistenComplete = listen<{ modelName: string }>(
       'sense-voice-model-download-complete',
       ({ payload }) => {
+        const { displayName, totalMiB } = senseVoiceDownloadDetails(payload.modelName);
         updateDownload(payload.modelName, {
           modelName: payload.modelName,
           displayName,
@@ -402,6 +412,7 @@ export function useDownloadProgressToast() {
     const unlistenError = listen<{ modelName: string; error: string }>(
       'sense-voice-model-download-error',
       ({ payload }) => {
+        const { displayName } = senseVoiceDownloadDetails(payload.modelName);
         const cancelled = payload.error.toLowerCase().includes('cancelled');
         updateDownload(payload.modelName, {
           modelName: payload.modelName,
