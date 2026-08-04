@@ -118,7 +118,7 @@ sufficient and must not be treated as read access.
 | Diarization adoption and quality | requested/completed/failed plus speaker-count buckets | Existing events only expose transcript segment count. |
 | Auto-detection funnel | detected → prompt shown → accepted/dismissed → recording started | Settings toggles do not measure real detections. |
 | Exact first-value latency | stable install timestamp + first value event | First observed analytics event can happen long after install or analytics activation. |
-| Historical local archive | one consent-gated aggregate `analytics_snapshot_v1` | Traction cannot see meetings created before analytics was enabled. |
+| Historical local archive | one privacy-controlled aggregate `analytics_snapshot_v1` | Traction cannot see meetings created before analytics was enabled. |
 | Perceived output quality | explicit thumbs up/down or reason buckets | Success status only means the pipeline completed. |
 
 Do not collect transcript text, meeting titles, file paths, device names, raw
@@ -146,10 +146,10 @@ hash rather than the database id.
 1. **Now, server-side:** per-install authentication, idempotent storage,
    exclusions, WVD, device funnel, value retention, quality panel, canonical
    Sessions/DAU and Tools/DAU, rate limiting, and 365-day retention.
-2. **Next desktop release:** first-party delivery, removal of PostHog, explicit
-   opt-in migration, event ids, release channel/build profile, and privacy
-   allowlist. Exact meeting-level summary joins and missing value events remain
-   follow-ups.
+2. **Next desktop release:** first-party delivery, removal of PostHog,
+   automatic-enable preference migration, event ids, release channel/build
+   profile, and privacy allowlist. Exact meeting-level summary joins and missing
+   value events remain follow-ups.
 3. **After coverage matures:** version/provider reliability comparisons and
    targets. Do not set numerical targets before at least four complete weeks of
    stable, deduplicated data are available.
