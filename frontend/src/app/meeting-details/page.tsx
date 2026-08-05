@@ -3,7 +3,7 @@ import { useSidebar } from "@/components/Sidebar/SidebarProvider";
 import { useState, useEffect, useCallback, useRef, Suspense } from "react";
 import { Transcript, Summary } from "@/types";
 import PageContent from "./page-content";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Analytics from "@/lib/analytics";
 import { invoke } from "@tauri-apps/api/core";
 import { FluidSpinner } from '@/components/ui/fluid-spinner';
@@ -12,6 +12,9 @@ import { useMeetingSpeakers } from "@/hooks/useMeetingSpeakers";
 import { useLanguage, useT } from "@/lib/i18n";
 import { useMeetingDrawer } from "@/contexts/MeetingDrawerContext";
 import { MeetingDrawerShell } from "./meeting-drawer-shell";
+import { requestAutoStart } from "@/lib/autoStartRecording";
+import { useRecordingState } from "@/contexts/RecordingStateContext";
+import { canStartRecordingNow } from "@/lib/recordingNavigation";
 import {
   cacheMeetingSummary,
   parsePersistedSummary,
@@ -33,6 +36,8 @@ type SummaryLoadStatus = 'loading' | 'loaded' | 'absent' | 'error';
 
 function UpcomingMeetingPreview() {
   const searchParams = useSearchParams();
+  const router = useRouter();
+  const { isRecording, status } = useRecordingState();
   const { t, lang } = useLanguage();
   const title = searchParams.get('title') || t('Upcoming meeting');
   const start = new Date(searchParams.get('start') || '');
@@ -52,6 +57,21 @@ function UpcomingMeetingPreview() {
     ? `${timeFormatter.format(start)}${hasEnd ? `\u00a0–\u00a0${timeFormatter.format(end)}` : ''}`
     : '';
 
+  // A calendar entry is a plan, not a recording, so nothing starts on its own here.
+  // What the screen owes the user is a one-tap way to record the meeting it names —
+  // the recorder then uses that name instead of a timestamp.
+  const now = Date.now();
+  const inProgress = hasStart
+    && start.getTime() <= now
+    && (!hasEnd || end.getTime() > now);
+  const canRecord = canStartRecordingNow(isRecording, status);
+
+  const recordThisMeeting = () => {
+    if (!canRecord) return;
+    requestAutoStart(window.sessionStorage, title);
+    router.push('/recording');
+  };
+
   return (
     <div className="meeting-page-surface flex h-full flex-col">
       <div className="flex items-center gap-3 border-b border-border px-[var(--drawer-content-inset)] py-4">
@@ -66,10 +86,20 @@ function UpcomingMeetingPreview() {
       </div>
       <main className="flex min-h-0 flex-1 items-center justify-center px-[var(--drawer-content-inset)] py-12">
         <div className="max-w-md text-center">
-          <p className="text-base font-medium text-foreground">{t('This meeting has not started yet')}</p>
+          <p className="text-base font-medium text-foreground">
+            {t(inProgress ? 'This meeting is happening now' : 'This meeting has not started yet')}
+          </p>
           <p className="mt-2 text-sm leading-relaxed text-[var(--primary-40)]">
             {t('The transcript and summary will appear here after the meeting is recorded.')}
           </p>
+          <button
+            type="button"
+            onClick={recordThisMeeting}
+            disabled={!canRecord}
+            className="mm-button mm-button-primary mt-6 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {t('Record this meeting')}
+          </button>
         </div>
       </main>
     </div>

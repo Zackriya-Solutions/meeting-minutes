@@ -43,6 +43,8 @@ export const RU: Record<string, string> = {
   "Upcoming meeting": "Предстоящая встреча",
   "Open meeting": "Открыть встречу",
   "This meeting has not started yet": "Встреча ещё не началась",
+  "This meeting is happening now": "Встреча идёт сейчас",
+  "Record this meeting": "Записать встречу",
   "The transcript and summary will appear here after the meeting is recorded.": "Расшифровка и суммаризация появятся здесь после записи встречи.",
   "No speech was recognized in this recording": "В этой записи не удалось распознать речь",
   "Weekly team sync": "Еженедельный синк команды",
