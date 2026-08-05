@@ -353,6 +353,31 @@ impl JobHandler for EmbeddingRepairHandler {
     }
 }
 
+/// Whether diarization has already landed on this meeting's rows.
+///
+/// The post-meeting refinement pass diarizes too: it runs the same cascade and then
+/// `attribute_transcripts`, which is what fills `speaker_id` (and enqueues speaker naming,
+/// and emits `diarization-complete`). The `diarize` job is enqueued minutes later by
+/// `chunk_embed`, so on the normal path it would repeat the entire cascade — measured at
+/// ~105 s of CPU for 31 minutes of audio — only to reach the state the rows are already in.
+///
+/// Attributed rows are the signal, rather than the presence of a diarization run: a manual
+/// re-transcription replaces the rows and clears their speakers, and that meeting does need
+/// diarizing again. The explicit "Detect speakers" command bypasses this handler entirely,
+/// so an intentional re-run is never blocked.
+pub(super) async fn already_attributed(
+    pool: &sqlx::SqlitePool,
+    meeting_id: &str,
+) -> anyhow::Result<bool> {
+    let attributed: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM transcripts WHERE meeting_id = ? AND speaker_id IS NOT NULL",
+    )
+    .bind(meeting_id)
+    .fetch_one(pool)
+    .await?;
+    Ok(attributed > 0)
+}
+
 pub struct DiarizeHandler;
 
 #[async_trait]
@@ -396,6 +421,14 @@ impl JobHandler for DiarizeHandler {
             log::info!(
                 "[diarize] meeting {meeting_id}: speaker ID disabled for this meeting; \
                  leaving segments unattributed"
+            );
+            return Ok(());
+        }
+
+        if already_attributed(&ctx.pool, meeting_id).await? {
+            log::info!(
+                "[diarize] meeting {meeting_id}: transcript rows already carry speakers; \
+                 skipping the redundant second cascade"
             );
             return Ok(());
         }
@@ -692,8 +725,13 @@ impl JobHandler for RefineMissingTranscriptHandler {
         let app = crate::pipeline::diarization_commands::app_handle()
             .ok_or_else(|| anyhow::anyhow!("app handle unavailable"))?;
 
-        crate::audio::refinement::run_post_meeting_refinement(&app, meeting_id, &folder_path)
-            .await?;
+        crate::audio::refinement::run_post_meeting_refinement(
+            &app,
+            meeting_id,
+            &folder_path,
+            crate::audio::refinement::RefinementTrigger::Automatic,
+        )
+        .await?;
 
         let transcript_count: i64 =
             sqlx::query_scalar("SELECT COUNT(*) FROM transcripts WHERE meeting_id = ?")

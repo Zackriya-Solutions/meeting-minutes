@@ -833,3 +833,53 @@ async fn backfill_skips_empty_meetings_and_deduplicates_active_work() {
         "missing vector row is repairable"
     );
 }
+
+/// The refinement pass diarizes and attributes rows before the `diarize` job is even
+/// enqueued, so the job must recognise finished work and not repeat the cascade. A meeting
+/// whose rows were replaced by a manual re-transcription has no speakers left and still
+/// needs the run.
+#[tokio::test]
+async fn diarize_skips_meetings_whose_rows_already_carry_speakers() {
+    let pool = test_pool().await;
+    sqlx::query(
+        "CREATE TABLE transcripts (id TEXT PRIMARY KEY, meeting_id TEXT, speaker_id INTEGER)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // No rows at all: nothing has been diarized.
+    assert!(!super::handlers::already_attributed(&pool, "m1")
+        .await
+        .unwrap());
+
+    // Rows exist but carry no speaker — the state after a manual re-transcription.
+    for id in ["t0", "t1"] {
+        sqlx::query("INSERT INTO transcripts(id,meeting_id,speaker_id) VALUES(?,?,NULL)")
+            .bind(id)
+            .bind("m1")
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+    assert!(
+        !super::handlers::already_attributed(&pool, "m1")
+            .await
+            .unwrap(),
+        "unattributed rows must still be diarized"
+    );
+
+    // One attributed row is enough: the pass ran and reached attribution.
+    sqlx::query("UPDATE transcripts SET speaker_id=7 WHERE id='t1'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert!(super::handlers::already_attributed(&pool, "m1")
+        .await
+        .unwrap());
+
+    // Attribution is per meeting — another meeting's speakers prove nothing about this one.
+    assert!(!super::handlers::already_attributed(&pool, "m2")
+        .await
+        .unwrap());
+}

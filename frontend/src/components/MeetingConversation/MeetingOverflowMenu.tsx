@@ -40,6 +40,10 @@ interface MeetingOverflowMenuProps {
   modelConfig: ModelConfig;
   setModelConfig: (config: ModelConfig | ((prev: ModelConfig) => ModelConfig)) => void;
   onSaveModelConfig: (config?: ModelConfig) => Promise<void>;
+  /** Re-runs the refinement pass (diarize → per-turn ASR → reply splitting). */
+  onReprocess: () => Promise<void> | void;
+  /** Stage of a pass already running, shown next to the item; null when idle. */
+  reprocessingLabel?: string | null;
 }
 
 export function MeetingOverflowMenu({
@@ -52,6 +56,8 @@ export function MeetingOverflowMenu({
   modelConfig,
   setModelConfig,
   onSaveModelConfig,
+  onReprocess,
+  reprocessingLabel = null,
 }: MeetingOverflowMenuProps) {
   const t = useT();
   const meetingDrawer = useMeetingDrawer();
@@ -174,8 +180,23 @@ export function MeetingOverflowMenu({
 
           <DropdownSeparator />
 
+          {/* The refinement pass has no other trigger: it runs once on save, and both
+              its two-minute floor and the `refinement.auto` setting leave a meeting with
+              no way back to per-reply rows. */}
           <MenuItem
             index={5}
+            iconName={reprocessingLabel ? 'progress_activity' : 'refresh'}
+            label={t('Split replies again')}
+            trailing={reprocessingLabel ?? undefined}
+            disabled={!!reprocessingLabel}
+            closeOnClick={false}
+            onSelect={() => void onReprocess()}
+          />
+
+          <DropdownSeparator />
+
+          <MenuItem
+            index={6}
             iconName={deleting ? 'progress_activity' : 'delete'}
             label={t('Delete meeting')}
             disabled={deleting}
