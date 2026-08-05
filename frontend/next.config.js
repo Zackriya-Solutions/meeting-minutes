@@ -16,6 +16,20 @@ module.exports = (phase) => ({
   basePath: '',
   assetPrefix: '/',
 
+  experimental: {
+    // These are barrel packages: one named import pulls the whole index into the
+    // module graph. lucide-react alone is ~2000 files and date-fns ~2200, and in dev
+    // webpack holds every one of those modules plus its source map in memory for the
+    // life of the server. Rewriting the imports to direct paths keeps the dev
+    // compiler's heap proportional to what the app actually uses.
+    optimizePackageImports: [
+      'lucide-react',
+      'date-fns',
+      'framer-motion',
+      '@tanstack/react-virtual',
+    ],
+  },
+
   // Add webpack configuration for Tauri
   webpack: (config, { isServer }) => {
     if (!isServer) {
