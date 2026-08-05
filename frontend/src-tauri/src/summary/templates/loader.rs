@@ -22,7 +22,7 @@ pub fn set_bundled_templates_dir(path: PathBuf) {
 /// - macOS: ~/Library/Application Support/Meetily/templates/
 /// - Windows: %APPDATA%\Meetily\templates\
 /// - Linux: ~/.config/Meetily/templates/
-fn get_custom_templates_dir() -> Option<PathBuf> {
+pub fn get_custom_templates_dir() -> Option<PathBuf> {
     let mut path = dirs::data_dir()?;
     path.push("Meetily");
     path.push("templates");
@@ -195,6 +195,22 @@ pub fn list_template_ids() -> Vec<String> {
 
     ids.sort();
     ids
+}
+
+/// Returns true if the template ID is a bundled or built-in template
+/// (i.e. not a user-created custom-only template).
+pub fn is_bundled_template(template_id: &str) -> bool {
+    if defaults::get_builtin_template(template_id).is_some() {
+        return true;
+    }
+    if let Ok(dir_lock) = BUNDLED_TEMPLATES_DIR.read() {
+        if let Some(bundled_dir) = dir_lock.as_ref() {
+            if bundled_dir.join(format!("{}.json", template_id)).exists() {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 /// List all available templates with their metadata

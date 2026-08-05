@@ -5,6 +5,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
 import { ModelConfig, ModelSettingsModal } from '@/components/ModelSettingsModal';
 import { SummaryLanguageSettings } from '@/components/SummaryLanguageSettings';
+import { TemplateManagementSettings } from '@/components/TemplateManagementSettings';
 import { Switch } from './ui/switch';
 import { useConfig } from '@/contexts/ConfigContext';
 
@@ -149,6 +150,8 @@ export function SummaryModelSettings({ refetchTrigger }: SummaryModelSettingsPro
           skipInitialFetch={true}
         />
       </div>
+
+      <TemplateManagementSettings />
     </div>
   );
 }
