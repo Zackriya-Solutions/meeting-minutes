@@ -929,7 +929,6 @@ pub fn run() {
             report::commands::get_analytics_report,
             report::commands::cancel_analytics_report,
             report::commands::submit_analytics_answers,
-            report::commands::submit_analytics_speakers,
             report::commands::reveal_report_in_folder,
             // Telegram sharing
             telegram::commands::telegram_share_text,

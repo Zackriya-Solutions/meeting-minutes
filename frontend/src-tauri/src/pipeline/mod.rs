@@ -9,3 +9,4 @@ pub mod extraction;
 pub mod extraction_persistence;
 pub mod kaldi_fbank;
 pub mod speaker_names;
+pub mod speaker_naming;

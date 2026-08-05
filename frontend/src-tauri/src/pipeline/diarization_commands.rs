@@ -764,6 +764,13 @@ pub async fn attribute_transcripts<R: Runtime>(
         }
     }
 
+    // Whatever the local pass could not name, the model reads the conversation for. Queued
+    // rather than awaited: voice separation is done and the user should see it now, and a
+    // model call has its own failure modes that must not reflect on this run.
+    if let Err(error) = crate::jobs::enqueue_speaker_naming(pool, meeting_id).await {
+        log::warn!("[diarize] meeting {meeting_id}: could not queue speaker naming: {error}");
+    }
+
     // 6) Notify the UI. snake_case field names, exactly as the frontend expects.
     let _ = app.emit(
         "diarization-complete",

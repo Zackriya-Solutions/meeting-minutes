@@ -38,6 +38,7 @@ pub mod kind {
     pub const CHUNK_EMBED: &str = "chunk_embed";
     pub const EMBEDDING_REPAIR: &str = "embedding_repair";
     pub const DIARIZE: &str = "diarize";
+    pub const NAME_SPEAKERS: &str = "name_speakers";
     pub const EXTRACT: &str = "extract";
     pub const BACKFILL: &str = "backfill";
     pub const AUDIO_IDENTITY_BACKFILL: &str = "audio_identity_backfill";
@@ -118,6 +119,7 @@ impl JobRegistry {
         r.register(Arc::new(handlers::ChunkEmbedHandler))
             .register(Arc::new(handlers::EmbeddingRepairHandler))
             .register(Arc::new(handlers::DiarizeHandler))
+            .register(Arc::new(handlers::NameSpeakersHandler))
             .register(Arc::new(handlers::ExtractHandler))
             .register(Arc::new(handlers::BackfillHandler))
             .register(Arc::new(handlers::AudioIdentityBackfillHandler))
@@ -137,6 +139,24 @@ pub async fn enqueue_post_meeting_pipeline(
         kind::CHUNK_EMBED,
         Some(meeting_id),
         &serde_json::json!({ "run_analysis": true, "source": "post_meeting" }),
+    )
+    .await?
+    .id)
+}
+
+/// Queue the automatic speaker-naming pass for a meeting whose voices have just been
+/// separated. Kept out of the diarization run itself so a slow or unavailable model never
+/// delays the speaker labels the user is waiting for, and so the naming attempt retries on
+/// its own schedule.
+pub async fn enqueue_speaker_naming(
+    pool: &SqlitePool,
+    meeting_id: &str,
+) -> Result<i64, sqlx::Error> {
+    Ok(store::enqueue_unique(
+        pool,
+        kind::NAME_SPEAKERS,
+        Some(meeting_id),
+        &serde_json::json!({ "source": "post_diarization" }),
     )
     .await?
     .id)

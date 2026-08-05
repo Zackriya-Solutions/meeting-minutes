@@ -104,86 +104,6 @@ pub struct SpeakerGuesses {
     pub merges: Vec<SpeakerMergeGuess>,
 }
 
-/// One transcript line rendered inside the speaker-confirmation dialog. Carries the
-/// speaker id so the UI can colour lines per participant when comparing two speakers.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct SpeakerLine {
-    #[serde(default)]
-    pub seg: i64,
-    /// mm:ss offset from the recording start.
-    #[serde(default)]
-    pub time: String,
-    #[serde(default)]
-    pub speaker_id: Option<i64>,
-    /// Display name of the speaker of THIS line at suggestion time.
-    #[serde(default)]
-    pub label: String,
-    #[serde(default)]
-    pub text: String,
-    /// The line the surrounding excerpt was built around (e.g. the name evidence).
-    #[serde(default)]
-    pub highlight: bool,
-}
-
-/// One speaker row shown in the confirmation dialog: current state + the LLM's
-/// suggestions for it + enough transcript to judge both. Persisted (JSON array) in
-/// `analytics_reports.speaker_suggestions` and emitted in the
-/// `analytics-report-speakers` event. snake_case on the wire.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct SpeakerSuggestion {
-    #[serde(default)]
-    pub speaker_id: i64,
-    #[serde(default)]
-    pub current_name: String,
-    #[serde(default)]
-    pub segment_count: i64,
-    #[serde(default)]
-    pub is_confirmed: bool,
-    #[serde(default)]
-    pub suggested_name: Option<String>,
-    #[serde(default)]
-    pub confidence: f32,
-    #[serde(default)]
-    pub evidence: Option<String>,
-    /// The LLM believes this speaker is the same person as `merge_into` (a speaker id).
-    #[serde(default)]
-    pub merge_into: Option<i64>,
-    #[serde(default)]
-    pub merge_reason: Option<String>,
-    /// Share of total speech time, 0..1.
-    #[serde(default)]
-    pub talk_share: f32,
-    /// mm:ss of this speaker's first line.
-    #[serde(default)]
-    pub first_seen: String,
-    /// Representative lines spread across the meeting — how the user recognises who
-    /// this speaker is.
-    #[serde(default)]
-    pub samples: Vec<SpeakerLine>,
-    /// The dialogue around the line the name guess was drawn from (the guess is only
-    /// checkable in context: «Паша, что думаешь?» → who answers next).
-    #[serde(default)]
-    pub evidence_context: Vec<SpeakerLine>,
-    /// Excerpt where this speaker and the proposed merge target both talk, so the user
-    /// can judge same-person vs different-person. Empty when they never speak close by.
-    #[serde(default)]
-    pub merge_context: Vec<SpeakerLine>,
-}
-
-/// One user decision per speaker, sent by the frontend as
-/// `{ "speaker_id": ..., "display_name": ..., "merge_into": ... }`.
-/// `display_name` null = keep the current name; `merge_into` null = stays separate.
-/// An empty decisions array means "skip — change nothing".
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct SpeakerDecision {
-    #[serde(default)]
-    pub speaker_id: i64,
-    #[serde(default)]
-    pub display_name: Option<String>,
-    #[serde(default)]
-    pub merge_into: Option<i64>,
-}
-
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Topic {
     #[serde(default)]
@@ -843,20 +763,6 @@ mod tests {
         assert_eq!(g.names[0].speaker_id, 12);
         assert_eq!(g.names[0].confidence, 0.0);
         assert!(g.merges.is_empty());
-    }
-
-    #[test]
-    fn speaker_decision_wire_format_is_snake_case_with_defaults() {
-        let raw = r#"{"speaker_id":3,"display_name":"Аня","merge_into":null}"#;
-        let d: SpeakerDecision = serde_json::from_str(raw).unwrap();
-        assert_eq!(d.speaker_id, 3);
-        assert_eq!(d.display_name.as_deref(), Some("Аня"));
-        assert!(d.merge_into.is_none());
-        // merge-only decision omits display_name entirely
-        let d2: SpeakerDecision =
-            serde_json::from_str(r#"{"speaker_id":5,"merge_into":3}"#).unwrap();
-        assert!(d2.display_name.is_none());
-        assert_eq!(d2.merge_into, Some(3));
     }
 
     #[test]

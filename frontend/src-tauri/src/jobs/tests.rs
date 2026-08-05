@@ -10,8 +10,8 @@ use sqlx::SqlitePool;
 
 use super::runner::{run_one_for_test, RunnerConfig};
 use super::{
-    enqueue_missing_diarization, enqueue_missing_transcript_refinement, kind, store, JobContext,
-    JobHandler,
+    enqueue_missing_diarization, enqueue_missing_transcript_refinement, enqueue_speaker_naming,
+    kind, store, JobContext, JobHandler,
 };
 
 /// In-memory pool pinned to a single connection so all queries share one DB.
@@ -150,6 +150,31 @@ async fn search_index_jobs_are_prioritized_over_optional_audio_work() {
             kind::EXTRACT,
             kind::DIARIZE,
         ]
+    );
+}
+
+/// Naming runs after every other post-meeting job: it is the most optional step and the
+/// only one that waits on a model to read the whole transcript. Queuing it twice for one
+/// meeting (a re-run of "Detect speakers") must not name the same voices twice.
+#[tokio::test]
+async fn speaker_naming_is_queued_once_per_meeting_and_runs_last() {
+    let pool = test_pool().await;
+    store::enqueue(&pool, kind::DIARIZE, Some("m1"), &serde_json::json!({}))
+        .await
+        .unwrap();
+    let first = enqueue_speaker_naming(&pool, "m1").await.unwrap();
+    let second = enqueue_speaker_naming(&pool, "m1").await.unwrap();
+    assert_eq!(first, second, "an active naming job is reused");
+
+    let kinds: Vec<String> = store::fetch_eligible(&pool, 10)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|job| job.kind)
+        .collect();
+    assert_eq!(
+        kinds,
+        vec![kind::DIARIZE.to_string(), kind::NAME_SPEAKERS.to_string()]
     );
 }
 
