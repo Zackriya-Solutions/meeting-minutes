@@ -447,6 +447,13 @@ pub fn run() {
         .setup(|_app| {
             log::info!("Application setup complete");
 
+            // If a previous run already installed a portable Node.js and/or
+            // OpenSpec CLI into this app's data directory, make sure their
+            // bin directories are on PATH before anything else runs, so the
+            // existing `which::which("openspec")`-based detection in
+            // `openspec::service` finds them transparently.
+            openspec::setup::ensure_local_tools_on_path(_app.handle());
+
             // Initialize system tray
             if let Err(e) = tray::create_tray(_app.handle()) {
                 log::error!("Failed to create system tray: {}", e);
@@ -701,6 +708,12 @@ pub fn run() {
             // OpenSpec generation commands
             openspec::commands::api_generate_openspec_bundle,
             openspec::commands::api_save_openspec_bundle_as,
+            openspec::commands::check_openspec_setup_status,
+            openspec::commands::check_node_runtime_status,
+            openspec::commands::install_node_runtime,
+            openspec::commands::install_openspec_cli,
+            openspec::commands::install_openspec_setup,
+            openspec::commands::skip_openspec_setup,
             // Built-in AI commands
             summary::summary_engine::commands::builtin_ai_list_models,
             summary::summary_engine::commands::builtin_ai_get_model_info,

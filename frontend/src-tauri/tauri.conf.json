@@ -5,8 +5,10 @@
     "identifier": "com.meetily.ai",
     "build": {
         "frontendDist": "../out",
-        "devUrl": "http://localhost:3118",
-        "beforeDevCommand": "pnpm dev",
+        "beforeDevCommand": {
+            "script": "pnpm run build",
+            "wait": true
+        },
         "beforeBuildCommand": "pnpm build"
     },
     "app": {
@@ -25,6 +27,7 @@
         "security": {
             "csp": {
                 "default-src": "'self'",
+                "script-src": "'self' 'unsafe-inline'",
                 "style-src": "'self' 'unsafe-inline'",
                 "img-src": "'self' asset: https://asset.localhost data:",
                 "connect-src": "'self' http://localhost:11434 http://localhost:5167 http://localhost:8178 https://api.ollama.ai"

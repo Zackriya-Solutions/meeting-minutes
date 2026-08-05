@@ -1,6 +1,7 @@
 use crate::database::repositories::{
     meeting::MeetingsRepository, summary::SummaryProcessesRepository,
 };
+use crate::openspec::setup;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::{Read, Write};
@@ -61,6 +62,10 @@ pub enum OpenSpecGenerationResult {
 
 #[derive(Debug, Clone)]
 enum OpenSpecCli {
+    Managed {
+        node_path: PathBuf,
+        entrypoint: PathBuf,
+    },
     Global,
     Npx,
 }
@@ -184,9 +189,11 @@ impl OpenSpecService {
             }
         };
 
-        Self::generate_bundle_for_seed_with_runner(&app_data_dir, meeting_id, seed, runner).await
+        let cli = Self::detect_cli_for_app(app, &app_data_dir, runner);
+        Self::generate_bundle_for_seed_with_runner_and_cli(&app_data_dir, meeting_id, seed, runner, cli).await
     }
 
+    #[cfg(test)]
     async fn generate_bundle_for_seed_with_runner(
         app_data_dir: &Path,
         meeting_id: &str,
@@ -198,15 +205,51 @@ impl OpenSpecService {
             Err(err) => return to_result_error(err),
         };
 
+        Self::generate_bundle_for_seed_with_runner_and_cli(app_data_dir, meeting_id, seed, runner, Ok(cli)).await
+    }
+
+    async fn generate_bundle_for_seed_with_runner_and_cli(
+        app_data_dir: &Path,
+        meeting_id: &str,
+        seed: TranscriptSeed,
+        runner: &(dyn CommandRunner + Sync),
+        cli: Result<OpenSpecCli, OpenSpecErrorPayload>,
+    ) -> OpenSpecGenerationResult {
+        let cli = match cli {
+            Ok(cli) => cli,
+            Err(err) => return to_result_error(err),
+        };
+
         let workspace = match Self::prepare_workspace(app_data_dir, meeting_id, &seed) {
             Ok(path) => path,
             Err(err) => return to_result_error(err),
         };
 
         let slug = format!("{}-openspec", slugify(&seed.title));
-        let request = Self::build_cli_request(&workspace, &slug, &cli);
+        let init_request = Self::build_cli_request(
+            &workspace,
+            &cli,
+            vec!["init".to_string(), ".".to_string(), "--tools".to_string(), "none".to_string(), "--force".to_string()],
+        );
 
-        let output = match runner.run(request).await {
+        // OpenSpec 1.7+ intentionally has no `generate` command. The CLI
+        // creates the governed change workspace; an AI agent then writes the
+        // proposal/spec/design/tasks using `/opsx:propose`. Keep the meeting
+        // source files in that workspace so the exported bundle is immediately
+        // actionable with every supported coding agent.
+        let create_request = Self::build_cli_request(
+            &workspace,
+            &cli,
+            vec![
+                "new".to_string(),
+                "change".to_string(),
+                slug.clone(),
+                "--description".to_string(),
+                format!("Generate an OpenSpec change from the meeting: {}", seed.title),
+            ],
+        );
+
+        let output = match runner.run(init_request).await {
             Ok(output) => output,
             Err(err) => {
                 return OpenSpecGenerationResult::Error {
@@ -232,10 +275,32 @@ impl OpenSpecService {
             };
         }
 
+        let output = match runner.run(create_request).await {
+            Ok(output) => output,
+            Err(err) => return to_result_error(err),
+        };
+
+        if !output.status_success {
+            let stderr = output.stderr.trim().to_string();
+            return OpenSpecGenerationResult::Error {
+                code: if is_network_error(&stderr) {
+                    OpenSpecErrorCode::NetworkUnavailable
+                } else {
+                    OpenSpecErrorCode::CliFailed
+                },
+                message: "OpenSpec CLI failed to create the change workspace".to_string(),
+                stderr: if stderr.is_empty() { None } else { Some(stderr) },
+            };
+        }
+
         let generated_change_dir = match Self::resolve_generated_change_dir(&workspace, &slug) {
             Ok(path) => path,
             Err(err) => return to_result_error(err),
         };
+
+        if let Err(err) = Self::write_meeting_context(&generated_change_dir, &seed) {
+            return to_result_error(err);
+        }
 
         let zip_path = workspace.join(format!("{}.zip", slug));
         if let Err(err) = zip_directory(&generated_change_dir, &zip_path) {
@@ -253,6 +318,24 @@ impl OpenSpecService {
             suggested_filename,
             slug,
         }
+    }
+
+    fn detect_cli_for_app<R: Runtime>(
+        app: &AppHandle<R>,
+        _app_data_dir: &Path,
+        runner: &dyn CommandRunner,
+    ) -> Result<OpenSpecCli, OpenSpecErrorPayload> {
+        // The Settings installer validates these exact absolute paths. Prefer
+        // them over `openspec.cmd`/PATH so generation cannot regress into the
+        // Windows cmd.exe PATH issue that the installer deliberately avoids.
+        if let Some((node_path, entrypoint)) = setup::managed_openspec_paths(app) {
+            return Ok(OpenSpecCli::Managed {
+                node_path,
+                entrypoint,
+            });
+        }
+
+        Self::detect_cli(runner)
     }
 
     fn detect_cli(runner: &dyn CommandRunner) -> Result<OpenSpecCli, OpenSpecErrorPayload> {
@@ -388,30 +471,50 @@ impl OpenSpecService {
         Ok(workspace)
     }
 
-    fn build_cli_request(workspace: &Path, slug: &str, cli: &OpenSpecCli) -> RunCommandRequest {
-        let prompt = format!(
-            "Generate an OpenSpec change named '{}' from transcript.md and summary.md (if present).",
-            slug
-        );
-
+    fn build_cli_request(workspace: &Path, cli: &OpenSpecCli, command_args: Vec<String>) -> RunCommandRequest {
         match cli {
+            OpenSpecCli::Managed {
+                node_path,
+                entrypoint,
+            } => RunCommandRequest {
+                program: node_path.to_string_lossy().to_string(),
+                args: std::iter::once(entrypoint.to_string_lossy().to_string())
+                    .chain(command_args)
+                    .collect(),
+                cwd: workspace.to_path_buf(),
+                timeout: Duration::from_secs(OPEN_SPEC_TIMEOUT_SECS),
+            },
             OpenSpecCli::Global => RunCommandRequest {
                 program: "openspec".to_string(),
-                args: vec!["generate".to_string(), prompt],
+                args: command_args,
                 cwd: workspace.to_path_buf(),
                 timeout: Duration::from_secs(OPEN_SPEC_TIMEOUT_SECS),
             },
             OpenSpecCli::Npx => RunCommandRequest {
                 program: "npx".to_string(),
-                args: vec![
-                    "openspec@latest".to_string(),
-                    "generate".to_string(),
-                    prompt,
-                ],
+                args: std::iter::once("openspec@latest".to_string())
+                    .chain(command_args)
+                    .collect(),
                 cwd: workspace.to_path_buf(),
                 timeout: Duration::from_secs(OPEN_SPEC_TIMEOUT_SECS),
             },
         }
+    }
+
+    fn write_meeting_context(
+        change_dir: &Path,
+        seed: &TranscriptSeed,
+    ) -> Result<(), OpenSpecErrorPayload> {
+        write_text_file(&change_dir.join(TRANSCRIPT_SEED_FILE), &seed.transcript_markdown)?;
+        if let Some(summary) = &seed.summary_markdown {
+            write_text_file(&change_dir.join(SUMMARY_SEED_FILE), summary)?;
+        }
+
+        let instructions = format!(
+            "# Meeting Context\n\nThis OpenSpec change was created from the meeting **{}**.\n\nUse your supported AI coding assistant from this change workspace and run:\n\n```text\n/opsx:propose\n```\n\nAsk it to read `transcript.md` and `summary.md` (if present), then create the proposal, specs, design, and tasks.\n",
+            seed.title
+        );
+        write_text_file(&change_dir.join("MEETING_CONTEXT.md"), &instructions)
     }
 
     fn resolve_generated_change_dir(
@@ -749,10 +852,16 @@ mod tests {
                 ("node".to_string(), true),
                 ("npx".to_string(), true),
             ]),
-            outputs: std::sync::Mutex::new(VecDeque::from([Ok(CommandOutput {
-                status_success: true,
-                stderr: String::new(),
-            })])),
+            outputs: std::sync::Mutex::new(VecDeque::from([
+                Ok(CommandOutput {
+                    status_success: true,
+                    stderr: String::new(),
+                }),
+                Ok(CommandOutput {
+                    status_success: true,
+                    stderr: String::new(),
+                }),
+            ])),
             seen_programs: std::sync::Mutex::new(Vec::new()),
             seen_args: std::sync::Mutex::new(Vec::new()),
             create_change_slug: std::sync::Mutex::new(Some("weekly-sync-openspec".to_string())),
@@ -761,7 +870,7 @@ mod tests {
         let result = run_generation_for_seed(root.path(), "meeting-1", seed, &runner).await;
 
         let seen_programs = runner.seen_programs.lock().expect("seen_programs lock");
-        assert_eq!(seen_programs.as_slice(), ["npx"]);
+        assert_eq!(seen_programs.as_slice(), ["npx", "npx"]);
         assert!(matches!(result, OpenSpecGenerationResult::Success { .. }));
     }
 
