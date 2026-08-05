@@ -200,7 +200,9 @@ pub async fn rerun_meeting_refinement<R: Runtime>(
     // Fail loudly here rather than inside the spawned pass, where the only trace would
     // be a log line: the user clicked a menu item and is owed an answer.
     if crate::audio::retranscription::find_audio_file(Path::new(&folder)).is_err() {
-        return Err("This meeting's audio file is missing, so it cannot be reprocessed".to_string());
+        return Err(
+            "This meeting's audio file is missing, so it cannot be reprocessed".to_string(),
+        );
     }
     // The menu item is disabled while a pass runs, but the frontend only learns about one
     // from an event — a pass already under way when the meeting was opened is invisible
@@ -211,12 +213,7 @@ pub async fn rerun_meeting_refinement<R: Runtime>(
         return Err("This meeting is already being reprocessed".to_string());
     }
     info!("[refinement] meeting {meeting_id}: user asked for another pass");
-    spawn_refinement(
-        app,
-        meeting_id,
-        folder,
-        RefinementTrigger::UserRequested,
-    );
+    spawn_refinement(app, meeting_id, folder, RefinementTrigger::UserRequested);
     Ok(())
 }
 
@@ -1239,7 +1236,11 @@ mod tests {
         // Setting off + rows present: the automatic pass attributes only...
         assert!(attribution_only(false, 12, RefinementTrigger::Automatic));
         // ...but an explicit request still re-transcribes and splits.
-        assert!(!attribution_only(false, 12, RefinementTrigger::UserRequested));
+        assert!(!attribution_only(
+            false,
+            12,
+            RefinementTrigger::UserRequested
+        ));
         // With the setting on, the full pass always runs.
         assert!(!attribution_only(true, 12, RefinementTrigger::Automatic));
         // No rows at all: there is nothing to attribute, so the full pass must run.

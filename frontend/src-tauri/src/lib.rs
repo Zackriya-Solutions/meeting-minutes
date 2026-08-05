@@ -251,6 +251,11 @@ async fn is_audio_level_monitoring() -> bool {
     audio::simple_level_monitor::is_monitoring()
 }
 
+#[tauri::command]
+fn get_current_microphone_level() -> f32 {
+    audio::pipeline::current_microphone_level()
+}
+
 // Analytics commands are now handled by analytics::commands module
 
 // Whisper commands are now handled by whisper_engine::commands module
@@ -857,6 +862,7 @@ pub fn run() {
             start_audio_level_monitoring,
             stop_audio_level_monitoring,
             is_audio_level_monitoring,
+            get_current_microphone_level,
             // Recording pause/resume commands
             audio::recording_commands::pause_recording,
             audio::recording_commands::resume_recording,

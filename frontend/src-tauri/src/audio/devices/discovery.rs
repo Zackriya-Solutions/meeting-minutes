@@ -2,7 +2,9 @@ use anyhow::Result;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use log::error;
 
-use super::configuration::{AudioDevice, DeviceType};
+use super::configuration::AudioDevice;
+#[cfg(not(target_os = "macos"))]
+use super::configuration::DeviceType;
 use super::platform;
 
 /// List all available audio devices on the system
@@ -10,7 +12,7 @@ pub async fn list_audio_devices() -> Result<Vec<AudioDevice>> {
     let host = cpal::default_host();
 
     // Platform-specific device enumeration
-    let mut devices = {
+    let devices = {
         #[cfg(target_os = "windows")]
         {
             platform::configure_windows_audio(&host)?
@@ -27,12 +29,21 @@ pub async fn list_audio_devices() -> Result<Vec<AudioDevice>> {
         }
     };
 
-    // Add any additional devices from the default host
-    if let Ok(other_devices) = host.devices() {
-        for device in other_devices {
-            if let Ok(name) = device.name() {
-                if !devices.iter().any(|d| d.name == name) {
-                    devices.push(AudioDevice::new(name, DeviceType::Output));
+    #[cfg(not(target_os = "macos"))]
+    let mut devices = devices;
+
+    // macOS enumeration above already uses Core Audio's complete hardware list.
+    // Calling CPAL's `devices()` there would probe each input with a temporary
+    // AudioUnit and can interfere with a microphone stream that is starting.
+    #[cfg(not(target_os = "macos"))]
+    {
+        // Add any additional devices from the default host
+        if let Ok(other_devices) = host.devices() {
+            for device in other_devices {
+                if let Ok(name) = device.name() {
+                    if !devices.iter().any(|d| d.name == name) {
+                        devices.push(AudioDevice::new(name, DeviceType::Output));
+                    }
                 }
             }
         }
