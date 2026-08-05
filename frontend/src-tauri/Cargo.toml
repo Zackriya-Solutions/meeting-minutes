@@ -169,7 +169,7 @@ whatlang = "0.16.4"
 # build script uses.
 zip = "2.2"
 
-ffmpeg-sidecar ={ git = "https://github.com/nathanbabcock/ffmpeg-sidecar", rev = "b0f48a514235d1278d860f4a0af66aa9d6e1618d" }
+ffmpeg-sidecar = { git = "https://github.com/nathanbabcock/ffmpeg-sidecar", rev = "b0f48a514235d1278d860f4a0af66aa9d6e1618d" }
 
 sqlx = { version = "0.8", features = [ "runtime-tokio", "sqlite", "chrono", "json"] }
 
