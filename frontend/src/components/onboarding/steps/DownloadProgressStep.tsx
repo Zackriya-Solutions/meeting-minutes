@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { Mic, Sparkles, Check, Loader2, Download, RefreshCw } from '@/components/deslop-icons';
+import { Mic, Sparkles, Users, Check, Loader2, Download, RefreshCw } from '@/components/deslop-icons';
 import { Button } from '@/components/ui/button';
 import { OnboardingContainer } from '../OnboardingContainer';
 import { useOnboarding } from '@/contexts/OnboardingContext';
@@ -14,6 +14,8 @@ type DownloadStatus = 'waiting' | 'downloading' | 'completed' | 'error';
 
 /** Shown until `gigaam_status` reports the selected variant's real size. */
 const TRANSCRIPTION_FALLBACK_MB = 987;
+/** Shown until `diarization_status` reports the real combined size. */
+const DIARIZATION_FALLBACK_MB = 34;
 
 interface DownloadState {
   status: DownloadStatus;
@@ -62,11 +64,31 @@ export function DownloadProgressStep() {
     speedMbps: 0,
   });
 
+  // Speaker recognition. Kept as local state rather than onboarding context: unlike the
+  // transcription and summary models, nothing outside this step gates on it, and its
+  // presence is always re-derivable from `diarization_status`.
+  const [diarizationState, setDiarizationState] = useState<DownloadState>({
+    status: 'waiting',
+    progress: 0,
+    downloadedMb: 0,
+    totalMb: DIARIZATION_FALLBACK_MB,
+    speedMbps: 0,
+  });
+
+  // Any card still transferring — drives the background-downloads banner and the
+  // Continue button's wording.
+  const anyDownloading =
+    transcriptionState.status === 'downloading' ||
+    summaryState.status === 'downloading' ||
+    diarizationState.status === 'downloading';
+
   const [isCompleting, setIsCompleting] = useState(false);
   const transcriptionDownloadStartedRef = useRef(false);
   const summaryDownloadStartedRef = useRef(false);
+  const diarizationDownloadStartedRef = useRef(false);
   const retryingRef = useRef(false);
   const retryingSummaryRef = useRef(false);
+  const retryingDiarizationRef = useRef(false);
 
   // Retry download handler
   const handleRetryDownload = async () => {
@@ -197,6 +219,82 @@ export function DownloadProgressStep() {
       })
       .catch((error) => console.warn('[DownloadProgressStep] gigaam_status failed:', error));
   }, [setTranscriptionModelDownloaded]);
+
+  // Speaker-recognition models: real size and whether they are already on disk.
+  useEffect(() => {
+    invoke<{ available: boolean; download_mb: number; downloading: boolean }>('diarization_status')
+      .then((status) => {
+        setDiarizationState((prev) => ({
+          ...prev,
+          status: status.available ? 'completed' : status.downloading ? 'downloading' : prev.status,
+          progress: status.available ? 100 : prev.progress,
+          totalMb: status.download_mb || prev.totalMb,
+        }));
+      })
+      .catch((error) => console.warn('[DownloadProgressStep] diarization_status failed:', error));
+  }, []);
+
+  const startDiarizationDownload = async () => {
+    if (diarizationDownloadStartedRef.current) return;
+    diarizationDownloadStartedRef.current = true;
+    setDiarizationState((prev) => ({ ...prev, status: 'downloading', error: undefined }));
+    try {
+      await invoke('download_diarization_models');
+    } catch (error) {
+      console.error('Failed to download the speaker models:', error);
+      diarizationDownloadStartedRef.current = false;
+      setDiarizationState((prev) => ({ ...prev, status: 'error', error: String(error) }));
+    }
+  };
+
+  const handleRetryDiarizationDownload = async () => {
+    if (retryingDiarizationRef.current) return;
+    retryingDiarizationRef.current = true;
+    diarizationDownloadStartedRef.current = false;
+    try {
+      await startDiarizationDownload();
+    } finally {
+      setTimeout(() => {
+        retryingDiarizationRef.current = false;
+      }, 2000);
+    }
+  };
+
+  // Speaker-model download progress. The backend reports bytes per file, and there are two
+  // files, so the bar tracks the file in flight rather than the pair.
+  useEffect(() => {
+    const unlistenProgress = listen<{
+      file: string;
+      downloaded: number;
+      total: number;
+      percent: number;
+    }>('diarization-download-progress', (event) => {
+      const { downloaded, total, percent } = event.payload;
+      setDiarizationState((prev) => ({
+        ...prev,
+        status: 'downloading',
+        progress: percent,
+        downloadedMb: downloaded / (1024 * 1024),
+        totalMb: total > 0 ? total / (1024 * 1024) : prev.totalMb,
+        speedMbps: 0,
+      }));
+    });
+
+    const unlistenReady = listen('diarization-ready', () => {
+      setDiarizationState((prev) => ({ ...prev, status: 'completed', progress: 100 }));
+    });
+
+    const unlistenError = listen<string>('diarization-download-error', (event) => {
+      diarizationDownloadStartedRef.current = false;
+      setDiarizationState((prev) => ({ ...prev, status: 'error', error: event.payload }));
+    });
+
+    return () => {
+      unlistenProgress.then((fn) => fn());
+      unlistenReady.then((fn) => fn());
+      unlistenError.then((fn) => fn());
+    };
+  }, []);
 
   // Downloads are OPT-IN. The transcription model can also be fetched later from
   // Settings → Transcription, and the local summary model is optional (cloud providers —
@@ -355,7 +453,7 @@ export function DownloadProgressStep() {
     }
 
     // If a download is still running, let the user know it continues in the background.
-    if (transcriptionState.status === 'downloading' || summaryState.status === 'downloading') {
+    if (anyDownloading) {
       toast.info(t('Downloads will continue in the background'), {
         description: t('You can start using the app now.'),
         duration: 5000,
@@ -386,7 +484,7 @@ export function DownloadProgressStep() {
   };
 
   const renderDownloadCard = (
-    type: 'transcription' | 'summary',
+    type: 'transcription' | 'summary' | 'diarization',
     title: string,
     icon: React.ReactNode,
     state: DownloadState,
@@ -466,9 +564,15 @@ export function DownloadProgressStep() {
         <div className="mt-2 p-3 bg-destructive/10 border border-destructive/40 rounded-md">
           <p className="text-sm text-destructive font-medium">{t('Download Error')}</p>
           <p className="text-xs text-destructive mt-1">{state.error}</p>
-          {(type === 'transcription' || type === 'summary') && (
+          {(type === 'transcription' || type === 'summary' || type === 'diarization') && (
             <button
-              onClick={type === 'transcription' ? handleRetryDownload : handleRetrySummaryDownload}
+              onClick={
+                type === 'transcription'
+                  ? handleRetryDownload
+                  : type === 'summary'
+                    ? handleRetrySummaryDownload
+                    : handleRetryDiarizationDownload
+              }
               className="mt-3 flex h-9 w-full items-center justify-center gap-2 rounded-full bg-primary px-4 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
             >
               <RefreshCw size={16} />
@@ -502,6 +606,17 @@ export function DownloadProgressStep() {
           )}
 
           {renderDownloadCard(
+            'diarization',
+            t('Speaker recognition'),
+            <Users className="w-5 h-5 text-muted-foreground" />,
+            diarizationState,
+            `${t('Segmentation + embeddings')} · ~${Math.round(diarizationState.totalMb)} MB`,
+            'MB',
+            startDiarizationDownload,
+            t('Labels who said what. Without it transcripts have no speaker names.')
+          )}
+
+          {renderDownloadCard(
             'summary',
             t('Summary Engine'),
             <Sparkles className="w-5 h-5 text-muted-foreground" />,
@@ -515,7 +630,7 @@ export function DownloadProgressStep() {
 
         {/* Info Message */}
         <AnimatePresence>
-          {(transcriptionState.status === 'downloading' || summaryState.status === 'downloading') && (
+          {(anyDownloading) && (
             <motion.div
               initial={{ opacity: 0, y: -10 }}
               animate={{ opacity: 1, y: 0 }}
@@ -543,7 +658,7 @@ export function DownloadProgressStep() {
           >
             {isCompleting ? (
               <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-            ) : transcriptionState.status === 'downloading' || summaryState.status === 'downloading' ? (
+            ) : anyDownloading ? (
               t('Continue in background')
             ) : transcriptionModelDownloaded || summaryModelDownloaded ? (
               t('Continue')

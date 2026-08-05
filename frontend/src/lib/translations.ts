@@ -1827,4 +1827,16 @@ export const RU: Record<string, string> = {
   "Voices remembered": "Запомнено голосов",
   "No new voices to learn": "Новых голосов нет",
   "Could not learn voices from past meetings": "Не удалось запомнить голоса. Попробуйте ещё раз.",
+
+  // Speaker recognition (diarization) model download — Settings + onboarding cards.
+  "Speaker recognition": "Распознавание спикеров",
+  "Speakers are separated on this device.": "Спикеры разделяются на этом устройстве.",
+  "Without these models transcripts have no speaker labels.": "Без этих моделей в расшифровке не будет имён спикеров.",
+  "Download (~": "Загрузить (~",
+  "Separates who said what · fully local": "Разделяет реплики по спикерам · локально",
+  "Installed": "Установлено",
+  "Two models: voice activity segmentation and speaker embeddings. Meetings are labeled by speaker automatically after recording; without them the transcript stays unlabeled.": "Две модели: сегментация речи и отпечатки голосов. После записи встреча автоматически размечается по спикерам; без них расшифровка останется без имён.",
+  "Ready — meetings will be split by speaker": "Готово: встречи будут размечены по спикерам",
+  "Segmentation + embeddings": "Сегментация и отпечатки голосов",
+  "Labels who said what. Without it transcripts have no speaker names.": "Размечает, кто что сказал. Без этого в расшифровке не будет имён спикеров.",
 };

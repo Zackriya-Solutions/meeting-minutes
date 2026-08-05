@@ -41,6 +41,11 @@ const EMBEDDING_URL: &str =
 /// on the next model download so stale installs don't keep 28 MB of dead weight.
 const LEGACY_EMBEDDING_FILE: &str = "embedding.onnx";
 
+/// Combined download size in MB, reported by [`diarization_status`] so the Settings and
+/// onboarding cards state the real cost instead of hardcoding a number that drifts when the
+/// URLs above change. Derived from the byte counts verified in the comment on those URLs.
+const DOWNLOAD_MB: u32 = (5_983_836 + 28_281_164) / 1_000_000;
+
 pub fn diarization_model_dir<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
     let dir = app
         .path()
@@ -54,6 +59,36 @@ pub fn diarization_model_dir<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, 
 
 fn models_present(dir: &Path) -> bool {
     dir.join(SEGMENTATION_FILE).exists() && dir.join(EMBEDDING_FILE).exists()
+}
+
+/// Set while a download runs. There are now two entry points — Settings and onboarding — and
+/// letting both stream into the same `.part` file would corrupt it.
+static DOWNLOAD_IN_PROGRESS: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// Claims [`DOWNLOAD_IN_PROGRESS`], clearing it on drop so an early `?` can't wedge the flag.
+struct DownloadGuard;
+
+impl DownloadGuard {
+    /// `None` when a download is already running — the caller should wait for
+    /// `diarization-ready` rather than start a second one.
+    fn acquire() -> Option<Self> {
+        std::sync::atomic::AtomicBool::compare_exchange(
+            &DOWNLOAD_IN_PROGRESS,
+            false,
+            true,
+            std::sync::atomic::Ordering::SeqCst,
+            std::sync::atomic::Ordering::SeqCst,
+        )
+        .ok()
+        .map(|_| Self)
+    }
+}
+
+impl Drop for DownloadGuard {
+    fn drop(&mut self) {
+        DOWNLOAD_IN_PROGRESS.store(false, std::sync::atomic::Ordering::SeqCst);
+    }
 }
 
 #[derive(serde::Serialize, Clone)]
@@ -127,6 +162,8 @@ pub async fn diarization_status<R: Runtime>(
         "model_dir": dir.to_string_lossy(),
         "segmentation_present": dir.join(SEGMENTATION_FILE).exists(),
         "embedding_present": dir.join(EMBEDDING_FILE).exists(),
+        "download_mb": DOWNLOAD_MB,
+        "downloading": DOWNLOAD_IN_PROGRESS.load(std::sync::atomic::Ordering::SeqCst),
     }))
 }
 
@@ -136,38 +173,58 @@ pub async fn diarization_status<R: Runtime>(
 /// job constructs a [`crate::pipeline::diarization::Diarizer`] on demand from `model_dir`.
 #[tauri::command]
 pub async fn download_diarization_models<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
-    let dir = diarization_model_dir(&app)?;
-    download_file(
-        &app,
-        SEGMENTATION_URL,
-        &dir.join(SEGMENTATION_FILE),
-        SEGMENTATION_FILE,
-    )
-    .await?;
-    download_file(
-        &app,
-        EMBEDDING_URL,
-        &dir.join(EMBEDDING_FILE),
-        EMBEDDING_FILE,
-    )
-    .await?;
+    // A second caller (the other of Settings / onboarding) is a no-op rather than an error:
+    // both are waiting on `diarization-ready`, which the in-flight download will emit.
+    let Some(_guard) = DownloadGuard::acquire() else {
+        log::info!("diarization model download already in progress; not starting a second one");
+        return Ok(());
+    };
+    let result = async {
+        let dir = diarization_model_dir(&app)?;
+        download_file(
+            &app,
+            SEGMENTATION_URL,
+            &dir.join(SEGMENTATION_FILE),
+            SEGMENTATION_FILE,
+        )
+        .await?;
+        download_file(
+            &app,
+            EMBEDDING_URL,
+            &dir.join(EMBEDDING_FILE),
+            EMBEDDING_FILE,
+        )
+        .await?;
 
-    // Retire the v1 embedding if this install still carries it.
-    let legacy = dir.join(LEGACY_EMBEDDING_FILE);
-    if legacy.exists() {
-        if let Err(e) = std::fs::remove_file(&legacy) {
-            log::warn!(
-                "could not remove legacy embedding model {}: {e}",
-                legacy.display()
-            );
-        } else {
-            log::info!("removed legacy v1 embedding model {}", legacy.display());
+        // Retire the v1 embedding if this install still carries it.
+        let legacy = dir.join(LEGACY_EMBEDDING_FILE);
+        if legacy.exists() {
+            if let Err(e) = std::fs::remove_file(&legacy) {
+                log::warn!(
+                    "could not remove legacy embedding model {}: {e}",
+                    legacy.display()
+                );
+            } else {
+                log::info!("removed legacy v1 embedding model {}", legacy.display());
+            }
+        }
+        Ok::<PathBuf, String>(dir)
+    }
+    .await;
+
+    match result {
+        Ok(dir) => {
+            let _ = app.emit("diarization-ready", ());
+            log::info!("diarization models downloaded to {}", dir.display());
+            Ok(())
+        }
+        // Emitted as well as returned: the card that started the download gets the Err, but
+        // the other one (Settings vs onboarding) is only listening to events.
+        Err(error) => {
+            let _ = app.emit("diarization-download-error", error.clone());
+            Err(error)
         }
     }
-
-    let _ = app.emit("diarization-ready", ());
-    log::info!("diarization models downloaded to {}", dir.display());
-    Ok(())
 }
 
 // ---------------------------------------------------------------------------
