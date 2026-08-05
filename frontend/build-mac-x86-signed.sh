@@ -222,19 +222,46 @@ if ! security find-identity -v -p codesigning "$KC" | grep -q "$APPLE_SIGNING_ID
   exit 1
 fi
 
-# ---------- patch config: real identity + no updater artifacts ----------
-# tauri.conf.json ships signingIdentity "-" (ad-hoc) and createUpdaterArtifacts true.
-# We can't sign updater artifacts (no private key for the configured pubkey), and we
-# need the real Developer ID identity. Patched here, restored by the EXIT trap.
+# ---------- updater signing key ----------
+# createUpdaterArtifacts needs the minisign private key matching
+# plugins.updater.pubkey in tauri.conf.json. Without it the bundler aborts, so we
+# turn the artifacts off and still produce an installable (but unpublishable) DMG.
+# The CLI wants the key *content*, not a path — a path in TAURI_SIGNING_PRIVATE_KEY
+# fails with "failed to decode base64 secret key".
+UPDATER_KEY="${TAURI_SIGNING_PRIVATE_KEY_PATH:-$HOME/.memento/updater/memento-updater.key}"
+updater_artifacts=false
+if [[ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]]; then
+  updater_artifacts=true
+elif [[ -f "$UPDATER_KEY" ]]; then
+  TAURI_SIGNING_PRIVATE_KEY="$(cat "$UPDATER_KEY")"
+  updater_artifacts=true
+fi
+if [[ "$updater_artifacts" == true ]]; then
+  # Must be exported even when empty: with the var unset the CLI tries to read the
+  # password from the tty and dies ("Device not configured") in a headless shell.
+  export TAURI_SIGNING_PRIVATE_KEY
+  export TAURI_SIGNING_PRIVATE_KEY_PASSWORD="${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}"
+  echo "==> Updater key found — emitting signed .app.tar.gz for auto-update."
+else
+  echo "WARNING: no updater signing key (checked TAURI_SIGNING_PRIVATE_KEY and $UPDATER_KEY)." >&2
+  echo "         Building WITHOUT updater artifacts — this build cannot be published to the" >&2
+  echo "         auto-update channel. See docs/AUTOUPDATE.md." >&2
+fi
+
+# ---------- patch config: real identity + updater artifacts ----------
+# tauri.conf.json ships signingIdentity "-" (ad-hoc); we need the real Developer ID
+# identity, and updater artifacts only when we hold the signing key. Patched here,
+# restored by the EXIT trap.
 cp -f "$CONF" "$BAK"
-APPLE_SIGNING_IDENTITY="$APPLE_SIGNING_IDENTITY" python3 - "$CONF" <<'PY'
+APPLE_SIGNING_IDENTITY="$APPLE_SIGNING_IDENTITY" UPDATER_ARTIFACTS="$updater_artifacts" python3 - "$CONF" <<'PY'
 import json, os, sys
 p = sys.argv[1]
 c = json.load(open(p))
 c["bundle"]["macOS"]["signingIdentity"] = os.environ["APPLE_SIGNING_IDENTITY"]
-c["bundle"]["createUpdaterArtifacts"] = False
+updater = os.environ["UPDATER_ARTIFACTS"] == "true"
+c["bundle"]["createUpdaterArtifacts"] = updater
 json.dump(c, open(p, "w"), indent=4)
-print("patched tauri.conf.json: signingIdentity + createUpdaterArtifacts=false")
+print(f"patched tauri.conf.json: signingIdentity + createUpdaterArtifacts={str(updater).lower()}")
 PY
 
 # ---------- build (cross-compile to x86_64, build-std, Metal GPU) ----------
@@ -275,5 +302,14 @@ if [[ -n "$DMG" ]]; then
   spctl -a -t open --context context:primary-signature -vv "$DMG" 2>&1
   xcrun stapler validate "$DMG" 2>&1 | tail -1
   echo ""; echo "==> Artifact:"; ls -lh "$DMG"; shasum -a 256 "$DMG"
+fi
+if [[ "$updater_artifacts" == true ]]; then
+  TARGZ="$(ls -t "$BUNDLE_DIR"/macos/*.app.tar.gz 2>/dev/null | head -1)"
+  if [[ -n "$TARGZ" && -f "$TARGZ.sig" ]]; then
+    echo ""; echo "==> Updater artifact:"; ls -lh "$TARGZ" "$TARGZ.sig"
+    echo "    Publish it with: scripts/publish-update-obs.py --from $BUNDLE_DIR"
+  else
+    echo "WARNING: updater artifacts were requested but no signed .app.tar.gz was produced." >&2
+  fi
 fi
 echo "==> Done."
