@@ -15,7 +15,6 @@ import { useRecordingStart } from '@/hooks/useRecordingStart';
 import { useRecordingStop } from '@/hooks/useRecordingStop';
 import { toast } from 'sonner';
 import { listen } from '@tauri-apps/api/event';
-import { RecordOverlay } from '@/components/memento/RecordOverlay';
 import { Icon } from '@/components/memento/Icon';
 import { useT } from '@/lib/i18n';
 
@@ -24,7 +23,7 @@ export default function Home() {
   const [isRecording, setIsRecordingState] = useState(false);
 
   // Use contexts for state management
-  const { meetingTitle, currentMeetingId, transcripts } = useTranscripts();
+  const { transcripts } = useTranscripts();
   const { transcriptModelConfig } = useConfig();
   const recordingState = useRecordingState();
 
@@ -162,21 +161,13 @@ export default function Home() {
           showModal={showModal}
         />
 
-        {/* Recording controls - only show when permissions are granted or already recording and not showing status messages */}
-        {recordingState.isRecording &&
-          status !== RecordingStatus.PROCESSING_TRANSCRIPTS &&
-          status !== RecordingStatus.SAVING && (
-            <div className="fixed bottom-6 right-6 z-10">
-              <RecordOverlay
-                title={meetingTitle || t('New meeting')}
-                meetingId={currentMeetingId}
-                onStop={() => {
-                  setIsStopping(true);
-                  handleRecordingStop(true);
-                }}
-              />
-            </div>
-          )}
+        {/* No in-place recording controls here: <GlobalRecordingPill> owns the
+            off-route recording affordance (return + Finish) on every screen. This
+            used to render its own RecordOverlay, which was unreachable while the
+            navigation guard pinned recording to /recording. With navigation free,
+            it would have been a second Finish button backed by a second
+            useRecordingStop instance — whose duplicate-stop guard cannot see the
+            provider's in-flight stop. */}
 
         {/* Start-recording button — bottom center of the content area when idle */}
         {!recordingState.isRecording &&
