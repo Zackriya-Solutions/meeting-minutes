@@ -123,29 +123,46 @@ function extractMeetingTopics(summary: unknown, transcripts: Transcript[]): stri
   return uniqueTopics(spreadAcrossArchive(transcriptLines, 3), 48);
 }
 
+/** Longest rotation the composer placeholder stays readable at. */
+const ARCHIVE_SUGGESTION_LIMIT = 6;
+
+/**
+ * Suggestions drawn from the archive itself, with generic analytical questions as
+ * filler for a thin or brand-new archive.
+ *
+ * Deliberately about meetings and topics rather than people: `rag_answer_v3` can
+ * reach a hedged conclusion about an individual when asked, but suggesting that as
+ * an opening move framed the product as a colleague-ranking tool.
+ */
 export function buildArchivePromptSuggestions(
-  _sources: readonly ArchiveSuggestionSource[],
+  sources: readonly ArchiveSuggestionSource[],
   lang: AppLanguage,
 ): string[] {
+  const archiveSample = spreadAcrossArchive(sources, 4);
+  const titles = uniqueTopics(archiveSample.map((source) => usefulTitle(source.title)));
+  const topics = uniqueTopics(sources.map((source) => source.description), 48).slice(0, 2);
+
   if (lang === "ru") {
-    return [
-      "Кто на встречах самый пассивный?",
-      "Какие встречи самые неэффективные?",
+    return uniqueSuggestions([
+      topics[0] ? `Что решили про ${quote(topics[0])}?` : null,
+      titles[0] ? `Что осталось сделать после ${quote(titles[0])}?` : null,
+      topics[1] ? `На каких встречах обсуждали ${quote(topics[1])}?` : null,
+      titles[1] ? "Сравни последние встречи" : null,
       "Какие проблемы не решаются?",
-      "Кто самый перегруженный?",
-      "Кто в команде топ‑перформер?",
       "Какие встречи самые эффективные?",
-    ];
+      "Какие решения повторяются?",
+    ]).slice(0, ARCHIVE_SUGGESTION_LIMIT);
   }
 
-  return [
-    "Who participates least in meetings?",
-    "Which meetings are the least effective?",
+  return uniqueSuggestions([
+    topics[0] ? `What was decided about ${quote(topics[0])}?` : null,
+    titles[0] ? `What is still open after ${quote(titles[0])}?` : null,
+    topics[1] ? `Where else was ${quote(topics[1])} discussed?` : null,
+    titles[1] ? `Compare ${quote(titles[0])} and ${quote(titles[1])}` : null,
     "Which problems remain unresolved?",
-    "Who has the heaviest workload?",
-    "Who is the top performer on the team?",
     "Which meetings are the most effective?",
-  ];
+    "Which agreements recur across meetings?",
+  ]).slice(0, ARCHIVE_SUGGESTION_LIMIT);
 }
 
 export function buildMeetingPromptSuggestions(

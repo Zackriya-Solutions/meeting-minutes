@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { motion } from 'framer-motion';
+import { Icon } from '@/components/memento/Icon';
 import { cn } from '@/lib/utils';
 import { useT } from '@/lib/i18n';
 import { avatarGradients } from '@/vendor/deslop/primitives/tokens.js';
@@ -9,7 +10,7 @@ import { Bubble, BubbleContent } from '@/components/ui/bubble';
 import { Badge } from '@/components/ui/fluid-badge';
 import { Message, MessageAvatar, MessageContent } from '@/components/ui/message';
 import { ChatMarkdown } from './ChatMarkdown';
-import type { ChatMessage, Citation } from '@/hooks/useMeetingChat';
+import type { ChatMessage, Citation, RetrievalDiagnostics } from '@/hooks/useMeetingChat';
 import StreamingText from '@/vendor/deslop/mini-app/StreamingText';
 
 /**
@@ -33,6 +34,7 @@ export function MessageBubble({
 }) {
   const t = useT();
   const isUser = msg.role === 'user';
+  const notFound = msg.role === 'assistant' && msg.found === false && !msg.error;
   const senderName = isUser ? t('You') : 'Memento';
   const avatarGradient = avatarGradients[isUser ? 0 : 2];
   const avatarInitials = isUser ? senderName.slice(0, 1).toUpperCase() : 'M';
@@ -72,6 +74,13 @@ export function MessageBubble({
                 </span>
 
                 <div className={cn('w-full text-left', isUser && 'whitespace-pre-wrap')}>
+                  {notFound && (
+                    <div className="mb-1 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                      <Icon name="search" size={14} />
+                      {t('Not found in your meetings')}
+                    </div>
+                  )}
+
                   {isUser || msg.error ? (
                     <div className="whitespace-pre-wrap">{msg.content}</div>
                   ) : showFormattedAnswer ? (
@@ -86,6 +95,15 @@ export function MessageBubble({
                       >
                         {msg.content}
                       </StreamingText>
+                    </div>
+                  )}
+
+                  {notFound && msg.diagnostics && <RetrievalExplanation diagnostics={msg.diagnostics} />}
+
+                  {msg.warning && (
+                    <div className="mt-2 flex items-center gap-1.5 text-xs text-primary">
+                      <Icon name="alert" size={14} />
+                      {msg.warning}
                     </div>
                   )}
 
@@ -132,6 +150,43 @@ export function MessageBubble({
         </MessageContent>
       </Message>
     </motion.div>
+  );
+}
+
+/**
+ * Why a question came back unanswered. The RAG layer already distinguishes an empty
+ * index from a complete one that simply lacks evidence, and `rag_answer_v3` is
+ * allowed to infer from indirect signals — so when it still declines, saying which
+ * of those happened is the difference between "nothing to search" and "searched,
+ * found nothing".
+ */
+export function RetrievalExplanation({ diagnostics }: { diagnostics: RetrievalDiagnostics }) {
+  const t = useT();
+  let explanation: string;
+  if (diagnostics.reason === 'no_index') {
+    explanation = t('There are no searchable transcripts in this scope yet.');
+  } else if (diagnostics.reason === 'index_incomplete') {
+    explanation = t('The archive index is incomplete: {indexed} of {total} meetings are ready.')
+      .replace('{indexed}', String(diagnostics.indexed_meetings))
+      .replace('{total}', String(diagnostics.indexable_meetings));
+  } else if (diagnostics.reason === 'answer_ungrounded') {
+    explanation = t('Relevant fragments were found, but the generated answer could not be verified against source links.');
+  } else if (diagnostics.reason === 'answer_not_found') {
+    explanation = t('Relevant fragments were checked, but they do not contain an answer to this question.');
+  } else {
+    explanation = t('Memento checked close spellings and related fragments, but did not find enough evidence for a grounded answer.');
+  }
+
+  return (
+    <div className="mt-2 rounded-lg bg-muted px-3 py-2 text-xs leading-relaxed text-muted-foreground">
+      <p>{explanation}</p>
+      {!diagnostics.semantic_available && diagnostics.indexable_meetings > 0 && (
+        <p className="mt-1">{t('Semantic search was unavailable; keyword and typo-tolerant search were used.')}</p>
+      )}
+      {diagnostics.query_rewritten && (
+        <p className="mt-1">{t('Common ASR spellings and transliterated product names were included automatically.')}</p>
+      )}
+    </div>
   );
 }
 
