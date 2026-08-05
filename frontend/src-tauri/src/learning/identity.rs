@@ -1063,6 +1063,77 @@ pub async fn review_identity(pool: &SqlitePool, input: ReviewIdentityInput) -> R
     Ok(())
 }
 
+/// Learn the voice behind a speaker the user just named.
+///
+/// Naming a speaker in a transcript is an explicit, trusted human assertion — the same
+/// evidence a confirmation carries — so it is the moment the app may build a voiceprint.
+/// Only user renames may call this: an automatically derived name is a prediction, and
+/// predictions never become training examples.
+///
+/// Learning follows the "recognise known voices" setting. With it off, naming a speaker
+/// changes the label and nothing else; there is no point storing a voiceprint that may
+/// never be matched against.
+///
+/// Returns how many clusters were learned from. Clusters that are too short, too noisy or
+/// too overlapped are skipped, as is any cluster already learned from, so renaming the
+/// same speaker twice does not count their audio twice.
+pub async fn learn_named_speaker(
+    pool: &SqlitePool,
+    speaker_id: i64,
+    display_name: &str,
+) -> Result<usize, String> {
+    if is_automatic_speaker_name(display_name) {
+        return Ok(0);
+    }
+    if !IdentityPolicy::load(pool).await.auto_assign_enabled {
+        return Ok(0);
+    }
+
+    // Only the newest run of each meeting: re-diarizing leaves older cluster rows behind
+    // that describe the same audio, and learning from them would double-weight it.
+    let clusters: Vec<i64> = sqlx::query_scalar(
+        "SELECT sc.id FROM speaker_clusters sc \
+         WHERE (sc.operational_speaker_id=?1 OR sc.placeholder_speaker_id=?1) \
+           AND sc.embedding IS NOT NULL AND sc.model_version=?2 \
+           AND sc.speech_duration_ms >= ?3 AND COALESCE(sc.speech_quality, 0.0) >= ?4 \
+           AND COALESCE(sc.overlap_ratio, 1.0) <= ?5 \
+           AND sc.diarization_run_id=( \
+               SELECT diarization_run_id FROM speaker_clusters \
+               WHERE meeting_id=sc.meeting_id ORDER BY id DESC LIMIT 1) \
+           AND NOT EXISTS( \
+               SELECT 1 FROM voice_samples vs \
+               WHERE vs.speaker_id=?1 AND vs.cluster_id=sc.id) \
+         ORDER BY sc.id",
+    )
+    .bind(speaker_id)
+    .bind(VOICE_MODEL_VERSION)
+    .bind(MIN_TRUSTED_DURATION_MS)
+    .bind(MIN_TRUSTED_QUALITY)
+    .bind(MAX_TRUSTED_OVERLAP)
+    .fetch_all(pool)
+    .await
+    .map_err(|error| format!("Failed to load clusters for the named speaker: {error}"))?;
+
+    let mut learned = 0;
+    for cluster_id in clusters {
+        review_identity(
+            pool,
+            ReviewIdentityInput {
+                cluster_id,
+                decision: "confirm".to_string(),
+                speaker_id: Some(speaker_id),
+                display_name: None,
+                rejected_speaker_id: None,
+                allow_learning: true,
+                scope: "cluster".to_string(),
+            },
+        )
+        .await?;
+        learned += 1;
+    }
+    Ok(learned)
+}
+
 #[derive(Debug, Clone)]
 struct ModeAccumulator {
     centroid: Vec<f32>,
@@ -1103,15 +1174,23 @@ impl ModeAccumulator {
         self.samples.push(sample);
     }
 
+    /// Mean angular spread of the mode's samples around its centroid.
+    ///
+    /// Clamped at zero: a single sample *is* its own centroid, so the cosine rounds to
+    /// slightly above 1.0 about half the time and the raw mean lands on -1e-7. That
+    /// negative epsilon violates `CHECK (dispersion >= 0.0)` on `voice_centroids`, which
+    /// used to abort the whole profile build for a first confirmation.
     fn dispersion(&self) -> f32 {
         if self.samples.is_empty() {
             return 0.0;
         }
-        self.samples
+        (self
+            .samples
             .iter()
             .map(|sample| 1.0 - cosine_similarity(sample, &self.centroid))
             .sum::<f32>()
-            / self.samples.len() as f32
+            / self.samples.len() as f32)
+            .max(0.0)
     }
 }
 
@@ -1608,6 +1687,77 @@ mod tests {
             modes.push(ModeAccumulator::new(sample, 1.0, "system".into()));
         }
         assert_eq!(modes.len(), 2);
+    }
+
+    /// A first confirmation builds a profile from exactly one sample, where the centroid
+    /// equals the sample. With a realistic 192-dimension embedding the cosine rounds just
+    /// above 1.0, so the raw dispersion is a negative epsilon — which the
+    /// `CHECK (dispersion >= 0.0)` constraint used to reject, silently leaving the
+    /// speaker with no voice profile. Toy embeddings like `[1.0, 0.0, 0.0]` hit the
+    /// exact-1.0 path and miss this entirely.
+    #[tokio::test]
+    async fn single_realistic_sample_still_publishes_a_profile() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+
+        let mut state = 0x2545_F491_4F6C_DD1Du64;
+        let embedding: Vec<f32> = (0..192)
+            .map(|_| {
+                state ^= state << 13;
+                state ^= state >> 7;
+                state ^= state << 17;
+                (state >> 40) as f32 / 8_388_608.0 - 0.5
+            })
+            .collect();
+        assert!(
+            ModeAccumulator::new(embedding.clone(), 0.9, "mic".to_string()).dispersion() >= 0.0,
+            "a one-sample mode must never report negative spread"
+        );
+
+        sqlx::query(
+            "INSERT INTO meetings(id, title, created_at, updated_at) \
+             VALUES('voice-meeting', 'Team sync', datetime('now'), datetime('now'))",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let turns = vec![crate::pipeline::diarization::SpeakerTurn {
+            start_ms: 0,
+            end_ms: 40_000,
+            cluster_id: 0,
+        }];
+        let mapping = resolve_clusters(&pool, "voice-meeting", "run-1", &turns, &[(0, embedding)])
+            .await
+            .unwrap();
+        let (speaker_id, cluster_id) = mapping[&0];
+
+        review_identity(
+            &pool,
+            ReviewIdentityInput {
+                cluster_id,
+                decision: "confirm".to_string(),
+                speaker_id: None,
+                display_name: Some("Anna".to_string()),
+                rejected_speaker_id: None,
+                allow_learning: true,
+                scope: "cluster".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+
+        let active: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM voice_centroids WHERE speaker_id=? AND is_active=1",
+        )
+        .bind(speaker_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(active, 1, "the learned voice must be matchable afterwards");
     }
 
     #[tokio::test]

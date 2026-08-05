@@ -312,7 +312,7 @@ export function PreferenceSettings() {
           <div className="settings-cell__text">
             <h3 className="settings-cell__label">{t('Automatic assignment for very high-confidence known voices')}</h3>
             <p className="settings-cell__caption">
-              {t('Voice profiles, corrections, and capture evidence stay local. Predictions never become training examples without an explicit confirmation.')}
+              {t('Name a speaker in a transcript and Memento remembers that voice, then fills the name in automatically at later meetings. Voice profiles stay on this device.')}
             </p>
           </div>
           <Switch className="shrink-0" checked={identityAutoAssign} onCheckedChange={handleIdentityAutoAssign} />

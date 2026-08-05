@@ -873,11 +873,22 @@ pub async fn rename_speaker(
     if name.is_empty() {
         return Err("Speaker name cannot be empty".to_string());
     }
-    let affected = SpeakersRepository::rename(state.db_manager.pool(), speaker_id, name)
+    let pool = state.db_manager.pool();
+    let affected = SpeakersRepository::rename(pool, speaker_id, name)
         .await
         .map_err(|e| format!("Failed to rename speaker: {e}"))?;
     if affected == 0 {
         return Err(format!("Speaker {speaker_id} not found"));
+    }
+    // Putting a name to a voice is the user's own assertion, so it is also the moment the
+    // app may remember that voice. A failure here must not undo the rename the user asked
+    // for — the label is the point, the voiceprint is the bonus.
+    match crate::learning::identity::learn_named_speaker(pool, speaker_id, name).await {
+        Ok(0) => {}
+        Ok(clusters) => log::info!(
+            "[speakers] learned speaker {speaker_id} from {clusters} confirmed cluster(s)"
+        ),
+        Err(error) => log::warn!("[speakers] could not learn the named voice: {error}"),
     }
     Ok(())
 }

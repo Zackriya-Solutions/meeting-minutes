@@ -224,6 +224,140 @@ mod integration_tests {
             .all(|sample| sample.transcript_id != "long"));
     }
 
+    /// A deterministic embedding that behaves like a real one: 192 dimensions, no exact
+    /// zeros, and `nudge` lets a second recording of the same voice land nearby.
+    fn voice_embedding(seed: u64, nudge: f32) -> Vec<f32> {
+        let mut state = seed;
+        (0..192)
+            .map(|index| {
+                state ^= state << 13;
+                state ^= state >> 7;
+                state ^= state << 17;
+                let base = (state >> 40) as f32 / 8_388_608.0 - 0.5;
+                base + nudge * ((index % 7) as f32 - 3.0) / 100.0
+            })
+            .collect()
+    }
+
+    async fn diarize_one_voice(
+        pool: &sqlx::SqlitePool,
+        meeting_id: &str,
+        embedding: Vec<f32>,
+    ) -> (i64, i64) {
+        let turns = vec![crate::pipeline::diarization::SpeakerTurn {
+            start_ms: 0,
+            end_ms: 40_000,
+            cluster_id: 0,
+        }];
+        let mapping = super::identity::resolve_clusters(
+            pool,
+            meeting_id,
+            meeting_id,
+            &turns,
+            &[(0, embedding)],
+        )
+        .await
+        .unwrap();
+        mapping[&0]
+    }
+
+    /// The user-facing contract of "Распознавать знакомые голоса": name a speaker once and
+    /// the same voice comes back named in the next meeting. Naming is the consent step, so
+    /// the learning must happen on the rename — and only when the setting is on.
+    #[tokio::test]
+    async fn naming_a_speaker_teaches_the_voice_for_the_next_meeting() {
+        let pool = migrated_pool().await;
+        insert_meeting(&pool, "first-meeting", "Team sync").await;
+        insert_meeting(&pool, "second-meeting", "Team sync next week").await;
+        let (speaker_id, _) =
+            diarize_one_voice(&pool, "first-meeting", voice_embedding(7, 0.0)).await;
+
+        // Setting off: renaming labels the speaker and learns nothing.
+        crate::database::repositories::speaker::SpeakersRepository::rename(
+            &pool, speaker_id, "Анна",
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            super::identity::learn_named_speaker(&pool, speaker_id, "Анна")
+                .await
+                .unwrap(),
+            0,
+            "no voiceprint may be built while recognition is off"
+        );
+
+        sqlx::query(
+            "INSERT INTO app_settings_kv(key, value) VALUES('identity.auto_assign_enabled','true')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            super::identity::learn_named_speaker(&pool, speaker_id, "Анна")
+                .await
+                .unwrap(),
+            1
+        );
+        // Renaming again must not count the same audio a second time.
+        assert_eq!(
+            super::identity::learn_named_speaker(&pool, speaker_id, "Анна")
+                .await
+                .unwrap(),
+            0
+        );
+        let samples: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM voice_samples WHERE speaker_id=?")
+                .bind(speaker_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(samples, 1);
+
+        // Next meeting, same voice from different audio: it comes back as Анна.
+        let (recognised, _) =
+            diarize_one_voice(&pool, "second-meeting", voice_embedding(7, 1.0)).await;
+        assert_eq!(recognised, speaker_id, "a learned voice must be recognised");
+        let decision: String = sqlx::query_scalar(
+            "SELECT ir.policy_result FROM identity_inference_runs ir \
+             JOIN speaker_clusters sc ON sc.id=ir.cluster_id \
+             WHERE sc.meeting_id='second-meeting'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(decision, "auto_assign");
+    }
+
+    /// Automatic labels are placeholders, not names: they are the app's own guess, and a
+    /// guess must never become a training example.
+    #[tokio::test]
+    async fn automatic_speaker_labels_never_teach_a_voice() {
+        let pool = migrated_pool().await;
+        insert_meeting(&pool, "auto-meeting", "Team sync").await;
+        sqlx::query(
+            "INSERT INTO app_settings_kv(key, value) VALUES('identity.auto_assign_enabled','true')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let (speaker_id, _) =
+            diarize_one_voice(&pool, "auto-meeting", voice_embedding(11, 0.0)).await;
+
+        assert_eq!(
+            super::identity::learn_named_speaker(&pool, speaker_id, "Speaker 3")
+                .await
+                .unwrap(),
+            0
+        );
+        let centroids: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM voice_centroids WHERE speaker_id=?")
+                .bind(speaker_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(centroids, 0);
+    }
+
     #[tokio::test]
     async fn confirmed_term_creates_reviewable_historical_backfill() {
         let pool = migrated_pool().await;

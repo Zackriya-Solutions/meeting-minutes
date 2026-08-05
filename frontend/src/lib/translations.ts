@@ -1813,5 +1813,5 @@ export const RU: Record<string, string> = {
   "Saved audio retention, days (blank keeps it)": "Хранить аудио, дней",
   "System audio capture is not available. You can still record with your microphone, but computer audio won\\'t be captured.": "Системный звук недоступен. Можно продолжить запись с микрофона, но звук компьютера не сохранится.",
   "Unpromoted capture metadata, minutes": "Хранить метаданные, мин",
-  "Voice profiles, corrections, and capture evidence stay local. Predictions never become training examples without an explicit confirmation.": "Голосовые профили и исправления хранятся на устройстве.",
+  "Name a speaker in a transcript and Memento remembers that voice, then fills the name in automatically at later meetings. Voice profiles stay on this device.": "Назовите спикера в расшифровке — Memento запомнит голос и подставит имя на следующих встречах. Профили голосов остаются на устройстве.",
 };
