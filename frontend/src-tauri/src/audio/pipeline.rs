@@ -6,8 +6,9 @@ use rubato::{
     Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType, WindowFunction,
 };
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::{Arc, LazyLock};
+use std::time::Instant;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
@@ -22,9 +23,45 @@ use super::vad::{ContinuousVadProcessor, SpeechSegment};
 // getUserMedia stream. A second microphone client makes macOS rebuild its
 // voice-processing graph and can lower the shared input level for call apps.
 static CURRENT_MICROPHONE_LEVEL: AtomicU32 = AtomicU32::new(0.0f32.to_bits());
+/// When the level above was last written, in milliseconds on `LEVEL_CLOCK`.
+static MICROPHONE_LEVEL_WRITTEN_AT_MS: AtomicU64 = AtomicU64::new(0);
+static LEVEL_CLOCK: LazyLock<Instant> = LazyLock::new(Instant::now);
+
+/// A published level older than this reads as silence.
+///
+/// Capture writes one value per chunk, tens of milliseconds apart, so a level
+/// this old means no microphone audio is flowing: recording stopped, the stream
+/// died, or the device went away. Without the expiry the process-wide value
+/// keeps the last RMS of a finished session forever, and the waveform shows a
+/// speaking user while nothing is being captured.
+const MICROPHONE_LEVEL_MAX_AGE_MS: u64 = 250;
+
+fn level_clock_ms() -> u64 {
+    LEVEL_CLOCK.elapsed().as_millis() as u64
+}
+
+fn store_microphone_level(rms: f32) {
+    CURRENT_MICROPHONE_LEVEL.store(rms.clamp(0.0, 1.0).to_bits(), Ordering::Relaxed);
+    MICROPHONE_LEVEL_WRITTEN_AT_MS.store(level_clock_ms(), Ordering::Relaxed);
+}
+
+/// Publish silence immediately, so the waveform does not have to wait out
+/// `MICROPHONE_LEVEL_MAX_AGE_MS` after the pipeline stops.
+pub fn reset_microphone_level() {
+    CURRENT_MICROPHONE_LEVEL.store(0.0f32.to_bits(), Ordering::Relaxed);
+    MICROPHONE_LEVEL_WRITTEN_AT_MS.store(0, Ordering::Relaxed);
+}
+
+fn microphone_level_at(now_ms: u64) -> f32 {
+    let written_at_ms = MICROPHONE_LEVEL_WRITTEN_AT_MS.load(Ordering::Relaxed);
+    if now_ms.saturating_sub(written_at_ms) > MICROPHONE_LEVEL_MAX_AGE_MS {
+        return 0.0;
+    }
+    f32::from_bits(CURRENT_MICROPHONE_LEVEL.load(Ordering::Relaxed))
+}
 
 pub fn current_microphone_level() -> f32 {
-    f32::from_bits(CURRENT_MICROPHONE_LEVEL.load(Ordering::Relaxed))
+    microphone_level_at(level_clock_ms())
 }
 
 /// Ring buffer for synchronized audio mixing
@@ -765,7 +802,7 @@ impl AudioCapture {
                     / mono_data.len() as f32)
                     .sqrt()
             };
-            CURRENT_MICROPHONE_LEVEL.store(rms.clamp(0.0, 1.0).to_bits(), Ordering::Relaxed);
+            store_microphone_level(rms);
         }
 
         // Create audio chunk with stream-specific timestamp (get ID first for logging)
@@ -1314,6 +1351,11 @@ impl AudioPipelineManager {
 
     /// Stop the audio pipeline
     pub async fn stop(&mut self) -> Result<()> {
+        // No microphone chunks will arrive from here on, so retire the level the
+        // waveform polls instead of leaving this session's last RMS published.
+        // `force_flush_and_stop` finishes through here too.
+        reset_microphone_level();
+
         // Drop the sender to close the pipeline
         self.audio_sender = None;
 
@@ -1417,6 +1459,30 @@ mod tests {
         let (mic, system) = ring.flush().unwrap();
         assert_eq!((mic.len(), system.len()), (90, 90));
         assert_eq!(mic[40..], [0.0; 50]);
+    }
+
+    #[test]
+    fn published_microphone_level_expires_and_resets() {
+        store_microphone_level(0.4);
+        let written_at = MICROPHONE_LEVEL_WRITTEN_AT_MS.load(Ordering::Relaxed);
+
+        // Fresh: the waveform sees what capture measured.
+        assert_eq!(
+            microphone_level_at(written_at + MICROPHONE_LEVEL_MAX_AGE_MS),
+            0.4
+        );
+
+        // Stale: capture stopped writing, so the last RMS of that session must
+        // not keep reading as live voice activity.
+        assert_eq!(
+            microphone_level_at(written_at + MICROPHONE_LEVEL_MAX_AGE_MS + 1),
+            0.0
+        );
+
+        // Stopping the pipeline retires the value without waiting for expiry.
+        store_microphone_level(0.4);
+        reset_microphone_level();
+        assert_eq!(current_microphone_level(), 0.0);
     }
 
     #[test]

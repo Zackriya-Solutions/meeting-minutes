@@ -1,7 +1,33 @@
 use anyhow::{anyhow, Result};
+use cidre::at::AudioBufListN;
 use cidre::core_audio::hardware::System;
+use cidre::os;
+use log::debug;
 
 use crate::audio::devices::configuration::{AudioDevice, DeviceType};
+
+/// Whether a device exposes capture or playback channels in one scope.
+///
+/// Most devices answer for both scopes and report zero channels for the one
+/// they do not serve, so an error here is unusual: a device in the middle of a
+/// transition, or a virtual device that publishes its configuration late. Such
+/// a device drops out of the list entirely, so log why rather than leaving the
+/// user with a microphone that silently disappeared. `list_audio_devices` runs
+/// every couple of seconds from the disconnect monitor, hence debug level.
+fn scope_has_channels(cfg: os::Result<AudioBufListN>, device_name: &str, scope: &str) -> bool {
+    match cfg {
+        Ok(cfg) => cfg
+            .buffers()
+            .iter()
+            .any(|buffer| buffer.number_channels > 0),
+        Err(error) => {
+            debug!(
+                "Core Audio device '{device_name}' reported no {scope} stream configuration: {error}"
+            );
+            false
+        }
+    }
+}
 
 /// Configure macOS audio devices using ScreenCaptureKit and CoreAudio
 ///
@@ -25,33 +51,21 @@ pub fn configure_macos_audio(_host: &cpal::Host) -> Result<Vec<AudioDevice>> {
         .map_err(|error| anyhow!("Failed to enumerate Core Audio devices: {error}"))?;
 
     for device in core_audio_devices {
-        let Ok(name) = device.name().map(|name| name.to_string()) else {
-            continue;
+        let name = match device.name() {
+            Ok(name) => name.to_string(),
+            Err(error) => {
+                debug!("Skipping Core Audio device {device:?} with no readable name: {error}");
+                continue;
+            }
         };
 
-        let has_input = device
-            .input_stream_cfg()
-            .map(|config| {
-                config
-                    .buffers()
-                    .iter()
-                    .any(|buffer| buffer.number_channels > 0)
-            })
-            .unwrap_or(false);
-        if has_input {
+        if scope_has_channels(device.input_stream_cfg(), &name, "input") {
             devices.push(AudioDevice::new(name.clone(), DeviceType::Input));
         }
 
-        let has_output = device
-            .output_stream_cfg()
-            .map(|config| {
-                config
-                    .buffers()
-                    .iter()
-                    .any(|buffer| buffer.number_channels > 0)
-            })
-            .unwrap_or(false);
-        if has_output && should_include_output_device(&name) {
+        if scope_has_channels(device.output_stream_cfg(), &name, "output")
+            && should_include_output_device(&name)
+        {
             devices.push(AudioDevice::new(name, DeviceType::Output));
         }
     }
