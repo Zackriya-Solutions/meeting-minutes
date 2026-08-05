@@ -17,7 +17,9 @@
 //! is skipped when the `refinement.auto` app setting is "false", when the meeting has no
 //! saved audio, or when a manual retranscription is already running.
 
+use std::collections::HashSet;
 use std::path::Path;
+use std::sync::{Mutex, OnceLock};
 
 use log::{info, warn};
 use sqlx::SqlitePool;
@@ -28,6 +30,55 @@ use crate::state::AppState;
 
 /// `app_settings_kv` key for the auto-refinement toggle. Missing key = enabled.
 pub const AUTO_REFINE_SETTING_KEY: &str = "refinement.auto";
+
+/// Meetings with a pass in flight, so a second one cannot start on the same recording.
+///
+/// The turn-aligned path holds the process-wide `RetranscriptionGuard`, which would make a
+/// second pass *wait* rather than interleave — but waiting up to 15 minutes only to redo
+/// work that just finished is not what anyone wants, and if the first pass exceeds that
+/// wait the second falls through to the silence-cut branch, where `diarize_and_export`
+/// runs unguarded against the same rows and `transcripts.json`. Refusing at the door is
+/// both cheaper and safer than serializing.
+fn in_flight() -> &'static Mutex<HashSet<String>> {
+    static IN_FLIGHT: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+    IN_FLIGHT.get_or_init(|| Mutex::new(HashSet::new()))
+}
+
+/// Claims a meeting for the duration of one pass. Releasing on `Drop` covers every exit —
+/// an early return from a skipped gate, an error, or a panic inside the pass. A poisoned
+/// lock is recovered rather than propagated: one panicking pass must not wedge
+/// reprocessing for the rest of the session.
+struct InFlightGuard(String);
+
+impl InFlightGuard {
+    /// `None` when a pass is already running for this meeting.
+    fn acquire(meeting_id: &str) -> Option<Self> {
+        let mut in_flight = in_flight().lock().unwrap_or_else(|e| e.into_inner());
+        if in_flight.insert(meeting_id.to_string()) {
+            Some(Self(meeting_id.to_string()))
+        } else {
+            None
+        }
+    }
+}
+
+impl Drop for InFlightGuard {
+    fn drop(&mut self) {
+        in_flight()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&self.0);
+    }
+}
+
+/// Whether a pass is running for this meeting. Only for answering the user before spawning;
+/// the authoritative claim is [`InFlightGuard::acquire`] inside the pass itself.
+fn is_in_flight(meeting_id: &str) -> bool {
+    in_flight()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .contains(meeting_id)
+}
 
 /// Whether the automatic pass is enabled (default: yes; only an explicit "false" disables).
 pub async fn auto_refine_enabled(pool: &SqlitePool) -> bool {
@@ -59,6 +110,26 @@ impl RefinementTrigger {
     fn is_user_requested(self) -> bool {
         self == Self::UserRequested
     }
+}
+
+/// Whether the two-minute floor applies. It keeps unattended processing off trivial
+/// recordings; an explicit request is not unattended, so a user can reprocess a 30-second
+/// meeting. A recording with no readable duration is never skipped on this basis.
+fn skips_for_short_recording(duration_seconds: Option<f64>, trigger: RefinementTrigger) -> bool {
+    duration_seconds.is_some_and(|duration| duration < 120.0) && !trigger.is_user_requested()
+}
+
+/// Whether to run speaker attribution alone and skip the batch re-transcription.
+///
+/// `refinement.auto` = false turns off the slow re-transcription, not diarization — but it
+/// must not mute an explicit request either. A meeting with no rows at all always needs the
+/// full pass, whatever the setting says, or there is nothing to attribute.
+fn attribution_only(
+    auto_refine_enabled: bool,
+    transcript_count: i64,
+    trigger: RefinementTrigger,
+) -> bool {
+    !auto_refine_enabled && transcript_count > 0 && !trigger.is_user_requested()
 }
 
 /// Progress for the UI. The pass is minutes of heavy CPU (diarization cascade, then one
@@ -137,6 +208,14 @@ pub async fn rerun_meeting_refinement<R: Runtime>(
     if crate::audio::retranscription::find_audio_file(Path::new(&folder)).is_err() {
         return Err("This meeting's audio file is missing, so it cannot be reprocessed".to_string());
     }
+    // The menu item is disabled while a pass runs, but the frontend only learns about one
+    // from an event — a pass already under way when the meeting was opened is invisible
+    // until its next stage, and `diarizing` alone can run for minutes without one. So the
+    // answer has to come from here. The pass re-checks under the lock, which makes two
+    // clicks in the same instant harmless: the loser is dropped there instead, silently.
+    if is_in_flight(&meeting_id) {
+        return Err("This meeting is already being reprocessed".to_string());
+    }
     info!("[refinement] meeting {meeting_id}: user asked for another pass");
     spawn_refinement(
         app,
@@ -153,6 +232,17 @@ pub(crate) async fn run_post_meeting_refinement<R: Runtime>(
     folder_path: &str,
     trigger: RefinementTrigger,
 ) -> anyhow::Result<()> {
+    // Claim the meeting for this pass. Every route in — the save hook, the recovery job and
+    // the menu item — funnels through here, so this is the one place that can be
+    // authoritative. Held until the function returns, by any path.
+    let Some(_in_flight) = InFlightGuard::acquire(meeting_id) else {
+        info!(
+            "[refinement] meeting {meeting_id}: a pass is already running; \
+             not starting a second one"
+        );
+        return Ok(());
+    };
+
     let state = app
         .try_state::<AppState>()
         .ok_or_else(|| anyhow::anyhow!("app state unavailable"))?;
@@ -171,7 +261,7 @@ pub(crate) async fn run_post_meeting_refinement<R: Runtime>(
                 .get("duration_seconds")
                 .and_then(serde_json::Value::as_f64)
         });
-    if duration_seconds.is_some_and(|duration| duration < 120.0) && !trigger.is_user_requested() {
+    if skips_for_short_recording(duration_seconds, trigger) {
         info!(
             "[refinement] meeting {meeting_id}: recording is shorter than two minutes; \
              skipping hidden-meeting speaker processing"
@@ -187,7 +277,7 @@ pub(crate) async fn run_post_meeting_refinement<R: Runtime>(
             .bind(meeting_id)
             .fetch_one(pool)
             .await?;
-    if !auto_refine_enabled(pool).await && transcript_count > 0 && !trigger.is_user_requested() {
+    if attribution_only(auto_refine_enabled(pool).await, transcript_count, trigger) {
         info!(
             "[refinement] meeting {meeting_id}: batch re-transcription disabled; \
              running speaker attribution only"
@@ -1074,6 +1164,61 @@ mod tests {
             end_ms,
             cluster_id,
         }
+    }
+
+    #[test]
+    fn one_pass_per_meeting_at_a_time() {
+        let first = InFlightGuard::acquire("m1").expect("first claim succeeds");
+        assert!(is_in_flight("m1"));
+        assert!(
+            InFlightGuard::acquire("m1").is_none(),
+            "a second pass on the same meeting must be refused"
+        );
+
+        // Meetings are independent — reprocessing one must not block another.
+        let other = InFlightGuard::acquire("m2").expect("a different meeting is unaffected");
+        assert!(is_in_flight("m2"));
+        drop(other);
+        assert!(!is_in_flight("m2"));
+
+        // Releasing lets the next pass in, so a finished (or failed) pass is repeatable.
+        drop(first);
+        assert!(!is_in_flight("m1"));
+        assert!(InFlightGuard::acquire("m1").is_some());
+    }
+
+    #[test]
+    fn a_requested_pass_ignores_the_two_minute_floor() {
+        // The floor is what made a 30-second meeting impossible to split by hand.
+        assert!(skips_for_short_recording(
+            Some(29.9),
+            RefinementTrigger::Automatic
+        ));
+        assert!(!skips_for_short_recording(
+            Some(29.9),
+            RefinementTrigger::UserRequested
+        ));
+        // Long recordings run either way, and an unreadable duration is never a reason to skip.
+        assert!(!skips_for_short_recording(
+            Some(600.0),
+            RefinementTrigger::Automatic
+        ));
+        assert!(!skips_for_short_recording(
+            None,
+            RefinementTrigger::Automatic
+        ));
+    }
+
+    #[test]
+    fn a_requested_pass_ignores_the_auto_refine_switch() {
+        // Setting off + rows present: the automatic pass attributes only...
+        assert!(attribution_only(false, 12, RefinementTrigger::Automatic));
+        // ...but an explicit request still re-transcribes and splits.
+        assert!(!attribution_only(false, 12, RefinementTrigger::UserRequested));
+        // With the setting on, the full pass always runs.
+        assert!(!attribution_only(true, 12, RefinementTrigger::Automatic));
+        // No rows at all: there is nothing to attribute, so the full pass must run.
+        assert!(!attribution_only(false, 0, RefinementTrigger::Automatic));
     }
 
     #[test]

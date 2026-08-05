@@ -3,23 +3,13 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { toast } from 'sonner';
 import { useT } from '@/lib/i18n';
+import {
+    refinementLabel,
+    type RefinementProgressPayload,
+    type RefinementStage,
+} from '@/lib/refinementProgress';
 
-/** Stages emitted by the Rust refinement pass (`audio/refinement.rs`). */
-export type RefinementStage =
-    | 'waiting_for_model'
-    | 'diarizing'
-    | 'decoding'
-    | 'transcribing'
-    | 'attributing'
-    | 'retranscribing'
-    | 'exporting';
-
-interface RefinementProgressPayload {
-    meeting_id: string;
-    stage: RefinementStage;
-    done: number;
-    total: number;
-}
+export type { RefinementStage } from '@/lib/refinementProgress';
 
 export interface MeetingRefinement {
     /** True between `refinement-started` and `-complete`/`-error`. */
@@ -136,23 +126,7 @@ export function useMeetingRefinement(
         }
     }, [meetingId, t]);
 
-    const stageLabels: Record<RefinementStage, string> = {
-        waiting_for_model: t('Waiting for the speech model'),
-        diarizing: t('Separating voices'),
-        decoding: t('Reading the recording'),
-        transcribing: t('Splitting replies'),
-        attributing: t('Labelling speakers'),
-        retranscribing: t('Re-transcribing'),
-        exporting: t('Saving'),
-    };
-
-    let label: string | null = null;
-    if (running) {
-        label = stage ? stageLabels[stage] : t('Processing');
-        if (stage === 'transcribing' && progress) {
-            label = `${label} ${progress.done}/${progress.total}`;
-        }
-    }
+    const label = refinementLabel(running, stage, progress, t);
 
     return { running, stage, label, rerun };
 }
