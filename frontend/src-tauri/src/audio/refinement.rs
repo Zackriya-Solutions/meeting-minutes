@@ -17,7 +17,9 @@
 //! is skipped when the `refinement.auto` app setting is "false", when the meeting has no
 //! saved audio, or when a manual retranscription is already running.
 
+use std::collections::HashSet;
 use std::path::Path;
+use std::sync::{Mutex, OnceLock};
 
 use log::{info, warn};
 use sqlx::SqlitePool;
@@ -28,6 +30,55 @@ use crate::state::AppState;
 
 /// `app_settings_kv` key for the auto-refinement toggle. Missing key = enabled.
 pub const AUTO_REFINE_SETTING_KEY: &str = "refinement.auto";
+
+/// Meetings with a pass in flight, so a second one cannot start on the same recording.
+///
+/// The turn-aligned path holds the process-wide `RetranscriptionGuard`, which would make a
+/// second pass *wait* rather than interleave — but waiting up to 15 minutes only to redo
+/// work that just finished is not what anyone wants, and if the first pass exceeds that
+/// wait the second falls through to the silence-cut branch, where `diarize_and_export`
+/// runs unguarded against the same rows and `transcripts.json`. Refusing at the door is
+/// both cheaper and safer than serializing.
+fn in_flight() -> &'static Mutex<HashSet<String>> {
+    static IN_FLIGHT: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+    IN_FLIGHT.get_or_init(|| Mutex::new(HashSet::new()))
+}
+
+/// Claims a meeting for the duration of one pass. Releasing on `Drop` covers every exit —
+/// an early return from a skipped gate, an error, or a panic inside the pass. A poisoned
+/// lock is recovered rather than propagated: one panicking pass must not wedge
+/// reprocessing for the rest of the session.
+struct InFlightGuard(String);
+
+impl InFlightGuard {
+    /// `None` when a pass is already running for this meeting.
+    fn acquire(meeting_id: &str) -> Option<Self> {
+        let mut in_flight = in_flight().lock().unwrap_or_else(|e| e.into_inner());
+        if in_flight.insert(meeting_id.to_string()) {
+            Some(Self(meeting_id.to_string()))
+        } else {
+            None
+        }
+    }
+}
+
+impl Drop for InFlightGuard {
+    fn drop(&mut self) {
+        in_flight()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&self.0);
+    }
+}
+
+/// Whether a pass is running for this meeting. Only for answering the user before spawning;
+/// the authoritative claim is [`InFlightGuard::acquire`] inside the pass itself.
+fn is_in_flight(meeting_id: &str) -> bool {
+    in_flight()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .contains(meeting_id)
+}
 
 /// Whether the automatic pass is enabled (default: yes; only an explicit "false" disables).
 pub async fn auto_refine_enabled(pool: &SqlitePool) -> bool {
@@ -45,28 +96,172 @@ pub async fn auto_refine_enabled(pool: &SqlitePool) -> bool {
     }
 }
 
+/// Why a pass is running. A pass the user asked for skips the automatic gates: the
+/// two-minute floor exists so unattended processing stays off trivial recordings, and
+/// `refinement.auto` switches the automatic pass off — neither should override an
+/// explicit request to reprocess this meeting.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum RefinementTrigger {
+    Automatic,
+    UserRequested,
+}
+
+impl RefinementTrigger {
+    fn is_user_requested(self) -> bool {
+        self == Self::UserRequested
+    }
+}
+
+/// Whether the two-minute floor applies. It keeps unattended processing off trivial
+/// recordings; an explicit request is not unattended, so a user can reprocess a 30-second
+/// meeting. A recording with no readable duration is never skipped on this basis.
+fn skips_for_short_recording(duration_seconds: Option<f64>, trigger: RefinementTrigger) -> bool {
+    duration_seconds.is_some_and(|duration| duration < 120.0) && !trigger.is_user_requested()
+}
+
+/// Whether to run speaker attribution alone and skip the batch re-transcription.
+///
+/// `refinement.auto` = false turns off the slow re-transcription, not diarization — but it
+/// must not mute an explicit request either. A meeting with no rows at all always needs the
+/// full pass, whatever the setting says, or there is nothing to attribute.
+fn attribution_only(
+    auto_refine_enabled: bool,
+    transcript_count: i64,
+    trigger: RefinementTrigger,
+) -> bool {
+    !auto_refine_enabled && transcript_count > 0 && !trigger.is_user_requested()
+}
+
+/// Progress for the UI. The pass is minutes of heavy CPU (diarization cascade, then one
+/// ASR call per speaker turn); without a stage name the app looks hung while the fans spin.
+/// `done`/`total` are 0 for stages that have no natural unit of work.
+fn emit_stage<R: Runtime>(
+    app: &AppHandle<R>,
+    meeting_id: &str,
+    stage: &str,
+    done: usize,
+    total: usize,
+) {
+    let _ = app.emit(
+        "refinement-progress",
+        serde_json::json!({
+            "meeting_id": meeting_id,
+            "stage": stage,
+            "done": done,
+            "total": total,
+        }),
+    );
+}
+
 /// Spawn the refinement pass for a just-saved recorded meeting. Returns immediately.
 pub fn spawn_post_meeting_refinement<R: Runtime>(
     app: AppHandle<R>,
     meeting_id: String,
     folder_path: String,
 ) {
+    spawn_refinement(app, meeting_id, folder_path, RefinementTrigger::Automatic);
+}
+
+fn spawn_refinement<R: Runtime>(
+    app: AppHandle<R>,
+    meeting_id: String,
+    folder_path: String,
+    trigger: RefinementTrigger,
+) {
     tauri::async_runtime::spawn(async move {
-        if let Err(e) = run_post_meeting_refinement(&app, &meeting_id, &folder_path).await {
-            warn!("[refinement] meeting {meeting_id}: pass did not complete: {e}");
-            let _ = app.emit(
-                "refinement-error",
-                serde_json::json!({ "meeting_id": meeting_id, "error": e.to_string() }),
-            );
-        }
+        // The error event comes from run_post_meeting_refinement itself, so that the
+        // recovery job — which calls it directly — cannot leave a pass unterminated.
+        let _ = run_post_meeting_refinement(&app, &meeting_id, &folder_path, trigger).await;
     });
 }
 
+/// Re-run the refinement pass on demand: diarize, re-transcribe per speaker turn, split
+/// replies, re-attribute. This is the only way to ask for that work again — the automatic
+/// pass runs once on save, and its two-minute floor and `refinement.auto` gate both leave
+/// meetings with no route back. Returns as soon as the pass is spawned; follow
+/// `refinement-progress` / `-complete` / `-error` for the outcome.
+#[tauri::command]
+pub async fn rerun_meeting_refinement<R: Runtime>(
+    app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    meeting_id: String,
+) -> Result<(), String> {
+    let pool = state.db_manager.pool();
+    let folder: Option<String> =
+        sqlx::query_scalar("SELECT folder_path FROM meetings WHERE id = ?")
+            .bind(&meeting_id)
+            .fetch_optional(pool)
+            .await
+            .map_err(|e| format!("Could not look up the meeting: {e}"))?
+            .flatten();
+    let folder = folder
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| "This meeting has no saved recording to reprocess".to_string())?;
+    // Fail loudly here rather than inside the spawned pass, where the only trace would
+    // be a log line: the user clicked a menu item and is owed an answer.
+    if crate::audio::retranscription::find_audio_file(Path::new(&folder)).is_err() {
+        return Err("This meeting's audio file is missing, so it cannot be reprocessed".to_string());
+    }
+    // The menu item is disabled while a pass runs, but the frontend only learns about one
+    // from an event — a pass already under way when the meeting was opened is invisible
+    // until its next stage, and `diarizing` alone can run for minutes without one. So the
+    // answer has to come from here. The pass re-checks under the lock, which makes two
+    // clicks in the same instant harmless: the loser is dropped there instead, silently.
+    if is_in_flight(&meeting_id) {
+        return Err("This meeting is already being reprocessed".to_string());
+    }
+    info!("[refinement] meeting {meeting_id}: user asked for another pass");
+    spawn_refinement(
+        app,
+        meeting_id,
+        folder,
+        RefinementTrigger::UserRequested,
+    );
+    Ok(())
+}
+
+/// Runs a pass and guarantees the UI hears how it ended.
+///
+/// Every `refinement-started` must be closed by exactly one `refinement-complete` or
+/// `refinement-error`, or the progress chip shows work that is no longer running. The
+/// terminal event belongs here rather than at the call site because callers differ: the save
+/// hook and the menu item spawn the pass and ignore its result, while the recovery job awaits
+/// it and propagates the error to the job runner. Emitting from the spawn wrapper alone left
+/// the job's failures silent.
 pub(crate) async fn run_post_meeting_refinement<R: Runtime>(
     app: &AppHandle<R>,
     meeting_id: &str,
     folder_path: &str,
+    trigger: RefinementTrigger,
 ) -> anyhow::Result<()> {
+    let result = refine_meeting(app, meeting_id, folder_path, trigger).await;
+    if let Err(error) = &result {
+        warn!("[refinement] meeting {meeting_id}: pass did not complete: {error}");
+        let _ = app.emit(
+            "refinement-error",
+            serde_json::json!({ "meeting_id": meeting_id, "error": error.to_string() }),
+        );
+    }
+    result
+}
+
+async fn refine_meeting<R: Runtime>(
+    app: &AppHandle<R>,
+    meeting_id: &str,
+    folder_path: &str,
+    trigger: RefinementTrigger,
+) -> anyhow::Result<()> {
+    // Claim the meeting for this pass. Every route in — the save hook, the recovery job and
+    // the menu item — funnels through here, so this is the one place that can be
+    // authoritative. Held until the function returns, by any path.
+    let Some(_in_flight) = InFlightGuard::acquire(meeting_id) else {
+        info!(
+            "[refinement] meeting {meeting_id}: a pass is already running; \
+             not starting a second one"
+        );
+        return Ok(());
+    };
+
     let state = app
         .try_state::<AppState>()
         .ok_or_else(|| anyhow::anyhow!("app state unavailable"))?;
@@ -85,7 +280,7 @@ pub(crate) async fn run_post_meeting_refinement<R: Runtime>(
                 .get("duration_seconds")
                 .and_then(serde_json::Value::as_f64)
         });
-    if duration_seconds.is_some_and(|duration| duration < 120.0) {
+    if skips_for_short_recording(duration_seconds, trigger) {
         info!(
             "[refinement] meeting {meeting_id}: recording is shorter than two minutes; \
              skipping hidden-meeting speaker processing"
@@ -101,11 +296,22 @@ pub(crate) async fn run_post_meeting_refinement<R: Runtime>(
             .bind(meeting_id)
             .fetch_one(pool)
             .await?;
-    if !auto_refine_enabled(pool).await && transcript_count > 0 {
+    // Announce here, not further down: everything above returns without doing any work, and
+    // everything below ends in `refinement-complete` or, via the wrapper, in
+    // `refinement-error`. Announcing after the branch below meant an attribution-only pass
+    // completed without ever having started, so a listener that keys off the pair saw a
+    // completion for a pass it never knew about.
+    let _ = app.emit(
+        "refinement-started",
+        serde_json::json!({ "meeting_id": meeting_id }),
+    );
+
+    if attribution_only(auto_refine_enabled(pool).await, transcript_count, trigger) {
         info!(
             "[refinement] meeting {meeting_id}: batch re-transcription disabled; \
              running speaker attribution only"
         );
+        emit_stage(app, meeting_id, "diarizing", 0, 0);
         diarize_and_export(app, pool, meeting_id, folder).await;
         let _ = app.emit(
             "refinement-complete",
@@ -128,10 +334,6 @@ pub(crate) async fn run_post_meeting_refinement<R: Runtime>(
             .ok_or_else(|| anyhow::anyhow!("no transcription model configured"))?;
 
     info!("[refinement] meeting {meeting_id}: refinement with {provider}/{model}");
-    let _ = app.emit(
-        "refinement-started",
-        serde_json::json!({ "meeting_id": meeting_id }),
-    );
 
     // Preferred: turn-aligned pass — diarize first, transcribe per speaker turn, so
     // every row is one reply (the reference-app shape). Falls back to the silence-cut
@@ -142,6 +344,7 @@ pub(crate) async fn run_post_meeting_refinement<R: Runtime>(
                 "[refinement] meeting {meeting_id}: turn-aligned pass done — {} speaker(s), {}/{} row(s) attributed",
                 outcome.speaker_count, outcome.assigned_segments, outcome.total_segments
             );
+            emit_stage(app, meeting_id, "exporting", 0, 0);
             if let Err(e) = write_refined_transcript_export(pool, meeting_id, folder).await {
                 warn!("[refinement] meeting {meeting_id}: export rewrite failed: {e}");
             }
@@ -151,6 +354,7 @@ pub(crate) async fn run_post_meeting_refinement<R: Runtime>(
                 "[refinement] meeting {meeting_id}: turn-aligned pass unavailable ({reason}); \
                  using silence-cut batch pass"
             );
+            emit_stage(app, meeting_id, "retranscribing", 0, 0);
             // 1) Batch re-transcription. Replaces the DB rows and writes transcripts.json;
             //    emits its own retranscription-* progress events. The in-progress guard
             //    inside makes a concurrent manual retranscription win — we just skip.
@@ -168,6 +372,7 @@ pub(crate) async fn run_post_meeting_refinement<R: Runtime>(
             normalize_stored_rows_logged(pool, meeting_id, "meeting").await;
 
             // 3) + 4) Speaker attribution and labeled export (shared with the import pass).
+            emit_stage(app, meeting_id, "diarizing", 0, 0);
             diarize_and_export(app, pool, meeting_id, folder).await;
         }
     }
@@ -447,9 +652,14 @@ async fn turn_aligned_retranscribe<R: Runtime>(
     }
 
     let model_deadline = std::time::Instant::now() + MODEL_LOAD_WAIT;
+    let mut announced_wait = false;
     while !crate::gigaam_engine::is_loaded() {
         if std::time::Instant::now() >= model_deadline {
             anyhow::bail!("GigaAM model is not loaded");
+        }
+        if !announced_wait {
+            emit_stage(app, meeting_id, "waiting_for_model", 0, 0);
+            announced_wait = true;
         }
         tokio::time::sleep(POLL).await;
     }
@@ -467,6 +677,7 @@ async fn turn_aligned_retranscribe<R: Runtime>(
     };
 
     // 1) Diarize (identity resolution included; transcript rows untouched).
+    emit_stage(app, meeting_id, "diarizing", 0, 0);
     let plan = match compute_speaker_turns(app, pool, meeting_id).await {
         Ok(plan) => plan,
         Err(DiarizeError::ModelsUnavailable) => {
@@ -480,6 +691,7 @@ async fn turn_aligned_retranscribe<R: Runtime>(
     }
 
     // 2) Decode the recording once.
+    emit_stage(app, meeting_id, "decoding", 0, 0);
     let audio_path = crate::audio::retranscription::find_audio_file(folder)?;
     let decode_path = audio_path.clone();
     let decoded =
@@ -503,6 +715,12 @@ async fn turn_aligned_retranscribe<R: Runtime>(
 
     let mut transcripts: Vec<(String, f64, f64)> = Vec::new(); // (text, start_ms, end_ms)
     for (i, &(start_ms, end_ms)) in spans.iter().enumerate() {
+        // The loop is the long pole — one ASR call per turn, hundreds of them. Report
+        // every fifth span (plus the first) so the UI can count down without the event
+        // stream itself becoming the load.
+        if i % 5 == 0 {
+            emit_stage(app, meeting_id, "transcribing", i, spans.len());
+        }
         let s = ((start_ms as f64 / 1000.0) * SAMPLE_RATE) as usize;
         let e = (((end_ms as f64 / 1000.0) * SAMPLE_RATE) as usize).min(total);
         if e <= s || e - s < 1_600 {
@@ -606,6 +824,7 @@ async fn turn_aligned_retranscribe<R: Runtime>(
 
     // 5) Attribute rows to speakers — rows were cut from the very turns being assigned,
     //    so overlap is essentially total and every row gets its speaker.
+    emit_stage(app, meeting_id, "attributing", 0, 0);
     crate::pipeline::diarization_commands::attribute_transcripts(app, pool, meeting_id, &plan)
         .await
         .map_err(|e| match e {
@@ -970,6 +1189,61 @@ mod tests {
             end_ms,
             cluster_id,
         }
+    }
+
+    #[test]
+    fn one_pass_per_meeting_at_a_time() {
+        let first = InFlightGuard::acquire("m1").expect("first claim succeeds");
+        assert!(is_in_flight("m1"));
+        assert!(
+            InFlightGuard::acquire("m1").is_none(),
+            "a second pass on the same meeting must be refused"
+        );
+
+        // Meetings are independent — reprocessing one must not block another.
+        let other = InFlightGuard::acquire("m2").expect("a different meeting is unaffected");
+        assert!(is_in_flight("m2"));
+        drop(other);
+        assert!(!is_in_flight("m2"));
+
+        // Releasing lets the next pass in, so a finished (or failed) pass is repeatable.
+        drop(first);
+        assert!(!is_in_flight("m1"));
+        assert!(InFlightGuard::acquire("m1").is_some());
+    }
+
+    #[test]
+    fn a_requested_pass_ignores_the_two_minute_floor() {
+        // The floor is what made a 30-second meeting impossible to split by hand.
+        assert!(skips_for_short_recording(
+            Some(29.9),
+            RefinementTrigger::Automatic
+        ));
+        assert!(!skips_for_short_recording(
+            Some(29.9),
+            RefinementTrigger::UserRequested
+        ));
+        // Long recordings run either way, and an unreadable duration is never a reason to skip.
+        assert!(!skips_for_short_recording(
+            Some(600.0),
+            RefinementTrigger::Automatic
+        ));
+        assert!(!skips_for_short_recording(
+            None,
+            RefinementTrigger::Automatic
+        ));
+    }
+
+    #[test]
+    fn a_requested_pass_ignores_the_auto_refine_switch() {
+        // Setting off + rows present: the automatic pass attributes only...
+        assert!(attribution_only(false, 12, RefinementTrigger::Automatic));
+        // ...but an explicit request still re-transcribes and splits.
+        assert!(!attribution_only(false, 12, RefinementTrigger::UserRequested));
+        // With the setting on, the full pass always runs.
+        assert!(!attribution_only(true, 12, RefinementTrigger::Automatic));
+        // No rows at all: there is nothing to attribute, so the full pass must run.
+        assert!(!attribution_only(false, 0, RefinementTrigger::Automatic));
     }
 
     #[test]

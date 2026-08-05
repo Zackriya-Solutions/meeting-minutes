@@ -711,6 +711,7 @@ pub fn run() {
             pipeline::diarization_commands::diarization_status,
             pipeline::diarization_commands::download_diarization_models,
             pipeline::diarization_commands::diarize_meeting,
+            audio::refinement::rerun_meeting_refinement,
             pipeline::diarization_commands::get_meeting_speakers,
             pipeline::diarization_commands::rename_speaker,
             pipeline::diarization_commands::set_self_speaker,
