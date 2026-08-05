@@ -13,6 +13,8 @@ import {
   IconBell,
 } from '@/vendor/deslop/primitives/material-symbols-react'
 import { invoke } from "@tauri-apps/api/core"
+import { toast } from "sonner"
+import { Button } from "@/components/ui/button"
 import Analytics from "@/lib/analytics"
 import AnalyticsConsentSwitch from "./AnalyticsConsentSwitch"
 import { useConfig, NotificationSettings } from "@/contexts/ConfigContext"
@@ -69,6 +71,7 @@ export function PreferenceSettings() {
   const [previousNotificationsEnabled, setPreviousNotificationsEnabled] = useState<boolean | null>(null);
   const [isLocalOnly, setIsLocalOnly] = useState<boolean | null>(null);
   const [identityAutoAssign, setIdentityAutoAssign] = useState(false);
+  const [learningPastVoices, setLearningPastVoices] = useState(false);
   const [telegramAutoShare, setTelegramAutoShare] = useState(false);
   const [backgroundCapture, setBackgroundCapture] = useState<{
     supported: boolean;
@@ -217,6 +220,27 @@ export function PreferenceSettings() {
     }
   };
 
+  /** One-off pass that learns the voices of speakers named before learning existed. */
+  const handleLearnPastMeetings = async () => {
+    setLearningPastVoices(true);
+    Analytics.trackButtonClick('learn_voices_past_meetings', 'settings');
+    try {
+      const outcome = await invoke<{ speakers: number; clusters: number; skipped: number }>(
+        'learn_voices_from_past_meetings',
+      );
+      if (outcome.speakers === 0) {
+        toast.info(t('No new voices to learn'));
+      } else {
+        toast.success(`${t('Voices remembered')}: ${outcome.speakers}`);
+      }
+    } catch (error) {
+      console.error('Failed to learn voices from past meetings:', error);
+      toast.error(t('Could not learn voices from past meetings'));
+    } finally {
+      setLearningPastVoices(false);
+    }
+  };
+
   const handleIdentityAutoAssign = async (enabled: boolean) => {
     setIdentityAutoAssign(enabled);
     try {
@@ -312,11 +336,32 @@ export function PreferenceSettings() {
           <div className="settings-cell__text">
             <h3 className="settings-cell__label">{t('Automatic assignment for very high-confidence known voices')}</h3>
             <p className="settings-cell__caption">
-              {t('Voice profiles, corrections, and capture evidence stay local. Predictions never become training examples without an explicit confirmation.')}
+              {t('Name a speaker in a transcript and Memento remembers that voice, then fills the name in automatically at later meetings. Voice profiles stay on this device.')}
             </p>
           </div>
           <Switch className="shrink-0" checked={identityAutoAssign} onCheckedChange={handleIdentityAutoAssign} />
         </div>
+        {/* Meetings named before this setting existed were never listened to. One pass
+            over them is the only way to start with a populated set of known voices. */}
+        {identityAutoAssign && (
+          <div className="settings-cell__row border-t border-[hsl(var(--border))]">
+            <span className="w-10 shrink-0" aria-hidden="true" />
+            <div className="settings-cell__text">
+              <p className="settings-cell__caption">
+                {t('Speakers you named in earlier or imported meetings can be learned in one pass — automatic names are left out.')}
+              </p>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              className="shrink-0"
+              disabled={learningPastVoices}
+              onClick={handleLearnPastMeetings}
+            >
+              {learningPastVoices ? t('Learning…') : t('Learn from past meetings')}
+            </Button>
+          </div>
+        )}
       </div>
 
       {/* Analytics Section */}

@@ -66,8 +66,7 @@ export function AnalyticsReportButton({ meetingId, disabled = false, disabledTit
       </div>
     );
   } else if (status === 'waiting_input') {
-    const waitingLabel =
-      report.waitingKind === 'speakers' ? t('Speakers — tap to confirm') : t('Questions — tap to answer');
+    const waitingLabel = t('Questions — tap to answer');
     control = (
       <Button
         variant="outline"

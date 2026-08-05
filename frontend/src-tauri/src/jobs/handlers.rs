@@ -444,6 +444,76 @@ impl JobHandler for DiarizeHandler {
     }
 }
 
+pub struct NameSpeakersHandler;
+
+#[async_trait]
+impl JobHandler for NameSpeakersHandler {
+    fn kind(&self) -> &'static str {
+        kind::NAME_SPEAKERS
+    }
+
+    /// Put names to the voices diarization just separated. Unattended by design: the pass
+    /// keeps only names it is confident about and leaves every other speaker untouched, so
+    /// there is nothing to confirm and nothing to undo. Failures are never fatal — an
+    /// unnamed speaker is the normal, harmless outcome.
+    async fn run(
+        &self,
+        ctx: &JobContext,
+        meeting_id: Option<&str>,
+        _payload: &serde_json::Value,
+    ) -> anyhow::Result<()> {
+        let meeting_id =
+            meeting_id.ok_or_else(|| anyhow::anyhow!("name_speakers requires a meeting_id"))?;
+        let pool = &ctx.pool;
+
+        // The per-meeting privacy switch is enforced inside `infer_and_apply`, so it holds
+        // for every caller rather than only this one.
+        match crate::pipeline::speaker_naming::infer_and_apply(pool, meeting_id).await {
+            Ok(outcome) if outcome.named == 0 && outcome.merged == 0 => {
+                log::info!("[name_speakers] meeting {meeting_id}: no confident names");
+                Ok(())
+            }
+            Ok(outcome) => {
+                log::info!(
+                    "[name_speakers] meeting {meeting_id}: named {} speaker(s), merged {}",
+                    outcome.named,
+                    outcome.merged
+                );
+                // Refresh the transcript UI the same way a diarization run does, so the
+                // new names appear without the user reopening the meeting.
+                if let Some(app) = crate::pipeline::diarization_commands::app_handle() {
+                    use tauri::Emitter;
+                    let speakers = crate::database::repositories::speaker::SpeakersRepository::meeting_speakers(pool, meeting_id)
+                        .await
+                        .map(|s| s.len() as i64)
+                        .unwrap_or(0);
+                    let assigned: i64 = sqlx::query_scalar(
+                        "SELECT COUNT(*) FROM transcripts \
+                         WHERE meeting_id = ? AND speaker_id IS NOT NULL",
+                    )
+                    .bind(meeting_id)
+                    .fetch_one(pool)
+                    .await
+                    .unwrap_or(0);
+                    let _ = app.emit(
+                        "diarization-complete",
+                        serde_json::json!({
+                            "meeting_id": meeting_id,
+                            "speaker_count": speakers,
+                            "assigned_segments": assigned,
+                        }),
+                    );
+                }
+                Ok(())
+            }
+            Err(error) => {
+                log::warn!("[name_speakers] meeting {meeting_id}: naming failed: {error}");
+                Ok(())
+            }
+        }
+    }
+}
+
 pub struct ExtractHandler;
 
 #[async_trait]

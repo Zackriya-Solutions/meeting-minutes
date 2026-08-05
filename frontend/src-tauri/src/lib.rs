@@ -720,6 +720,7 @@ pub fn run() {
             learning::identity::list_speaker_profile_versions,
             learning::identity::rollback_speaker_profile,
             learning::identity::purge_speaker_learning_data,
+            learning::identity::learn_voices_from_past_meetings,
             learning::advanced::get_speaker_advanced_learning,
             learning::advanced::set_speaker_advanced_learning,
             learning::classification::classify_meeting,
@@ -929,7 +930,6 @@ pub fn run() {
             report::commands::get_analytics_report,
             report::commands::cancel_analytics_report,
             report::commands::submit_analytics_answers,
-            report::commands::submit_analytics_speakers,
             report::commands::reveal_report_in_folder,
             // Telegram sharing
             telegram::commands::telegram_share_text,

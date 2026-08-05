@@ -764,6 +764,13 @@ pub async fn attribute_transcripts<R: Runtime>(
         }
     }
 
+    // Whatever the local pass could not name, the model reads the conversation for. Queued
+    // rather than awaited: voice separation is done and the user should see it now, and a
+    // model call has its own failure modes that must not reflect on this run.
+    if let Err(error) = crate::jobs::enqueue_speaker_naming(pool, meeting_id).await {
+        log::warn!("[diarize] meeting {meeting_id}: could not queue speaker naming: {error}");
+    }
+
     // 6) Notify the UI. snake_case field names, exactly as the frontend expects.
     let _ = app.emit(
         "diarization-complete",
@@ -863,6 +870,12 @@ pub async fn set_meeting_diarization_prefs(
 }
 
 /// Rename a speaker profile and mark it confirmed. Rejects empty/whitespace names.
+///
+/// This command means "a person typed this name", and voice learning depends on that:
+/// its sole caller is the rename control in the transcript UI. Code that applies a name
+/// the app worked out for itself must go through the provisional path instead (see
+/// [`crate::pipeline::speaker_naming`]), which leaves `is_confirmed` at 0 and teaches
+/// nothing. A future batch-rename or import flow must do the same.
 #[tauri::command]
 pub async fn rename_speaker(
     state: tauri::State<'_, AppState>,
@@ -873,11 +886,22 @@ pub async fn rename_speaker(
     if name.is_empty() {
         return Err("Speaker name cannot be empty".to_string());
     }
-    let affected = SpeakersRepository::rename(state.db_manager.pool(), speaker_id, name)
+    let pool = state.db_manager.pool();
+    let affected = SpeakersRepository::rename(pool, speaker_id, name)
         .await
         .map_err(|e| format!("Failed to rename speaker: {e}"))?;
     if affected == 0 {
         return Err(format!("Speaker {speaker_id} not found"));
+    }
+    // Putting a name to a voice is the user's own assertion, so it is also the moment the
+    // app may remember that voice. A failure here must not undo the rename the user asked
+    // for — the label is the point, the voiceprint is the bonus.
+    match crate::learning::identity::learn_named_speaker(pool, speaker_id, name).await {
+        Ok(0) => {}
+        Ok(clusters) => log::info!(
+            "[speakers] learned speaker {speaker_id} from {clusters} confirmed cluster(s)"
+        ),
+        Err(error) => log::warn!("[speakers] could not learn the named voice: {error}"),
     }
     Ok(())
 }
