@@ -87,9 +87,11 @@ export async function generateOpenSpecBundle(
   {
     meetingId,
     hasTranscript,
+    resume = false,
   }: {
     meetingId: string;
     hasTranscript: boolean;
+    resume?: boolean;
   },
   options: GenerateOpenSpecOptions,
 ): Promise<{ state: OpenSpecStatus; error: OpenSpecErrorPayload | null }> {
@@ -161,6 +163,7 @@ export async function generateOpenSpecBundle(
     result = await invokeFn<OpenSpecGenerationResult>('api_generate_openspec_bundle', {
       meetingId,
       generateWithAi: true,
+      resume: resume ?? false,
     });
   } catch (invokeError) {
     const payload = {
@@ -231,7 +234,7 @@ export function useOpenSpecGeneration({ meetingId, hasTranscript }: UseOpenSpecG
     }
   }, [t]);
 
-  const generate = useCallback(async () => {
+  const generate = useCallback(async (resume = false) => {
     if (!hasTranscript) {
       return;
     }
@@ -241,7 +244,7 @@ export function useOpenSpecGeneration({ meetingId, hasTranscript }: UseOpenSpecG
     setProgress({ stage: 'workspace', message: 'Preparing OpenSpec workspace', percent: 10 });
 
     const result = await generateOpenSpecBundle(
-      { meetingId, hasTranscript },
+      { meetingId, hasTranscript, resume },
       {
         t,
         showToastError: (message, options) => toast.error(message, options),
@@ -271,7 +274,7 @@ export function useOpenSpecGeneration({ meetingId, hasTranscript }: UseOpenSpecG
       return;
     }
 
-    await generate();
+    await generate(true);
   }, [generate, status]);
 
   const handleRegenerate = useCallback(async () => {

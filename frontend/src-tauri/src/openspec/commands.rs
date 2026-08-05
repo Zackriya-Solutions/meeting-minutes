@@ -19,8 +19,9 @@ pub async fn api_generate_openspec_bundle<R: Runtime>(
     state: tauri::State<'_, AppState>,
     meeting_id: String,
     generate_with_ai: Option<bool>,
+    resume: Option<bool>,
 ) -> Result<OpenSpecGenerationResult, OpenSpecErrorPayload> {
-    Ok(OpenSpecService::generate_bundle(&app, state.db_manager.pool(), meeting_id, generate_with_ai.unwrap_or(true)).await)
+    Ok(OpenSpecService::generate_bundle(&app, state.db_manager.pool(), meeting_id, generate_with_ai.unwrap_or(true), resume.unwrap_or(false)).await)
 }
 
 #[tauri::command]

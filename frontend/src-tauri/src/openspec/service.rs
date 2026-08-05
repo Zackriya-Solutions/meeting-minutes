@@ -156,9 +156,10 @@ impl OpenSpecService {
         pool: &sqlx::SqlitePool,
         meeting_id: String,
         generate_with_ai: bool,
+        resume: bool,
     ) -> OpenSpecGenerationResult {
         let runner = SystemCommandRunner;
-        Self::generate_bundle_with_runner(app, pool, &meeting_id, generate_with_ai, &runner).await
+        Self::generate_bundle_with_runner(app, pool, &meeting_id, generate_with_ai, resume, &runner).await
     }
 
     async fn generate_bundle_with_runner<R: Runtime>(
@@ -166,6 +167,7 @@ impl OpenSpecService {
         pool: &sqlx::SqlitePool,
         meeting_id: &str,
         generate_with_ai: bool,
+        resume: bool,
         runner: &(dyn CommandRunner + Sync),
     ) -> OpenSpecGenerationResult {
         if meeting_id.trim().is_empty() {
@@ -193,7 +195,7 @@ impl OpenSpecService {
         };
 
         let cli = Self::detect_cli_for_app(app, &app_data_dir, runner);
-        Self::generate_bundle_for_seed_with_runner_and_cli(app, pool, &app_data_dir, meeting_id, seed, generate_with_ai, runner, cli).await
+        Self::generate_bundle_for_seed_with_runner_and_cli(app, pool, &app_data_dir, meeting_id, seed, generate_with_ai, resume, runner, cli).await
     }
 
     #[cfg(test)]
@@ -330,10 +332,22 @@ impl OpenSpecService {
         meeting_id: &str,
         seed: TranscriptSeed,
         generate_with_ai: bool,
+        resume: bool,
         runner: &(dyn CommandRunner + Sync),
         cli: Result<OpenSpecCli, OpenSpecErrorPayload>,
     ) -> OpenSpecGenerationResult {
-        let result = Self::generate_bundle_for_seed_with_runner_and_cli_for_tests(app_data_dir, meeting_id, seed.clone(), runner, cli).await;
+        let slug = format!("{}-openspec", slugify(&seed.title));
+        let existing_change = app_data_dir.join("openspec-generation").join(slugify(meeting_id)).join("openspec").join("changes").join(&slug);
+        let result = if resume && existing_change.is_dir() {
+            let zip_path = app_data_dir.join("openspec-generation").join(slugify(meeting_id)).join(format!("{}.zip", slug));
+            OpenSpecGenerationResult::Success {
+                zip_temp_path: zip_path.to_string_lossy().to_string(),
+                suggested_filename: format!("{}-openspec.zip", slugify(&seed.title)),
+                slug,
+            }
+        } else {
+            Self::generate_bundle_for_seed_with_runner_and_cli_for_tests(app_data_dir, meeting_id, seed.clone(), runner, cli).await
+        };
         let OpenSpecGenerationResult::Success { zip_temp_path, suggested_filename, slug } = result else { return result };
         if !generate_with_ai { return OpenSpecGenerationResult::Success { zip_temp_path, suggested_filename, slug } }
         let change_dir = app_data_dir.join("openspec-generation").join(slugify(meeting_id)).join("openspec").join("changes").join(&slug);

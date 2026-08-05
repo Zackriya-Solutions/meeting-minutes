@@ -79,21 +79,23 @@ pub async fn generate_artifacts<R: Runtime>(
         app_data_dir: app_data_dir.as_ref(),
     };
 
-    emit(app, meeting_id, "proposal", "Generating proposal", 25);
-    let proposal = generate_stage(&client, &provider_config, &evidence, "Write proposal.md with Why, What Changes, Impact, assumptions and open questions. Use standard OpenSpec proposal Markdown headings.", &cancellation).await?;
-    emit(app, meeting_id, "spec", "Generating requirements", 45);
-    let spec = generate_stage(&client, &provider_config, &evidence, "Write specs/meeting-derived/spec.md. Use OpenSpec requirement Markdown: ## ADDED Requirements, ### Requirement, and at least one #### Scenario with WHEN/THEN. Only include requirements supported by evidence.", &cancellation).await?;
-    emit(app, meeting_id, "design", "Generating technical design", 65);
-    let design = generate_stage(&client, &provider_config, &evidence, "Write design.md with Context, Goals / Non-Goals, Decisions, Risks / Trade-offs, and Open Questions. Keep it implementation-neutral unless evidence provides technical detail.", &cancellation).await?;
-    emit(app, meeting_id, "tasks", "Generating implementation tasks", 85);
-    let tasks = generate_stage(&client, &provider_config, &evidence, "Write tasks.md as an actionable Markdown checklist. Each task must trace to a supported requirement or an explicit open question. Do not claim tasks are complete.", &cancellation).await?;
-
-    write_artifact(&change_dir.join("proposal.md"), &proposal)?;
-    write_artifact(&change_dir.join("design.md"), &design)?;
-    write_artifact(&change_dir.join("tasks.md"), &tasks)?;
     let specs = change_dir.join("specs").join("meeting-derived");
     std::fs::create_dir_all(&specs).map_err(|e| format!("Failed to create OpenSpec specs directory: {e}"))?;
-    write_artifact(&specs.join("spec.md"), &spec)?;
+    let stages = [
+        ("proposal", "Generating proposal", 25, change_dir.join("proposal.md"), "Write proposal.md with Why, What Changes, Impact, assumptions and open questions. Use standard OpenSpec proposal Markdown headings."),
+        ("spec", "Generating requirements", 45, specs.join("spec.md"), "Write specs/meeting-derived/spec.md. Use OpenSpec requirement Markdown: ## ADDED Requirements, ### Requirement, and at least one #### Scenario with WHEN/THEN. Only include requirements supported by evidence."),
+        ("design", "Generating technical design", 65, change_dir.join("design.md"), "Write design.md with Context, Goals / Non-Goals, Decisions, Risks / Trade-offs, and Open Questions. Keep it implementation-neutral unless evidence provides technical detail."),
+        ("tasks", "Generating implementation tasks", 85, change_dir.join("tasks.md"), "Write tasks.md as an actionable Markdown checklist. Each task must trace to a supported requirement or an explicit open question. Do not claim tasks are complete."),
+    ];
+    for (stage, message, percent, path, instruction) in stages {
+        if artifact_is_valid(&path) {
+            emit(app, meeting_id, stage, "Keeping previously generated artifact", percent);
+            continue;
+        }
+        emit(app, meeting_id, stage, message, percent);
+        let content = generate_stage(&client, &provider_config, &evidence, instruction, &cancellation).await?;
+        write_artifact(&path, &content)?;
+    }
     CANCELLATIONS.remove(meeting_id);
     emit(app, meeting_id, "complete", "OpenSpec artifacts are ready", 100);
     Ok(())
@@ -143,4 +145,10 @@ fn write_artifact(path: &Path, text: &str) -> Result<(), String> {
         return Err(format!("The selected LLM returned an empty artifact: {}", path.display()));
     }
     std::fs::write(path, format!("{}\n", text)).map_err(|e| format!("Failed to write {}: {e}", path.display()))
+}
+
+fn artifact_is_valid(path: &Path) -> bool {
+    std::fs::read_to_string(path)
+        .map(|content| !content.trim().is_empty())
+        .unwrap_or(false)
 }
