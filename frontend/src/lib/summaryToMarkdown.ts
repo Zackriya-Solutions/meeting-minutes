@@ -278,6 +278,137 @@ export function extractSummaryAgreements(markdown: string): string {
   return uniqueMarkdownList(combined);
 }
 
+export interface SummaryAgreementRow {
+  who: string;
+  what: string;
+  when: string;
+}
+
+const UNKNOWN_AGREEMENT_FIELD = /^(?:-|—|unknown|not stated|not specified|none|n\/a|неизвестно|не указан(?:о|а)?|не определен(?:о|а)?|не распознан(?:о|а)?|без срока)$/i;
+
+function cleanAgreementField(value: string | undefined): string {
+  const cleaned = (value ?? '')
+    .trim()
+    .replace(/^\*\*(.*?)\*\*$/, '$1')
+    .replace(/<br\s*\/?\s*>/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return UNKNOWN_AGREEMENT_FIELD.test(cleaned) ? '' : cleaned;
+}
+
+function agreementColumnIndex(headers: string[], aliases: string[]): number {
+  return headers.findIndex((header) => aliases.some((alias) => header === alias || header.includes(alias)));
+}
+
+function agreementRowsFromSection(
+  section: MarkdownSection,
+  kind: 'agreement' | 'decision' | 'action',
+): SummaryAgreementRow[] {
+  const lines = section.body.split('\n').map((line) => line.trim()).filter(Boolean);
+  const tableLines = lines.filter((line) => line.startsWith('|'));
+  const rows: SummaryAgreementRow[] = [];
+
+  if (tableLines.length >= 2) {
+    const headerLine = tableLines.find((line) => !/^\|?\s*:?-{3,}/.test(line));
+    if (headerLine) {
+      const headerIndex = tableLines.indexOf(headerLine);
+      const headers = tableCells(headerLine).map(normalizeSectionTitle);
+      const whoIndex = agreementColumnIndex(headers, [
+        'who', 'owner', 'responsible', 'assignee', 'кто', 'ответственный', 'исполнитель',
+      ]);
+      const whatIndex = agreementColumnIndex(headers, [
+        'what', 'task', 'action', 'agreement', 'decision', 'commitment',
+        'что', 'задача', 'действие', 'договоренност', 'решение',
+      ]);
+      const whenIndex = agreementColumnIndex(headers, [
+        'when', 'due', 'deadline', 'когда', 'срок', 'дедлайн',
+      ]);
+
+      tableLines.slice(headerIndex + 1).forEach((line) => {
+        if (/^\|?\s*:?-{3,}/.test(line)) return;
+        const cells = tableCells(line);
+        const fallbackWhatIndex = kind === 'action' && cells.length > 1 ? 1 : 0;
+        const what = cleanAgreementField(cells[whatIndex >= 0 ? whatIndex : fallbackWhatIndex]);
+        if (!what || isEmptyAgreement(what)) return;
+        rows.push({
+          who: cleanAgreementField(cells[whoIndex >= 0 ? whoIndex : -1]),
+          what,
+          when: cleanAgreementField(cells[whenIndex >= 0 ? whenIndex : -1]),
+        });
+      });
+    }
+  }
+
+  lines.forEach((line) => {
+    if (line.startsWith('|')) return;
+    const value = line.match(/^[-+*]\s+(?:\[[ xX]\]\s+)?(.+)$/)?.[1] ?? line;
+    const what = cleanAgreementField(value);
+    if (!what || isEmptyAgreement(what)) return;
+    rows.push({ who: '', what, when: '' });
+  });
+
+  return rows;
+}
+
+/**
+ * Return display-ready agreement rows. Structured action-item tables provide the
+ * owner and due date; legacy bullet summaries remain valid with empty metadata.
+ * Rows with a recognized owner are kept first without changing their relative order.
+ */
+export function extractSummaryAgreementRows(markdown: string): SummaryAgreementRow[] {
+  if (!markdown.trim()) return [];
+
+  const sections = markdownSections(markdown);
+  const classified = sections.map((section) => {
+    const title = normalizeSectionTitle(section.title);
+    return {
+      section,
+      agreement: title.includes('договоренност') || title.includes('agreement') || title.includes('commitment'),
+      decision: title.includes('решени') || title.includes('decision'),
+      action: title.includes('задач')
+        || title.includes('action item')
+        || title.includes('следующие шаги')
+        || title.includes('next steps')
+        || title.includes('согласованные результаты')
+        || title.includes('agreed deliverables'),
+    };
+  });
+
+  const agreements = classified
+    .filter(({ agreement }) => agreement)
+    .flatMap(({ section }) => agreementRowsFromSection(section, 'agreement'));
+  const decisions = classified
+    .filter(({ decision }) => decision)
+    .flatMap(({ section }) => agreementRowsFromSection(section, 'decision'));
+  const actions = classified
+    .filter(({ action }) => action)
+    .flatMap(({ section }) => agreementRowsFromSection(section, 'action'));
+
+  const combined = [...actions, ...(agreements.length > 0 ? agreements : decisions)];
+  const unique: SummaryAgreementRow[] = [];
+  combined.forEach((row) => {
+    const normalizedWhat = normalizeSectionTitle(row.what);
+    const existingIndex = unique.findIndex((candidate) => normalizeSectionTitle(candidate.what) === normalizedWhat);
+    if (existingIndex < 0) {
+      unique.push(row);
+      return;
+    }
+    const existing = unique[existingIndex];
+    if ((!existing.who && row.who) || (!existing.when && row.when)) {
+      unique[existingIndex] = {
+        who: existing.who || row.who,
+        what: existing.what,
+        when: existing.when || row.when,
+      };
+    }
+  });
+
+  return unique
+    .map((row, index) => ({ row, index }))
+    .sort((left, right) => Number(Boolean(right.row.who)) - Number(Boolean(left.row.who)) || left.index - right.index)
+    .map(({ row }) => row);
+}
+
 /** Return the generated assessment of whether the meeting stayed on schedule. */
 export function extractSummaryTiming(markdown: string): string {
   if (!markdown.trim()) return '';
