@@ -27,6 +27,7 @@ type PromptInputProps = Omit<
   submitButtonType?: "button" | "submit"
   placeholderSuggestions?: readonly string[]
   placeholderIntervalMs?: number
+  placeholderRotationKey?: string
 }
 
 export function PromptInputContainer({
@@ -64,6 +65,7 @@ export function PromptInput({
   placeholder,
   placeholderSuggestions = [],
   placeholderIntervalMs,
+  placeholderRotationKey,
   onKeyDown,
   rows = 1,
   ...props
@@ -74,6 +76,7 @@ export function PromptInput({
     placeholderSuggestions,
     placeholder ?? "",
     placeholderIntervalMs,
+    placeholderRotationKey,
   )
 
   const resize = React.useCallback((node: HTMLTextAreaElement | null) => {

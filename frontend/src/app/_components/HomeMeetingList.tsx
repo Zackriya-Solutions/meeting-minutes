@@ -40,7 +40,7 @@ import { useLanguage } from '@/lib/i18n';
 import Analytics from '@/lib/analytics';
 import { clearMarkedMoments } from '@/lib/markedMoments';
 import { formatRelativeMeetingDate, getMeetingDisplayInfo } from '@/lib/meetingDisplay';
-import { prefetchMeetingSummary } from '@/lib/meetingSummaryCache';
+import { prefetchMeetingSummary, readCachedMeetingSummary } from '@/lib/meetingSummaryCache';
 import { isRecordingNavigationLocked } from '@/lib/recordingNavigation';
 import { splitSummaryLead, summaryToMarkdown } from '@/lib/summaryToMarkdown';
 import { Cell, CellText } from '@/vendor/deslop/mini-app/Cell';
@@ -286,11 +286,11 @@ function meetingSummaryDescription(summary: unknown): string | null {
   const markdown = summaryToMarkdown(summary);
   if (!markdown) return null;
 
-  const topic = firstSummaryTopic(markdown);
-  if (topic) return topic;
-
   const { lead } = splitSummaryLead(markdown);
   if (lead) return truncateMeetingDescription(lead);
+
+  const topic = firstSummaryTopic(markdown);
+  if (topic) return topic;
 
   const firstContentLine = markdown
     .split('\n')
@@ -298,6 +298,15 @@ function meetingSummaryDescription(summary: unknown): string | null {
     .find((line) => line && !/^#{1,6}\s/.test(line) && !/^\|?\s*:?-{3,}/.test(line));
 
   return firstContentLine ? truncateMeetingDescription(firstContentLine) : null;
+}
+
+function cachedMeetingDescriptions(meetings: CurrentMeeting[]): Record<string, string> {
+  return Object.fromEntries(
+    meetings.flatMap((meeting) => {
+      const description = meetingSummaryDescription(readCachedMeetingSummary(meeting.id));
+      return description ? [[meeting.id, description]] : [];
+    }),
+  );
 }
 
 export function HomeMeetingList({ animateOnMount = true }: { animateOnMount?: boolean }) {
@@ -314,7 +323,12 @@ export function HomeMeetingList({ animateOnMount = true }: { animateOnMount?: bo
   const [question, setQuestion] = useState('');
   const [meetingToDelete, setMeetingToDelete] = useState<CalendarMeeting | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
-  const [meetingDescriptions, setMeetingDescriptions] = useState<Record<string, string>>({});
+  // Route drawers render the same archive behind the panel. On route hand-off,
+  // seed the replacement list synchronously from that warmed cache so row
+  // descriptions never disappear for a frame and reflow the whole screen.
+  const [meetingDescriptions, setMeetingDescriptions] = useState<Record<string, string>>(
+    () => cachedMeetingDescriptions(meetings),
+  );
   const screenRef = useRef<HTMLDivElement>(null);
   const locale = lang === 'ru' ? 'ru-RU' : 'en-US';
   const navigationLocked = isRecordingNavigationLocked(isRecording, status);
@@ -563,6 +577,7 @@ export function HomeMeetingList({ animateOnMount = true }: { animateOnMount?: bo
           containerClassName="home-ask"
           placeholder={t('Ask anything')}
           placeholderSuggestions={archiveSuggestions}
+          placeholderRotationKey="home-archive"
           aria-label={t('Ask anything')}
           sendLabel={t('Send')}
         />

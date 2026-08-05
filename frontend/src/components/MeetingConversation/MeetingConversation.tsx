@@ -25,7 +25,6 @@ import {
   MessageScroller,
   MessageScrollerButton,
   MessageScrollerContent,
-  MessageScrollerInitialPosition,
   MessageScrollerItem,
   MessageScrollerProvider,
   MessageScrollerViewport,
@@ -359,7 +358,7 @@ export function MeetingConversation({
           <MessageScrollerProvider
             key={meetingId}
             autoScroll={false}
-            defaultScrollPosition="last-anchor"
+            defaultScrollPosition="start"
             scrollPreviousItemPeek={48}
           >
             <ScrollEdgesObserver onChange={setSummaryScrollEdges} />
@@ -409,12 +408,6 @@ export function MeetingConversation({
                   </MessageScrollerContent>
                 </MessageScrollerViewport>
                 <MessageScrollerButton className="data-[direction=end]:bottom-[92px]" />
-                <MessageScrollerInitialPosition
-                  ready={!loadingHistory}
-                  resetKey={`${meetingId}-${latestUserMessageIndex}`}
-                  messageId={latestUserMessageIndex >= 0 ? `${meetingId}-chat-${latestUserMessageIndex}` : undefined}
-                  scrollMargin={48}
-                />
               </MessageScroller>
 
               <MeetingComposer
@@ -426,7 +419,6 @@ export function MeetingConversation({
                 disabled={loadingHistory}
                 inputRef={inputRef}
                 suggestions={meetingSuggestions}
-                showSeparator={tabScrollEdges.summary.start || tabScrollEdges.summary.end}
               />
             </div>
           </MessageScrollerProvider>
