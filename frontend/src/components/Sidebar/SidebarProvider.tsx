@@ -67,7 +67,7 @@ export function clearStoredSidebarWidth(): void {
 
 interface SidebarContextType {
   currentMeeting: CurrentMeeting | null;
-  setCurrentMeeting: (meeting: CurrentMeeting | null) => void;
+  setCurrentMeeting: React.Dispatch<React.SetStateAction<CurrentMeeting | null>>;
   sidebarItems: SidebarItem[];
   isCollapsed: boolean;
   toggleCollapse: () => void;
@@ -77,7 +77,7 @@ interface SidebarContextType {
   isSidebarResizing: boolean;
   setIsSidebarResizing: (resizing: boolean) => void;
   meetings: CurrentMeeting[];
-  setMeetings: (meetings: CurrentMeeting[]) => void;
+  setMeetings: React.Dispatch<React.SetStateAction<CurrentMeeting[]>>;
   isMeetingActive: boolean;
   setIsMeetingActive: (active: boolean) => void;
   handleRecordingToggle: () => void;

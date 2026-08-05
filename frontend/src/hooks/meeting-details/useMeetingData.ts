@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { Transcript, Summary } from '@/types';
 import { BlockNoteSummaryViewRef } from '@/components/AISummary/BlockNoteSummaryView';
-import { CurrentMeeting, useSidebar } from '@/components/Sidebar/SidebarProvider';
+import { useSidebar } from '@/components/Sidebar/SidebarProvider';
 import { invoke as invokeTauri } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
 import { useLanguage } from '@/lib/i18n';
@@ -34,9 +34,13 @@ export function useMeetingData({ meeting, summaryData, onMeetingUpdated }: UseMe
 
   // Ref for BlockNoteSummaryView
   const blockNoteSummaryRef = useRef<BlockNoteSummaryViewRef>(null);
+  const meetingTitleRef = useRef(initialMeetingTitle);
+  const savedMeetingTitleRef = useRef(initialMeetingTitle);
+  const titleSaveQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const savingOperationsRef = useRef(0);
 
   // Sidebar context
-  const { setCurrentMeeting, setMeetings, meetings: sidebarMeetings } = useSidebar();
+  const { setCurrentMeeting, setMeetings } = useSidebar();
 
   // Sync aiSummary state when summaryData prop changes (fixes display of fetched summaries)
   useEffect(() => {
@@ -46,8 +50,9 @@ export function useMeetingData({ meeting, summaryData, onMeetingUpdated }: UseMe
 
   // Handlers
   const handleTitleChange = useCallback((newTitle: string) => {
+    meetingTitleRef.current = newTitle;
     setMeetingTitle(newTitle);
-    setIsTitleDirty(true);
+    setIsTitleDirty(newTitle.trim() !== savedMeetingTitleRef.current);
   }, []);
 
   const handleSummaryChange = useCallback((newSummary: Summary) => {
@@ -55,31 +60,99 @@ export function useMeetingData({ meeting, summaryData, onMeetingUpdated }: UseMe
   }, []);
 
   const handleSaveMeetingTitle = useCallback(async () => {
-    try {
-      await invokeTauri('api_save_meeting_title', {
-        meetingId: meeting.id,
-        title: meetingTitle,
-      });
-
-      console.log('Save meeting title success');
-      setIsTitleDirty(false);
-
-      // Update meetings with new title
-      const updatedMeetings = sidebarMeetings.map((m: CurrentMeeting) =>
-        m.id === meeting.id ? { id: m.id, title: meetingTitle } : m
-      );
-      setMeetings(updatedMeetings);
-      setCurrentMeeting({ id: meeting.id, title: meetingTitle });
-    } catch (error) {
-      console.error('Failed to save meeting title:', error);
-      if (error instanceof Error) {
-        setError(error.message);
-      } else {
-        setError('Failed to save meeting title: Unknown error');
-      }
-      throw error;
+    const titleToSave = meetingTitleRef.current.trim();
+    if (!titleToSave) {
+      throw new Error(t('Meeting title cannot be empty'));
     }
-  }, [meeting.id, meetingTitle, sidebarMeetings, setMeetings, setCurrentMeeting]);
+
+    // Enter followed by blur, or a click on "Save" while the textarea is losing
+    // focus, can request the same save twice. Serialize title writes so an older,
+    // slower IPC response can never overwrite a newer rename.
+    const previousSave = titleSaveQueueRef.current;
+    const save = (async () => {
+      try {
+        await previousSave.catch(() => undefined);
+        if (titleToSave === savedMeetingTitleRef.current) {
+          if (meetingTitleRef.current.trim() === titleToSave) setIsTitleDirty(false);
+          return;
+        }
+
+        await invokeTauri('api_save_meeting_title', {
+          meetingId: meeting.id,
+          title: titleToSave,
+        });
+
+        savedMeetingTitleRef.current = titleToSave;
+        if (meetingTitleRef.current.trim() === titleToSave) {
+          meetingTitleRef.current = titleToSave;
+          setMeetingTitle(titleToSave);
+          setIsTitleDirty(false);
+        }
+
+        // Keep every view over the shared archive in sync immediately. Preserve
+        // date, duration, and folder metadata: the home list uses all of it for
+        // grouping and display.
+        setMeetings((current) => current.map((item) =>
+          item.id === meeting.id ? { ...item, title: titleToSave } : item
+        ));
+        setCurrentMeeting((current) => {
+          if (!current || current.id !== meeting.id) return current;
+          return { ...current, title: titleToSave };
+        });
+        try {
+          await onMeetingUpdated?.();
+        } catch (refreshError) {
+          // The database write and shared-state update already succeeded. A
+          // follow-up refresh must not turn a successful rename into an error.
+          console.warn('Meeting title saved, but archive refresh failed:', refreshError);
+        }
+      } catch (error) {
+        console.error('Failed to save meeting title:', error);
+        if (meetingTitleRef.current.trim() === titleToSave) {
+          const savedTitle = savedMeetingTitleRef.current;
+          meetingTitleRef.current = savedTitle;
+          setMeetingTitle(savedTitle);
+          setIsTitleDirty(false);
+        }
+        setError(error instanceof Error ? error.message : 'Failed to save meeting title: Unknown error');
+        throw error;
+      }
+    })();
+
+    titleSaveQueueRef.current = save;
+    await save;
+  }, [meeting.id, onMeetingUpdated, setMeetings, setCurrentMeeting, t]);
+
+  const beginSaving = useCallback(() => {
+    savingOperationsRef.current += 1;
+    setIsSaving(true);
+  }, []);
+
+  const finishSaving = useCallback(() => {
+    savingOperationsRef.current = Math.max(0, savingOperationsRef.current - 1);
+    if (savingOperationsRef.current === 0) setIsSaving(false);
+  }, []);
+
+  const handleFinishEditTitle = useCallback(async () => {
+    setIsEditingTitle(false);
+    const normalizedTitle = meetingTitleRef.current.trim();
+    if (normalizedTitle === savedMeetingTitleRef.current) {
+      meetingTitleRef.current = normalizedTitle;
+      setMeetingTitle(normalizedTitle);
+      setIsTitleDirty(false);
+      return;
+    }
+
+    beginSaving();
+    try {
+      await handleSaveMeetingTitle();
+      toast.success(t('Meeting title updated successfully'));
+    } catch (error) {
+      toast.error(t('Failed to update meeting title'), { description: String(error) });
+    } finally {
+      finishSaving();
+    }
+  }, [beginSaving, finishSaving, handleSaveMeetingTitle, t]);
 
   const handleSaveSummary = useCallback(async (summary: Summary | { markdown?: string; summary_json?: any[] }) => {
     console.log('📄 handleSaveSummary called with:', {
@@ -126,7 +199,7 @@ export function useMeetingData({ meeting, summaryData, onMeetingUpdated }: UseMe
   }, [meeting.id, meetingTitle]);
 
   const saveAllChanges = useCallback(async () => {
-    setIsSaving(true);
+    beginSaving();
     try {
       // Save meeting title only if changed
       if (isTitleDirty) {
@@ -144,9 +217,9 @@ export function useMeetingData({ meeting, summaryData, onMeetingUpdated }: UseMe
       console.error('Failed to save changes:', error);
       toast.error(t("Failed to save changes"), { description: String(error) });
     } finally {
-      setIsSaving(false);
+      finishSaving();
     }
-  }, [isTitleDirty, handleSaveMeetingTitle]);
+  }, [beginSaving, finishSaving, isTitleDirty, handleSaveMeetingTitle, t]);
 
   return {
     // State
@@ -167,6 +240,7 @@ export function useMeetingData({ meeting, summaryData, onMeetingUpdated }: UseMe
     // Handlers
     handleTitleChange,
     handleSummaryChange,
+    handleFinishEditTitle,
     handleSaveSummary,
     handleSaveMeetingTitle,
     saveAllChanges,
