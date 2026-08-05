@@ -8,8 +8,9 @@
 //!
 //!   1. re-transcribe the saved recording through the batch path (2000 ms redemption +
 //!      25 s silence splitting) — replaces the live transcript rows in the DB;
-//!   2. diarize the recording so the fresh rows get speaker attribution;
-//!   3. rewrite the recording folder's `transcripts.json` with speaker labels and
+//!   2. clean the fresh rows (hesitation stripping, see [`text_normalization`]);
+//!   3. diarize the recording so the fresh rows get speaker attribution;
+//!   4. rewrite the recording folder's `transcripts.json` with speaker labels and
 //!      turn-merged text (the shape reference transcription apps produce).
 //!
 //! Fire-and-forget: failures degrade to the live transcript, never block saving. The pass
@@ -22,6 +23,7 @@ use log::{info, warn};
 use sqlx::SqlitePool;
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 
+use crate::audio::text_normalization::normalize_transcript_text;
 use crate::state::AppState;
 
 /// `app_settings_kv` key for the auto-refinement toggle. Missing key = enabled.
@@ -162,7 +164,10 @@ pub(crate) async fn run_post_meeting_refinement<R: Runtime>(
             )
             .await?;
 
-            // 2) + 3) Speaker attribution and labeled export (shared with the import pass).
+            // 2) Hesitation cleanup over the rows it just wrote.
+            normalize_stored_rows_logged(pool, meeting_id, "meeting").await;
+
+            // 3) + 4) Speaker attribution and labeled export (shared with the import pass).
             diarize_and_export(app, pool, meeting_id, folder).await;
         }
     }
@@ -224,8 +229,9 @@ pub fn spawn_import_refinement<R: Runtime>(app: AppHandle<R>, meeting_id: String
             Err(reason) => {
                 info!(
                     "[refinement] import {meeting_id}: turn-aligned pass unavailable ({reason}); \
-                     keeping imported rows, attributing speakers only"
+                     keeping imported rows, cleaning text and attributing speakers only"
                 );
+                normalize_stored_rows_logged(pool, &meeting_id, "import").await;
                 diarize_and_export(&app, pool, &meeting_id, folder).await;
             }
         }
@@ -268,6 +274,62 @@ async fn diarize_and_export<R: Runtime>(
 
     if let Err(e) = write_refined_transcript_export(pool, meeting_id, folder).await {
         warn!("[refinement] meeting {meeting_id}: export rewrite failed: {e}");
+    }
+}
+
+/// Clean freshly transcribed rows, dropping the ones that were nothing but hesitation.
+fn normalize_transcripts(rows: Vec<(String, f64, f64)>) -> Vec<(String, f64, f64)> {
+    rows.into_iter()
+        .filter_map(|(text, start_ms, end_ms)| {
+            let cleaned = normalize_transcript_text(&text);
+            (!cleaned.is_empty()).then_some((cleaned, start_ms, end_ms))
+        })
+        .collect()
+}
+
+/// Apply the same cleanup to rows a previous stage already wrote to the database — the
+/// silence-cut fallback and the import path build their rows themselves. Runs before
+/// attribution and the export, so both see the final text. Rows left empty are deleted.
+async fn normalize_stored_rows(pool: &SqlitePool, meeting_id: &str) -> anyhow::Result<usize> {
+    let rows: Vec<(String, String)> =
+        sqlx::query_as("SELECT id, transcript FROM transcripts WHERE meeting_id = ?")
+            .bind(meeting_id)
+            .fetch_all(pool)
+            .await?;
+
+    let mut conn = pool.acquire().await?;
+    let mut tx = sqlx::Connection::begin(&mut *conn).await?;
+    let mut changed = 0usize;
+    for (id, text) in rows {
+        let cleaned = normalize_transcript_text(&text);
+        if cleaned == text {
+            continue;
+        }
+        changed += 1;
+        if cleaned.is_empty() {
+            sqlx::query("DELETE FROM transcripts WHERE id = ?")
+                .bind(&id)
+                .execute(&mut *tx)
+                .await?;
+        } else {
+            sqlx::query("UPDATE transcripts SET transcript = ? WHERE id = ?")
+                .bind(&cleaned)
+                .bind(&id)
+                .execute(&mut *tx)
+                .await?;
+        }
+    }
+    tx.commit().await?;
+    Ok(changed)
+}
+
+/// Run [`normalize_stored_rows`] for a meeting, logging instead of failing the pass —
+/// unnormalized rows are a cosmetic loss, not a reason to abandon refinement.
+async fn normalize_stored_rows_logged(pool: &SqlitePool, meeting_id: &str, label: &str) {
+    match normalize_stored_rows(pool, meeting_id).await {
+        Ok(0) => {}
+        Ok(count) => info!("[refinement] {label} {meeting_id}: cleaned {count} transcript row(s)"),
+        Err(e) => warn!("[refinement] {label} {meeting_id}: row cleanup failed: {e}"),
     }
 }
 
@@ -502,6 +564,13 @@ async fn turn_aligned_retranscribe<R: Runtime>(
     }
     if transcripts.is_empty() {
         anyhow::bail!("turn-aligned transcription produced no text");
+    }
+    // Strip hesitations before anything reads the text: rejoin keys on sentence-final
+    // punctuation, and a span that was pure filler must disappear rather than become an
+    // «Э-э-э.» row somebody's speaker label gets attached to.
+    let transcripts = normalize_transcripts(transcripts);
+    if transcripts.is_empty() {
+        anyhow::bail!("turn-aligned transcription produced only hesitations");
     }
     // Rejoin sentences that phantom boundary micro-spans split across rows.
     let transcripts = rejoin_sentence_fragments(transcripts, &plan.turns, FRAGMENT_JOIN_MAX_GAP_MS);

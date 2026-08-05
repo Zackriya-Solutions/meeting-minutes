@@ -43,6 +43,9 @@ pub mod transcription_provenance;
 // Shared utilities for import and retranscription
 pub(crate) mod common;
 
+// Deterministic transcript text cleanup applied by the refinement pass
+pub(crate) mod text_normalization;
+
 // Shared constants
 pub mod constants;
 
