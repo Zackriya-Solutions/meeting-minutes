@@ -88,10 +88,22 @@ export function useMeetingData({ meeting, summaryData, onMeetingUpdated }: UseMe
   const handleSaveMeetingTitle = useCallback(async () => {
     const meetingId = meeting.id;
     const titleToSave = normalizeMeetingTitle(meetingTitleRef.current);
+    if (!titleToSave) {
+      // Validation is synchronous on purpose: restore the ref before a trailing
+      // blur or another edit can enqueue work for the invalid value.
+      const message = t('Meeting title cannot be empty');
+      const savedTitle = savedMeetingTitleRef.current;
+      meetingTitleRef.current = savedTitle;
+      setMeetingTitle(savedTitle);
+      setIsTitleDirty(false);
+      publishMeetingTitle(savedTitle);
+      setError(message);
+      toast.error(t('Failed to update meeting title'), { description: message });
+      throw new Error(message);
+    }
+
     const save = titleSaveQueueRef.current.enqueue(titleToSave, async () => {
       try {
-        if (!titleToSave) throw new Error(t('Meeting title cannot be empty'));
-
         if (
           activeMeetingIdRef.current === meetingId
           && titleToSave === savedMeetingTitleRef.current
