@@ -15,13 +15,7 @@ import {
 import { useRouteDrawerLifecycle } from "@/hooks/useRouteDrawerLifecycle"
 import { useT } from "@/lib/i18n"
 
-export function RecordingDrawerShell({
-  children,
-  locked,
-}: {
-  children: ReactNode
-  locked: boolean
-}) {
+export function RecordingDrawerShell({ children }: { children: ReactNode }) {
   const router = useRouter()
   const t = useT()
   const backgroundRef = useRef<HTMLDivElement>(null)
@@ -39,12 +33,13 @@ export function RecordingDrawerShell({
     })
   }, [router])
 
+  // Closable while recording: dismissing the drawer hands off to the home screen and
+  // the recording keeps running, with <GlobalRecordingPill> carrying the way back.
   const {
     open,
     onOpenChange,
     onOpenChangeComplete,
   } = useRouteDrawerLifecycle({
-    canClose: !locked,
     onClosed: navigateHome,
   })
 
@@ -57,20 +52,7 @@ export function RecordingDrawerShell({
       <DrawerIndent
         ref={backgroundRef}
         data-home-scroll-container
-        aria-disabled={locked || undefined}
-        onClickCapture={locked ? (event) => {
-          event.preventDefault()
-          event.stopPropagation()
-        } : undefined}
-        onContextMenuCapture={locked ? (event) => {
-          event.preventDefault()
-          event.stopPropagation()
-        } : undefined}
-        onSubmitCapture={locked ? (event) => {
-          event.preventDefault()
-          event.stopPropagation()
-        } : undefined}
-        className={`route-drawer-background h-screen overflow-x-hidden overflow-y-auto${locked ? " select-none" : ""}`}
+        className="route-drawer-background h-screen overflow-x-hidden overflow-y-auto"
       >
         <HomeMeetingList animateOnMount={false} />
       </DrawerIndent>

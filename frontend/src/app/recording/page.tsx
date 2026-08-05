@@ -12,7 +12,6 @@ import { useRecordingStateSync } from "@/hooks/useRecordingStateSync"
 import { useRecordingStop } from "@/hooks/useRecordingStop"
 import { useLanguage } from "@/lib/i18n"
 import { getMeetingDisplayInfo } from "@/lib/meetingDisplay"
-import { isRecordingNavigationLocked } from "@/lib/recordingNavigation"
 import { RecordingDrawerShell } from "./recording-drawer-shell"
 
 export default function RecordingPage() {
@@ -53,10 +52,6 @@ export default function RecordingPage() {
     return getMeetingDisplayInfo({ title: meetingTitle }, lang).title
   }, [lang, meetingTitle, t])
 
-  const locked = isRecordingNavigationLocked(
-    recordingState.isRecording,
-    recordingState.status,
-  )
   const isStarting = recordingState.status === RecordingStatus.STARTING
   const isFinalizing =
     recordingState.status === RecordingStatus.STOPPING ||
@@ -69,7 +64,7 @@ export default function RecordingPage() {
   }
 
   return (
-    <RecordingDrawerShell locked={locked}>
+    <RecordingDrawerShell>
       <div className="flex h-full flex-col bg-[var(--elevation-2)]">
         <header className="relative shrink-0 px-[var(--drawer-content-inset)] py-4">
           <h1 className="memento-screen-title truncate text-foreground">
