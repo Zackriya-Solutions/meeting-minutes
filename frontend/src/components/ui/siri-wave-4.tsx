@@ -14,6 +14,11 @@ type SiriWave4Props = HTMLAttributes<HTMLDivElement> & {
 
 const BASE_AMPLITUDE = 0.32
 
+// The native pipeline publishes a level per audio chunk (~10ms). Sampling it at
+// 20Hz is well inside the 110ms attack the amplitude easing below applies, so
+// the wave looks the same as it did reading an analyser every frame.
+const POLL_INTERVAL_MS = 50
+
 function easeInOutCubic(value: number) {
   const clamped = Math.max(0, Math.min(1, value))
   return clamped < 0.5
@@ -66,22 +71,33 @@ export function SiriWave4({
     if (!active) return
 
     let cancelled = false
+    let timer = 0
+    let consecutiveFailures = 0
 
-    const readNativeMicrophoneLevel = async () => {
+    // Chained rather than setInterval: each read waits for the previous one to
+    // settle, so a slow IPC round trip cannot stack up pending invokes.
+    const pollNativeMicrophoneLevel = async () => {
       try {
         const level = await invoke<number>("get_current_microphone_level")
-        if (!cancelled) microphoneLevelRef.current = level
+        if (cancelled) return
+        microphoneLevelRef.current = level
+        consecutiveFailures = 0
       } catch {
         microphoneLevelRef.current = 0
+        // The command itself cannot fail, so a rejection means there is no
+        // Tauri bridge — the browser-only dev server. Give up instead of
+        // retrying twenty times a second forever; the wave keeps its synthetic
+        // pulse. A couple of retries first, in case the bridge is still coming up.
+        if (++consecutiveFailures >= 3) return
       }
+      if (!cancelled) timer = window.setTimeout(pollNativeMicrophoneLevel, POLL_INTERVAL_MS)
     }
 
-    void readNativeMicrophoneLevel()
-    const timer = window.setInterval(() => void readNativeMicrophoneLevel(), 50)
+    void pollNativeMicrophoneLevel()
 
     return () => {
       cancelled = true
-      window.clearInterval(timer)
+      window.clearTimeout(timer)
       microphoneLevelRef.current = 0
     }
   }, [active])

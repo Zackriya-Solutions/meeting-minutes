@@ -6,7 +6,7 @@ use rubato::{
     Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType, WindowFunction,
 };
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock};
 use std::time::Instant;
 use tokio::sync::mpsc;
@@ -22,9 +22,13 @@ use super::vad::{ContinuousVadProcessor, SpeechSegment};
 // The recording UI reads this value instead of opening a second WebKit
 // getUserMedia stream. A second microphone client makes macOS rebuild its
 // voice-processing graph and can lower the shared input level for call apps.
-static CURRENT_MICROPHONE_LEVEL: AtomicU32 = AtomicU32::new(0.0f32.to_bits());
-/// When the level above was last written, in milliseconds on `LEVEL_CLOCK`.
-static MICROPHONE_LEVEL_WRITTEN_AT_MS: AtomicU64 = AtomicU64::new(0);
+//
+// The level and the moment it was written live in one word so that a reader
+// always sees the pair the writer published: two separate atomics would let a
+// poll land between the two stores and age a fresh level against the previous
+// timestamp. High 32 bits hold the RMS as `f32::to_bits`, low 32 bits hold
+// milliseconds on `LEVEL_CLOCK`.
+static MICROPHONE_LEVEL: AtomicU64 = AtomicU64::new(0);
 static LEVEL_CLOCK: LazyLock<Instant> = LazyLock::new(Instant::now);
 
 /// A published level older than this reads as silence.
@@ -34,34 +38,39 @@ static LEVEL_CLOCK: LazyLock<Instant> = LazyLock::new(Instant::now);
 /// died, or the device went away. Without the expiry the process-wide value
 /// keeps the last RMS of a finished session forever, and the waveform shows a
 /// speaking user while nothing is being captured.
-const MICROPHONE_LEVEL_MAX_AGE_MS: u64 = 250;
+const MICROPHONE_LEVEL_MAX_AGE_MS: u32 = 250;
 
-fn level_clock_ms() -> u64 {
-    LEVEL_CLOCK.elapsed().as_millis() as u64
+/// Truncated to 32 bits, so it wraps after about 49 days of uptime. Ages are
+/// taken with `wrapping_sub`, which stays correct across that wrap.
+fn level_clock_ms() -> u32 {
+    LEVEL_CLOCK.elapsed().as_millis() as u32
+}
+
+fn pack_microphone_level(rms: f32, written_at_ms: u32) -> u64 {
+    ((rms.to_bits() as u64) << 32) | written_at_ms as u64
 }
 
 fn store_microphone_level(rms: f32) {
-    CURRENT_MICROPHONE_LEVEL.store(rms.clamp(0.0, 1.0).to_bits(), Ordering::Relaxed);
-    MICROPHONE_LEVEL_WRITTEN_AT_MS.store(level_clock_ms(), Ordering::Relaxed);
+    let packed = pack_microphone_level(rms.clamp(0.0, 1.0), level_clock_ms());
+    MICROPHONE_LEVEL.store(packed, Ordering::Relaxed);
 }
 
 /// Publish silence immediately, so the waveform does not have to wait out
 /// `MICROPHONE_LEVEL_MAX_AGE_MS` after the pipeline stops.
 pub fn reset_microphone_level() {
-    CURRENT_MICROPHONE_LEVEL.store(0.0f32.to_bits(), Ordering::Relaxed);
-    MICROPHONE_LEVEL_WRITTEN_AT_MS.store(0, Ordering::Relaxed);
+    MICROPHONE_LEVEL.store(pack_microphone_level(0.0, 0), Ordering::Relaxed);
 }
 
-fn microphone_level_at(now_ms: u64) -> f32 {
-    let written_at_ms = MICROPHONE_LEVEL_WRITTEN_AT_MS.load(Ordering::Relaxed);
-    if now_ms.saturating_sub(written_at_ms) > MICROPHONE_LEVEL_MAX_AGE_MS {
+fn level_from_packed(packed: u64, now_ms: u32) -> f32 {
+    let written_at_ms = packed as u32;
+    if now_ms.wrapping_sub(written_at_ms) > MICROPHONE_LEVEL_MAX_AGE_MS {
         return 0.0;
     }
-    f32::from_bits(CURRENT_MICROPHONE_LEVEL.load(Ordering::Relaxed))
+    f32::from_bits((packed >> 32) as u32)
 }
 
 pub fn current_microphone_level() -> f32 {
-    microphone_level_at(level_clock_ms())
+    level_from_packed(MICROPHONE_LEVEL.load(Ordering::Relaxed), level_clock_ms())
 }
 
 /// Ring buffer for synchronized audio mixing
@@ -1462,25 +1471,61 @@ mod tests {
     }
 
     #[test]
-    fn published_microphone_level_expires_and_resets() {
-        store_microphone_level(0.4);
-        let written_at = MICROPHONE_LEVEL_WRITTEN_AT_MS.load(Ordering::Relaxed);
+    fn published_microphone_level_expires() {
+        let written_at = 10_000u32;
+        let packed = pack_microphone_level(0.4, written_at);
 
         // Fresh: the waveform sees what capture measured.
         assert_eq!(
-            microphone_level_at(written_at + MICROPHONE_LEVEL_MAX_AGE_MS),
+            level_from_packed(packed, written_at + MICROPHONE_LEVEL_MAX_AGE_MS),
             0.4
         );
 
         // Stale: capture stopped writing, so the last RMS of that session must
         // not keep reading as live voice activity.
         assert_eq!(
-            microphone_level_at(written_at + MICROPHONE_LEVEL_MAX_AGE_MS + 1),
+            level_from_packed(packed, written_at + MICROPHONE_LEVEL_MAX_AGE_MS + 1),
             0.0
         );
+    }
 
-        // Stopping the pipeline retires the value without waiting for expiry.
+    #[test]
+    fn published_microphone_level_survives_the_clock_wrapping() {
+        // The clock is milliseconds truncated to 32 bits, so it wraps roughly
+        // every 49 days of uptime. A level written just before the wrap must
+        // still read as fresh just after it, not as a 49-day-old one.
+        let just_before_wrap = u32::MAX - 10;
+        let packed = pack_microphone_level(0.4, just_before_wrap);
+
+        assert_eq!(
+            level_from_packed(packed, just_before_wrap.wrapping_add(20)),
+            0.4
+        );
+        assert_eq!(
+            level_from_packed(
+                packed,
+                just_before_wrap.wrapping_add(MICROPHONE_LEVEL_MAX_AGE_MS + 1)
+            ),
+            0.0
+        );
+    }
+
+    #[test]
+    fn packed_microphone_level_keeps_both_halves_intact() {
+        // The level and its timestamp share one word so a reader always gets
+        // the pair the writer published; neither half may corrupt the other.
+        for (rms, at_ms) in [(0.0, 0u32), (1.0, u32::MAX), (0.375, 1_234_567)] {
+            let packed = pack_microphone_level(rms, at_ms);
+            assert_eq!(packed as u32, at_ms);
+            assert_eq!(f32::from_bits((packed >> 32) as u32), rms);
+        }
+    }
+
+    #[test]
+    fn stopping_the_pipeline_retires_the_published_level() {
         store_microphone_level(0.4);
+        assert_eq!(current_microphone_level(), 0.4);
+
         reset_microphone_level();
         assert_eq!(current_microphone_level(), 0.0);
     }
