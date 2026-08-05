@@ -19,7 +19,7 @@ import { readMeetingSummaryLanguage, saveMeetingSummaryLanguage } from '@/lib/su
 import { labelForCode } from '@/lib/summary-languages';
 import { useT } from '@/lib/i18n';
 import { useMeetingDrawer } from '@/contexts/MeetingDrawerContext';
-import { useAnalyticsReport } from '@/hooks/meeting-details/useAnalyticsReport';
+import type { UseAnalyticsReportResult } from '@/hooks/meeting-details/useAnalyticsReport';
 import { AnalyticsReportDialog } from './AnalyticsReportDialog';
 
 /**
@@ -33,6 +33,14 @@ import { AnalyticsReportDialog } from './AnalyticsReportDialog';
 
 interface MeetingOverflowMenuProps {
   meetingId: string;
+  /** Report pipeline state, owned by the meeting screen so the analytics tabs share it. */
+  report: UseAnalyticsReportResult;
+  /**
+   * True when a finished report exists for this meeting (the run the analytics tabs read).
+   * Kept separate from `report.status`, which describes the LATEST run — a failed
+   * regeneration must not hide the report the user already has.
+   */
+  canOpenReport?: boolean;
   hasSummary: boolean;
   hasTranscript: boolean;
   onCopySummary: () => Promise<void> | void;
@@ -51,6 +59,8 @@ interface MeetingOverflowMenuProps {
 
 export function MeetingOverflowMenu({
   meetingId,
+  report,
+  canOpenReport = false,
   hasSummary,
   hasTranscript,
   onCopySummary,
@@ -65,7 +75,6 @@ export function MeetingOverflowMenu({
 }: MeetingOverflowMenuProps) {
   const t = useT();
   const meetingDrawer = useMeetingDrawer();
-  const report = useAnalyticsReport(meetingId);
   const [open, setOpen] = useState(false);
   const [reportDialogOpen, setReportDialogOpen] = useState(false);
   const [modelOpen, setModelOpen] = useState(false);
@@ -193,8 +202,17 @@ export function MeetingOverflowMenu({
             />
           )}
 
+          {canOpenReport && (
+            <MenuItem
+              index={3}
+              iconName="open_in_new"
+              label={t('Open report')}
+              onSelect={() => void report.openReport()}
+            />
+          )}
+
           <MenuItem
-            index={3}
+            index={4}
             iconName={reportIcon}
             label={t('Analytical report')}
             trailing={reportTrailing}
@@ -205,7 +223,7 @@ export function MeetingOverflowMenu({
           <DropdownSeparator />
 
           <MenuItem
-            index={4}
+            index={5}
             iconName="language"
             label={t('Summary language')}
             trailing={languageLabel}
@@ -213,7 +231,7 @@ export function MeetingOverflowMenu({
           />
 
           <MenuItem
-            index={5}
+            index={6}
             iconName="settings"
             label={t('AI Model')}
             trailing={modelLabel}
@@ -226,7 +244,7 @@ export function MeetingOverflowMenu({
               its two-minute floor and the `refinement.auto` setting leave a meeting with
               no way back to per-reply rows. */}
           <MenuItem
-            index={6}
+            index={7}
             iconName={reprocessingLabel ? 'progress_activity' : 'refresh'}
             label={t('Split replies again')}
             trailing={reprocessingLabel ?? undefined}
@@ -238,7 +256,7 @@ export function MeetingOverflowMenu({
           <DropdownSeparator />
 
           <MenuItem
-            index={7}
+            index={8}
             iconName={deleting ? 'progress_activity' : 'delete'}
             label={t('Delete meeting')}
             disabled={deleting}

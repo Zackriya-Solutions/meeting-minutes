@@ -20,7 +20,10 @@ const TEMPLATE: &str = include_str!("template.html");
 // ============================ Score ============================
 
 /// Deterministic meeting score and its five components (all 0..100).
-#[derive(Debug, Clone, Copy, serde::Serialize)]
+///
+/// `Deserialize` is here so the meeting screen can read the score back out of a completed
+/// report's artifacts snapshot (see [`crate::report::sections`]).
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
 pub struct Score {
     pub total: i64,
     pub coverage_pct: f64,

@@ -954,6 +954,8 @@ pub fn run() {
             // Deep Analytics report commands
             report::commands::generate_analytics_report,
             report::commands::get_analytics_report,
+            report::commands::get_meeting_analytics_sections,
+            report::commands::open_analytics_report,
             report::commands::cancel_analytics_report,
             report::commands::submit_analytics_answers,
             report::commands::reveal_report_in_folder,

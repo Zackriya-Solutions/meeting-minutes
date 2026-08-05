@@ -7,6 +7,14 @@ import { EditableTitle } from '@/components/EditableTitle';
 import { SummaryPanel } from '@/components/MeetingDetails/SummaryPanel';
 import { useMeetingChat, type Citation } from '@/hooks/useMeetingChat';
 import { useMeetingRefinement } from '@/hooks/useMeetingRefinement';
+import { useAnalyticsReport } from '@/hooks/meeting-details/useAnalyticsReport';
+import { useMeetingAnalyticsSections } from '@/hooks/meeting-details/useMeetingAnalyticsSections';
+import { AnalyticsBuildPrompt } from './analytics/AnalyticsBuildPrompt';
+import { MeetingDynamicsPanel } from './analytics/MeetingDynamicsPanel';
+import { MeetingNumbersPanel } from './analytics/MeetingNumbersPanel';
+import { MeetingScoreSections } from './analytics/MeetingScoreSections';
+import { MeetingTimelinePanel } from './analytics/MeetingTimelinePanel';
+import { OpenReportButton } from './analytics/primitives';
 import { MessageBubble, TypingIndicator } from '@/components/chat/MessageBubble';
 import { useLanguage } from '@/lib/i18n';
 import Analytics from '@/lib/analytics';
@@ -50,15 +58,32 @@ function ScrollEdgesObserver({ onChange }: { onChange: (edges: ScrollEdges) => v
  *   MeetingConversation
  *   ├─ TopBar          editable title · metadata · "⋯"
  *   ├─ Thread (scroll)
- *   │   ├─ TranscriptCard   [pin] collapsed by default
- *   │   ├─ SummaryMessage   [pin] assistant message #0 + type selector
- *   │   └─ ChatMessage[]    from useMeetingChat (meeting-scoped RAG session)
+ *   │   ├─ TranscriptCard      [pin] collapsed by default
+ *   │   ├─ SummaryMessage      [pin] assistant message #0 + type selector
+ *   │   ├─ MeetingScoreSections  score · «Что мешало» · «Покрытие повестки»
+ *   │   └─ ChatMessage[]       from useMeetingChat (meeting-scoped RAG session)
  *   └─ MeetingComposer suggestion chips + input → send()
  *
  * The pins are not part of the RAG session; they stay at the top and the thread
  * scrolls as a whole. Clicking a citation expands the transcript pin and scrolls
  * it to the cited segment (by start_ms) in place, instead of routing away.
+ *
+ * Five tabs: the summary thread, the transcript, and the three analytical-report sections
+ * that stand on their own — «Числа встречи», «Динамика встречи» and «Лента встречи». All of
+ * the report material comes from one completed run (see `useMeetingAnalyticsSections`), so
+ * nothing here re-analyses a meeting; moment links from any of it jump into the transcript
+ * tab, and «Открыть отчёт» opens that run's full HTML.
  */
+
+type MeetingTab = 'summary' | 'transcript' | 'numbers' | 'dynamics' | 'timeline';
+
+const NO_SCROLL_EDGES = {
+  summary: { start: false, end: false },
+  transcript: { start: false, end: false },
+  numbers: { start: false, end: false },
+  dynamics: { start: false, end: false },
+  timeline: { start: false, end: false },
+};
 
 interface MeetingConversationProps {
   meetingId: string;
@@ -171,13 +196,21 @@ export function MeetingConversation({
     [lang, meeting.title, meetingTitle, summaryPanelProps.aiSummary, transcripts],
   );
   const [seekTarget, setSeekTarget] = useState<number | null>(seekToSeconds);
-  const [activeTab, setActiveTab] = useState<'summary' | 'transcript'>(
+  const [activeTab, setActiveTab] = useState<MeetingTab>(
     seekToSeconds == null ? 'summary' : 'transcript',
   );
-  const [tabScrollEdges, setTabScrollEdges] = useState({
-    summary: { start: false, end: false },
-    transcript: { start: false, end: false },
-  });
+  const [tabScrollEdges, setTabScrollEdges] = useState(NO_SCROLL_EDGES);
+
+  // One report pipeline per meeting screen: the "⋯" menu drives it, the analytics tabs
+  // read its progress, and the persisted sections below come from its last finished run.
+  const report = useAnalyticsReport(meetingId);
+  const analytics = useMeetingAnalyticsSections(meetingId);
+  const hasTranscript = (totalCount ?? transcripts.length) > 0;
+  // A finished report exists exactly when its sections loaded, and that is the run
+  // «Открыть отчёт» opens — a later failed regeneration never hides it.
+  const openReportAction = analytics.sections
+    ? <OpenReportButton onOpen={() => void report.openReport()} />
+    : null;
 
   const setSummaryScrollEdges = useCallback((edges: ScrollEdges) => {
     setTabScrollEdges((current) => (
@@ -206,10 +239,7 @@ export function MeetingConversation({
   useEffect(() => {
     setSeekTarget(null);
     setActiveTab('summary');
-    setTabScrollEdges({
-      summary: { start: false, end: false },
-      transcript: { start: false, end: false },
-    });
+    setTabScrollEdges(NO_SCROLL_EDGES);
   }, [meetingId]);
 
   // Honor the ?t= deep link / citation from another screen: expand + scroll.
@@ -329,8 +359,10 @@ export function MeetingConversation({
           />
           <MeetingOverflowMenu
             meetingId={meetingId}
+            report={report}
+            canOpenReport={!!analytics.sections}
             hasSummary={hasSummary}
-            hasTranscript={(totalCount ?? transcripts.length) > 0}
+            hasTranscript={hasTranscript}
             onCopySummary={onCopySummary}
             onRenameMeeting={onStartEditTitle}
             onShareSummaryToTelegram={summaryPanelProps.onShareSummaryToTelegram}
@@ -348,16 +380,29 @@ export function MeetingConversation({
 
       <FluidTabs
         value={activeTab}
-        onValueChange={(value) => setActiveTab(value as 'summary' | 'transcript')}
+        onValueChange={(value) => setActiveTab(value as MeetingTab)}
         onScrollCapture={handleThreadScrollCapture}
         className="flex min-h-0 flex-1 flex-col"
       >
-        <FluidTabsList className="mx-[var(--drawer-content-inset)] mb-3 w-auto shrink-0 grid-cols-2">
-          <FluidTabsTrigger value="summary" className="shadow-none">
+        {/* Five labels have to survive the 450px minimum drawer width: the analytics chips
+            are short (each panel's own heading carries the full name), every label keeps its
+            natural width — `flex-1` alone would hand all five an equal fifth and clip the
+            longest — and the row wraps rather than shrinking if it still does not fit. */}
+        <FluidTabsList className="mx-[var(--drawer-content-inset)] mb-3 h-auto min-h-10 w-auto shrink-0 flex-wrap">
+          <FluidTabsTrigger value="summary" className="whitespace-nowrap px-2.5 shadow-none">
             {t('Summary tab')}
           </FluidTabsTrigger>
-          <FluidTabsTrigger value="transcript" className="shadow-none">
+          <FluidTabsTrigger value="transcript" className="whitespace-nowrap px-2.5 shadow-none">
             {t('Transcript tab')}
+          </FluidTabsTrigger>
+          <FluidTabsTrigger value="numbers" className="whitespace-nowrap px-2.5 shadow-none">
+            {t('Numbers tab')}
+          </FluidTabsTrigger>
+          <FluidTabsTrigger value="dynamics" className="whitespace-nowrap px-2.5 shadow-none">
+            {t('Dynamics tab')}
+          </FluidTabsTrigger>
+          <FluidTabsTrigger value="timeline" className="whitespace-nowrap px-2.5 shadow-none">
+            {t('Feed tab')}
           </FluidTabsTrigger>
         </FluidTabsList>
 
@@ -386,6 +431,16 @@ export function MeetingConversation({
                           summaryPanelProps={summaryProps}
                           actualDurationSeconds={actualDurationSeconds}
                           speakers={speakers}
+                        />
+                      </MessageScrollerItem>
+                    )}
+
+                    {analytics.sections && (
+                      <MessageScrollerItem messageId={`${meetingId}-score`}>
+                        <MeetingScoreSections
+                          sections={analytics.sections}
+                          onSeek={handleSeekToMoment}
+                          action={openReportAction}
                         />
                       </MessageScrollerItem>
                     )}
@@ -463,6 +518,64 @@ export function MeetingConversation({
             onSpeakersDetected={onSpeakersDetected}
             transcriptViewportClassName="px-[var(--drawer-content-inset)]"
           />
+        </FluidTabsContent>
+
+        <FluidTabsContent
+          value="numbers"
+          className="mt-0 min-h-0 flex-1 overflow-y-auto px-[var(--drawer-content-inset)] data-[state=inactive]:hidden"
+        >
+          {analytics.sections ? (
+            <MeetingNumbersPanel
+              numbers={analytics.sections.numbers}
+              onSeek={handleSeekToMoment}
+              action={openReportAction}
+            />
+          ) : (
+            <AnalyticsBuildPrompt
+              report={report}
+              hasTranscript={hasTranscript}
+              loading={analytics.loading}
+            />
+          )}
+        </FluidTabsContent>
+
+        <FluidTabsContent
+          value="dynamics"
+          className="mt-0 min-h-0 flex-1 overflow-y-auto px-[var(--drawer-content-inset)] data-[state=inactive]:hidden"
+        >
+          {analytics.sections ? (
+            <MeetingDynamicsPanel
+              dynamics={analytics.sections.dynamics}
+              roles={analytics.sections.roles}
+              onSeek={handleSeekToMoment}
+              action={openReportAction}
+            />
+          ) : (
+            <AnalyticsBuildPrompt
+              report={report}
+              hasTranscript={hasTranscript}
+              loading={analytics.loading}
+            />
+          )}
+        </FluidTabsContent>
+
+        <FluidTabsContent
+          value="timeline"
+          className="mt-0 min-h-0 flex-1 overflow-y-auto px-[var(--drawer-content-inset)] data-[state=inactive]:hidden"
+        >
+          {analytics.sections ? (
+            <MeetingTimelinePanel
+              timeline={analytics.sections.timeline}
+              onSeek={handleSeekToMoment}
+              action={openReportAction}
+            />
+          ) : (
+            <AnalyticsBuildPrompt
+              report={report}
+              hasTranscript={hasTranscript}
+              loading={analytics.loading}
+            />
+          )}
         </FluidTabsContent>
       </FluidTabs>
     </div>

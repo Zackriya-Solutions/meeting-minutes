@@ -1142,6 +1142,24 @@ input, textarea, button, [role='dialog'], [role='menu'], [role='listbox'] { font
 .mm-press { transition: transform 180ms cubic-bezier(0.2, 0, 0, 1); }
 .mm-press:active { transform: scale(0.985); }
 .mm-numeric { font-family: var(--ui-font-interface); font-variant-numeric: tabular-nums; }
+
+/*
+ * Speaker series for «Лента встречи» and other meeting-analytics marks. These are the same
+ * steps the exported HTML report uses (--s1..--s4 there), so a meeting reads identically in
+ * both places; the dark steps are chosen against the dark surface, not flipped. Both sets
+ * pass the categorical palette checks (lightness band, chroma, CVD separation ΔE ≥ 8);
+ * in light mode the green and amber sit under 3:1 contrast, which the per-lane speaker
+ * labels and the transcript tab relieve. Slot 5+ falls back to muted grey.
+ */
+.mm-series-1 { color: #2a78d6; }
+.mm-series-2 { color: #eb6834; }
+.mm-series-3 { color: #1baf7a; }
+.mm-series-4 { color: #eda100; }
+.mm-series-muted { color: var(--primary-30); }
+.dark .mm-series-1 { color: #3987e5; }
+.dark .mm-series-2 { color: #d95926; }
+.dark .mm-series-3 { color: #199e70; }
+.dark .mm-series-4 { color: #c98500; }
 .timer-hero { color: hsl(var(--foreground)); font-family: var(--ui-font-interface); font-size: 52px; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: -0.055em; line-height: 0.92; }
 .timer-hero-gold { color: hsl(var(--primary)); }
 .mm-eyebrow { color: hsl(var(--muted-foreground)); font-size: 10px; font-weight: 600; letter-spacing: 0.22em; text-transform: uppercase; }

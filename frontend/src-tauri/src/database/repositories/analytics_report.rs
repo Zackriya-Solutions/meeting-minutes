@@ -7,7 +7,16 @@
 //! UI reads the LATEST row per meeting via [`AnalyticsReportsRepository::latest_for_meeting`].
 
 use crate::database::models::AnalyticsReportMeta;
-use sqlx::{Error as SqlxError, SqlitePool};
+use sqlx::{Error as SqlxError, FromRow, SqlitePool};
+
+/// The stage-artifacts snapshot of a finished report, read back by the meeting screen so
+/// it can re-render report sections without re-running the pipeline.
+#[derive(Debug, Clone, FromRow)]
+pub struct CompletedReportArtifacts {
+    pub id: String,
+    pub completed_at: Option<String>,
+    pub artifacts: String,
+}
 
 /// Total pipeline stages, mirrored into the row so the UI can render a progress bar
 /// without hard-coding the count. Kept in sync with `report::pipeline::STAGE_META`.
@@ -62,6 +71,38 @@ impl AnalyticsReportsRepository {
             "SELECT id, meeting_id, status, stage, stage_index, total_stages, \
                     html_path, error, created_at, completed_at, questions, speaker_suggestions \
              FROM analytics_reports WHERE meeting_id = ? \
+             ORDER BY created_at DESC LIMIT 1",
+        )
+        .bind(meeting_id)
+        .fetch_optional(pool)
+        .await
+    }
+
+    /// The artifacts snapshot of the latest COMPLETED report for a meeting, or `None` when
+    /// the meeting has no finished report (or an older row that predates the snapshot).
+    pub async fn latest_completed_artifacts(
+        pool: &SqlitePool,
+        meeting_id: &str,
+    ) -> Result<Option<CompletedReportArtifacts>, SqlxError> {
+        sqlx::query_as::<_, CompletedReportArtifacts>(
+            "SELECT id, completed_at, artifacts FROM analytics_reports \
+             WHERE meeting_id = ? AND status = 'completed' AND artifacts IS NOT NULL \
+             ORDER BY created_at DESC LIMIT 1",
+        )
+        .bind(meeting_id)
+        .fetch_optional(pool)
+        .await
+    }
+
+    /// Path to the rendered HTML of the latest COMPLETED report for a meeting. Deliberately
+    /// not "the latest row": a failed regeneration must not hide the report the user has.
+    pub async fn latest_completed_html_path(
+        pool: &SqlitePool,
+        meeting_id: &str,
+    ) -> Result<Option<String>, SqlxError> {
+        sqlx::query_scalar::<_, String>(
+            "SELECT html_path FROM analytics_reports \
+             WHERE meeting_id = ? AND status = 'completed' AND html_path IS NOT NULL \
              ORDER BY created_at DESC LIMIT 1",
         )
         .bind(meeting_id)

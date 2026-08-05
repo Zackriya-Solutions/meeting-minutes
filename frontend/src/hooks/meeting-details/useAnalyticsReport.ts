@@ -98,14 +98,24 @@ export interface UseAnalyticsReportResult {
   questions: AnalyticsQuestion[];
   /** Which pause screen `waiting_input` refers to (null when not waiting). */
   waitingKind: AnalyticsWaitingKind | null;
-  /** Start (or regenerate) the report. Optimistically enters the running state. */
-  generate: () => Promise<void>;
+  /**
+   * Start (or regenerate) the report. Optimistically enters the running state.
+   * `autoDownload` (default true) offers the finished HTML through the save dialog — the
+   * "⋯ → Аналитический отчёт" flow wants that, a build started to fill the meeting's own
+   * analytics tabs does not.
+   */
+  generate: (options?: { autoDownload?: boolean }) => Promise<void>;
   /** Cancel the in-flight report (no-op if nothing is running). */
   cancel: () => Promise<void>;
   /** Submit answers to the clarifying questions (empty array = skip all). */
   submitAnswers: (answers: AnalyticsAnswer[]) => Promise<void>;
   /** Open the meeting folder in Finder/Explorer with the report file selected. */
   revealReport: () => Promise<void>;
+  /**
+   * Open the generated HTML report itself (browser / default handler). Resolves the file
+   * from the latest COMPLETED run, so a later failed regeneration does not hide it.
+   */
+  openReport: () => Promise<void>;
   /** Save a copy of the completed HTML report through the system file dialog. */
   downloadReport: () => Promise<void>;
 }
@@ -301,13 +311,13 @@ export function useAnalyticsReport(meetingId: string | null): UseAnalyticsReport
     return () => { active = false; clearInterval(intervalId); };
   }, [meetingId, status, applyMeta]);
 
-  const generate = useCallback(async () => {
+  const generate = useCallback(async (options?: { autoDownload?: boolean }) => {
     if (!meetingId) return;
     Analytics.trackButtonClick('generate_analytics_report', 'meeting_details');
     // Optimistic running state so the button reacts immediately; real stage labels
     // arrive via the progress events.
     reportIdRef.current = null;
-    autoDownloadRequestedRef.current = true;
+    autoDownloadRequestedRef.current = options?.autoDownload ?? true;
     setStatus('running');
     setStageLabel('Подготовка');
     setStageIndex(0);
@@ -370,6 +380,17 @@ export function useAnalyticsReport(meetingId: string | null): UseAnalyticsReport
     }
   }, [htmlPath]);
 
+  const openReport = useCallback(async () => {
+    if (!meetingId) return;
+    Analytics.trackButtonClick('open_analytics_report', 'meeting_details');
+    try {
+      await invoke('open_analytics_report', { meetingId });
+    } catch (e) {
+      console.error('Failed to open analytics report:', e);
+      toast.error(`${t('Failed to open report')}: ${String(e)}`);
+    }
+  }, [meetingId, t]);
+
   const downloadReport = useCallback(async () => {
     if (!meetingId || status !== 'completed') return;
     Analytics.trackButtonClick('download_analytics_report', 'meeting_details');
@@ -404,6 +425,7 @@ export function useAnalyticsReport(meetingId: string | null): UseAnalyticsReport
     cancel,
     submitAnswers,
     revealReport,
+    openReport,
     downloadReport,
   };
 }
