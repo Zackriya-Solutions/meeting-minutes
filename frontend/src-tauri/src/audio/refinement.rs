@@ -1087,6 +1087,115 @@ mod tests {
     }
 
     #[test]
+    fn hesitation_only_spans_drop_before_rejoin_without_fusing_their_neighbours() {
+        // The two stages run back to back, so the interesting case is a filler-only span
+        // sitting between two finished sentences: it must disappear, and its removal must
+        // not make the sentences around it look like one split sentence.
+        let rows = vec![
+            ("Прототип готов.".to_string(), 0.0, 3_000.0),
+            ("Э-э-э.".to_string(), 3_200.0, 3_600.0),
+            ("Э-э, ну запиши тогда.".to_string(), 3_800.0, 6_000.0),
+        ];
+        let cleaned = normalize_transcripts(rows);
+        let texts: Vec<&str> = cleaned.iter().map(|r| r.0.as_str()).collect();
+        // The filler-only row is gone, and the next row kept the capital it would have
+        // lost with its opening «Э-э» — a lowercase opener is a merge signal below.
+        assert_eq!(texts, vec!["Прототип готов.", "Ну запиши тогда."]);
+
+        let out = rejoin_sentence_fragments(cleaned, &[], FRAGMENT_JOIN_MAX_GAP_MS);
+        assert_eq!(out.len(), 2, "two finished sentences must not merge");
+    }
+
+    #[tokio::test]
+    async fn stored_row_cleanup_rewrites_updates_and_cascades_deletes() {
+        use sqlx::sqlite::SqlitePoolOptions;
+
+        let pool = SqlitePoolOptions::new()
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        // Minimal slice of the real schema: rows plus one table that references them, so
+        // the delete below proves it cannot orphan an attribution (sqlx turns
+        // `PRAGMA foreign_keys` ON, and the real column is ON DELETE CASCADE).
+        sqlx::query(
+            "CREATE TABLE transcripts(id TEXT PRIMARY KEY, meeting_id TEXT, transcript TEXT)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "CREATE TABLE speaker_cluster_segments(
+                 cluster_id INTEGER NOT NULL,
+                 transcript_id TEXT NOT NULL REFERENCES transcripts(id) ON DELETE CASCADE,
+                 PRIMARY KEY(cluster_id, transcript_id))",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        for (id, meeting, text) in [
+            ("r1", "m1", "Прекрасно. Э-э-э. Мишань, карусель отменяем."),
+            ("r2", "m1", "Э-э-э."),
+            ("r3", "m1", "Уже готово."),
+            ("r4", "m2", "Другая встреча, э-э-э, не трогать."),
+        ] {
+            sqlx::query("INSERT INTO transcripts(id, meeting_id, transcript) VALUES(?, ?, ?)")
+                .bind(id)
+                .bind(meeting)
+                .bind(text)
+                .execute(&pool)
+                .await
+                .unwrap();
+            sqlx::query(
+                "INSERT INTO speaker_cluster_segments(cluster_id, transcript_id) VALUES(1, ?)",
+            )
+            .bind(id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+
+        // Two rows change: one rewritten, one emptied. The clean row is left alone.
+        assert_eq!(normalize_stored_rows(&pool, "m1").await.unwrap(), 2);
+
+        let rows: Vec<(String, String)> =
+            sqlx::query_as("SELECT id, transcript FROM transcripts ORDER BY id")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            rows,
+            vec![
+                (
+                    "r1".to_string(),
+                    "Прекрасно. Мишань, карусель отменяем.".to_string()
+                ),
+                ("r3".to_string(), "Уже готово.".to_string()),
+                // Another meeting's rows are out of scope.
+                (
+                    "r4".to_string(),
+                    "Другая встреча, э-э-э, не трогать.".to_string()
+                ),
+            ]
+        );
+
+        let orphans: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM speaker_cluster_segments s
+             WHERE NOT EXISTS (SELECT 1 FROM transcripts t WHERE t.id = s.transcript_id)",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            orphans, 0,
+            "deleting a filler-only row must not orphan its attribution"
+        );
+
+        // Idempotent: a second pass over already-clean rows changes nothing.
+        assert_eq!(normalize_stored_rows(&pool, "m1").await.unwrap(), 0);
+    }
+
+    #[test]
     fn sentence_fragments_rejoin_across_phantom_boundaries() {
         // Real cases from the 2026-07-28 meeting review.
         let rows = vec![
