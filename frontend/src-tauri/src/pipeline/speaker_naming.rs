@@ -168,6 +168,21 @@ async fn apply_provisional_name(
     Ok(result.rows_affected() > 0)
 }
 
+/// Whether this meeting's transcript may be read by a model at all.
+///
+/// Naming sends the conversation to a cloud model, so it honours the same per-meeting
+/// switch extraction does. The check lives here rather than in the caller so the
+/// guarantee holds for every caller, present and future.
+async fn naming_allowed(pool: &SqlitePool, meeting_id: &str) -> Result<bool, String> {
+    let cloud_allowed: Option<i64> =
+        sqlx::query_scalar("SELECT cloud_processing_allowed FROM meetings WHERE id = ?")
+            .bind(meeting_id)
+            .fetch_optional(pool)
+            .await
+            .map_err(|error| format!("Failed to read the meeting privacy policy: {error}"))?;
+    Ok(cloud_allowed != Some(0))
+}
+
 /// Name the speakers of one meeting from its transcript, unattended.
 ///
 /// Degrades quietly: no diarized speakers, no transcript, a privacy policy that blocks
@@ -189,6 +204,13 @@ pub async fn infer_and_apply(pool: &SqlitePool, meeting_id: &str) -> Result<Nami
         .iter()
         .all(|entry| entry.is_confirmed || !is_automatic_speaker_name(&entry.display_name))
     {
+        return Ok(NamingOutcome::default());
+    }
+
+    if !naming_allowed(pool, meeting_id).await? {
+        log::info!(
+            "[speaker-naming] meeting {meeting_id}: naming disabled by memory privacy policy"
+        );
         return Ok(NamingOutcome::default());
     }
 
@@ -352,6 +374,32 @@ mod tests {
             confidence,
             ..Default::default()
         }
+    }
+
+    #[tokio::test]
+    async fn a_meeting_that_forbids_cloud_processing_is_never_sent_to_the_model() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+        for (id, allowed) in [("open-meeting", 1), ("private-meeting", 0)] {
+            sqlx::query(
+                "INSERT INTO meetings(id, title, created_at, updated_at, cloud_processing_allowed) \
+                 VALUES(?, 'Sync', datetime('now'), datetime('now'), ?)",
+            )
+            .bind(id)
+            .bind(allowed)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+
+        assert!(naming_allowed(&pool, "open-meeting").await.unwrap());
+        assert!(!naming_allowed(&pool, "private-meeting").await.unwrap());
+        // An unknown meeting cannot be named either way; it must not look forbidden.
+        assert!(naming_allowed(&pool, "missing-meeting").await.unwrap());
     }
 
     #[test]

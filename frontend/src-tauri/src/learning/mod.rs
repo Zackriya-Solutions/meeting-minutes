@@ -441,6 +441,50 @@ mod integration_tests {
         assert_eq!(learned, 1);
     }
 
+    /// A meeting the user kept out of the app's memory contributes no voiceprint either.
+    /// A profile outlives the meeting it was built from, which is exactly what that switch
+    /// is there to prevent.
+    #[tokio::test]
+    async fn a_meeting_excluded_from_memory_teaches_nothing() {
+        let pool = migrated_pool().await;
+        insert_meeting(&pool, "private-meeting", "One-on-one").await;
+        sqlx::query("UPDATE meetings SET indexing_allowed=0 WHERE id='private-meeting'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO app_settings_kv(key, value) VALUES('identity.auto_assign_enabled','true')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let (speaker_id, _) =
+            diarize_one_voice(&pool, "private-meeting", voice_embedding(17, 0.0)).await;
+
+        crate::database::repositories::speaker::SpeakersRepository::rename(
+            &pool,
+            speaker_id,
+            "Ольга",
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            super::identity::learn_named_speaker(&pool, speaker_id, "Ольга")
+                .await
+                .unwrap(),
+            0,
+            "naming a speaker must not learn audio the user excluded from memory"
+        );
+        assert_eq!(
+            super::identity::learn_from_named_speakers(&pool)
+                .await
+                .unwrap()
+                .speakers,
+            0,
+            "and the backfill must not pick it up either"
+        );
+    }
+
     /// Automatic labels are placeholders, not names: they are the app's own guess, and a
     /// guess must never become a training example.
     #[tokio::test]

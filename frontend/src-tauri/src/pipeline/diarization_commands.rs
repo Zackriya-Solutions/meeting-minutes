@@ -870,6 +870,12 @@ pub async fn set_meeting_diarization_prefs(
 }
 
 /// Rename a speaker profile and mark it confirmed. Rejects empty/whitespace names.
+///
+/// This command means "a person typed this name", and voice learning depends on that:
+/// its sole caller is the rename control in the transcript UI. Code that applies a name
+/// the app worked out for itself must go through the provisional path instead (see
+/// [`crate::pipeline::speaker_naming`]), which leaves `is_confirmed` at 0 and teaches
+/// nothing. A future batch-rename or import flow must do the same.
 #[tauri::command]
 pub async fn rename_speaker(
     state: tauri::State<'_, AppState>,

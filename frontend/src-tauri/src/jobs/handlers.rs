@@ -466,20 +466,8 @@ impl JobHandler for NameSpeakersHandler {
             meeting_id.ok_or_else(|| anyhow::anyhow!("name_speakers requires a meeting_id"))?;
         let pool = &ctx.pool;
 
-        // Same per-meeting privacy switch the extraction job honours: naming reads the
-        // transcript with a cloud model.
-        let cloud_processing_allowed: Option<i64> =
-            sqlx::query_scalar("SELECT cloud_processing_allowed FROM meetings WHERE id = ?")
-                .bind(meeting_id)
-                .fetch_optional(pool)
-                .await?;
-        if cloud_processing_allowed == Some(0) {
-            log::info!(
-                "[name_speakers] meeting {meeting_id}: naming disabled by memory privacy policy"
-            );
-            return Ok(());
-        }
-
+        // The per-meeting privacy switch is enforced inside `infer_and_apply`, so it holds
+        // for every caller rather than only this one.
         match crate::pipeline::speaker_naming::infer_and_apply(pool, meeting_id).await {
             Ok(outcome) if outcome.named == 0 && outcome.merged == 0 => {
                 log::info!("[name_speakers] meeting {meeting_id}: no confident names");

@@ -1093,12 +1093,19 @@ pub async fn learn_named_speaker(
     // the newest run *that this speaker appears in*, not the newest run overall. A meeting
     // re-diarized after its speakers were named leaves those names on the superseded run,
     // and that audio is still theirs.
+    //
+    // A meeting excluded from the app's memory (`indexing_allowed = 0`) contributes no
+    // audio either: a voiceprint is exactly the kind of durable derived memory that switch
+    // is there to prevent, and it would outlive the meeting it came from.
     let clusters: Vec<i64> = sqlx::query_scalar(
         "SELECT sc.id FROM speaker_clusters sc \
          WHERE (sc.operational_speaker_id=?1 OR sc.placeholder_speaker_id=?1) \
            AND sc.embedding IS NOT NULL AND sc.model_version=?2 \
            AND sc.speech_duration_ms >= ?3 AND COALESCE(sc.speech_quality, 0.0) >= ?4 \
            AND COALESCE(sc.overlap_ratio, 1.0) <= ?5 \
+           AND EXISTS( \
+               SELECT 1 FROM meetings m \
+               WHERE m.id=sc.meeting_id AND COALESCE(m.indexing_allowed, 1) <> 0) \
            AND sc.diarization_run_id=( \
                SELECT sc2.diarization_run_id FROM speaker_clusters sc2 \
                WHERE sc2.meeting_id=sc.meeting_id \
