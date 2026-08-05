@@ -101,6 +101,9 @@ export function AutoMeetingDetection() {
     let disposed = false;
     const unlisteners: Array<() => void> = [];
 
+    // Only reaches us when the user's "When a call is detected" setting is on: the
+    // detector emits nothing while `auto_meeting_detection` is off, and this prompt
+    // only offers to record — starting one is still a tap.
     listen<MeetingDetectedEvent>('auto-meeting-detected', (event) => {
       if (recordingState.isRecording) return;
       setBanner({ apps: event.payload.apps, state: 'suggestion' });
@@ -109,6 +112,17 @@ export function AutoMeetingDetection() {
       else unlisteners.push(unsubscribe);
     }).catch((error) => {
       console.error('Failed to subscribe to meeting detection events:', error);
+    });
+
+    // The call ended, or detection was switched off, with the prompt unanswered.
+    // A suggestion outlives its call otherwise, since nothing else clears it.
+    listen('auto-meeting-detection-ended', () => {
+      setBanner((current) => (current?.state === 'suggestion' ? null : current));
+    }).then((unsubscribe) => {
+      if (disposed) unsubscribe();
+      else unlisteners.push(unsubscribe);
+    }).catch((error) => {
+      console.error('Failed to subscribe to meeting detection end events:', error);
     });
 
     listen<AutoListeningEvent>('auto-listening-start-requested', (event) => {

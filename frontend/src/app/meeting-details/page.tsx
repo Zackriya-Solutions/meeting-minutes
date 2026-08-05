@@ -12,9 +12,9 @@ import { useMeetingSpeakers } from "@/hooks/useMeetingSpeakers";
 import { useLanguage, useT } from "@/lib/i18n";
 import { useMeetingDrawer } from "@/contexts/MeetingDrawerContext";
 import { MeetingDrawerShell } from "./meeting-drawer-shell";
-import { AUTO_START_TITLE_KEY } from "@/hooks/useRecordingStart";
-import { useRecordingState, RecordingStatus } from "@/contexts/RecordingStateContext";
-import { isRecordingNavigationLocked } from "@/lib/recordingNavigation";
+import { requestAutoStart } from "@/lib/autoStartRecording";
+import { useRecordingState } from "@/contexts/RecordingStateContext";
+import { canStartRecordingNow } from "@/lib/recordingNavigation";
 import {
   cacheMeetingSummary,
   parsePersistedSummary,
@@ -64,15 +64,11 @@ function UpcomingMeetingPreview() {
   const inProgress = hasStart
     && start.getTime() <= now
     && (!hasEnd || end.getTime() > now);
-  const canRecord = !isRecordingNavigationLocked(isRecording, status)
-    && (status === RecordingStatus.IDLE
-      || status === RecordingStatus.COMPLETED
-      || status === RecordingStatus.ERROR);
+  const canRecord = canStartRecordingNow(isRecording, status);
 
   const recordThisMeeting = () => {
     if (!canRecord) return;
-    window.sessionStorage.setItem('autoStartRecording', 'true');
-    window.sessionStorage.setItem(AUTO_START_TITLE_KEY, title);
+    requestAutoStart(window.sessionStorage, title);
     router.push('/recording');
   };
 

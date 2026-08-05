@@ -1,0 +1,48 @@
+import { describe, expect, test } from "bun:test";
+import { RecordingStatus } from "../../src/contexts/RecordingStateContext";
+import {
+  canStartRecordingNow,
+  isRecordingNavigationLocked,
+} from "../../src/lib/recordingNavigation";
+
+describe("canStartRecordingNow", () => {
+  test("allows a start from every settled status", () => {
+    for (const status of [
+      RecordingStatus.IDLE,
+      RecordingStatus.COMPLETED,
+      RecordingStatus.ERROR,
+    ]) {
+      expect(canStartRecordingNow(false, status)).toBe(true);
+    }
+  });
+
+  test("refuses while the recorder is working, including after isRecording drops", () => {
+    // The teardown statuses are the point: `isRecording` goes false before saving and
+    // transcript processing finish, and a second start there would race the first.
+    for (const status of [
+      RecordingStatus.STARTING,
+      RecordingStatus.RECORDING,
+      RecordingStatus.STOPPING,
+      RecordingStatus.PROCESSING_TRANSCRIPTS,
+      RecordingStatus.SAVING,
+    ]) {
+      expect(canStartRecordingNow(false, status)).toBe(false);
+    }
+  });
+
+  test("refuses whenever a recording is live, whatever the status says", () => {
+    for (const status of Object.values(RecordingStatus)) {
+      expect(canStartRecordingNow(true, status)).toBe(false);
+    }
+  });
+
+  test("is never true where navigation is locked", () => {
+    for (const status of Object.values(RecordingStatus)) {
+      for (const isRecording of [true, false]) {
+        if (isRecordingNavigationLocked(isRecording, status)) {
+          expect(canStartRecordingNow(isRecording, status)).toBe(false);
+        }
+      }
+    }
+  });
+});

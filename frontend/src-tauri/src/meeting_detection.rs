@@ -195,6 +195,10 @@ struct DetectionSession {
 enum DetectionEvent {
     None,
     SuggestRecording,
+    /// The call a suggestion was raised for is over, or detection was switched off
+    /// under it. Nothing is recording, so this only withdraws the prompt — without it
+    /// an unanswered suggestion would sit on screen indefinitely.
+    WithdrawSuggestion,
     StartAutoListening,
     StopAutoListening,
 }
@@ -208,11 +212,15 @@ impl DetectionSession {
         auto_listening: bool,
     ) -> DetectionEvent {
         if !enabled {
+            let had_suggestion = self.notified;
             if self.auto_listening_active {
                 *self = Self::default();
                 return DetectionEvent::StopAutoListening;
             }
             *self = Self::default();
+            if had_suggestion {
+                return DetectionEvent::WithdrawSuggestion;
+            }
             return DetectionEvent::None;
         }
 
@@ -257,8 +265,12 @@ impl DetectionSession {
             return DetectionEvent::None;
         }
         if self.quiet_polls >= REQUIRED_QUIET_POLLS {
+            let had_suggestion = self.notified;
             self.notified = false;
             self.quiet_polls = 0;
+            if had_suggestion {
+                return DetectionEvent::WithdrawSuggestion;
+            }
         }
         DetectionEvent::None
     }
@@ -331,8 +343,12 @@ async fn run_detection_loop(
                 let settings = detection_settings(&app).await;
                 let recording = crate::audio::recording_commands::is_recording().await;
                 if !settings.detection_enabled {
-                    if session.observe(false, false, false, false) == DetectionEvent::StopAutoListening {
-                        stop_armed_mode(&app, &auto_listening_state, armed_mode.take()).await;
+                    match session.observe(false, false, false, false) {
+                        DetectionEvent::StopAutoListening => {
+                            stop_armed_mode(&app, &auto_listening_state, armed_mode.take()).await;
+                        }
+                        DetectionEvent::WithdrawSuggestion => withdraw_detection(&app),
+                        _ => {}
                     }
                     process_evidence = ProcessLaunchEvidence::default();
                     continue;
@@ -413,6 +429,7 @@ async fn run_detection_loop(
                         )
                         .await;
                     }
+                    DetectionEvent::WithdrawSuggestion => withdraw_detection(&app),
                     DetectionEvent::StartAutoListening => {
                         let Some(source) = source else { continue };
                         let Some(mode) = mode_to_arm else { continue };
@@ -1320,6 +1337,12 @@ async fn deliver_detection(app: &AppHandle<Wry>, event: MeetingDetectedEvent) {
     }
 }
 
+/// Take back a prompt the user never answered. Only the webview banner is withdrawn:
+/// a native notification is already dismissible by the user, and nothing is recording.
+fn withdraw_detection(app: &AppHandle<Wry>) {
+    let _ = app.emit("auto-meeting-detection-ended", ());
+}
+
 fn collect_native_apps(system: &System) -> BTreeSet<MeetingApp> {
     let mut apps = BTreeSet::new();
     for process in system.processes().values() {
@@ -1846,9 +1869,11 @@ mod tests {
             session.observe(false, false, true, false),
             DetectionEvent::None
         );
+        // The call is over, so the unanswered prompt is taken back before the session
+        // is free to suggest again.
         assert_eq!(
             session.observe(false, false, true, false),
-            DetectionEvent::None
+            DetectionEvent::WithdrawSuggestion
         );
         assert_eq!(
             session.observe(true, false, true, false),
@@ -1857,6 +1882,54 @@ mod tests {
         assert_eq!(
             session.observe(true, false, true, false),
             DetectionEvent::SuggestRecording
+        );
+    }
+
+    #[test]
+    fn a_suggestion_is_withdrawn_only_once_and_only_when_one_was_raised() {
+        let mut session = DetectionSession::default();
+        // Quiet polls with nothing suggested stay silent.
+        for _ in 0..4 {
+            assert_eq!(
+                session.observe(false, false, true, false),
+                DetectionEvent::None
+            );
+        }
+
+        session.observe(true, false, true, false);
+        assert_eq!(
+            session.observe(true, false, true, false),
+            DetectionEvent::SuggestRecording
+        );
+        session.observe(false, false, true, false);
+        assert_eq!(
+            session.observe(false, false, true, false),
+            DetectionEvent::WithdrawSuggestion
+        );
+        // Withdrawn once: staying quiet must not re-emit it every poll.
+        for _ in 0..4 {
+            assert_eq!(
+                session.observe(false, false, true, false),
+                DetectionEvent::None
+            );
+        }
+    }
+
+    #[test]
+    fn switching_detection_off_takes_back_an_open_suggestion() {
+        let mut session = DetectionSession::default();
+        session.observe(true, false, true, false);
+        assert_eq!(
+            session.observe(true, false, true, false),
+            DetectionEvent::SuggestRecording
+        );
+        assert_eq!(
+            session.observe(false, false, false, false),
+            DetectionEvent::WithdrawSuggestion
+        );
+        assert_eq!(
+            session.observe(false, false, false, false),
+            DetectionEvent::None
         );
     }
 
