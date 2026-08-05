@@ -45,14 +45,62 @@ pub async fn auto_refine_enabled(pool: &SqlitePool) -> bool {
     }
 }
 
+/// Why a pass is running. A pass the user asked for skips the automatic gates: the
+/// two-minute floor exists so unattended processing stays off trivial recordings, and
+/// `refinement.auto` switches the automatic pass off — neither should override an
+/// explicit request to reprocess this meeting.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum RefinementTrigger {
+    Automatic,
+    UserRequested,
+}
+
+impl RefinementTrigger {
+    fn is_user_requested(self) -> bool {
+        self == Self::UserRequested
+    }
+}
+
+/// Progress for the UI. The pass is minutes of heavy CPU (diarization cascade, then one
+/// ASR call per speaker turn); without a stage name the app looks hung while the fans spin.
+/// `done`/`total` are 0 for stages that have no natural unit of work.
+fn emit_stage<R: Runtime>(
+    app: &AppHandle<R>,
+    meeting_id: &str,
+    stage: &str,
+    done: usize,
+    total: usize,
+) {
+    let _ = app.emit(
+        "refinement-progress",
+        serde_json::json!({
+            "meeting_id": meeting_id,
+            "stage": stage,
+            "done": done,
+            "total": total,
+        }),
+    );
+}
+
 /// Spawn the refinement pass for a just-saved recorded meeting. Returns immediately.
 pub fn spawn_post_meeting_refinement<R: Runtime>(
     app: AppHandle<R>,
     meeting_id: String,
     folder_path: String,
 ) {
+    spawn_refinement(app, meeting_id, folder_path, RefinementTrigger::Automatic);
+}
+
+fn spawn_refinement<R: Runtime>(
+    app: AppHandle<R>,
+    meeting_id: String,
+    folder_path: String,
+    trigger: RefinementTrigger,
+) {
     tauri::async_runtime::spawn(async move {
-        if let Err(e) = run_post_meeting_refinement(&app, &meeting_id, &folder_path).await {
+        if let Err(e) =
+            run_post_meeting_refinement(&app, &meeting_id, &folder_path, trigger).await
+        {
             warn!("[refinement] meeting {meeting_id}: pass did not complete: {e}");
             let _ = app.emit(
                 "refinement-error",
@@ -62,10 +110,48 @@ pub fn spawn_post_meeting_refinement<R: Runtime>(
     });
 }
 
+/// Re-run the refinement pass on demand: diarize, re-transcribe per speaker turn, split
+/// replies, re-attribute. This is the only way to ask for that work again — the automatic
+/// pass runs once on save, and its two-minute floor and `refinement.auto` gate both leave
+/// meetings with no route back. Returns as soon as the pass is spawned; follow
+/// `refinement-progress` / `-complete` / `-error` for the outcome.
+#[tauri::command]
+pub async fn rerun_meeting_refinement<R: Runtime>(
+    app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    meeting_id: String,
+) -> Result<(), String> {
+    let pool = state.db_manager.pool();
+    let folder: Option<String> =
+        sqlx::query_scalar("SELECT folder_path FROM meetings WHERE id = ?")
+            .bind(&meeting_id)
+            .fetch_optional(pool)
+            .await
+            .map_err(|e| format!("Could not look up the meeting: {e}"))?
+            .flatten();
+    let folder = folder
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| "This meeting has no saved recording to reprocess".to_string())?;
+    // Fail loudly here rather than inside the spawned pass, where the only trace would
+    // be a log line: the user clicked a menu item and is owed an answer.
+    if crate::audio::retranscription::find_audio_file(Path::new(&folder)).is_err() {
+        return Err("This meeting's audio file is missing, so it cannot be reprocessed".to_string());
+    }
+    info!("[refinement] meeting {meeting_id}: user asked for another pass");
+    spawn_refinement(
+        app,
+        meeting_id,
+        folder,
+        RefinementTrigger::UserRequested,
+    );
+    Ok(())
+}
+
 pub(crate) async fn run_post_meeting_refinement<R: Runtime>(
     app: &AppHandle<R>,
     meeting_id: &str,
     folder_path: &str,
+    trigger: RefinementTrigger,
 ) -> anyhow::Result<()> {
     let state = app
         .try_state::<AppState>()
@@ -85,7 +171,7 @@ pub(crate) async fn run_post_meeting_refinement<R: Runtime>(
                 .get("duration_seconds")
                 .and_then(serde_json::Value::as_f64)
         });
-    if duration_seconds.is_some_and(|duration| duration < 120.0) {
+    if duration_seconds.is_some_and(|duration| duration < 120.0) && !trigger.is_user_requested() {
         info!(
             "[refinement] meeting {meeting_id}: recording is shorter than two minutes; \
              skipping hidden-meeting speaker processing"
@@ -101,11 +187,12 @@ pub(crate) async fn run_post_meeting_refinement<R: Runtime>(
             .bind(meeting_id)
             .fetch_one(pool)
             .await?;
-    if !auto_refine_enabled(pool).await && transcript_count > 0 {
+    if !auto_refine_enabled(pool).await && transcript_count > 0 && !trigger.is_user_requested() {
         info!(
             "[refinement] meeting {meeting_id}: batch re-transcription disabled; \
              running speaker attribution only"
         );
+        emit_stage(app, meeting_id, "diarizing", 0, 0);
         diarize_and_export(app, pool, meeting_id, folder).await;
         let _ = app.emit(
             "refinement-complete",
@@ -142,6 +229,7 @@ pub(crate) async fn run_post_meeting_refinement<R: Runtime>(
                 "[refinement] meeting {meeting_id}: turn-aligned pass done — {} speaker(s), {}/{} row(s) attributed",
                 outcome.speaker_count, outcome.assigned_segments, outcome.total_segments
             );
+            emit_stage(app, meeting_id, "exporting", 0, 0);
             if let Err(e) = write_refined_transcript_export(pool, meeting_id, folder).await {
                 warn!("[refinement] meeting {meeting_id}: export rewrite failed: {e}");
             }
@@ -151,6 +239,7 @@ pub(crate) async fn run_post_meeting_refinement<R: Runtime>(
                 "[refinement] meeting {meeting_id}: turn-aligned pass unavailable ({reason}); \
                  using silence-cut batch pass"
             );
+            emit_stage(app, meeting_id, "retranscribing", 0, 0);
             // 1) Batch re-transcription. Replaces the DB rows and writes transcripts.json;
             //    emits its own retranscription-* progress events. The in-progress guard
             //    inside makes a concurrent manual retranscription win — we just skip.
@@ -168,6 +257,7 @@ pub(crate) async fn run_post_meeting_refinement<R: Runtime>(
             normalize_stored_rows_logged(pool, meeting_id, "meeting").await;
 
             // 3) + 4) Speaker attribution and labeled export (shared with the import pass).
+            emit_stage(app, meeting_id, "diarizing", 0, 0);
             diarize_and_export(app, pool, meeting_id, folder).await;
         }
     }
@@ -447,9 +537,14 @@ async fn turn_aligned_retranscribe<R: Runtime>(
     }
 
     let model_deadline = std::time::Instant::now() + MODEL_LOAD_WAIT;
+    let mut announced_wait = false;
     while !crate::gigaam_engine::is_loaded() {
         if std::time::Instant::now() >= model_deadline {
             anyhow::bail!("GigaAM model is not loaded");
+        }
+        if !announced_wait {
+            emit_stage(app, meeting_id, "waiting_for_model", 0, 0);
+            announced_wait = true;
         }
         tokio::time::sleep(POLL).await;
     }
@@ -467,6 +562,7 @@ async fn turn_aligned_retranscribe<R: Runtime>(
     };
 
     // 1) Diarize (identity resolution included; transcript rows untouched).
+    emit_stage(app, meeting_id, "diarizing", 0, 0);
     let plan = match compute_speaker_turns(app, pool, meeting_id).await {
         Ok(plan) => plan,
         Err(DiarizeError::ModelsUnavailable) => {
@@ -480,6 +576,7 @@ async fn turn_aligned_retranscribe<R: Runtime>(
     }
 
     // 2) Decode the recording once.
+    emit_stage(app, meeting_id, "decoding", 0, 0);
     let audio_path = crate::audio::retranscription::find_audio_file(folder)?;
     let decode_path = audio_path.clone();
     let decoded =
@@ -503,6 +600,12 @@ async fn turn_aligned_retranscribe<R: Runtime>(
 
     let mut transcripts: Vec<(String, f64, f64)> = Vec::new(); // (text, start_ms, end_ms)
     for (i, &(start_ms, end_ms)) in spans.iter().enumerate() {
+        // The loop is the long pole — one ASR call per turn, hundreds of them. Report
+        // every fifth span (plus the first) so the UI can count down without the event
+        // stream itself becoming the load.
+        if i % 5 == 0 {
+            emit_stage(app, meeting_id, "transcribing", i, spans.len());
+        }
         let s = ((start_ms as f64 / 1000.0) * SAMPLE_RATE) as usize;
         let e = (((end_ms as f64 / 1000.0) * SAMPLE_RATE) as usize).min(total);
         if e <= s || e - s < 1_600 {
@@ -606,6 +709,7 @@ async fn turn_aligned_retranscribe<R: Runtime>(
 
     // 5) Attribute rows to speakers — rows were cut from the very turns being assigned,
     //    so overlap is essentially total and every row gets its speaker.
+    emit_stage(app, meeting_id, "attributing", 0, 0);
     crate::pipeline::diarization_commands::attribute_transcripts(app, pool, meeting_id, &plan)
         .await
         .map_err(|e| match e {
