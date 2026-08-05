@@ -6,11 +6,23 @@ import { invoke as invokeTauri } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
 import { useLanguage } from '@/lib/i18n';
 import { getMeetingDisplayInfo } from '@/lib/meetingDisplay';
+import {
+  isLatestMeetingTitle,
+  MeetingTitleSaveQueue,
+  normalizeMeetingTitle,
+} from '@/lib/meetingTitleSaveQueue';
 
 interface UseMeetingDataProps {
   meeting: any;
   summaryData: Summary | null;
   onMeetingUpdated?: () => Promise<void>;
+}
+
+class MeetingTitleSaveError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'MeetingTitleSaveError';
+  }
 }
 
 export function useMeetingData({ meeting, summaryData, onMeetingUpdated }: UseMeetingDataProps) {
@@ -36,7 +48,7 @@ export function useMeetingData({ meeting, summaryData, onMeetingUpdated }: UseMe
   const blockNoteSummaryRef = useRef<BlockNoteSummaryViewRef>(null);
   const meetingTitleRef = useRef(initialMeetingTitle);
   const savedMeetingTitleRef = useRef(initialMeetingTitle);
-  const titleSaveQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const titleSaveQueueRef = useRef(new MeetingTitleSaveQueue());
   const savingOperationsRef = useRef(0);
 
   // Sidebar context
@@ -52,28 +64,40 @@ export function useMeetingData({ meeting, summaryData, onMeetingUpdated }: UseMe
   const handleTitleChange = useCallback((newTitle: string) => {
     meetingTitleRef.current = newTitle;
     setMeetingTitle(newTitle);
-    setIsTitleDirty(newTitle.trim() !== savedMeetingTitleRef.current);
+    setIsTitleDirty(normalizeMeetingTitle(newTitle) !== savedMeetingTitleRef.current);
   }, []);
 
   const handleSummaryChange = useCallback((newSummary: Summary) => {
     setAiSummary(newSummary);
   }, []);
 
+  const publishMeetingTitle = useCallback((title: string) => {
+    setMeetings((current) => current.map((item) =>
+      item.id === meeting.id ? { ...item, title } : item
+    ));
+    setCurrentMeeting((current) => {
+      if (!current || current.id !== meeting.id) return current;
+      return { ...current, title };
+    });
+  }, [meeting.id, setCurrentMeeting, setMeetings]);
+
   const handleSaveMeetingTitle = useCallback(async () => {
-    const titleToSave = meetingTitleRef.current.trim();
+    const titleToSave = normalizeMeetingTitle(meetingTitleRef.current);
     if (!titleToSave) {
-      throw new Error(t('Meeting title cannot be empty'));
+      const error = new MeetingTitleSaveError(t('Meeting title cannot be empty'));
+      const savedTitle = savedMeetingTitleRef.current;
+      meetingTitleRef.current = savedTitle;
+      setMeetingTitle(savedTitle);
+      setIsTitleDirty(false);
+      publishMeetingTitle(savedTitle);
+      toast.error(t('Failed to update meeting title'), { description: error.message });
+      throw error;
     }
 
-    // Enter followed by blur, or a click on "Save" while the textarea is losing
-    // focus, can request the same save twice. Serialize title writes so an older,
-    // slower IPC response can never overwrite a newer rename.
-    const previousSave = titleSaveQueueRef.current;
-    const save = (async () => {
+    const save = titleSaveQueueRef.current.enqueue(titleToSave, async () => {
       try {
-        await previousSave.catch(() => undefined);
         if (titleToSave === savedMeetingTitleRef.current) {
-          if (meetingTitleRef.current.trim() === titleToSave) setIsTitleDirty(false);
+          if (isLatestMeetingTitle(meetingTitleRef.current, titleToSave)) setIsTitleDirty(false);
           return;
         }
 
@@ -83,45 +107,41 @@ export function useMeetingData({ meeting, summaryData, onMeetingUpdated }: UseMe
         });
 
         savedMeetingTitleRef.current = titleToSave;
-        if (meetingTitleRef.current.trim() === titleToSave) {
+        const isLatestEdit = isLatestMeetingTitle(meetingTitleRef.current, titleToSave);
+        if (isLatestEdit) {
           meetingTitleRef.current = titleToSave;
           setMeetingTitle(titleToSave);
           setIsTitleDirty(false);
-        }
 
-        // Keep every view over the shared archive in sync immediately. Preserve
-        // date, duration, and folder metadata: the home list uses all of it for
-        // grouping and display.
-        setMeetings((current) => current.map((item) =>
-          item.id === meeting.id ? { ...item, title: titleToSave } : item
-        ));
-        setCurrentMeeting((current) => {
-          if (!current || current.id !== meeting.id) return current;
-          return { ...current, title: titleToSave };
-        });
-        try {
-          await onMeetingUpdated?.();
-        } catch (refreshError) {
-          // The database write and shared-state update already succeeded. A
-          // follow-up refresh must not turn a successful rename into an error.
-          console.warn('Meeting title saved, but archive refresh failed:', refreshError);
+          // Keep every view over the shared archive in sync immediately. Do not
+          // publish an intermediate saved title when a newer edit is pending.
+          publishMeetingTitle(titleToSave);
+          try {
+            await onMeetingUpdated?.();
+          } catch (refreshError) {
+            // The database write and shared-state update already succeeded. A
+            // follow-up refresh must not turn a successful rename into an error.
+            console.warn('Meeting title saved, but archive refresh failed:', refreshError);
+          }
         }
       } catch (error) {
         console.error('Failed to save meeting title:', error);
-        if (meetingTitleRef.current.trim() === titleToSave) {
+        if (isLatestMeetingTitle(meetingTitleRef.current, titleToSave)) {
           const savedTitle = savedMeetingTitleRef.current;
           meetingTitleRef.current = savedTitle;
           setMeetingTitle(savedTitle);
           setIsTitleDirty(false);
+          publishMeetingTitle(savedTitle);
         }
-        setError(error instanceof Error ? error.message : 'Failed to save meeting title: Unknown error');
-        throw error;
+        const message = error instanceof Error ? error.message : 'Failed to save meeting title: Unknown error';
+        setError(message);
+        toast.error(t('Failed to update meeting title'), { description: message });
+        throw new MeetingTitleSaveError(message);
       }
-    })();
+    });
 
-    titleSaveQueueRef.current = save;
     await save;
-  }, [meeting.id, onMeetingUpdated, setMeetings, setCurrentMeeting, t]);
+  }, [meeting.id, onMeetingUpdated, publishMeetingTitle, t]);
 
   const beginSaving = useCallback(() => {
     savingOperationsRef.current += 1;
@@ -135,7 +155,7 @@ export function useMeetingData({ meeting, summaryData, onMeetingUpdated }: UseMe
 
   const handleFinishEditTitle = useCallback(async () => {
     setIsEditingTitle(false);
-    const normalizedTitle = meetingTitleRef.current.trim();
+    const normalizedTitle = normalizeMeetingTitle(meetingTitleRef.current);
     if (normalizedTitle === savedMeetingTitleRef.current) {
       meetingTitleRef.current = normalizedTitle;
       setMeetingTitle(normalizedTitle);
@@ -146,13 +166,13 @@ export function useMeetingData({ meeting, summaryData, onMeetingUpdated }: UseMe
     beginSaving();
     try {
       await handleSaveMeetingTitle();
-      toast.success(t('Meeting title updated successfully'));
-    } catch (error) {
-      toast.error(t('Failed to update meeting title'), { description: String(error) });
+    } catch {
+      // handleSaveMeetingTitle owns the single user-facing error for a shared
+      // in-flight request, including Enter/blur duplicates.
     } finally {
       finishSaving();
     }
-  }, [beginSaving, finishSaving, handleSaveMeetingTitle, t]);
+  }, [beginSaving, finishSaving, handleSaveMeetingTitle]);
 
   const handleSaveSummary = useCallback(async (summary: Summary | { markdown?: string; summary_json?: any[] }) => {
     console.log('📄 handleSaveSummary called with:', {
@@ -215,7 +235,9 @@ export function useMeetingData({ meeting, summaryData, onMeetingUpdated }: UseMe
       toast.success(t("Changes saved successfully"));
     } catch (error) {
       console.error('Failed to save changes:', error);
-      toast.error(t("Failed to save changes"), { description: String(error) });
+      if (!(error instanceof MeetingTitleSaveError)) {
+        toast.error(t("Failed to save changes"), { description: String(error) });
+      }
     } finally {
       finishSaving();
     }
