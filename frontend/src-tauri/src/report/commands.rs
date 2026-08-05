@@ -3,12 +3,16 @@
 
 use once_cell::sync::Lazy;
 use serde::Serialize;
+use std::path::PathBuf;
 use tauri::{AppHandle, Runtime, State};
+use tauri_plugin_dialog::DialogExt;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
+use crate::audio::audio_processing::sanitize_filename;
 use crate::database::models::AnalyticsReportMeta;
 use crate::database::repositories::analytics_report::AnalyticsReportsRepository;
+use crate::database::repositories::meeting::MeetingsRepository;
 use crate::report::pipeline;
 use crate::report::prompts::ClarifyAnswer;
 use crate::state::AppState;
@@ -149,4 +153,116 @@ pub fn reveal_report_in_folder(path: String) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+fn suggested_report_name(title: &str) -> String {
+    let sanitized = sanitize_filename(title);
+    let stem = if sanitized.is_empty() {
+        "Memento"
+    } else {
+        sanitized.as_str()
+    };
+    format!("{stem} — аналитический отчёт.html")
+}
+
+fn ensure_html_extension(path: PathBuf) -> PathBuf {
+    if path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("html"))
+    {
+        path
+    } else {
+        path.with_extension("html")
+    }
+}
+
+/// Save the latest completed report for a meeting to a location chosen by the user.
+/// The generated source remains in the meeting folder; exporting creates a separate copy.
+#[tauri::command]
+pub async fn download_analytics_report<R: Runtime>(
+    app: AppHandle<R>,
+    state: State<'_, AppState>,
+    meeting_id: String,
+) -> Result<Option<String>, String> {
+    let pool = state.db_manager.pool();
+    let report = AnalyticsReportsRepository::latest_for_meeting(pool, &meeting_id)
+        .await
+        .map_err(|e| format!("Не удалось загрузить аналитический отчёт: {e}"))?
+        .ok_or_else(|| "Аналитический отчёт ещё не создан.".to_string())?;
+
+    if report.status != "completed" {
+        return Err("Аналитический отчёт ещё не готов.".to_string());
+    }
+
+    let source = report
+        .html_path
+        .map(PathBuf::from)
+        .ok_or_else(|| "У готового отчёта отсутствует путь к HTML-файлу.".to_string())?;
+    if !source.is_file() {
+        return Err("HTML-файл аналитического отчёта не найден.".to_string());
+    }
+
+    let title = MeetingsRepository::get_meeting_metadata(pool, &meeting_id)
+        .await
+        .ok()
+        .flatten()
+        .map(|meeting| meeting.title)
+        .unwrap_or_else(|| "Memento".to_string());
+
+    let selected = app
+        .dialog()
+        .file()
+        .add_filter("HTML", &["html"])
+        .set_file_name(suggested_report_name(&title))
+        .blocking_save_file();
+    let Some(selected) = selected else {
+        return Ok(None);
+    };
+    let destination = ensure_html_extension(
+        selected
+            .into_path()
+            .map_err(|e| format!("Некорректный путь сохранения: {e}"))?,
+    );
+
+    if source != destination {
+        let source_for_task = source.clone();
+        let destination_for_task = destination.clone();
+        tokio::task::spawn_blocking(move || std::fs::copy(source_for_task, destination_for_task))
+            .await
+            .map_err(|e| format!("Не удалось завершить сохранение отчёта: {e}"))?
+            .map_err(|e| format!("Не удалось сохранить аналитический отчёт: {e}"))?;
+    }
+
+    Ok(Some(destination.to_string_lossy().into_owned()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ensure_html_extension, suggested_report_name};
+    use std::path::PathBuf;
+
+    #[test]
+    fn report_download_name_is_safe_and_descriptive() {
+        assert_eq!(
+            suggested_report_name("Статус: продукт / команда"),
+            "Статус_ продукт _ команда — аналитический отчёт.html"
+        );
+        assert_eq!(
+            suggested_report_name("  "),
+            "Memento — аналитический отчёт.html"
+        );
+    }
+
+    #[test]
+    fn report_download_always_uses_html_extension() {
+        assert_eq!(
+            ensure_html_extension(PathBuf::from("report")),
+            PathBuf::from("report.html")
+        );
+        assert_eq!(
+            ensure_html_extension(PathBuf::from("report.HTML")),
+            PathBuf::from("report.HTML")
+        );
+    }
 }

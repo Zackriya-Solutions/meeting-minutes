@@ -174,7 +174,7 @@ const Dropdown = forwardRef<HTMLDivElement, DropdownProps>(
             {activeRect && (
               <motion.div
                 key={sessionRef.current}
-                className={`absolute ${shape.bg} bg-hover pointer-events-none`}
+                className={`absolute ${shape.bg} bg-[var(--primary-10)] pointer-events-none`}
                 initial={{
                   opacity: 0,
                   top: checkedRect?.top ?? activeRect.top,
@@ -198,17 +198,17 @@ const Dropdown = forwardRef<HTMLDivElement, DropdownProps>(
             )}
           </AnimatePresence>
 
-          {/* Focus ring */}
+          {/* Keyboard focus background */}
           <AnimatePresence>
             {focusRect && (
               <motion.div
-                className={`absolute ${shape.focusRing} pointer-events-none z-20 border border-[color:var(--focus-ring,#6B97FF)]`}
+                className={`absolute ${shape.bg} pointer-events-none bg-[var(--primary-5)]`}
                 initial={false}
                 animate={{
-                  left: focusRect.left - 2,
-                  top: focusRect.top - 2,
-                  width: focusRect.width + 4,
-                  height: focusRect.height + 4,
+                  left: focusRect.left,
+                  top: focusRect.top,
+                  width: focusRect.width,
+                  height: focusRect.height,
                 }}
                 exit={{ opacity: 0, transition: spring.fast.exit }}
                 transition={{
@@ -523,10 +523,6 @@ const DropdownContent = forwardRef<HTMLDivElement, DropdownContentProps>(
               <Elevated
                 offset={2}
                 shadowLevel={3}
-                style={{
-                  background: "var(--elevation-2)",
-                  boxShadow: "var(--shadow-3)",
-                }}
                 ref={(node: HTMLDivElement | null) => {
                   (
                     containerRef as React.MutableRefObject<HTMLDivElement | null>
@@ -597,7 +593,7 @@ const DropdownContent = forwardRef<HTMLDivElement, DropdownContentProps>(
                   {activeRect && (
                     <motion.div
                       key={sessionRef.current}
-                      className={`absolute ${shape.bg} bg-hover pointer-events-none`}
+                      className={`absolute ${shape.bg} bg-[var(--primary-10)] pointer-events-none`}
                       initial={{
                         opacity: 0,
                         top: checkedRect?.top ?? activeRect.top,
@@ -621,17 +617,17 @@ const DropdownContent = forwardRef<HTMLDivElement, DropdownContentProps>(
                   )}
                 </AnimatePresence>
 
-                {/* Focus ring */}
+                {/* Keyboard focus background */}
                 <AnimatePresence>
                   {focusRect && (
                     <motion.div
-                      className={`absolute ${shape.focusRing} pointer-events-none z-20 border border-[color:var(--focus-ring,#6B97FF)]`}
+                      className={`absolute ${shape.bg} pointer-events-none bg-[var(--primary-5)]`}
                       initial={false}
                       animate={{
-                        left: focusRect.left - 2,
-                        top: focusRect.top - 2,
-                        width: focusRect.width + 4,
-                        height: focusRect.height + 4,
+                        left: focusRect.left,
+                        top: focusRect.top,
+                        width: focusRect.width,
+                        height: focusRect.height,
                       }}
                       exit={{ opacity: 0, transition: spring.fast.exit }}
                       transition={{

@@ -1174,6 +1174,7 @@ input, textarea, button, [role='dialog'], [role='menu'], [role='listbox'] { font
 .mm-summary-list > ul > li { display: grid; grid-template-columns: 6px minmax(0, 1fr); column-gap: 8px; }
 .mm-summary-list > ul > li::before { content: '•'; color: var(--primary-50); }
 .mm-summary-list > ol { padding-inline-start: 18px; }
+.mm-summary-plain > ul { padding-inline-start: 0; list-style: none; }
 .mm-md li { margin: 2px 0; }
 .mm-md li > ul, .mm-md li > ol { margin: 2px 0; }
 .mm-md li.task-list-item { list-style: none; }

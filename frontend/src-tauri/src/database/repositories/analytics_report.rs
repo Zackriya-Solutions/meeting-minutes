@@ -11,7 +11,7 @@ use sqlx::{Error as SqlxError, SqlitePool};
 
 /// Total pipeline stages, mirrored into the row so the UI can render a progress bar
 /// without hard-coding the count. Kept in sync with `report::pipeline::STAGE_META`.
-pub const TOTAL_STAGES: i64 = 12;
+pub const TOTAL_STAGES: i64 = 11;
 
 pub struct AnalyticsReportsRepository;
 

@@ -1,13 +1,16 @@
 "use client";
 
-import { type ComponentProps, useMemo } from 'react';
+import { type ComponentProps, useEffect, useMemo, useState } from 'react';
+import { Calligraph } from 'calligraph';
 import { SummaryPanel } from '@/components/MeetingDetails/SummaryPanel';
 import { Copy, RefreshCw } from '@/components/deslop-icons';
 import { ChatMarkdown } from '@/components/chat/ChatMarkdown';
 import { Button as FluidButton } from '@/components/ui/fluid-button';
 import { FluidSpinner } from '@/components/ui/fluid-spinner';
+import { Progress } from '@/components/ui/progress';
+import MiniAppMarkdown from '@/vendor/deslop/mini-app/components/Markdown';
 import {
-  extractSummaryAgreements,
+  extractSummaryAgreementRows,
   extractSummaryParticipants,
   extractSummaryTiming,
   summaryToMarkdown,
@@ -15,6 +18,8 @@ import {
 } from '@/lib/summaryToMarkdown';
 import { useT } from '@/lib/i18n';
 import { localizeSpeakerLabel, type SpeakerInfo } from '@/types';
+
+import styles from './SummaryMessage.module.css';
 
 /**
  * Summary for the meeting conversation (variant 3a): flows as content in the feed —
@@ -51,6 +56,10 @@ function normalizedLabel(value: string): string {
   return value.trim().toLocaleLowerCase('ru-RU').replace(/ё/g, 'е');
 }
 
+function markdownTableCell(value: string): string {
+  return value.replace(/\|/g, '\\|').replace(/\r?\n/g, '<br />');
+}
+
 function engagementPercentages(speakers: SpeakerInfo[]): Map<number, number> {
   const totalDuration = speakers.reduce(
     (sum, speaker) => sum + Math.max(0, speaker.speech_duration_seconds || 0),
@@ -85,13 +94,14 @@ function engagementPercentages(speakers: SpeakerInfo[]): Map<number, number> {
 
 export function SummaryMessage({ summaryPanelProps: p, actualDurationSeconds, speakers = [] }: SummaryMessageProps) {
   const t = useT();
+  const [animateEngagement, setAnimateEngagement] = useState(false);
 
   const isGenerating =
     p.summaryStatus === 'processing' || p.summaryStatus === 'summarizing' || p.summaryStatus === 'regenerating';
   const hasSummary = !!p.aiSummary;
 
   const content = useMemo(() => {
-    if (!hasSummary) return { participants: '', lead: '', timing: '', agreements: '' };
+    if (!hasSummary) return { participants: '', lead: '', timing: '', agreements: [] };
     const markdown = summaryToMarkdown(p.aiSummary);
     return {
       participants: extractSummaryParticipants(
@@ -100,7 +110,7 @@ export function SummaryMessage({ summaryPanelProps: p, actualDurationSeconds, sp
       ),
       lead: splitSummaryLead(markdown).lead,
       timing: extractSummaryTiming(markdown),
-      agreements: extractSummaryAgreements(markdown),
+      agreements: extractSummaryAgreementRows(markdown),
     };
   }, [hasSummary, p.aiSummary, t]);
 
@@ -111,6 +121,22 @@ export function SummaryMessage({ summaryPanelProps: p, actualDurationSeconds, sp
       .filter(Boolean),
     [content.participants],
   );
+  const participantAnimationKey = participants.join('\u0000');
+  const agreementsTable = useMemo(() => [
+    `| ${t('Who')} | ${t('What')} | ${t('When')} |`,
+    '| --- | --- | --- |',
+    ...content.agreements.map(({ who, what, when }) =>
+      `| ${markdownTableCell(who)} | ${markdownTableCell(what)} | ${markdownTableCell(when)} |`),
+  ].join('\n'), [content.agreements, t]);
+
+  useEffect(() => {
+    if (participants.length === 0) return;
+
+    setAnimateEngagement(false);
+    const frame = window.requestAnimationFrame(() => setAnimateEngagement(true));
+    return () => window.cancelAnimationFrame(frame);
+  }, [participantAnimationKey, participants.length]);
+
   const engagementByLabel = useMemo(() => {
     const percentages = engagementPercentages(speakers);
     const byLabel = new Map<string, number>();
@@ -124,6 +150,16 @@ export function SummaryMessage({ summaryPanelProps: p, actualDurationSeconds, sp
     return byLabel;
   }, [speakers, t]);
 
+  const participantRows = useMemo(() => participants
+    .map((participant, index) => ({
+      participant,
+      index,
+      engagement: engagementByLabel.get(normalizedLabel(participant)),
+    }))
+    .sort((left, right) =>
+      (right.engagement ?? -1) - (left.engagement ?? -1) || left.index - right.index),
+  [engagementByLabel, participants]);
+
   return (
     <div>
       {isGenerating ? (
@@ -132,34 +168,48 @@ export function SummaryMessage({ summaryPanelProps: p, actualDurationSeconds, sp
           {p.getSummaryStatusMessage(p.summaryStatus)}
         </div>
       ) : hasSummary ? (
-        <>
+        <div className="flex flex-col gap-6">
+          {content.lead ? (
+            <section>
+              <h2 className="text-sm font-normal leading-5 text-[var(--primary-50)]">{t('About the meeting')}</h2>
+              <ChatMarkdown content={content.lead} className="mm-summary-plain mt-2" />
+            </section>
+          ) : null}
           {participants.length > 0 ? (
             <section>
-              <h2 className="text-sm font-semibold leading-5 text-[var(--primary-50)]">{t('Participants')}</h2>
-              <ul className="mt-2 space-y-0.5 text-sm leading-[1.6] text-foreground">
-                {participants.map((participant) => {
-                  const engagement = engagementByLabel.get(normalizedLabel(participant));
+              <h2 className="text-sm font-normal leading-5 text-[var(--primary-50)]">
+                {t(participants.length === 1 ? 'Participants' : 'Participant engagement')}
+              </h2>
+              <div className="mt-3 flex flex-col gap-3 text-[length:var(--ui-body-font-size)] leading-[21px] text-foreground">
+                {participantRows.map(({ participant, engagement }) => {
                   return (
-                    <li key={participant} className="grid grid-cols-[6px_minmax(0,1fr)_auto] gap-x-2">
-                      <span className="text-[var(--primary-50)]">•</span>
-                      <span className="min-w-0">{participant}</span>
-                      {engagement != null && (
-                        <span className="mm-numeric text-[var(--primary-40)]">{engagement}%</span>
-                      )}
-                    </li>
+                    <div key={participant}>
+                      <div className="flex min-w-0 items-center justify-between gap-2">
+                        <span className="min-w-0 truncate">{participant}</span>
+                        {participants.length > 1 && engagement != null && (
+                          <span className="mm-numeric inline-flex min-w-[4ch] shrink-0 justify-end text-[var(--primary-40)]">
+                            <Calligraph variant="number" animation="bouncy">
+                              {animateEngagement ? engagement : 0}
+                            </Calligraph>
+                            <span>%</span>
+                          </span>
+                        )}
+                      </div>
+                      {participants.length > 1 ? (
+                        <Progress
+                          value={animateEngagement ? (engagement ?? 0) : 0}
+                          aria-label={`${participant}: ${engagement ?? 0}%`}
+                          className="mt-1 gap-0"
+                        />
+                      ) : null}
+                    </div>
                   );
                 })}
-              </ul>
+              </div>
             </section>
           ) : null}
-          {content.lead ? (
-            <section className={participants.length > 0 ? 'mt-6' : undefined}>
-              <h2 className="text-sm font-semibold leading-5 text-[var(--primary-50)]">{t('About the meeting')}</h2>
-              <ChatMarkdown content={content.lead} className="mm-summary-list mt-2" />
-            </section>
-          ) : null}
-          <section className="mt-6">
-            <h2 className="text-sm font-semibold leading-5 text-[var(--primary-50)]">{t('Timing')}</h2>
+          <section>
+            <h2 className="text-sm font-normal leading-5 text-[var(--primary-50)]">{t('Timing')}</h2>
             <ChatMarkdown
               content={[
                 actualDurationSeconds && actualDurationSeconds > 0
@@ -170,17 +220,18 @@ export function SummaryMessage({ summaryPanelProps: p, actualDurationSeconds, sp
               className="mm-summary-list mt-2"
             />
           </section>
-          {content.agreements ? (
-            <section className="mt-6">
-              <h2 className="text-sm font-semibold leading-5 text-[var(--primary-50)]">{t('Agreements')}</h2>
-              <ChatMarkdown
-                content={content.agreements}
-                className="mm-summary-list mt-2"
-              />
+          {content.agreements.length > 0 ? (
+            <section>
+              <h2 className="text-sm font-normal leading-5 text-[var(--primary-50)]">{t('Agreements')}</h2>
+              <div
+                className={`mt-2 ${styles.agreementsTable}`}
+              >
+                <MiniAppMarkdown>{agreementsTable}</MiniAppMarkdown>
+              </div>
             </section>
           ) : null}
 
-          <div className="mt-[18px] flex gap-1">
+          <div className="flex gap-1">
             <FluidButton
               type="button"
               variant="secondary"
@@ -202,7 +253,7 @@ export function SummaryMessage({ summaryPanelProps: p, actualDurationSeconds, sp
               {t('Copy')}
             </FluidButton>
           </div>
-        </>
+        </div>
       ) : p.summaryLoadStatus === 'loading' ? (
         <div className="flex items-center gap-2 py-4 text-sm text-muted-foreground">
           <FluidSpinner className="h-4 w-4 text-primary" />

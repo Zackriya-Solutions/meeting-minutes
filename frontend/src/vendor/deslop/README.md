@@ -28,3 +28,7 @@ component. It keeps the source spacing, separators, typography, and interaction
 states while using Memento's existing React runtime. Deslop's `--primary*`
 colors are exposed as `--deslop-primary*` here because shadcn already owns the
 unprefixed `--primary` name in Memento.
+
+`mini-app/components/{Markdown,Table,Text,Skeleton}` are unmodified source files
+from Deslop Mini Apps. Memento scopes the source `--primary` token to the safe
+`--deslop-primary` adapter alias at the integration boundary.

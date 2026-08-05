@@ -14,14 +14,13 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use once_cell::sync::Lazy;
 use serde::de::DeserializeOwned;
 use serde_json::json;
 use sqlx::SqlitePool;
 use tauri::{AppHandle, Emitter, Manager, Runtime};
-use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
 
 use crate::database::repositories::analytics_report::{AnalyticsReportsRepository, TOTAL_STAGES};
@@ -31,8 +30,8 @@ use crate::llm::providers::{deepseek, resolve_deepseek};
 use crate::llm::{ensure_outbound_allowed, Purpose};
 use crate::report::dynamics::{self, DynSegment, Dynamics};
 use crate::report::prompts::{
-    self, Clarify, ClarifyAnswer, ClarifyQuestion, Classification, Commitments,
-    DisagreementsConcepts, Insights, Numbers, Roles, ThreadsRisks, Topics,
+    self, ClarifyAnswer, ClarifyQuestion, Classification, Commitments, DisagreementsConcepts,
+    Insights, Numbers, Roles, ThreadsRisks, Topics,
 };
 use crate::report::render::{compute_score, render_report, RenderInput};
 
@@ -41,7 +40,6 @@ use crate::report::render::{compute_score, render_report, RenderInput};
 const STAGE_META: [(&str, &str); TOTAL_STAGES as usize] = [
     ("dynamics", "Анализ динамики разговора"),
     ("classify", "Классификация встречи"),
-    ("clarify", "Уточняющие вопросы"),
     ("topics", "Темы и повестка"),
     ("decisions", "Решения"),
     ("commitments", "Обязательства"),
@@ -53,19 +51,11 @@ const STAGE_META: [(&str, &str); TOTAL_STAGES as usize] = [
     ("render", "Сборка отчёта"),
 ];
 
-/// How long the pipeline waits at the clarify pause before it gives up and proceeds with
-/// no answers.
-const INPUT_WAIT: Duration = Duration::from_secs(600);
-
 /// Sampling temperature for all structured extraction calls.
 const STAGE_TEMPERATURE: f32 = 0.2;
 
 // Cancellation tokens keyed by report id (mirrors the summary pipeline pattern).
 static CANCELLATION_REGISTRY: Lazy<Arc<Mutex<HashMap<String, CancellationToken>>>> =
-    Lazy::new(|| Arc::new(Mutex::new(HashMap::new())));
-
-// One-shot channels delivering user answers to a report parked in `waiting_input`.
-static ANSWER_REGISTRY: Lazy<Arc<Mutex<HashMap<String, oneshot::Sender<Vec<ClarifyAnswer>>>>>> =
     Lazy::new(|| Arc::new(Mutex::new(HashMap::new())));
 
 fn register_token(report_id: &str) -> CancellationToken {
@@ -80,46 +70,11 @@ fn cleanup_token(report_id: &str) {
     if let Ok(mut reg) = CANCELLATION_REGISTRY.lock() {
         reg.remove(report_id);
     }
-    cleanup_answer_sender(report_id);
 }
 
-fn cleanup_answer_sender(report_id: &str) {
-    if let Ok(mut reg) = ANSWER_REGISTRY.lock() {
-        reg.remove(report_id);
-    }
-}
-
-/// Deliver answers to a report currently waiting for input. Idempotent: if nothing is
-/// waiting for `report_id`, this is a no-op.
-pub fn submit_answers(report_id: &str, answers: Vec<ClarifyAnswer>) {
-    let sender = ANSWER_REGISTRY
-        .lock()
-        .ok()
-        .and_then(|mut reg| reg.remove(report_id));
-    if let Some(tx) = sender {
-        let _ = tx.send(answers);
-    }
-}
-
-/// Register a waiter and block until answers arrive, the run is cancelled, or the wait
-/// times out. Returns `None` only on cancellation (caller then finishes as cancelled);
-/// `Some(answers)` on submission (or an empty vec on timeout / dropped sender).
-async fn wait_for_answers(
-    report_id: &str,
-    token: &CancellationToken,
-) -> Option<Vec<ClarifyAnswer>> {
-    let (tx, rx) = oneshot::channel::<Vec<ClarifyAnswer>>();
-    if let Ok(mut reg) = ANSWER_REGISTRY.lock() {
-        reg.insert(report_id.to_string(), tx);
-    }
-    let outcome = tokio::select! {
-        received = rx => Some(received.unwrap_or_default()),
-        _ = token.cancelled() => None,
-        _ = tokio::time::sleep(INPUT_WAIT) => Some(Vec::new()),
-    };
-    cleanup_answer_sender(report_id);
-    outcome
-}
+/// Kept as a compatibility no-op for older frontends. New report runs never pause for
+/// clarification and therefore have no answer receiver.
+pub fn submit_answers(_report_id: &str, _answers: Vec<ClarifyAnswer>) {}
 
 /// Signal cancellation for a running report. Returns true if a live token was found.
 pub fn cancel_report(report_id: &str) -> bool {
@@ -146,12 +101,9 @@ pub async fn resolve_model(pool: &SqlitePool) -> String {
     .unwrap_or_else(|| deepseek::DEFAULT_MODEL.to_string())
 }
 
-/// Reconcile reports orphaned by an app restart. The pipeline and its interactive
-/// the clarify input wait lives only in memory, so any row still
-/// `queued`/`running`/`waiting_input` after a restart can never resume: reopening it
-/// re-shows the persisted questions, but submitting answers no-ops because no pipeline
-/// is listening. Mark those failed so the meeting can be regenerated. Idempotent; call
-/// once at startup before serving report commands.
+/// Reconcile reports orphaned by an app restart. `waiting_input` is retained for rows
+/// created by older builds that still had interactive clarification. Mark every active
+/// row failed so the meeting can be regenerated. Idempotent; call once at startup.
 pub async fn recover_interrupted_reports(pool: &SqlitePool) {
     match AnalyticsReportsRepository::fail_interrupted(
         pool,
@@ -486,73 +438,14 @@ pub async fn run_report_pipeline<R: Runtime>(
         .map(|c| c.meeting_type.clone())
         .unwrap_or_default();
 
-    // ---- stage 3: clarify (interactive) ----
+    // Clarification is intentionally skipped. Keep empty artifacts so old HTML and DB
+    // contracts remain readable without ever pausing the new pipeline.
+    let clarify_questions: Vec<ClarifyQuestion> = Vec::new();
+    let clarify_answers: Vec<ClarifyAnswer> = Vec::new();
+    let answers_block = String::new();
+
+    // ---- stage 3: topics ----
     start_stage(&app, &pool, &report_id, &meeting_id, 2).await;
-    let classification_json =
-        serde_json::to_string(&classification).unwrap_or_else(|_| "null".to_string());
-    let (sys, usr) = prompts::clarify(&transcript, &classification_json);
-    let clarify: Option<Clarify> = run_stage(&client, &sys, &usr, "clarify", &mut failed).await;
-    if token.is_cancelled() {
-        finish_cancelled(&pool, &report_id).await;
-        return;
-    }
-
-    // Present questions and wait for answers (unless there are none / stage soft-failed).
-    let mut clarify_questions: Vec<ClarifyQuestion> = Vec::new();
-    let mut clarify_answers: Vec<ClarifyAnswer> = Vec::new();
-    if let Some(c) = &clarify {
-        if !c.questions.is_empty() {
-            // Guarantee the literal "другое" tap option on every question.
-            clarify_questions = c.questions.clone();
-            for q in &mut clarify_questions {
-                if !q.options.iter().any(|o| o.trim() == "другое") {
-                    q.options.push("другое".to_string());
-                }
-            }
-            let questions_json =
-                serde_json::to_string(&clarify_questions).unwrap_or_else(|_| "[]".to_string());
-            if let Err(e) = AnalyticsReportsRepository::set_questions_waiting(
-                &pool,
-                &report_id,
-                &questions_json,
-            )
-            .await
-            {
-                log::warn!("[report] failed to persist clarify questions for {report_id}: {e}");
-            }
-            let _ = app.emit(
-                "analytics-report-questions",
-                json!({
-                    "report_id": report_id,
-                    "meeting_id": meeting_id,
-                    "questions": clarify_questions,
-                }),
-            );
-
-            match wait_for_answers(&report_id, &token).await {
-                Some(answers) => clarify_answers = answers,
-                None => {
-                    finish_cancelled(&pool, &report_id).await;
-                    return;
-                }
-            }
-
-            let answers_json =
-                serde_json::to_string(&clarify_answers).unwrap_or_else(|_| "[]".to_string());
-            if let Err(e) =
-                AnalyticsReportsRepository::set_answers_running(&pool, &report_id, &answers_json)
-                    .await
-            {
-                log::warn!("[report] failed to persist clarify answers for {report_id}: {e}");
-            }
-        }
-    }
-
-    // Confirmed clarifications are appended to every downstream extraction prompt.
-    let answers_block = prompts::build_answers_block(&clarify_questions, &clarify_answers);
-
-    // ---- stage 4: topics ----
-    start_stage(&app, &pool, &report_id, &meeting_id, 3).await;
     let (sys, usr) = prompts::topics(&transcript, &meeting_type);
     let topics: Option<Topics> = run_stage(
         &client,
@@ -567,8 +460,8 @@ pub async fn run_report_pipeline<R: Runtime>(
         return;
     }
 
-    // ---- stage 5: decisions ----
-    start_stage(&app, &pool, &report_id, &meeting_id, 4).await;
+    // ---- stage 4: decisions ----
+    start_stage(&app, &pool, &report_id, &meeting_id, 3).await;
     let (sys, usr) = prompts::decisions(&transcript);
     let decisions: Option<prompts::Decisions> = run_stage(
         &client,
@@ -583,8 +476,8 @@ pub async fn run_report_pipeline<R: Runtime>(
         return;
     }
 
-    // ---- stage 6: commitments ----
-    start_stage(&app, &pool, &report_id, &meeting_id, 5).await;
+    // ---- stage 5: commitments ----
+    start_stage(&app, &pool, &report_id, &meeting_id, 4).await;
     let (sys, usr) = prompts::commitments(&transcript);
     let commitments: Option<Commitments> = run_stage(
         &client,
@@ -599,8 +492,8 @@ pub async fn run_report_pipeline<R: Runtime>(
         return;
     }
 
-    // ---- stage 7: threads + risks ----
-    start_stage(&app, &pool, &report_id, &meeting_id, 6).await;
+    // ---- stage 6: threads + risks ----
+    start_stage(&app, &pool, &report_id, &meeting_id, 5).await;
     let (sys, usr) = prompts::threads_risks(&transcript);
     let threads_risks: Option<ThreadsRisks> = run_stage(
         &client,
@@ -615,8 +508,8 @@ pub async fn run_report_pipeline<R: Runtime>(
         return;
     }
 
-    // ---- stage 8: disagreements + concepts ----
-    start_stage(&app, &pool, &report_id, &meeting_id, 7).await;
+    // ---- stage 7: disagreements + concepts ----
+    start_stage(&app, &pool, &report_id, &meeting_id, 6).await;
     let (sys, usr) = prompts::disagreements_concepts(&transcript);
     let disagreements_concepts: Option<DisagreementsConcepts> = run_stage(
         &client,
@@ -631,8 +524,8 @@ pub async fn run_report_pipeline<R: Runtime>(
         return;
     }
 
-    // ---- stage 9: numbers ----
-    start_stage(&app, &pool, &report_id, &meeting_id, 8).await;
+    // ---- stage 8: numbers ----
+    start_stage(&app, &pool, &report_id, &meeting_id, 7).await;
     let (sys, usr) = prompts::numbers(&transcript);
     let numbers: Option<Numbers> = run_stage(
         &client,
@@ -647,8 +540,8 @@ pub async fn run_report_pipeline<R: Runtime>(
         return;
     }
 
-    // ---- stage 10: roles ----
-    start_stage(&app, &pool, &report_id, &meeting_id, 9).await;
+    // ---- stage 9: roles ----
+    start_stage(&app, &pool, &report_id, &meeting_id, 8).await;
     let (sys, usr) = prompts::roles(&transcript);
     let roles: Option<Roles> = run_stage(
         &client,
@@ -663,8 +556,8 @@ pub async fn run_report_pipeline<R: Runtime>(
         return;
     }
 
-    // ---- stage 11: insights (over artifacts + fast facts, NOT the transcript) ----
-    start_stage(&app, &pool, &report_id, &meeting_id, 10).await;
+    // ---- stage 10: insights (over artifacts + fast facts, NOT the transcript) ----
+    start_stage(&app, &pool, &report_id, &meeting_id, 9).await;
     let artifacts_for_insights = json!({
         "classification": classification,
         "topics": topics,
@@ -691,8 +584,8 @@ pub async fn run_report_pipeline<R: Runtime>(
         return;
     }
 
-    // ---- stage 12: score + render (local) ----
-    start_stage(&app, &pool, &report_id, &meeting_id, 11).await;
+    // ---- stage 11: score + render (local) ----
+    start_stage(&app, &pool, &report_id, &meeting_id, 10).await;
     let empty_agenda = Vec::new();
     let agenda = topics.as_ref().map(|t| &t.agenda).unwrap_or(&empty_agenda);
     let empty_commitments = Vec::new();

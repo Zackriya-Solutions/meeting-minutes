@@ -44,6 +44,18 @@ export const EditableTitle: React.FC<EditableTitleProps> = ({
     }
   }, [title, isEditing]);
 
+  // Enter rename mode at the natural continuation point instead of placing the
+  // caret before the first character. Keep this separate from the resize effect
+  // so typing does not repeatedly move the caret back to the end.
+  useEffect(() => {
+    if (!isEditing || !titleInputRef.current) return;
+
+    const input = titleInputRef.current;
+    input.focus({ preventScroll: true });
+    const end = input.value.length;
+    input.setSelectionRange(end, end);
+  }, [isEditing]);
+
   return isEditing ? (
     <div className="flex-1">
       <Textarea
@@ -71,7 +83,9 @@ export const EditableTitle: React.FC<EditableTitleProps> = ({
   ) : (
     <div className="group flex flex-1 items-center space-x-2 text-left">
       <h1
-        className="memento-screen-title flex-1 cursor-pointer whitespace-pre-wrap rounded text-left hover:bg-background"
+        className={`memento-screen-title flex-1 cursor-pointer whitespace-pre-wrap rounded text-left ${
+          seamlessEditing ? '' : 'hover:bg-background'
+        }`}
         onClick={onStartEditing}
       >
         {title}

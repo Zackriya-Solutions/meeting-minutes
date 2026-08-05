@@ -1,0 +1,46 @@
+.redaction {
+  --skeleton-bg: var(--primary-10);
+
+  position: relative;
+  transition: color 0.45s cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.redaction::after {
+  content: "";
+  position: absolute;
+  inset: 0 0 var(--skeleton-inset-bottom, calc(0.24em - 2px));
+  border-radius: var(--skeleton-radius, 0.35em);
+  background-color: var(--skeleton-bg);
+  opacity: 0;
+  transition: opacity 0.45s cubic-bezier(0.23, 1, 0.32, 1);
+  pointer-events: none;
+}
+
+.active {
+  color: transparent;
+}
+
+.active::after {
+  opacity: 1;
+  animation: wave 1.8s ease-in-out infinite;
+  animation-delay: var(--wave-phase, 0ms);
+}
+
+.sized {
+  display: inline-block;
+  max-inline-size: 100%;
+}
+
+@keyframes wave {
+  0%, 35% {
+    opacity: 0.55;
+  }
+
+  50% {
+    opacity: 1;
+  }
+
+  65%, 100% {
+    opacity: 0.55;
+  }
+}

@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useState } from 'react';
-import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/fluid-dialog';
 import { Button } from '@/components/ui/button';
-import { AlertCircle, Check, CheckCircle, Circle, FolderOpen, Loader2, RefreshCw } from '@/components/deslop-icons';
+import { AlertCircle, Check, CheckCircle, Circle, Download, Loader2, RefreshCw } from '@/components/deslop-icons';
 import { useT } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import type {
@@ -21,7 +21,7 @@ import type {
  * (running checklist / clarify questions / completed) from the shared hook state.
  */
 
-// Fallback Russian stage names (12 stages; clarify runs 3rd). Live
+// Fallback Russian stage names (11 stages). Live
 // labels from the progress events override these per stage — see the accumulation
 // below. Kept in Russian to match the backend-provided stage labels regardless of
 // UI language. Mirror of STAGE_META in src-tauri/src/report/pipeline.rs (same order
@@ -29,7 +29,6 @@ import type {
 const FALLBACK_STAGE_LABELS = [
   'Анализ динамики разговора',
   'Классификация встречи',
-  'Уточняющие вопросы',
   'Темы и повестка',
   'Решения',
   'Обязательства',
@@ -52,7 +51,7 @@ export function AnalyticsReportDialog({ open, onOpenChange, report }: AnalyticsR
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
+      <DialogContent size="sm">
         {status === 'waiting_input' ? (
           <QuestionsView report={report} />
         ) : status === 'completed' ? (
@@ -90,7 +89,7 @@ function RunningView({
     setSeenLabels((prev) => (prev[stageIndex] === stageLabel ? prev : { ...prev, [stageIndex]: stageLabel }));
   }, [status, stageLabel, stageIndex]);
 
-  // stage_index is 1-based (1…12), emitted at the start of each stage. Rows use a
+  // stage_index is 1-based (1…11), emitted at the start of each stage. Rows use a
   // 1-based position (i + 1): positions < activeIndex are done, activeIndex shows the
   // spinner, later positions are pending. The optimistic pre-event state (stageIndex 0,
   // «Подготовка») renders the spinner on row 1.
@@ -251,7 +250,7 @@ function QuestionsView({ report }: { report: UseAnalyticsReportResult }) {
 
 function CompletedView({ report }: { report: UseAnalyticsReportResult }) {
   const t = useT();
-  const { generate, revealReport } = report;
+  const { generate, downloadReport } = report;
   return (
     <>
       <DialogTitle>{t('Report ready')}</DialogTitle>
@@ -268,10 +267,10 @@ function CompletedView({ report }: { report: UseAnalyticsReportResult }) {
           variant="outline"
           size="sm"
           className="border-primary/40 bg-primary text-primary-foreground hover:bg-primary/90"
-          onClick={() => void revealReport()}
+          onClick={() => void downloadReport()}
         >
-          <FolderOpen size={16} />
-          {t('Show in Finder')}
+          <Download size={16} />
+          {t('Download report')}
         </Button>
       </div>
     </>

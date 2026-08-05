@@ -1,0 +1,53 @@
+.wrap {
+  --table-line: var(--primary-20);
+  --table-radius: var(--ui-radius-16);
+  --table-pad: var(--ui-space-10) var(--ui-space-12);
+  --table-head-bg: var(--primary-5);
+  --table-cell-bg: transparent;
+  --table-line-width: var(--cell-separator-height, 0.33px);
+
+  width: 100%;
+  border: var(--table-line-width) solid var(--table-line);
+  border-radius: var(--table-radius);
+  overflow: hidden;
+}
+
+:global([data-mini-app].material) .wrap {
+  --table-radius: 10px;
+  --table-pad: 11px;
+  --table-head-bg: var(--background-primary);
+  --table-cell-bg: var(--background-secondary);
+}
+
+.scroll {
+  overflow-x: auto;
+}
+
+.table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.cell {
+  padding: var(--table-pad);
+  background: var(--table-cell-bg);
+  color: var(--primary);
+  text-align: left;
+  white-space: nowrap;
+  vertical-align: top;
+  border-right: var(--table-line-width) solid var(--table-line);
+  border-bottom: var(--table-line-width) solid var(--table-line);
+}
+
+.cell:last-child {
+  border-right: none;
+}
+
+.body tr:last-child .cell {
+  border-bottom: none;
+}
+
+.head .cell {
+  background: var(--table-head-bg);
+}
