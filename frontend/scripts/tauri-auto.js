@@ -21,11 +21,18 @@ if (fs.existsSync(localEnvPath)) {
     const match = line.match(/^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$/);
     if (!match || process.env[match[1]] !== undefined) continue;
 
-    let value = match[2].trim();
-    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
-      value = value.slice(1, -1);
-    }
-    process.env[match[1]] = value;
+    const [, name, rawValue] = match;
+
+    // A quoted value is literal up to its closing quote, and anything after it —
+    // typically an inline comment — is dropped. An unquoted value ends at a ` #`,
+    // matching dotenv: a '#' with no leading whitespace stays part of the value so
+    // URLs keep their fragment. Getting this wrong is quiet and expensive, because
+    // `KEY=abc # dev key` yielded the literal "abc # dev key", which still passes
+    // the placeholder check below and ships a build with a broken registration key.
+    const quoted = rawValue.match(/^(['"])(.*?)\1/);
+    const value = quoted ? quoted[2] : rawValue.replace(/(^|\s)#.*$/, '').trim();
+
+    process.env[name] = value;
   }
 }
 

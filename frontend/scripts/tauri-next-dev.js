@@ -18,6 +18,15 @@ const host = '127.0.0.1';
 const publicPort = 3118;
 const preferredNextPort = 3119;
 let nextPort = preferredNextPort;
+
+// The handshake that lets a new dev server retire the previous one. Gated on a
+// custom request header rather than the path alone: a page in a browser cannot set
+// one on a cross-origin POST without a CORS preflight, which this proxy never
+// approves, so a visited web page can no longer kill the dev server. A local process
+// running as you could still send it — but it could already just `kill` the process,
+// so that is not a boundary worth pretending to defend.
+const shutdownPath = '/__memento_dev_shutdown__';
+const shutdownHeader = 'x-memento-dev-shutdown';
 const warmupPaths = [
   '/',
   '/_next/static/chunks/main-app.js',
@@ -37,8 +46,9 @@ function stopExistingProxy() {
       {
         host,
         port: publicPort,
-        path: '/__memento_dev_shutdown__',
+        path: shutdownPath,
         method: 'POST',
+        headers: { [shutdownHeader]: '1' },
         timeout: 500,
       },
       (response) => {
@@ -117,7 +127,14 @@ async function warmup() {
 }
 
 function forwardRequest(clientRequest, clientResponse) {
-  if (clientRequest.method === 'POST' && clientRequest.url === '/__memento_dev_shutdown__') {
+  if (clientRequest.method === 'POST' && clientRequest.url === shutdownPath) {
+    if (clientRequest.headers[shutdownHeader] !== '1') {
+      // Not the replacement handshake. 404 rather than 403 so the route is
+      // indistinguishable from any other unknown path.
+      clientResponse.writeHead(404);
+      clientResponse.end();
+      return;
+    }
     clientResponse.writeHead(204);
     clientResponse.end();
     setImmediate(() => {
