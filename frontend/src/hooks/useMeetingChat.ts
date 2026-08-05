@@ -63,6 +63,8 @@ export interface ChatMessage {
   warning?: string | null;
   diagnostics?: RetrievalDiagnostics;
   error?: boolean;
+  /** Animate only a response that arrived during the current UI session. */
+  animate?: boolean;
 }
 
 export interface RagSessionResponse {
@@ -96,7 +98,6 @@ export interface UseMeetingChat {
   send: (text: string) => Promise<void>;
   onKeyDown: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
   startNewChat: () => void;
-  scrollRef: React.RefObject<HTMLDivElement>;
   inputRef: React.RefObject<HTMLTextAreaElement>;
 }
 
@@ -115,7 +116,6 @@ export function useMeetingChat({
   const [sessionId, setSessionId] = useState<number | null>(null);
   const [historyIndex, setHistoryIndex] = useState<number | null>(null);
 
-  const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const draftBeforeHistory = useRef('');
 
@@ -167,11 +167,6 @@ export function useMeetingChat({
     };
   }, [enabled, scope, collectionId, meetingId]);
 
-  // Auto-scroll to the latest message.
-  useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
-  }, [messages, sending]);
-
   const startNewChat = useCallback(() => {
     setMessages([]);
     setSessionId(null);
@@ -221,6 +216,7 @@ export function useMeetingChat({
             found: res.found,
             warning: res.warning,
             diagnostics: res.diagnostics,
+            animate: true,
           },
         ]);
       } catch (e) {
@@ -303,7 +299,6 @@ export function useMeetingChat({
     send,
     onKeyDown,
     startNewChat,
-    scrollRef,
     inputRef,
   };
 }

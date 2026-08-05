@@ -129,6 +129,7 @@ function DrawerContent({
         <DrawerPrimitive.Popup
           data-slot="drawer-popup"
           data-swipe-axis={swipeAxis}
+          data-swipe-direction={swipeDirection}
           data-snap-points={hasSnapPoints ? "" : undefined}
           className={cn("memento-drawer-popup group/drawer-popup", className)}
           {...props}

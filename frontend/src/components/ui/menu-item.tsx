@@ -15,6 +15,10 @@ import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { fontWeights } from "@/lib/font-weight";
 import { shapeMap } from "@/lib/shape-context";
+import {
+  MaterialSymbol,
+  type MaterialSymbolName,
+} from "@/vendor/deslop/primitives/material-symbols-react";
 
 // MenuItem is only used inside Dropdown, which opts out of the global pill
 // shape — see dropdown.tsx for the rationale.
@@ -78,6 +82,8 @@ interface MenuItemProps extends HTMLAttributes<HTMLDivElement> {
   /** Optional leading icon. When omitted, the row renders text-only with no
    *  reserved icon column. */
   icon?: IconComponent;
+  /** Material Symbols icon from the shared Deslop primitives catalogue. */
+  iconName?: MaterialSymbolName;
   label: string;
   /** Optional value or control aligned to the trailing edge of the row. */
   trailing?: ReactNode;
@@ -97,6 +103,7 @@ const MenuItem = forwardRef<HTMLDivElement, MenuItemProps>(
   (
     {
       icon: Icon,
+      iconName,
       label,
       trailing,
       index,
@@ -152,7 +159,19 @@ const MenuItem = forwardRef<HTMLDivElement, MenuItemProps>(
 
     const content = (
       <>
-        {Icon && (
+        {iconName ? (
+          <MaterialSymbol
+            name={iconName}
+            size={16}
+            weight={400}
+            className={cn(
+              "shrink-0 transition-colors duration-80",
+              isActive || checked
+                ? "text-foreground"
+                : "text-muted-foreground"
+            )}
+          />
+        ) : Icon ? (
           <span className="inline-grid">
             <span className="col-start-1 row-start-1 invisible">
               <Icon size={16} strokeWidth={2} />
@@ -168,7 +187,7 @@ const MenuItem = forwardRef<HTMLDivElement, MenuItemProps>(
               )}
             />
           </span>
-        )}
+        ) : null}
         {/* Both stacked spans carry the text-box trim so the invisible bold
             sizer and the visible label keep identical boxes. */}
         <span className="inline-grid flex-1 text-[13px]">

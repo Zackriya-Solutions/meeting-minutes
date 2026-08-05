@@ -3,12 +3,15 @@
 import {
   type FormEvent,
   type MouseEvent,
+  type ReactNode,
+  useCallback,
   useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
   useState,
 } from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
 import { invoke } from '@tauri-apps/api/core';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
@@ -43,6 +46,7 @@ import { splitSummaryLead, summaryToMarkdown } from '@/lib/summaryToMarkdown';
 import { Cell, CellText } from '@/vendor/deslop/mini-app/Cell';
 import { IconPlus } from '@/vendor/deslop/primitives/material-symbols-react';
 import { buildArchivePromptSuggestions } from '@/lib/promptSuggestions';
+import { spring } from '@/lib/fluid/springs';
 import { CalendarSettings } from '@/components/CalendarSettings';
 import type { LocalOutlookMeeting } from '@/lib/localOutlookCalendar';
 
@@ -58,6 +62,117 @@ interface CalendarMeetingGroup {
   key: string;
   label: string;
   meetings: CalendarMeeting[];
+}
+
+interface FluidMeetingRect {
+  top: number;
+  left: number;
+  width: number;
+  height: number;
+}
+
+function FluidMeetingList({
+  children,
+  itemCount,
+}: {
+  children: ReactNode;
+  itemCount: number;
+}) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const animationFrameRef = useRef<number | null>(null);
+  const sessionRef = useRef(0);
+  const [activeIndex, setActiveIndex] = useState<number | null>(null);
+  const [itemRects, setItemRects] = useState<FluidMeetingRect[]>([]);
+
+  const measureItems = useCallback(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const containerRect = container.getBoundingClientRect();
+    const nextRects = Array.from(
+      container.querySelectorAll<HTMLElement>('[data-fluid-meeting-index]')
+    ).map((element) => {
+      const rect = element.getBoundingClientRect();
+      return {
+        top: rect.top - containerRect.top - container.clientTop,
+        left: rect.left - containerRect.left - container.clientLeft,
+        width: rect.width,
+        height: rect.height,
+      };
+    });
+    setItemRects(nextRects);
+  }, []);
+
+  useLayoutEffect(() => {
+    measureItems();
+    const container = containerRef.current;
+    if (!container || typeof ResizeObserver === 'undefined') return;
+
+    const observer = new ResizeObserver(measureItems);
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [itemCount, measureItems]);
+
+  useEffect(() => () => {
+    if (animationFrameRef.current !== null) {
+      cancelAnimationFrame(animationFrameRef.current);
+    }
+  }, []);
+
+  const handleMouseMove = (event: MouseEvent<HTMLDivElement>) => {
+    if (animationFrameRef.current !== null) {
+      cancelAnimationFrame(animationFrameRef.current);
+    }
+
+    const mouseY = event.clientY;
+    animationFrameRef.current = requestAnimationFrame(() => {
+      animationFrameRef.current = null;
+      const container = containerRef.current;
+      if (!container) return;
+
+      const containerTop = container.getBoundingClientRect().top;
+      let closestIndex: number | null = null;
+      let closestDistance = Number.POSITIVE_INFINITY;
+
+      itemRects.forEach((rect, index) => {
+        const distance = Math.abs(mouseY - (containerTop + rect.top + rect.height / 2));
+        if (distance < closestDistance) {
+          closestDistance = distance;
+          closestIndex = index;
+        }
+      });
+      setActiveIndex(closestIndex);
+    });
+  };
+
+  const activeRect = activeIndex === null ? null : itemRects[activeIndex];
+
+  return (
+    <div
+      ref={containerRef}
+      className="home-history__list no-drag"
+      onMouseEnter={() => {
+        sessionRef.current += 1;
+      }}
+      onMouseMove={handleMouseMove}
+      onMouseLeave={() => setActiveIndex(null)}
+    >
+      <AnimatePresence>
+        {activeRect && (
+          <motion.span
+            key={sessionRef.current}
+            aria-hidden="true"
+            className="home-history__hover-indicator"
+            initial={{ ...activeRect, opacity: 0 }}
+            animate={{ ...activeRect, opacity: 1 }}
+            exit={{ opacity: 0, transition: spring.fast.exit }}
+            transition={{ ...spring.fast, opacity: { duration: 0.08 } }}
+          />
+        )}
+      </AnimatePresence>
+      {children}
+    </div>
+  );
 }
 
 export const HOME_SCROLL_POSITION_KEY = 'memento:home-scroll-position';
@@ -403,7 +518,7 @@ export function HomeMeetingList({ animateOnMount = true }: { animateOnMount?: bo
                 {calendarMeetingGroups.map((group) => (
                   <section key={group.key} className="home-history__group" aria-label={group.label}>
                     <h3>{group.label}</h3>
-                    <div className="home-history__list no-drag">
+                    <FluidMeetingList itemCount={group.meetings.length}>
                       {group.meetings.map((item, itemIndex) => (
                         <ContextMenu key={item.meeting.id}>
                           <ContextMenuTrigger asChild>
@@ -411,6 +526,7 @@ export function HomeMeetingList({ animateOnMount = true }: { animateOnMount?: bo
                               <Cell
                                 type="button"
                                 className="home-history-cell no-drag"
+                                data-fluid-meeting-index={itemIndex}
                                 data-separator={itemIndex < group.meetings.length - 1}
                                 onClick={(event) => openMeeting(item.meeting, event)}
                                 end={<span className="home-history-time">{item.timeRange}</span>}
@@ -430,7 +546,7 @@ export function HomeMeetingList({ animateOnMount = true }: { animateOnMount?: bo
                           </ContextMenuContent>
                         </ContextMenu>
                       ))}
-                    </div>
+                    </FluidMeetingList>
                   </section>
                 ))}
               </div>

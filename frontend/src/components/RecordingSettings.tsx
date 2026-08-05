@@ -5,6 +5,7 @@ import { DeviceSelection, SelectedDevices } from '@/components/DeviceSelection';
 import Analytics from '@/lib/analytics';
 import { toast } from 'sonner';
 import { useT } from '@/lib/i18n';
+import { Save } from '@/components/deslop-icons';
 
 export interface RecordingPreferences {
   save_folder: string;
@@ -114,12 +115,16 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
 
   return (
     <>
-      <section className="settings-section space-y-3">
-        <div className="flex items-center justify-between gap-4">
-          <div className="flex-1">
-            <div className="font-medium">{t('Save Audio Recordings')}</div>
+      <section className="settings-section settings-cell">
+        <div className="settings-cell__row">
+          <span className="settings-cell__avatar" aria-hidden="true">
+            <Save size={20} strokeWidth={2} />
+          </span>
+          <div className="settings-cell__text">
+            <div className="settings-cell__label">{t('Save Audio Recordings')}</div>
           </div>
           <Switch
+            className="shrink-0"
             checked={preferences.auto_save}
             onCheckedChange={handleAutoSaveToggle}
             disabled={saving}
@@ -127,7 +132,7 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
         </div>
 
         {!preferences.auto_save && (
-          <div className="rounded-xl bg-[var(--primary-5)] px-3 py-2">
+          <div className="mx-4 mb-4 rounded-xl bg-[var(--primary-5)] px-3 py-2">
             <div className="text-sm text-muted-foreground">
               {t('Audio recording is disabled. Enable "Save Audio Recordings" to automatically save your meeting audio.')}
             </div>

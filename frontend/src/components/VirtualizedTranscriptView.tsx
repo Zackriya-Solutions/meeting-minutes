@@ -20,6 +20,10 @@ import {
 } from "./ui/message-scroller";
 import { cn } from "@/lib/utils";
 import { avatarGradients } from "@/vendor/deslop/primitives/tokens.js";
+import StreamingText from "@/vendor/deslop/mini-app/StreamingText";
+import { Icon } from "@/components/memento/Icon";
+
+const ROLL_CALL_TIP_DISMISSED_KEY = 'memento:roll-call-tip-dismissed:v1';
 
 export interface VirtualizedTranscriptViewProps {
     /** Transcript segments to display */
@@ -124,6 +128,55 @@ function speakerInitials(label: string): string {
         .toLocaleUpperCase();
 }
 
+function RollCallTip({ onDismiss }: { onDismiss: () => void }) {
+    const t = useT();
+    const avatarGradient = avatarGradients[2];
+
+    return (
+        <Message align="start" role="listitem" className="mb-3">
+            <MessageAvatar
+                aria-label="Memento"
+                title="Memento"
+                className="mr-2 h-8 w-8 text-sm font-bold text-white"
+                style={{
+                    background: `linear-gradient(180deg, ${avatarGradient.top} 0%, ${avatarGradient.bottom} 100%)`,
+                }}
+            >
+                <span aria-hidden="true">M</span>
+            </MessageAvatar>
+            <MessageContent className="items-start">
+                <Bubble
+                    align="start"
+                    variant="muted"
+                    className="max-w-[82%] rounded-[16px_16px_16px_4px]"
+                >
+                    <BubbleContent className="!bg-[var(--primary-5)] px-[15px] py-[11px] text-[var(--deslop-primary)]">
+                        <div className="flex items-start gap-3 text-left">
+                            <div className="min-w-0 flex-1">
+                                <div className="mb-1 text-xs font-medium text-[var(--deslop-primary-60)]">
+                                    Memento
+                                </div>
+                                <p className="text-base leading-relaxed">
+                                    {t('Have everyone say their name at the start of the meeting. This helps me remember voices and recognize participants more accurately.')}
+                                </p>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={onDismiss}
+                                aria-label={t('Dismiss')}
+                                title={t('Dismiss')}
+                                className="-mr-1 -mt-1 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[var(--deslop-primary-60)] transition-colors hover:bg-[var(--primary-8)] hover:text-[var(--deslop-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary-20)]"
+                            >
+                                <Icon name="close" size={16} />
+                            </button>
+                        </div>
+                    </BubbleContent>
+                </Bubble>
+            </MessageContent>
+        </Message>
+    );
+}
+
 // Memoized transcript segment component
 const TranscriptSegment = memo(function TranscriptSegment({
     id,
@@ -175,7 +228,6 @@ const TranscriptSegment = memo(function TranscriptSegment({
             role="listitem"
             className={cn(
                 'mb-3 rounded-lg px-1 py-0.5 transition-colors duration-300',
-                highlight && 'bg-primary/10 ring-2 ring-ring',
                 playbackActive && !highlight && 'bg-primary/10',
             )}
         >
@@ -192,7 +244,7 @@ const TranscriptSegment = memo(function TranscriptSegment({
             >
                 <span aria-hidden="true">{avatarInitials}</span>
             </MessageAvatar>
-            <MessageContent className={cn('gap-1', isOwn ? 'items-end' : 'items-start')}>
+            <MessageContent className={cn('gap-0.5', isOwn ? 'items-end' : 'items-start')}>
                 <Bubble
                     align={align}
                     variant={isOwn || isStreaming ? 'muted' : 'secondary'}
@@ -203,8 +255,13 @@ const TranscriptSegment = memo(function TranscriptSegment({
                             : 'rounded-[16px_16px_16px_4px]',
                     )}
                 >
-                    <BubbleContent className="whitespace-pre-wrap px-[15px] py-[11px] text-base leading-relaxed">
-                        <div className="flex flex-col items-start gap-1 text-left">
+                    <BubbleContent
+                        className={cn(
+                            'whitespace-pre-wrap px-[15px] py-[11px] text-base leading-relaxed transition-[background-color] duration-500 ease-[cubic-bezier(0.2,0,0,1)]',
+                            highlight && '!bg-[var(--primary-10)]',
+                        )}
+                    >
+                        <div className="flex flex-col items-start gap-0.5 text-left">
                             {speakerLabel && (
                                 speakerRenamable && speakerId != null && onSpeakerClick ? (
                                     <button
@@ -221,7 +278,17 @@ const TranscriptSegment = memo(function TranscriptSegment({
                                     </span>
                                 )
                             )}
-                            <span>{displayText}</span>
+                            {isStreaming ? (
+                                <StreamingText
+                                    mode="word"
+                                    speed="fast"
+                                    replayKey={id}
+                                >
+                                    {displayText}
+                                </StreamingText>
+                            ) : (
+                                <span>{displayText}</span>
+                            )}
                         </div>
                     </BubbleContent>
                 </Bubble>
@@ -259,6 +326,16 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
     const [renamingSpeaker, setRenamingSpeaker] = useState<{ id: number; name: string; isSelf: boolean } | null>(null);
     const [editingSegment, setEditingSegment] = useState<{ id: string; text: string } | null>(null);
     const [isSavingCorrection, setIsSavingCorrection] = useState(false);
+    const [showRollCallTip, setShowRollCallTip] = useState(false);
+
+    useEffect(() => {
+        setShowRollCallTip(window.localStorage.getItem(ROLL_CALL_TIP_DISMISSED_KEY) !== 'true');
+    }, []);
+
+    const dismissRollCallTip = useCallback(() => {
+        window.localStorage.setItem(ROLL_CALL_TIP_DISMISSED_KEY, 'true');
+        setShowRollCallTip(false);
+    }, []);
 
     // Stable so memoized segments don't re-render on every parent render.
     const handleSpeakerClick = useCallback((speakerId: number) => {
@@ -305,7 +382,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
         }, 150);
         const clearTimer = setTimeout(() => {
             setHighlightedId((cur) => (cur === target.id ? null : cur));
-        }, 3200);
+        }, 2650);
         return () => {
             clearTimeout(scrollTimer);
             clearTimeout(clearTimer);
@@ -350,11 +427,22 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
         <MessageScroller className="h-full">
         <MessageScrollerViewport className={cn("px-4 py-2", viewportClassName)}>
         <MessageScrollerContent className="gap-0">
-            <div>
+            <div
+                className={cn(
+                    segments.length === 0 && !isRecording && !showRollCallTip
+                        ? "flex min-h-full items-center justify-center"
+                        : undefined,
+                )}
+            >
+            {showRollCallTip && (
+                <MessageScrollerItem messageId="memento-roll-call-tip" className="w-full">
+                    <RollCallTip onDismiss={dismissRollCallTip} />
+                </MessageScrollerItem>
+            )}
             {segments.length === 0 ? (
-                isRecording ? null : (
-                    <MessageScrollerItem messageId="transcript-empty">
-                        <div className="flex min-h-40 items-center justify-center px-6 text-center text-sm text-muted-foreground">
+                isRecording || showRollCallTip ? null : (
+                    <MessageScrollerItem messageId="transcript-empty" className="w-full">
+                        <div className="flex items-center justify-center px-6 text-center text-sm text-muted-foreground">
                             {t('No speech was recognized in this recording')}
                         </div>
                     </MessageScrollerItem>

@@ -162,7 +162,11 @@ impl<R: Runtime> ConsentManager<R> {
         }
 
         let content = tokio::fs::read_to_string(&self.settings_path).await?;
-        let settings: NotificationSettings = serde_json::from_str(&content)?;
+        let mut settings: NotificationSettings = serde_json::from_str(&content)?;
+
+        // Silent background capture was removed from the product. Normalize legacy
+        // preferences before the meeting detector can act on them.
+        settings.background_auto_recording = false;
 
         log_info!("Loaded notification settings from disk");
         Ok(settings)
@@ -170,7 +174,9 @@ impl<R: Runtime> ConsentManager<R> {
 
     /// Save notification settings to disk
     pub async fn save_settings(&self, settings: &NotificationSettings) -> Result<()> {
-        let content = serde_json::to_string_pretty(settings)?;
+        let mut normalized = settings.clone();
+        normalized.background_auto_recording = false;
+        let content = serde_json::to_string_pretty(&normalized)?;
         tokio::fs::write(&self.settings_path, content).await?;
 
         log_info!("Saved notification settings to disk");
@@ -297,7 +303,7 @@ pub fn merge_with_defaults(partial: NotificationSettings) -> NotificationSetting
     NotificationSettings {
         auto_meeting_detection: partial.auto_meeting_detection,
         auto_listening: partial.auto_listening,
-        background_auto_recording: partial.background_auto_recording,
+        background_auto_recording: false,
         recording_notifications: partial.recording_notifications,
         time_based_reminders: partial.time_based_reminders,
         meeting_reminders: partial.meeting_reminders,

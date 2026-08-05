@@ -1,14 +1,17 @@
 "use client";
 
+import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { Icon } from '@/components/memento/Icon';
 import { cn } from '@/lib/utils';
 import { useT } from '@/lib/i18n';
 import { avatarGradients } from '@/vendor/deslop/primitives/tokens.js';
 import { Bubble, BubbleContent } from '@/components/ui/bubble';
-import { Message, MessageAvatar, MessageContent, MessageHeader } from '@/components/ui/message';
+import { Badge } from '@/components/ui/fluid-badge';
+import { Message, MessageAvatar, MessageContent } from '@/components/ui/message';
 import { ChatMarkdown } from './ChatMarkdown';
 import type { ChatMessage, Citation, RetrievalDiagnostics } from '@/hooks/useMeetingChat';
+import StreamingText from '@/vendor/deslop/mini-app/StreamingText';
 
 /**
  * Chat primitives shared by the archive/collection chat page and the embedded
@@ -35,6 +38,7 @@ export function MessageBubble({
   const senderName = isUser ? t('You') : 'Memento';
   const avatarGradient = avatarGradients[isUser ? 0 : 2];
   const avatarInitials = isUser ? senderName.slice(0, 1).toUpperCase() : 'M';
+  const [showFormattedAnswer, setShowFormattedAnswer] = useState(!msg.animate);
 
   return (
     <motion.div
@@ -64,12 +68,12 @@ export function MessageBubble({
                 !msg.error && '!bg-[var(--primary-5)] !text-[var(--deslop-primary)]',
               )}
             >
-              <div className="flex flex-col items-start gap-1 text-left">
+              <div className="flex flex-col items-start gap-0.5 text-left">
                 <span className="text-xs font-medium text-[var(--deslop-primary-60)]">
                   {senderName}
                 </span>
 
-                <div className={cn('w-full', isUser && 'whitespace-pre-wrap')}>
+                <div className={cn('w-full text-left', isUser && 'whitespace-pre-wrap')}>
                   {notFound && (
                     <div className="mb-1 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
                       <Icon name="search" size={14} />
@@ -77,9 +81,22 @@ export function MessageBubble({
                     </div>
                   )}
 
-                  {isUser || msg.error
-                    ? <div className="whitespace-pre-wrap">{msg.content}</div>
-                    : <ChatMarkdown content={msg.content} />}
+                  {isUser || msg.error ? (
+                    <div className="whitespace-pre-wrap">{msg.content}</div>
+                  ) : showFormattedAnswer ? (
+                    <ChatMarkdown content={msg.content} className="mm-md-answer" />
+                  ) : (
+                    <div className="whitespace-pre-wrap">
+                      <StreamingText
+                        mode="word"
+                        speed="fast"
+                        replayKey={`${msg.role}-${msg.content}`}
+                        onComplete={() => setShowFormattedAnswer(true)}
+                      >
+                        {msg.content}
+                      </StreamingText>
+                    </div>
+                  )}
 
                   {notFound && msg.diagnostics && <RetrievalExplanation diagnostics={msg.diagnostics} />}
 
@@ -91,17 +108,38 @@ export function MessageBubble({
                   )}
 
                   {!!msg.citations?.length && (
-                    <div className="mt-2.5 flex flex-wrap gap-1.5">
-                      {msg.citations.map((c) => (
-                        <button
+                    <div className="mt-2.5 flex w-full flex-wrap items-center justify-start gap-1.5">
+                      {msg.citations.map((c, index) => (
+                        <motion.button
                           key={c.index}
+                          type="button"
                           onClick={() => onCite(c)}
                           title={t('Open the meeting at this moment')}
-                          className="mm-numeric inline-flex items-center gap-1 rounded-md bg-muted px-2 py-0.5 text-[11px] font-semibold text-muted-foreground transition-colors hover:text-foreground"
+                          initial={{ opacity: 0, scale: 0.85, filter: 'blur(4px)' }}
+                          animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
+                          transition={{
+                            type: 'spring',
+                            stiffness: 420,
+                            damping: 30,
+                            delay: index * 0.04,
+                            filter: { duration: 0.12, delay: index * 0.04 },
+                          }}
+                          className="min-w-0 text-left outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary-20)] focus-visible:ring-offset-1"
                         >
-                          <span>[{c.index}]</span>
-                          {showMeetingLabel && <span className="max-w-[160px] truncate font-normal">{meetingTitle(c.meeting_id)}</span>}
-                        </button>
+                          <Badge
+                            variant="solid"
+                            size="sm"
+                            color="gray"
+                            className="max-w-full cursor-pointer overflow-hidden text-[var(--deslop-primary-60)] transition-colors hover:text-[var(--deslop-primary)] [&>span]:min-w-0 [&>span]:truncate"
+                          >
+                            <span className="mm-numeric font-semibold">[{c.index}]</span>
+                            {showMeetingLabel && (
+                              <span className="max-w-[190px] truncate font-normal">
+                                {meetingTitle(c.meeting_id)}
+                              </span>
+                            )}
+                          </Badge>
+                        </motion.button>
                       ))}
                     </div>
                   )}
@@ -115,6 +153,13 @@ export function MessageBubble({
   );
 }
 
+/**
+ * Why a question came back unanswered. The RAG layer already distinguishes an empty
+ * index from a complete one that simply lacks evidence, and `rag_answer_v3` is
+ * allowed to infer from indirect signals — so when it still declines, saying which
+ * of those happened is the difference between "nothing to search" and "searched,
+ * found nothing".
+ */
 export function RetrievalExplanation({ diagnostics }: { diagnostics: RetrievalDiagnostics }) {
   const t = useT();
   let explanation: string;
@@ -162,16 +207,26 @@ export function TypingIndicator() {
         <span aria-hidden="true">M</span>
       </MessageAvatar>
       <MessageContent>
-        <MessageHeader>Memento</MessageHeader>
         <Bubble variant="muted">
-          <BubbleContent className="flex items-center gap-1">
-            {[0, 1, 2].map((i) => (
-              <span
-                key={i}
-                className="h-2 w-2 animate-bounce rounded-full bg-muted-foreground"
-                style={{ animationDelay: `${i * 0.15}s` }}
-              />
-            ))}
+          <BubbleContent className="flex flex-col items-start gap-1">
+            <span className="text-xs font-medium text-[var(--deslop-primary-60)]">
+              Memento
+            </span>
+            <span className="flex h-3 items-center justify-center gap-1" aria-hidden="true">
+              {[0, 1, 2].map((i) => (
+                <motion.span
+                  key={i}
+                  className="h-2 w-2 rounded-full bg-muted-foreground"
+                  animate={{ opacity: [0.45, 1, 0.45], scale: [0.82, 1, 0.82] }}
+                  transition={{
+                    duration: 0.9,
+                    repeat: Number.POSITIVE_INFINITY,
+                    ease: 'easeInOut',
+                    delay: i * 0.15,
+                  }}
+                />
+              ))}
+            </span>
           </BubbleContent>
         </Bubble>
       </MessageContent>

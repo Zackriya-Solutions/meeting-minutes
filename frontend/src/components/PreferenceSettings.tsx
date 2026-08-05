@@ -26,7 +26,7 @@ import {
 import { useT } from '@/lib/i18n'
 
 /**
- * The four behaviours, ordered least to most automatic. Labels and descriptions are
+ * The available behaviours, ordered least to most automatic. Labels and descriptions are
  * English translation keys (see `translations.ts`).
  */
 const AUTO_CAPTURE_MODE_OPTIONS: ReadonlyArray<{
@@ -48,11 +48,6 @@ const AUTO_CAPTURE_MODE_OPTIONS: ReadonlyArray<{
     mode: 'live',
     label: 'Record with a live transcript',
     description: 'Start recording Zoom, Teams, Telemost, and SberJazz calls right away and transcribe as you go, then save about 45 seconds after the call ends. Browser and Telegram calls still ask first.',
-  },
-  {
-    mode: 'silent',
-    label: 'Record quietly in the background',
-    description: 'Capture every detected call, including browser and Telegram, without opening the recorder or transcribing live. The meeting appears in your list with audio when the call ends — press Enhance to transcribe it. Calls shorter than a minute are discarded.',
   },
 ];
 
@@ -251,9 +246,7 @@ export function PreferenceSettings() {
         </div>
       </div>
 
-      {/* One choice instead of three toggles: detection, auto-listening and background
-          capture only ever described four behaviours. Detection evidence stays in
-          memory; only the normalized capture lifecycle is stored. */}
+      {/* Detection can stay off, ask first, or open a normal live recording. */}
       <div className="settings-section settings-cell">
         <div className="settings-cell__row">
           <span className="settings-cell__avatar" aria-hidden="true">
@@ -262,9 +255,7 @@ export function PreferenceSettings() {
           <div className="settings-cell__text">
             <h3 className="settings-cell__label">{t('When a call is detected')}</h3>
             <p className="settings-cell__caption">
-              {backgroundCapture?.capturing
-                ? t('Recording a call in the background right now.')
-                : t('Choose how Memento responds when it detects a call')}
+              {t('Choose how Memento responds when it detects a call')}
             </p>
           </div>
           <div className="settings-cell__control">

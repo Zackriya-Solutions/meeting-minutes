@@ -125,4 +125,3 @@ export CARGO_INCREMENTAL=0
 
 echo "Building Tauri app..."
 "${PNPM[@]}" run tauri dev
-sleep

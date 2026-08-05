@@ -18,6 +18,14 @@ pub fn rag_answer_v2() -> &'static str {
     include_str!("../../prompts/rag_answer_v2.md")
 }
 
+/// Cross-meeting synthesis with cautious inference from indirect evidence. This is
+/// used for comparative questions where meeting notes rarely contain a ready-made
+/// metric, but do contain observable signals such as participation, follow-through,
+/// blockers and repeated unresolved issues.
+pub fn rag_answer_v3() -> &'static str {
+    include_str!("../../prompts/rag_answer_v3.md")
+}
+
 /// Sentinel the RAG model returns when the answer is not in the provided context
 /// (PLAN.md Phase 4 low-confidence guard). Must match `rag_answer_v1.md` exactly.
 pub const RAG_NOT_FOUND: &str = "в записях не найдено";
@@ -49,5 +57,7 @@ mod tests {
         assert!(extract_v1().contains("action_items"));
         assert!(rag_answer_v1().contains(RAG_NOT_FOUND));
         assert!(rag_answer_v2().contains(RAG_NOT_FOUND));
+        assert!(rag_answer_v3().contains(RAG_NOT_FOUND));
+        assert!(rag_answer_v3().contains("По косвенным признакам"));
     }
 }

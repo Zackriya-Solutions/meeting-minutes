@@ -13,6 +13,7 @@ import { TranscriptCard } from './TranscriptCard';
 import { SummaryMessage } from './SummaryMessage';
 import { MeetingComposer } from './MeetingComposer';
 import { MeetingOverflowMenu } from './MeetingOverflowMenu';
+import { TranscriptSearchDialog } from './TranscriptSearchDialog';
 import { buildMeetingPromptSuggestions } from '@/lib/promptSuggestions';
 import {
   FluidTabs,
@@ -24,6 +25,7 @@ import {
   MessageScroller,
   MessageScrollerButton,
   MessageScrollerContent,
+  MessageScrollerInitialPosition,
   MessageScrollerItem,
   MessageScrollerProvider,
   MessageScrollerViewport,
@@ -239,6 +241,12 @@ export function MeetingConversation({
     setActiveTab('transcript');
   }, []);
 
+  const handleTranscriptSearchSelect = useCallback((seconds: number) => {
+    Analytics.trackFeatureUsed('transcript_search_result_click');
+    setActiveTab('transcript');
+    setSeekTarget(seconds + Math.random() * 0.02);
+  }, []);
+
   const focusComposer = useCallback(() => {
     inputRef.current?.focus();
     inputRef.current?.scrollIntoView({ block: 'nearest' });
@@ -255,6 +263,10 @@ export function MeetingConversation({
     || ['processing', 'summarizing', 'regenerating'].includes(summaryPanelProps.summaryStatus);
 
   const meetingTitleFor = useCallback(() => meetingTitle || meeting.title, [meetingTitle, meeting.title]);
+  const latestUserMessageIndex = messages.reduce(
+    (latestIndex, message, index) => message.role === 'user' ? index : latestIndex,
+    -1,
+  );
 
   const actualDurationSeconds = useMemo(() => {
     const durationSource = segments && segments.length > 0
@@ -292,21 +304,30 @@ export function MeetingConversation({
             onFinishEditing={onFinishEditTitle}
             onChange={onTitleChange}
             showEditButton={false}
+            seamlessEditing
           />
           {metaLine && <p className="mm-numeric mt-0.5 truncate text-xs text-muted-foreground">{metaLine}</p>}
         </div>
-        <MeetingOverflowMenu
-          meetingId={meetingId}
-          hasSummary={hasSummary}
-          onCopySummary={onCopySummary}
-          onRenameMeeting={onStartEditTitle}
-          onSaveSummary={summaryPanelProps.onSaveAll}
-          onShareSummaryToTelegram={summaryPanelProps.onShareSummaryToTelegram}
-          canShareToTelegram={summaryPanelProps.canShareToTelegram}
-          modelConfig={summaryPanelProps.modelConfig}
-          setModelConfig={summaryPanelProps.setModelConfig}
-          onSaveModelConfig={summaryPanelProps.onSaveModelConfig}
-        />
+        <div className="flex shrink-0 items-center gap-1.5">
+          <TranscriptSearchDialog
+            meetingId={meetingId}
+            transcripts={transcripts}
+            totalCount={totalCount}
+            onSelect={handleTranscriptSearchSelect}
+          />
+          <MeetingOverflowMenu
+            meetingId={meetingId}
+            hasSummary={hasSummary}
+            onCopySummary={onCopySummary}
+            onRenameMeeting={onStartEditTitle}
+            onSaveSummary={summaryPanelProps.onSaveAll}
+            onShareSummaryToTelegram={summaryPanelProps.onShareSummaryToTelegram}
+            canShareToTelegram={summaryPanelProps.canShareToTelegram}
+            modelConfig={summaryPanelProps.modelConfig}
+            setModelConfig={summaryPanelProps.setModelConfig}
+            onSaveModelConfig={summaryPanelProps.onSaveModelConfig}
+          />
+        </div>
       </div>
 
       {reviewSlot && <div className="shrink-0">{reviewSlot}</div>}
@@ -335,8 +356,8 @@ export function MeetingConversation({
 
         <FluidTabsContent value="summary" className="mt-0 min-h-0 flex-1 data-[state=active]:flex data-[state=active]:flex-col data-[state=inactive]:hidden">
           <MessageScrollerProvider
-            key={`${meetingId}-${loadingHistory ? 'loading' : 'ready'}`}
-            autoScroll
+            key={meetingId}
+            autoScroll={false}
             defaultScrollPosition="last-anchor"
             scrollPreviousItemPeek={48}
           >
@@ -367,7 +388,7 @@ export function MeetingConversation({
                           <MessageScrollerItem
                             key={`${msg.role}-${i}`}
                             messageId={`${meetingId}-chat-${i}`}
-                            scrollAnchor={msg.role === 'user'}
+                            scrollAnchor={i === latestUserMessageIndex}
                           >
                             <MessageBubble
                               msg={msg}
@@ -387,6 +408,12 @@ export function MeetingConversation({
                   </MessageScrollerContent>
                 </MessageScrollerViewport>
                 <MessageScrollerButton className="data-[direction=end]:bottom-[92px]" />
+                <MessageScrollerInitialPosition
+                  ready={!loadingHistory}
+                  resetKey={`${meetingId}-${latestUserMessageIndex}`}
+                  messageId={latestUserMessageIndex >= 0 ? `${meetingId}-chat-${latestUserMessageIndex}` : undefined}
+                  scrollMargin={48}
+                />
               </MessageScroller>
 
               <MeetingComposer

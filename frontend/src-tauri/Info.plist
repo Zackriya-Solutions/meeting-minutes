@@ -2,6 +2,10 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+    <key>CFBundleIconFile</key>
+    <string>MementoMac</string>
+    <key>CFBundleIconName</key>
+    <string>MementoMac</string>
     <key>NSMicrophoneUsageDescription</key>
     <string>This application needs access to your microphone to record meeting audio.</string>
     <key>NSScreenCaptureUsageDescription</key>

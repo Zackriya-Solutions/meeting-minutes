@@ -1,0 +1,25 @@
+.root {
+  display: block;
+}
+
+.line {
+  display: block;
+  min-height: 1lh;
+}
+
+.token {
+  display: inline-block;
+}
+
+.typewriter {
+  display: grid;
+}
+
+.typewriter > span {
+  grid-area: 1/1;
+  white-space: pre-wrap;
+}
+
+.typewriterGhost {
+  visibility: hidden;
+}

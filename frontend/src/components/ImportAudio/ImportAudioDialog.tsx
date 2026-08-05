@@ -1,10 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
-  Upload,
   Globe,
-  Loader2,
-  AlertCircle,
-  CheckCircle2,
   Cpu,
   FileAudio,
   Clock,
@@ -38,9 +34,6 @@ import { useTranscriptionModels, ModelOption } from '@/hooks/useTranscriptionMod
 import { useT } from '@/lib/i18n';
 
 type FluidIconProps = { size?: number; strokeWidth?: number; className?: string };
-const UploadIcon = ({ size = 16, className }: FluidIconProps) => <MaterialSymbol name="upload" size={size} weight={400} className={className} />;
-const FolderIcon = ({ size = 16, className }: FluidIconProps) => <MaterialSymbol name="folder_open" size={size} weight={400} className={className} />;
-const CancelIcon = ({ size = 16, className }: FluidIconProps) => <MaterialSymbol name="close" size={size} weight={400} className={className} />;
 const ExpandIcon = ({ size = 16, className }: FluidIconProps) => <MaterialSymbol name="expand_more" size={size} weight={400} className={className} />;
 const CollapseIcon = ({ size = 16, className }: FluidIconProps) => <MaterialSymbol name="expand_less" size={size} weight={400} className={className} />;
 
@@ -311,28 +304,14 @@ export function ImportAudioDialog({
         onInteractOutside={handleInteractOutside}
       >
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            {isProcessing ? (
-              <>
-                <Loader2 className="h-5 w-5 animate-spin text-primary" />
-                {t('Importing Audio...')}
-              </>
-            ) : error ? (
-              <>
-                <AlertCircle className="h-5 w-5 text-destructive" />
-                {t('Import Failed')}
-              </>
-            ) : status === 'complete' ? (
-              <>
-                <CheckCircle2 className="h-5 w-5 text-success" />
-                {t('Import Complete')}
-              </>
-            ) : (
-              <>
-                <Upload className="h-5 w-5 text-primary" />
-                {t('Import Audio File')}
-              </>
-            )}
+          <DialogTitle>
+            {isProcessing
+              ? t('Importing Audio...')
+              : error
+                ? t('Import Failed')
+                : status === 'complete'
+                  ? t('Import Complete')
+                  : t('Import Audio File')}
           </DialogTitle>
           <DialogDescription>
             {isProcessing
@@ -442,32 +421,32 @@ export function ImportAudioDialog({
                   </Button>
                 </div>
               ) : (
-                <div className="min-w-0 border-2 border-dashed border-border rounded-lg p-5 text-center sm:p-8">
-                  <FileAudio className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-                  <div className="flex min-w-0 flex-col justify-center gap-2 sm:flex-row sm:flex-wrap">
-                    <Button
-                      className="min-w-0"
-                      variant="primary"
-                      size="md"
-                      leadingIcon={UploadIcon}
-                      loading={status === 'validating'}
-                      onClick={handleSelectFile}
-                      disabled={status === 'validating'}
-                    >
-                      {status === 'validating' ? t('Validating...') : t('Select Audio File')}
-                    </Button>
-                    <Button
-                      className="min-w-0"
-                      variant="secondary"
-                      size="md"
-                      leadingIcon={FolderIcon}
-                      onClick={handleSelectFolder}
-                      disabled={status === 'validating'}
-                    >
-                      {t('Select Audio Folder')}
-                    </Button>
-                  </div>
-                  <p className="text-sm text-muted-foreground mt-2">{t('MP4, WAV, MP3, FLAC, OGG, MKV, WebM, WMA')}</p>
+                <div className="space-y-2">
+                  <button
+                    type="button"
+                    className="flex min-h-48 w-full min-w-0 cursor-pointer items-center justify-center rounded-lg border-2 border-dashed border-border p-5 text-center transition-colors hover:bg-primary/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-wait disabled:opacity-60 sm:p-8"
+                    aria-label={status === 'validating' ? t('Validating...') : t('Select Audio File')}
+                    onClick={handleSelectFile}
+                    disabled={status === 'validating'}
+                  >
+                    <p className="text-sm text-muted-foreground">
+                      {status === 'validating'
+                        ? t('Validating...')
+                        : t('MP4, WAV, MP3, FLAC, OGG, MKV, WebM, WMA')}
+                    </p>
+                  </button>
+                  {/* Folder import has no other entry point: batchFiles is only ever
+                      populated here, and the batch view's "Choose Different Folder"
+                      is unreachable until it is. */}
+                  <Button
+                    variant="tertiary"
+                    size="md"
+                    className="w-full"
+                    onClick={handleSelectFolder}
+                    disabled={status === 'validating'}
+                  >
+                    {t('Select Audio Folder')}
+                  </Button>
                 </div>
               )}
 
@@ -611,7 +590,6 @@ export function ImportAudioDialog({
                 className="min-w-0"
                 variant="primary"
                 size="md"
-                leadingIcon={UploadIcon}
                 disabled={
                   (!fileInfo && batchFiles.length === 0)
                   || Boolean(fileInfo?.existing_meeting)
@@ -625,7 +603,7 @@ export function ImportAudioDialog({
             </>
           )}
           {isProcessing && (
-            <Button variant="ghost" size="md" leadingIcon={CancelIcon} onClick={handleCancel}>
+            <Button variant="ghost" size="md" onClick={handleCancel}>
               {t('Cancel')}
             </Button>
           )}

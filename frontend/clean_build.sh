@@ -81,7 +81,10 @@ if ! command -v cmake &> /dev/null; then
     brew install cmake
 else
     CMAKE_VERSION=$(cmake --version | head -n1 | cut -d" " -f3)
-    if [[ "$CMAKE_VERSION" < "3.5" ]]; then
+    if ! awk -v version="$CMAKE_VERSION" 'BEGIN {
+        split(version, parts, ".")
+        exit !(parts[1] > 3 || (parts[1] == 3 && parts[2] >= 5))
+    }'; then
         echo "CMake version $CMAKE_VERSION is too old. Updating via Homebrew..."
         brew upgrade cmake
     fi
@@ -113,4 +116,3 @@ echo "Building Tauri app..."
 # Local builds produce the .app and DMG only. Updater artifacts require the
 # private signing key and are created by the protected GitHub release workflow.
 "${PNPM[@]}" exec tauri build --config '{"bundle":{"createUpdaterArtifacts":false}}'
-sleep

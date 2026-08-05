@@ -42,6 +42,12 @@ export const RU: Record<string, string> = {
   "Compare the replies": "Сравните реплики",
 
   // Meeting conversation (variant 2a/3a)
+  "Find in transcript": "Найти в стенограмме",
+  "Find a word or phrase": "Найти слово или фразу",
+  "Enter a word or phrase": "Введите слово или фразу",
+  "Loading transcript…": "Загружаем стенограмму…",
+  "Nothing found": "Ничего не найдено",
+  "Matches": "Совпадения",
   "Today": "Сегодня",
   "Yesterday": "Вчера",
   "Day before yesterday": "Позавчера",
@@ -472,6 +478,7 @@ export const RU: Record<string, string> = {
   "Display colored dots showing transcription confidence quality": "Показывать качество распознавания рядом с фрагментами",
   "Recording Stopped": "Запись завершена",
   "Dismiss": "Закрыть",
+  "Have everyone say their name at the start of the meeting. This helps me remember voices and recognize participants more accurately.": "Пусть каждый в начале встречи назовёт своё имя. Так я запомню голоса и точнее распознаю участников",
   "Transcription Performance Warning": "Расшифровка может работать медленно",
   "Recover Interrupted Meetings": "Восстановить прерванные встречи",
   "We found": "Найдено",

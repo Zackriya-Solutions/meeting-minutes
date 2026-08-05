@@ -1,0 +1,17 @@
+{
+  "name": "MementoMac",
+  "platforms": ["macos"],
+  "background": {
+    "default": "#000000"
+  },
+  "layers": [
+    {
+      "name": "M Logo",
+      "default": "layers/m-logo.svg",
+      "dark": "layers/m-logo.svg",
+      "tinted": "layers/m-logo.svg",
+      "glass": false,
+      "shadowOpacity": 0
+    }
+  ]
+}

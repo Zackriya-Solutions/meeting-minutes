@@ -8,6 +8,36 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 
+// Next.js reads `.env` for the web bundle, but the Rust compiler is a child of
+// this process and otherwise never sees build-only values such as the managed
+// gateway registration key. Keep local secrets out of source control while
+// forwarding them to both `tauri dev` and `tauri build`.
+const localEnvPath = path.join(process.cwd(), '.env');
+if (fs.existsSync(localEnvPath)) {
+  for (const sourceLine of fs.readFileSync(localEnvPath, 'utf8').split(/\r?\n/)) {
+    const line = sourceLine.trim();
+    if (!line || line.startsWith('#')) continue;
+
+    const match = line.match(/^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$/);
+    if (!match || process.env[match[1]] !== undefined) continue;
+
+    let value = match[2].trim();
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+      value = value.slice(1, -1);
+    }
+    process.env[match[1]] = value;
+  }
+}
+
+const managedGatewayKey = process.env.MEMENTO_REGISTRATION_KEY;
+const unmanagedBuildAllowed = process.env.MEMENTO_ALLOW_UNMANAGED_BUILD === '1';
+if ((!managedGatewayKey || managedGatewayKey === 'replace-with-development-registration-key') && !unmanagedBuildAllowed) {
+  console.error('Missing MEMENTO_REGISTRATION_KEY. Refusing to build a Memento app with broken managed chat.');
+  console.error('Use the protected clean_run.sh / clean_build.sh path, or add the key to frontend/.env.');
+  console.error('Set MEMENTO_ALLOW_UNMANAGED_BUILD=1 only for an intentional BYOK-only build.');
+  process.exit(1);
+}
+
 // Get the command (dev or build)
 const command = process.argv[2];
 if (!command || !['dev', 'build'].includes(command)) {

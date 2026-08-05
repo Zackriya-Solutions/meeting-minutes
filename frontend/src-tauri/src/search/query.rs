@@ -33,7 +33,7 @@ impl QueryPlan {
     pub fn build(query: &str) -> Self {
         let raw_terms = tokenize(query);
         let mut rewritten = false;
-        let semantic_terms: Vec<String> = raw_terms
+        let mut semantic_terms: Vec<String> = raw_terms
             .iter()
             .map(|term| {
                 if let Some((canonical, _)) = known_aliases(term) {
@@ -44,6 +44,21 @@ impl QueryPlan {
                 }
             })
             .collect();
+
+        // Evaluation questions rarely reuse the user's exact wording in a meeting.
+        // Add a small deterministic vocabulary of observable signals so both semantic
+        // and lexical retrieval can find evidence such as blockers or lack of follow-
+        // through for a question phrased as "кто самый неэффективный".
+        for term in &raw_terms {
+            if let Some(related) = related_evidence_terms(term) {
+                rewritten = true;
+                for value in related {
+                    if !semantic_terms.iter().any(|term| term == value) {
+                        semantic_terms.push((*value).to_string());
+                    }
+                }
+            }
+        }
 
         let mut seen = HashSet::new();
         let mut concepts = Vec::new();
@@ -60,6 +75,9 @@ impl QueryPlan {
             };
             if let Some(transliterated) = transliteration_variant(&term) {
                 variants.push(transliterated);
+            }
+            if let Some(related) = related_evidence_terms(&term) {
+                variants.extend(related.iter().map(|value| (*value).to_string()));
             }
             variants.sort();
             variants.dedup();
@@ -355,6 +373,66 @@ fn known_aliases(term: &str) -> Option<(&'static str, &'static [&'static str])> 
     }
 }
 
+/// Related, observable evidence for common analytical questions. These are not
+/// treated as facts about a person; they only widen retrieval so the answer model can
+/// compare cited fragments and state the limits of an indirect conclusion.
+fn related_evidence_terms(term: &str) -> Option<&'static [&'static str]> {
+    const INEFFECTIVE: &[&str] = &[
+        "пассивный",
+        "безрезультатный",
+        "задержка",
+        "просрочка",
+        "блокер",
+        "проблема",
+        "сорван",
+        "не выполнено",
+        "не решено",
+    ];
+    const EFFECTIVE: &[&str] = &[
+        "результат",
+        "решение",
+        "договоренность",
+        "выполнено",
+        "завершено",
+        "прогресс",
+        "инициатива",
+        "вовлеченность",
+    ];
+    const PASSIVE: &[&str] = &[
+        "молчал",
+        "не участвовал",
+        "не ответил",
+        "не высказался",
+        "без инициативы",
+        "мало говорил",
+    ];
+    const OVERLOADED: &[&str] = &[
+        "нагрузка",
+        "занят",
+        "дедлайн",
+        "не успеваю",
+        "много задач",
+        "переработка",
+        "перегрузка",
+    ];
+
+    match term {
+        "неэффективный" | "неэффективная" | "неэффективные" | "неэффективность" => {
+            Some(INEFFECTIVE)
+        }
+        "эффективный" | "эффективная" | "эффективные" | "эффективность" => {
+            Some(EFFECTIVE)
+        }
+        "пассивный" | "пассивная" | "пассивные" | "пассивность" => {
+            Some(PASSIVE)
+        }
+        "перегруженный" | "перегруженная" | "перегруженные" | "перегруженность" => {
+            Some(OVERLOADED)
+        }
+        _ => None,
+    }
+}
+
 fn transliteration_variant(term: &str) -> Option<String> {
     if term.chars().all(|c| c.is_ascii_alphabetic()) {
         let mut value = term.to_string();
@@ -450,6 +528,18 @@ mod tests {
         );
         let plan = QueryPlan::build("pipeline");
         assert!(plan.expanded_terms().iter().any(|term| term == "пипелине"));
+    }
+
+    #[test]
+    fn evaluative_query_expands_to_observable_evidence() {
+        let plan = QueryPlan::build("кто в команде самый неэффективный");
+        let expanded = plan.expanded_terms();
+
+        assert!(plan.rewritten);
+        assert!(expanded.iter().any(|term| term == "блокер"));
+        assert!(expanded.iter().any(|term| term == "просрочка"));
+        assert!(plan.semantic_query.contains("пассивный"));
+        assert!(plan.semantic_query.contains("не решено"));
     }
 
     #[tokio::test]
