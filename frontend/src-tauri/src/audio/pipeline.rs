@@ -6,7 +6,9 @@ use rubato::{
     Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType, WindowFunction,
 };
 use std::collections::VecDeque;
-use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, LazyLock};
+use std::time::Instant;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
@@ -16,6 +18,65 @@ use super::audio_processing::{
 use super::devices::AudioDevice;
 use super::recording_state::{AudioChunk, AudioError, DeviceType, RecordingState};
 use super::vad::{ContinuousVadProcessor, SpeechSegment};
+
+// The recording UI reads this value instead of opening a second WebKit
+// getUserMedia stream. A second microphone client makes macOS rebuild its
+// voice-processing graph and can lower the shared input level for call apps.
+//
+// The level and the moment it was written live in one word so that a reader
+// always sees the pair the writer published: two separate atomics would let a
+// poll land between the two stores and age a fresh level against the previous
+// timestamp. High 32 bits hold the RMS as `f32::to_bits`, low 32 bits hold
+// milliseconds on `LEVEL_CLOCK`. An all-zero word reads as silence either way,
+// so the initial value needs no special case.
+//
+// One word for the whole process, matching the one-recording-at-a-time model
+// the rest of the module assumes: two concurrent microphone captures would
+// overwrite each other here.
+static MICROPHONE_LEVEL: AtomicU64 = AtomicU64::new(0);
+static LEVEL_CLOCK: LazyLock<Instant> = LazyLock::new(Instant::now);
+
+/// A published level older than this reads as silence.
+///
+/// Capture writes one value per chunk, tens of milliseconds apart, so a level
+/// this old means no microphone audio is flowing: recording stopped, the stream
+/// died, or the device went away. Without the expiry the process-wide value
+/// keeps the last RMS of a finished session forever, and the waveform shows a
+/// speaking user while nothing is being captured.
+const MICROPHONE_LEVEL_MAX_AGE_MS: u32 = 250;
+
+/// Truncated to 32 bits, so it wraps after about 49 days of uptime. Ages are
+/// taken with `wrapping_sub`, which stays correct across that wrap.
+fn level_clock_ms() -> u32 {
+    LEVEL_CLOCK.elapsed().as_millis() as u32
+}
+
+fn pack_microphone_level(rms: f32, written_at_ms: u32) -> u64 {
+    ((rms.to_bits() as u64) << 32) | written_at_ms as u64
+}
+
+fn store_microphone_level(rms: f32) {
+    let packed = pack_microphone_level(rms.clamp(0.0, 1.0), level_clock_ms());
+    MICROPHONE_LEVEL.store(packed, Ordering::Relaxed);
+}
+
+/// Publish silence immediately, so the waveform does not have to wait out
+/// `MICROPHONE_LEVEL_MAX_AGE_MS` after the pipeline stops.
+pub fn reset_microphone_level() {
+    MICROPHONE_LEVEL.store(pack_microphone_level(0.0, 0), Ordering::Relaxed);
+}
+
+fn level_from_packed(packed: u64, now_ms: u32) -> f32 {
+    let written_at_ms = packed as u32;
+    if now_ms.wrapping_sub(written_at_ms) > MICROPHONE_LEVEL_MAX_AGE_MS {
+        return 0.0;
+    }
+    f32::from_bits((packed >> 32) as u32)
+}
+
+pub fn current_microphone_level() -> f32 {
+    level_from_packed(MICROPHONE_LEVEL.load(Ordering::Relaxed), level_clock_ms())
+}
 
 /// Ring buffer for synchronized audio mixing
 /// Accumulates samples from mic and system streams until we have aligned windows
@@ -747,6 +808,26 @@ impl AudioCapture {
                     }
                 }
             }
+
+            // STEP 4: Publish the level for the recording waveform.
+            //
+            // Microphone only, and mic-only: this runs inside the
+            // DeviceType::Microphone branch, one AudioCapture serves one
+            // device, and mixing with system audio happens downstream in
+            // AudioPipeline. No system energy can reach this number, so the
+            // wave cannot show "speaking" while only the far end is talking.
+            //
+            // Measured after normalization on purpose — the wave should track
+            // what the meeting hears, so it reads the same for a quiet mic and
+            // a loud one.
+            let rms = if mono_data.is_empty() {
+                0.0
+            } else {
+                (mono_data.iter().map(|sample| sample * sample).sum::<f32>()
+                    / mono_data.len() as f32)
+                    .sqrt()
+            };
+            store_microphone_level(rms);
         }
 
         // Create audio chunk with stream-specific timestamp (get ID first for logging)
@@ -1295,6 +1376,11 @@ impl AudioPipelineManager {
 
     /// Stop the audio pipeline
     pub async fn stop(&mut self) -> Result<()> {
+        // No microphone chunks will arrive from here on, so retire the level the
+        // waveform polls instead of leaving this session's last RMS published.
+        // `force_flush_and_stop` finishes through here too.
+        reset_microphone_level();
+
         // Drop the sender to close the pipeline
         self.audio_sender = None;
 
@@ -1372,6 +1458,16 @@ impl Default for AudioPipelineManager {
 mod tests {
     use super::*;
 
+    /// The published level is process-wide, so the tests that write it take
+    /// turns rather than racing each other under the parallel test harness.
+    static LEVEL_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn level_test_guard() -> std::sync::MutexGuard<'static, ()> {
+        LEVEL_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
     #[test]
     fn ring_buffer_flush_returns_the_aligned_tail_then_nothing() {
         // 600ms windows: at 1000 Hz that is 600 samples, so 100 samples is a tail.
@@ -1398,6 +1494,171 @@ mod tests {
         let (mic, system) = ring.flush().unwrap();
         assert_eq!((mic.len(), system.len()), (90, 90));
         assert_eq!(mic[40..], [0.0; 50]);
+    }
+
+    #[test]
+    fn published_microphone_level_expires() {
+        let written_at = 10_000u32;
+        let packed = pack_microphone_level(0.4, written_at);
+
+        // Fresh: the waveform sees what capture measured.
+        assert_eq!(
+            level_from_packed(packed, written_at + MICROPHONE_LEVEL_MAX_AGE_MS),
+            0.4
+        );
+
+        // Stale: capture stopped writing, so the last RMS of that session must
+        // not keep reading as live voice activity.
+        assert_eq!(
+            level_from_packed(packed, written_at + MICROPHONE_LEVEL_MAX_AGE_MS + 1),
+            0.0
+        );
+    }
+
+    #[test]
+    fn published_microphone_level_survives_the_clock_wrapping() {
+        // The clock is milliseconds truncated to 32 bits, so it wraps roughly
+        // every 49 days of uptime. A level written just before the wrap must
+        // still read as fresh just after it, not as a 49-day-old one.
+        let just_before_wrap = u32::MAX - 10;
+        let packed = pack_microphone_level(0.4, just_before_wrap);
+
+        assert_eq!(
+            level_from_packed(packed, just_before_wrap.wrapping_add(20)),
+            0.4
+        );
+        assert_eq!(
+            level_from_packed(
+                packed,
+                just_before_wrap.wrapping_add(MICROPHONE_LEVEL_MAX_AGE_MS + 1)
+            ),
+            0.0
+        );
+    }
+
+    #[test]
+    fn packed_microphone_level_keeps_both_halves_intact() {
+        // The level and its timestamp share one word so a reader always gets
+        // the pair the writer published; neither half may corrupt the other.
+        for (rms, at_ms) in [(0.0, 0u32), (1.0, u32::MAX), (0.375, 1_234_567)] {
+            let packed = pack_microphone_level(rms, at_ms);
+            assert_eq!(packed as u32, at_ms);
+            assert_eq!(f32::from_bits((packed >> 32) as u32), rms);
+        }
+    }
+
+    #[test]
+    fn the_never_written_level_reads_as_silence() {
+        // `MICROPHONE_LEVEL` starts at zero, so the Tauri command answers a
+        // poll that arrives before any recording with silence rather than
+        // whatever an all-zero word happens to decode to. Both the fresh and
+        // the expired branch have to agree on that.
+        let untouched = 0u64;
+        assert_eq!(level_from_packed(untouched, 0), 0.0);
+        assert_eq!(
+            level_from_packed(untouched, MICROPHONE_LEVEL_MAX_AGE_MS + 1),
+            0.0
+        );
+    }
+
+    #[test]
+    fn stopping_the_pipeline_retires_the_published_level() {
+        let _guard = level_test_guard();
+
+        store_microphone_level(0.4);
+        assert_eq!(current_microphone_level(), 0.4);
+
+        reset_microphone_level();
+        assert_eq!(current_microphone_level(), 0.0);
+    }
+
+    /// One capture serves one device, and mixing happens downstream, so loud
+    /// system audio must leave the published level alone — otherwise the wave
+    /// shows the user speaking while only the far end is talking.
+    #[test]
+    fn only_the_microphone_capture_publishes_a_level() {
+        let _guard = level_test_guard();
+
+        fn capture_for(device_type: DeviceType) -> AudioCapture {
+            let state = RecordingState::new();
+            state.start_recording().expect("start recording");
+            AudioCapture::new(
+                Arc::new(AudioDevice::new(
+                    "test device".to_string(),
+                    super::super::devices::DeviceType::Input,
+                )),
+                state,
+                48_000, // matches the pipeline rate, so nothing is resampled away
+                1,
+                device_type,
+                None,
+            )
+        }
+
+        let loud = vec![0.5f32; 4_800];
+
+        reset_microphone_level();
+        capture_for(DeviceType::System).process_audio_data(&loud);
+        assert_eq!(
+            current_microphone_level(),
+            0.0,
+            "system audio must not reach the microphone level"
+        );
+
+        capture_for(DeviceType::Microphone).process_audio_data(&loud);
+        assert!(
+            current_microphone_level() > 0.0,
+            "microphone audio must reach the level the waveform polls"
+        );
+
+        reset_microphone_level();
+    }
+
+    /// A reader must never see one publication's level paired with another's
+    /// timestamp. Packing both into a single word makes that impossible; this
+    /// pins the invariant so splitting them apart again fails loudly.
+    #[test]
+    fn concurrent_readers_never_observe_a_torn_level_and_timestamp() {
+        use std::sync::atomic::AtomicBool;
+        use std::thread;
+
+        let _guard = level_test_guard();
+
+        // Each publication stores a level that encodes its own timestamp, so a
+        // torn pair is detectable from the packed word alone.
+        fn level_for(at_ms: u32) -> f32 {
+            (at_ms % 1_000) as f32 / 1_000.0
+        }
+        let done = Arc::new(AtomicBool::new(false));
+
+        let writer_done = Arc::clone(&done);
+        let writer = thread::spawn(move || {
+            for at_ms in 0..200_000u32 {
+                MICROPHONE_LEVEL.store(
+                    pack_microphone_level(level_for(at_ms), at_ms),
+                    Ordering::Relaxed,
+                );
+            }
+            writer_done.store(true, Ordering::Release);
+        });
+
+        // Read at least once even if the writer has already finished.
+        loop {
+            let finished = done.load(Ordering::Acquire);
+            let packed = MICROPHONE_LEVEL.load(Ordering::Relaxed);
+            let at_ms = packed as u32;
+            assert_eq!(
+                f32::from_bits((packed >> 32) as u32),
+                level_for(at_ms),
+                "observed a level that was never published with timestamp {at_ms}"
+            );
+            if finished {
+                break;
+            }
+        }
+
+        writer.join().expect("writer thread");
+        reset_microphone_level();
     }
 
     #[test]

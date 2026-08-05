@@ -385,7 +385,10 @@ mod tests {
             background_auto_recording: true,
             ..NotificationSettings::default()
         };
-        assert!(legacy.sanitize(), "a coerced legacy flag must be reportable");
+        assert!(
+            legacy.sanitize(),
+            "a coerced legacy flag must be reportable"
+        );
         assert!(!legacy.background_auto_recording);
         // Idempotent, so re-saving an already-migrated file logs nothing.
         assert!(!legacy.sanitize());
