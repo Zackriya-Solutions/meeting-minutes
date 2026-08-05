@@ -793,7 +793,7 @@ export const RU: Record<string, string> = {
   "SaluteSpeech is unavailable. Transcription continues locally with GigaAM; the audio recording is still being saved.": "SaluteSpeech недоступен. Расшифровка продолжается локально через GigaAM, аудиозапись по-прежнему сохраняется.",
   "Audio saved, but transcription produced no text": "Аудио сохранено, но расшифровка не получена",
   "Open the meeting to play the saved audio or retranscribe it with a local model.": "Откройте встречу, чтобы прослушать сохранённое аудио или расшифровать его повторно локальной моделью.",
-  "SaluteSpeech is unavailable. Download the local speaker models to continue without the cloud.": "SaluteSpeech недоступен. Загрузите локальные модели спикеров, чтобы продолжить без облака.",
+  "Speaker detection needs the local speaker models. Download them once to continue.": "Для определения спикеров нужны локальные модели. Загрузите их один раз.",
   "standup-like title": "название похоже на стендап",
   "reviewed standups in this series": "в этой серии уже подтверждались стендапы",
   "status-round language": "есть признаки статусного круга",

@@ -5,10 +5,11 @@
 //!   * `embedding.v2.onnx`  — 3D-Speaker CAM++ zh-en advanced speaker embeddings (~28 MB,
 //!     Apache-2.0, sherpa-onnx export; replaced the WeSpeaker VoxCeleb v1 model 2026-07-20)
 //!
-//! SaluteSpeech is the primary diarization engine. These models are an optional local
-//! fallback: until both files are present, `diarization_status.available` is false and
-//! a cloud failure leaves segments unattributed (existing v1 installs re-enter the
-//! download-consent flow once).
+//! This local cascade is the only diarization engine (see [`resolve_diarization_provider`]
+//! for the measurements behind that). Both files are required: until they are present,
+//! `diarization_status.available` is false and diarization reports
+//! [`DiarizeError::ModelsUnavailable`] so the UI can offer the one-time download (existing
+//! v1 installs re-enter that consent flow once).
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -274,28 +275,30 @@ fn should_preserve_existing_assignments(
     had_existing_assignments && total_segments > 0 && assigned_segments == 0
 }
 
-/// Diarization engine selection: `"salutespeech"` (Sber cloud, default) or `"local"`.
-/// Reads `app_settings_kv.diarization.provider`; `MEETILY_DIARIZATION_PROVIDER` overrides
-/// it (headless runs / tests).
-async fn resolve_diarization_provider(pool: &SqlitePool) -> String {
-    if let Ok(v) = std::env::var("MEETILY_DIARIZATION_PROVIDER") {
-        if !v.trim().is_empty() {
-            return v.trim().to_string();
-        }
-    }
-    sqlx::query_scalar::<_, String>(
-        "SELECT value FROM app_settings_kv WHERE key = 'diarization.provider'",
-    )
-    .fetch_optional(pool)
-    .await
-    .ok()
-    .flatten()
-    .map(|s| s.trim().to_string())
-    .filter(|s| !s.is_empty())
-    // SaluteSpeech is the product default; local ONNX models remain the offline fallback.
-    // `privacy.local_only` is enforced inside SaluteSpeech config resolution before any
-    // credentials or network clients are used.
-    .unwrap_or_else(|| "salutespeech".to_string())
+/// Diarization engine: always the local ONNX cascade.
+///
+/// The local cascade measured better on real meetings — the cloud engine found 4 of 7
+/// speakers against local's 7/7, which is why the Local/SaluteSpeech selector was removed
+/// from Settings → Transcription — and the reply-splitting refinements (two half-offset
+/// segmentation grids, interjection carving, covered-dominance attribution) only exist on
+/// the local path, so routing to the cloud silently gives up per-reply rows. There is no
+/// cloud fallback: when the models aren't downloaded, diarization reports
+/// [`DiarizeError::ModelsUnavailable`] and the UI offers the one-time download, rather than
+/// quietly producing worse turns.
+///
+/// `app_settings_kv.diarization.provider` is deliberately *not* consulted: nothing has
+/// written that key since the selector was deleted, so a stored value is a stale artifact
+/// of a removed control (its own default was the string `"salutespeech"`) and installs
+/// carrying one could never get back to the better engine.
+///
+/// `MEETILY_DIARIZATION_PROVIDER` remains the one way to reach the cloud engine, for
+/// headless runs and the `research_salutespeech_diarize` harness.
+fn resolve_diarization_provider() -> String {
+    std::env::var("MEETILY_DIARIZATION_PROVIDER")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "local".to_string())
 }
 
 /// Create a fresh unconfirmed `Speaker N` profile per distinct cloud speaker id, returning
@@ -546,7 +549,7 @@ pub async fn compute_speaker_turns<R: Runtime>(
         log::info!("[diarize] meeting {meeting_id}: using expected speaker count hint = {n}");
     }
 
-    let provider = resolve_diarization_provider(pool).await;
+    let provider = resolve_diarization_provider();
     let cloud_processing_allowed =
         sqlx::query_scalar::<_, i64>("SELECT cloud_processing_allowed FROM meetings WHERE id = ?")
             .bind(meeting_id)
