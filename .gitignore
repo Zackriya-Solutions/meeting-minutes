@@ -2,6 +2,7 @@
 
 /experiments
 /.worktrees
+.worktrees/**/.worktree-setup-done
 
 # dependencies
 /node_modules
