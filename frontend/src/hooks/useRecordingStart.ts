@@ -19,6 +19,13 @@ interface UseRecordingStartReturn {
 }
 
 /**
+ * Title requested by whoever raised the auto-start flag — a calendar entry naming the
+ * meeting it belongs to, rather than the generated `Meeting DD_MM_YY_HH_MM_SS` stamp.
+ * Read once and cleared, so the next unattended start falls back to the stamp.
+ */
+export const AUTO_START_TITLE_KEY = 'autoStartRecordingTitle';
+
+/**
  * Custom hook for managing recording start lifecycle.
  * Handles both manual start (button click) and auto-start (from sidebar navigation).
  *
@@ -56,6 +63,15 @@ export function useRecordingStart(
       : 'Meeting';
     return `${prefix} ${day}_${month}_${year}_${hours}_${minutes}_${seconds}`;
   }, []);
+
+  // Title for a start the user did not type a name for: a requested one if a calendar
+  // entry supplied it, otherwise the generated stamp.
+  const takeRequestedMeetingTitle = useCallback(() => {
+    if (typeof window === 'undefined') return generateMeetingTitle();
+    const requested = sessionStorage.getItem(AUTO_START_TITLE_KEY);
+    sessionStorage.removeItem(AUTO_START_TITLE_KEY);
+    return requested?.trim() || generateMeetingTitle();
+  }, [generateMeetingTitle]);
 
   const reportAutoListeningFailure = useCallback(async (
     failureReason: 'model_unavailable' | 'permission_denied' | 'start_failed',
@@ -148,7 +164,7 @@ export function useRecordingStart(
 
       console.log('Parakeet ready - setting up meeting title and state');
 
-      const randomTitle = calendarMeetingTitle?.trim() || generateMeetingTitle();
+      const randomTitle = calendarMeetingTitle?.trim() || takeRequestedMeetingTitle();
       setMeetingTitle(randomTitle);
 
       // Set STARTING status before initiating backend recording
@@ -179,7 +195,7 @@ export function useRecordingStart(
       // Re-throw so RecordingControls can handle device-specific errors
       throw error;
     }
-  }, [generateMeetingTitle, setMeetingTitle, setIsRecording, clearTranscripts, setIsMeetingActive, checkTranscriptionReadiness, showTranscriptionReadinessError, selectedDevices, setStatus]);
+  }, [takeRequestedMeetingTitle, setMeetingTitle, setIsRecording, clearTranscripts, setIsMeetingActive, checkTranscriptionReadiness, showTranscriptionReadinessError, selectedDevices, setStatus]);
 
   // Check for autoStartRecording flag and start recording automatically
   useEffect(() => {
@@ -203,8 +219,8 @@ export function useRecordingStart(
 
           // Start the actual backend recording
           try {
-            // Generate meeting title
-            const generatedMeetingTitle = generateMeetingTitle();
+            // Name the meeting after whoever requested the start, or stamp it
+            const generatedMeetingTitle = takeRequestedMeetingTitle();
 
             // Set STARTING status before initiating backend recording
             setStatus(RecordingStatus.STARTING, 'Initializing recording...');
@@ -244,7 +260,7 @@ export function useRecordingStart(
     isRecording,
     isAutoStarting,
     selectedDevices,
-    generateMeetingTitle,
+    takeRequestedMeetingTitle,
     setMeetingTitle,
     setIsRecording,
     clearTranscripts,
@@ -277,8 +293,8 @@ export function useRecordingStart(
       }
 
       try {
-        // Generate meeting title
-        const generatedMeetingTitle = generateMeetingTitle();
+        // Name the meeting after whoever requested the start, or stamp it
+        const generatedMeetingTitle = takeRequestedMeetingTitle();
 
         // Set STARTING status before initiating backend recording
         setStatus(RecordingStatus.STARTING, 'Initializing recording...');
@@ -320,7 +336,7 @@ export function useRecordingStart(
     isRecording,
     isAutoStarting,
     selectedDevices,
-    generateMeetingTitle,
+    takeRequestedMeetingTitle,
     setMeetingTitle,
     setIsRecording,
     clearTranscripts,

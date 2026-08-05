@@ -46,7 +46,6 @@ const TOAST_ID = 'auto-meeting-detected';
 const AUTO_LISTENING_SESSION_KEY = 'autoListeningSessionId';
 const AUTO_LISTENING_REPORTED_KEY = 'autoListeningStartReported';
 const AUTO_LISTENING_STOP_KEY = 'autoStopRecordingSessionId';
-const SHOW_MEETING_DETECTION_BANNER = false;
 
 interface DetectionBannerData {
   apps: MeetingApp[];
@@ -180,7 +179,7 @@ export function AutoMeetingDetection() {
 
   return (
     <MeetingDetectionBanner
-      open={SHOW_MEETING_DETECTION_BANNER && banner !== null}
+      open={banner !== null}
       state={banner?.state ?? 'suggestion'}
       appNames={banner ? Array.from(new Set(banner.apps.map(appName))) : []}
       onPrimaryAction={banner?.state === 'recording' ? () => router.push('/recording') : startRecording}

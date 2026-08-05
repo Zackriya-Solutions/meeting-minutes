@@ -511,10 +511,19 @@ fn should_auto_listen(
     enabled
         && microphone_signal_supported
         && source == Some(DetectionSource::MicrophoneActivity)
-        // A browser or Telegram may own the microphone for dictation or a voice message.
-        // Until call-specific evidence exists, keep those as confirmation prompts.
-        && !candidates.contains(&MeetingApp::BrowserCall)
-        && !candidates.contains(&MeetingApp::Telegram)
+        // A browser or Telegram may own the microphone for dictation or a voice message,
+        // so on their own they stay confirmation prompts. They must not veto a dedicated
+        // client, though: a browser tab that keeps the microphone open in the background
+        // is common, and a Zoom or Teams call running next to it is still call-specific
+        // evidence. Requiring at least one dedicated client also keeps an empty candidate
+        // set — no signal at all — from reading as "nothing ambiguous here".
+        && candidates.iter().any(|app| !is_ambiguous_client(*app))
+}
+
+/// Clients that hold the microphone for things other than calls (dictation, voice
+/// messages), so their presence alone is not enough to record unattended.
+fn is_ambiguous_client(app: MeetingApp) -> bool {
+    matches!(app, MeetingApp::BrowserCall | MeetingApp::Telegram)
 }
 
 fn select_detection_signal(
@@ -1653,6 +1662,40 @@ mod tests {
         ));
         assert!(!should_auto_listen(
             &apps(&[MeetingApp::Telegram]),
+            Some(DetectionSource::MicrophoneActivity),
+            true,
+            true,
+        ));
+    }
+
+    #[test]
+    fn an_ambiguous_client_does_not_veto_a_dedicated_one() {
+        // A browser tab holding the microphone next to a Zoom call is the common case,
+        // and it must not downgrade the call to a confirmation prompt.
+        assert!(should_auto_listen(
+            &apps(&[MeetingApp::BrowserCall, MeetingApp::Zoom]),
+            Some(DetectionSource::MicrophoneActivity),
+            true,
+            true,
+        ));
+        assert!(should_auto_listen(
+            &apps(&[MeetingApp::Telegram, MeetingApp::MicrosoftTeams]),
+            Some(DetectionSource::MicrophoneActivity),
+            true,
+            true,
+        ));
+        assert!(!should_auto_listen(
+            &apps(&[MeetingApp::BrowserCall, MeetingApp::Telegram]),
+            Some(DetectionSource::MicrophoneActivity),
+            true,
+            true,
+        ));
+    }
+
+    #[test]
+    fn no_candidates_never_arms_auto_listening() {
+        assert!(!should_auto_listen(
+            &BTreeSet::new(),
             Some(DetectionSource::MicrophoneActivity),
             true,
             true,
