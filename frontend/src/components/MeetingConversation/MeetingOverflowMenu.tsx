@@ -37,13 +37,16 @@ interface MeetingOverflowMenuProps {
   hasTranscript: boolean;
   onCopySummary: () => Promise<void> | void;
   onRenameMeeting: () => void;
-  onSaveSummary: () => Promise<void> | void;
   /** Omitted (along with `canShareToTelegram`) when Telegram sharing is unavailable. */
   onShareSummaryToTelegram?: () => Promise<void> | void;
   canShareToTelegram?: boolean;
   modelConfig: ModelConfig;
   setModelConfig: (config: ModelConfig | ((prev: ModelConfig) => ModelConfig)) => void;
   onSaveModelConfig: (config?: ModelConfig) => Promise<void>;
+  /** Re-runs the refinement pass (diarize → per-turn ASR → reply splitting). */
+  onReprocess: () => Promise<void> | void;
+  /** Stage of a pass already running, shown next to the item; null when idle. */
+  reprocessingLabel?: string | null;
 }
 
 export function MeetingOverflowMenu({
@@ -52,12 +55,13 @@ export function MeetingOverflowMenu({
   hasTranscript,
   onCopySummary,
   onRenameMeeting,
-  onSaveSummary,
   onShareSummaryToTelegram,
   canShareToTelegram = false,
   modelConfig,
   setModelConfig,
   onSaveModelConfig,
+  onReprocess,
+  reprocessingLabel = null,
 }: MeetingOverflowMenuProps) {
   const t = useT();
   const meetingDrawer = useMeetingDrawer();
@@ -179,17 +183,9 @@ export function MeetingOverflowMenu({
             onSelect={() => void onCopySummary()}
           />
 
-          <MenuItem
-            index={2}
-            iconName="save"
-            label={t('Save to note')}
-            disabled={!hasSummary}
-            onSelect={() => void onSaveSummary()}
-          />
-
           {canShareToTelegram && onShareSummaryToTelegram && (
             <MenuItem
-              index={3}
+              index={2}
               iconName="send"
               label={t('Send to Telegram')}
               disabled={!hasSummary}
@@ -198,7 +194,7 @@ export function MeetingOverflowMenu({
           )}
 
           <MenuItem
-            index={4}
+            index={3}
             iconName={reportIcon}
             label={t('Analytical report')}
             trailing={reportTrailing}
@@ -209,7 +205,7 @@ export function MeetingOverflowMenu({
           <DropdownSeparator />
 
           <MenuItem
-            index={5}
+            index={4}
             iconName="language"
             label={t('Summary language')}
             trailing={languageLabel}
@@ -217,11 +213,26 @@ export function MeetingOverflowMenu({
           />
 
           <MenuItem
-            index={6}
+            index={5}
             iconName="settings"
             label={t('AI Model')}
             trailing={modelLabel}
             onSelect={() => setModelOpen(true)}
+          />
+
+          <DropdownSeparator />
+
+          {/* The refinement pass has no other trigger: it runs once on save, and both
+              its two-minute floor and the `refinement.auto` setting leave a meeting with
+              no way back to per-reply rows. */}
+          <MenuItem
+            index={6}
+            iconName={reprocessingLabel ? 'progress_activity' : 'refresh'}
+            label={t('Split replies again')}
+            trailing={reprocessingLabel ?? undefined}
+            disabled={!!reprocessingLabel}
+            closeOnClick={false}
+            onSelect={() => void onReprocess()}
           />
 
           <DropdownSeparator />

@@ -6,6 +6,7 @@ import { SpeakerInfo, Transcript, TranscriptSegmentData } from '@/types';
 import { EditableTitle } from '@/components/EditableTitle';
 import { SummaryPanel } from '@/components/MeetingDetails/SummaryPanel';
 import { useMeetingChat, type Citation } from '@/hooks/useMeetingChat';
+import { useMeetingRefinement } from '@/hooks/useMeetingRefinement';
 import { MessageBubble, TypingIndicator } from '@/components/chat/MessageBubble';
 import { useLanguage } from '@/lib/i18n';
 import Analytics from '@/lib/analytics';
@@ -156,6 +157,9 @@ export function MeetingConversation({
 }: MeetingConversationProps) {
   const { t, lang } = useLanguage();
   const locale = lang === 'ru' ? 'ru-RU' : 'en-US';
+  // Post-meeting reprocessing: reply splitting is minutes of background CPU with no other
+  // trigger and, until now, no visible sign it was running.
+  const refinement = useMeetingRefinement(meetingId, onRefetchTranscripts);
   const chat = useMeetingChat({ scope: 'meeting', collectionId: null, meetingId, enabled: true });
   const { messages, input, setInput, sending, loadingHistory, send, onKeyDown, inputRef } = chat;
   const meetingSuggestions = useMemo(
@@ -308,6 +312,15 @@ export function MeetingConversation({
           {metaLine && <p className="mm-numeric mt-0.5 truncate text-xs text-muted-foreground">{metaLine}</p>}
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
+          {refinement.label && (
+            <span
+              className="mm-numeric flex items-center gap-1.5 rounded-full bg-[var(--primary-5)] px-2.5 py-1 text-xs text-muted-foreground"
+              title={t('Reprocessing this meeting in the background')}
+            >
+              <Loader2 className="animate-spin" size={12} />
+              {refinement.label}
+            </span>
+          )}
           <TranscriptSearchDialog
             meetingId={meetingId}
             transcripts={transcripts}
@@ -320,12 +333,13 @@ export function MeetingConversation({
             hasTranscript={(totalCount ?? transcripts.length) > 0}
             onCopySummary={onCopySummary}
             onRenameMeeting={onStartEditTitle}
-            onSaveSummary={summaryPanelProps.onSaveAll}
             onShareSummaryToTelegram={summaryPanelProps.onShareSummaryToTelegram}
             canShareToTelegram={summaryPanelProps.canShareToTelegram}
             modelConfig={summaryPanelProps.modelConfig}
             setModelConfig={summaryPanelProps.setModelConfig}
             onSaveModelConfig={summaryPanelProps.onSaveModelConfig}
+            onReprocess={refinement.rerun}
+            reprocessingLabel={refinement.label}
           />
         </div>
       </div>

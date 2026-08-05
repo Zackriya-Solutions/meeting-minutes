@@ -1,8 +1,34 @@
 'use client';
 
-import React, { useEffect } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { useRecordingStop } from '@/hooks/useRecordingStop';
+
+interface RecordingSessionStopValue {
+  /**
+   * Stop the live recording and run the full finalize flow (save, summary, navigate).
+   * Safe to call from any route: this provider sits in the root layout, so it stays
+   * mounted while the user browses away from the recording screen.
+   */
+  stopRecording: () => void;
+}
+
+const RecordingSessionStopContext = createContext<RecordingSessionStopValue | null>(null);
+
+/**
+ * Stop handle for UI that lives outside the recording route (the floating pill).
+ *
+ * Consumers share this provider's single `useRecordingStop` instance on purpose: that
+ * hook guards against concurrent stops with a per-instance ref, so a second instance
+ * would not see the first one's in-flight stop and could double-save the meeting.
+ */
+export function useRecordingSessionStop(): RecordingSessionStopValue {
+  const ctx = useContext(RecordingSessionStopContext);
+  if (!ctx) {
+    throw new Error('useRecordingSessionStop must be used within RecordingPostProcessingProvider');
+  }
+  return ctx;
+}
 
 /**
  * RecordingPostProcessingProvider
@@ -25,7 +51,20 @@ export function RecordingPostProcessingProvider({ children }: { children: React.
 
   const {
     handleRecordingStop,
+    setIsStopping,
   } = useRecordingStop(setIsRecording, setIsRecordingDisabled);
+
+  // Flip to STOPPING before the async finalize so the pill shows its saving state on
+  // the first frame, matching what the recording screen's Finish button does.
+  const stopRecording = useCallback(() => {
+    setIsStopping(true);
+    void handleRecordingStop(true);
+  }, [handleRecordingStop, setIsStopping]);
+
+  const stopValue = useMemo<RecordingSessionStopValue>(
+    () => ({ stopRecording }),
+    [stopRecording],
+  );
 
   useEffect(() => {
     let unlistenFn: (() => void) | undefined;
@@ -57,5 +96,9 @@ export function RecordingPostProcessingProvider({ children }: { children: React.
     };
   }, [handleRecordingStop]);
 
-  return <>{children}</>;
+  return (
+    <RecordingSessionStopContext.Provider value={stopValue}>
+      {children}
+    </RecordingSessionStopContext.Provider>
+  );
 }

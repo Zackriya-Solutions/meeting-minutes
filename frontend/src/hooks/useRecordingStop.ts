@@ -24,6 +24,14 @@ import {
 
 type SummaryStatus = 'idle' | 'processing' | 'summarizing' | 'regenerating' | 'completed' | 'error';
 
+/**
+ * Module-scoped on purpose: several components mount this hook at once (the root
+ * RecordingPostProcessingProvider, the home route, the recording route), and there is
+ * only ever one recording session app-wide. A per-instance ref let two instances each
+ * believe no stop was running and finalize/save the same meeting twice.
+ */
+let stopInProgress = false;
+
 interface UseRecordingStopReturn {
   handleRecordingStop: (callApi: boolean) => Promise<void>;
   isStopping: boolean;
@@ -81,8 +89,6 @@ export function useRecordingStop(
 
   const router = useRouter();
 
-  // Guard to prevent duplicate/concurrent stop calls (e.g., from UI and tray simultaneously)
-  const stopInProgressRef = useRef(false);
 
   // Promise to track recording-stopped event data (fixes race condition with recording-stop-complete)
   const recordingStoppedDataRef = useRef<Promise<void> | null>(null);
@@ -135,11 +141,12 @@ export function useRecordingStop(
       await recordingStoppedDataRef.current;
     }
 
-    // Guard: prevent duplicate/concurrent stop calls
-    if (stopInProgressRef.current) {
+    // Guard: prevent duplicate/concurrent stop calls (e.g. the pill's Finish and the
+    // tray's recording-stop-complete, which land on different hook instances)
+    if (stopInProgress) {
       return;
     }
-    stopInProgressRef.current = true;
+    stopInProgress = true;
 
     // Set status to STOPPING immediately
     setStatus(RecordingStatus.STOPPING);
@@ -520,7 +527,7 @@ export function useRecordingStop(
       setIsRecordingDisabled(false);
     } finally {
       // Always reset the guard flag when done
-      stopInProgressRef.current = false;
+      stopInProgress = false;
     }
   }, [
     setIsRecording,

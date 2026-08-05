@@ -41,7 +41,8 @@ import Analytics from '@/lib/analytics';
 import { clearMarkedMoments } from '@/lib/markedMoments';
 import { formatRelativeMeetingDate, getMeetingDisplayInfo } from '@/lib/meetingDisplay';
 import { prefetchMeetingSummary, readCachedMeetingSummary } from '@/lib/meetingSummaryCache';
-import { isRecordingNavigationLocked } from '@/lib/recordingNavigation';
+import { canStartRecordingNow } from '@/lib/recordingNavigation';
+import { requestAutoStart } from '@/lib/autoStartRecording';
 import { splitSummaryLead, summaryToMarkdown } from '@/lib/summaryToMarkdown';
 import { Cell, CellText } from '@/vendor/deslop/mini-app/Cell';
 import { IconPlus } from '@/vendor/deslop/primitives/material-symbols-react';
@@ -331,17 +332,14 @@ export function HomeMeetingList({ animateOnMount = true }: { animateOnMount?: bo
   );
   const screenRef = useRef<HTMLDivElement>(null);
   const locale = lang === 'ru' ? 'ru-RU' : 'en-US';
-  const navigationLocked = isRecordingNavigationLocked(isRecording, status);
-  const canStartMeeting = !navigationLocked && (
-    status === RecordingStatus.IDLE
-    || status === RecordingStatus.COMPLETED
-    || status === RecordingStatus.ERROR
-  );
+  const canStartMeeting = canStartRecordingNow(isRecording, status);
 
   const startNewMeeting = () => {
     if (!canStartMeeting) return;
 
-    window.sessionStorage.setItem('autoStartRecording', 'true');
+    // Untitled on purpose: this also clears any title a calendar entry left behind,
+    // so a plain new meeting is never named after the last one that was opened.
+    requestAutoStart(window.sessionStorage);
     router.push('/recording');
   };
 

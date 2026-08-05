@@ -33,9 +33,9 @@ const errString = (err: unknown, fallback: string): string =>
     typeof err === "string" ? err : (err as any)?.message || fallback;
 
 /**
- * "Detect speakers" action for a saved meeting. SaluteSpeech is the primary engine;
- * local models are offered only if the cloud is unavailable, then `diarize_meeting`
- * reports the outcome via toast — matching the retranscription idiom.
+ * "Detect speakers" action for a saved meeting. Diarization is always local, so the one
+ * recoverable failure is "models not downloaded" — that offers the download; every other
+ * outcome is reported via toast, matching the retranscription idiom.
  */
 export function DetectSpeakersButton({ meetingId, speakerCount = 0, onDetected, label }: DetectSpeakersButtonProps) {
     const t = useT();
@@ -60,10 +60,14 @@ export function DetectSpeakersButton({ meetingId, speakerCount = 0, onDetected, 
             await onDetected?.();
         } catch (err) {
             const message = errString(err, t("Speaker detection failed"));
-            if (message.includes("local diarization models are not downloaded")) {
+            // `diarize_meeting` maps DiarizeError::ModelsUnavailable to "Diarization models
+            // not downloaded"; the cloud engine, reachable only via
+            // MEETILY_DIARIZATION_PROVIDER, words it "local diarization models are not
+            // downloaded". Match both so the download stays offered either way.
+            if (/models (are )?not downloaded/i.test(message)) {
                 setShowDownload(true);
                 setDownloadPurpose('fallback');
-                toast.warning(t("SaluteSpeech is unavailable. Download the local speaker models to continue without the cloud."));
+                toast.warning(t("Speaker detection needs the local speaker models. Download them once to continue."));
             } else {
                 toast.error(message);
             }

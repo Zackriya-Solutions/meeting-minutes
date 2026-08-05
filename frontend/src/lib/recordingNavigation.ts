@@ -1,6 +1,6 @@
 import { RecordingStatus } from '@/contexts/RecordingStateContext';
 
-const NAVIGATION_LOCKED_STATUSES = new Set<RecordingStatus>([
+const BUSY_STATUSES = new Set<RecordingStatus>([
   RecordingStatus.STARTING,
   RecordingStatus.RECORDING,
   RecordingStatus.STOPPING,
@@ -8,9 +8,57 @@ const NAVIGATION_LOCKED_STATUSES = new Set<RecordingStatus>([
   RecordingStatus.SAVING,
 ]);
 
-export function isRecordingNavigationLocked(
+/**
+ * Whether the recorder is mid-session: live, spinning up, or still tearing down.
+ *
+ * This deliberately does NOT gate navigation. Capture and transcript accumulation
+ * are owned by the layout-level `RecordingStateProvider`/`TranscriptProvider`, above
+ * the router, so a recording survives the user walking off to settings or to an
+ * older meeting. It only answers "is the recorder occupied right now".
+ */
+export function isRecordingSessionBusy(
   isRecording: boolean,
   status: RecordingStatus,
 ): boolean {
-  return isRecording || NAVIGATION_LOCKED_STATUSES.has(status);
+  return isRecording || BUSY_STATUSES.has(status);
+}
+
+const STARTABLE_STATUSES = new Set<RecordingStatus>([
+  RecordingStatus.IDLE,
+  RecordingStatus.COMPLETED,
+  RecordingStatus.ERROR,
+]);
+
+/**
+ * Whether a new recording may be started right now.
+ *
+ * Both inputs are consulted on purpose: `isRecording` can already be false while the
+ * recorder is still stopping, saving, or processing transcripts, and starting a second
+ * recording over that would race the first one's teardown.
+ */
+export function canStartRecordingNow(
+  isRecording: boolean,
+  status: RecordingStatus,
+): boolean {
+  return !isRecordingSessionBusy(isRecording, status)
+    && STARTABLE_STATUSES.has(status);
+}
+
+export const RECORDING_ROUTE = '/recording';
+
+/**
+ * Whether the floating "recording in progress" pill belongs on screen.
+ *
+ * The pill is how a user gets back to a session — and stops it — once navigation is
+ * free, so it shows for teardown statuses too: `isRecording` drops before saving and
+ * transcript processing finish, and vanishing mid-finalize would read as a lost meeting.
+ * It stays hidden on the recording route itself, which already has the live controls.
+ */
+export function shouldShowRecordingPill(
+  pathname: string,
+  isRecording: boolean,
+  status: RecordingStatus,
+): boolean {
+  if (pathname === RECORDING_ROUTE) return false;
+  return isRecordingSessionBusy(isRecording, status);
 }
