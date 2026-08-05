@@ -39,7 +39,7 @@ pub struct TimedSegment {
 
 /// Per-speaker rollup, sorted most-talkative first. `palette_index` assigns color slots
 /// (0..=3 -> `--s1`..`--s4`, >=4 -> muted gray) by talk-time order.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SpeakerDyn {
     pub key: String,
     pub label: String,
@@ -51,7 +51,10 @@ pub struct SpeakerDyn {
 }
 
 /// Whole-meeting deterministic analytics.
-#[derive(Debug, Clone, serde::Serialize)]
+///
+/// `Deserialize` is here so the meeting screen can read these metrics back out of a
+/// completed report's artifacts snapshot (see [`crate::report::sections`]).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Dynamics {
     pub duration_secs: f64,
     /// Fraction of wall-clock time that was speech (0..1).

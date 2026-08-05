@@ -13,8 +13,11 @@ use crate::audio::audio_processing::sanitize_filename;
 use crate::database::models::AnalyticsReportMeta;
 use crate::database::repositories::analytics_report::AnalyticsReportsRepository;
 use crate::database::repositories::meeting::MeetingsRepository;
-use crate::report::pipeline;
+use crate::database::repositories::speaker::SpeakersRepository;
+use crate::report::dynamics::Dynamics;
 use crate::report::prompts::ClarifyAnswer;
+use crate::report::sections::{AnalyticsSections, TranscriptTimeline};
+use crate::report::{dynamics, pipeline, sections};
 use crate::state::AppState;
 
 #[derive(Debug, Serialize)]
@@ -83,6 +86,99 @@ pub async fn get_analytics_report(
     AnalyticsReportsRepository::latest_for_meeting(pool, &meeting_id)
         .await
         .map_err(|e| format!("Failed to load report: {e}"))
+}
+
+/// The report sections the meeting screen renders inline (score + verdict, «Что мешало»,
+/// «Покрытие повестки», «Числа встречи», «Динамика встречи»), rebuilt from the latest
+/// COMPLETED report's artifacts. `None` when the meeting has no finished report yet — the
+/// UI then offers to build one instead of showing empty sections.
+#[tauri::command]
+pub async fn get_meeting_analytics_sections(
+    state: State<'_, AppState>,
+    meeting_id: String,
+) -> Result<Option<AnalyticsSections>, String> {
+    let pool = state.db_manager.pool();
+    let Some(row) = AnalyticsReportsRepository::latest_completed_artifacts(pool, &meeting_id)
+        .await
+        .map_err(|e| format!("Не удалось загрузить разбор встречи: {e}"))?
+    else {
+        return Ok(None);
+    };
+
+    // Stage 1 of the pipeline, re-run locally: it is deterministic and LLM-free, and it puts
+    // the CURRENT transcript on the timeline the moment links and the feed lanes need. A read
+    // failure only costs those, not the sections.
+    let placed = match SpeakersRepository::meeting_transcript_segments(pool, &meeting_id).await {
+        Ok(segments) => {
+            let (dyn_segments, _, texts) = pipeline::build_segment_views(&segments);
+            let timed = dynamics::timeline(&dyn_segments);
+            let live = Dynamics::from_timed(&dyn_segments, &timed);
+            Some((timed, texts, live))
+        }
+        Err(e) => {
+            log::warn!(
+                "[report] no transcript timeline for {meeting_id}; moments and feed omitted: {e}"
+            );
+            None
+        }
+    };
+    let transcript = placed
+        .as_ref()
+        .map(|(timed, texts, live)| TranscriptTimeline {
+            timed,
+            texts,
+            dynamics: live,
+        });
+
+    sections::build(
+        &row.id,
+        row.completed_at,
+        &row.artifacts,
+        transcript.as_ref(),
+    )
+    .map(Some)
+}
+
+/// Open the meeting's generated report in whatever the OS uses for HTML (a browser). Reads
+/// the path from the latest COMPLETED run, which is the same run the meeting's analytics
+/// sections come from — regenerating is a separate action.
+#[tauri::command]
+pub async fn open_analytics_report(
+    state: State<'_, AppState>,
+    meeting_id: String,
+) -> Result<(), String> {
+    let pool = state.db_manager.pool();
+    let path = AnalyticsReportsRepository::latest_completed_html_path(pool, &meeting_id)
+        .await
+        .map_err(|e| format!("Не удалось найти аналитический отчёт: {e}"))?
+        .ok_or_else(|| "Аналитический отчёт ещё не создан.".to_string())?;
+
+    let file = std::path::Path::new(&path);
+    if !file.is_file() {
+        return Err(format!("HTML-файл отчёта не найден: {path}"));
+    }
+
+    #[cfg(target_os = "macos")]
+    std::process::Command::new("open")
+        .arg(&path)
+        .spawn()
+        .map_err(|e| format!("Не удалось открыть отчёт: {e}"))?;
+
+    #[cfg(target_os = "windows")]
+    std::process::Command::new("cmd")
+        .args(["/C", "start", ""])
+        .arg(&path)
+        .spawn()
+        .map_err(|e| format!("Не удалось открыть отчёт: {e}"))?;
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    std::process::Command::new("xdg-open")
+        .arg(&path)
+        .spawn()
+        .map_err(|e| format!("Не удалось открыть отчёт: {e}"))?;
+
+    log::info!("[report] opened report for meeting {meeting_id}");
+    Ok(())
 }
 
 /// Cancel a running report by id (cancels the token; row status -> `cancelled`).

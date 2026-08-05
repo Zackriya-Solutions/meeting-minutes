@@ -632,7 +632,10 @@ pub async fn run_report_pipeline<R: Runtime>(
         }
     };
 
+    // `segment_count` lets a later reader tell whether the stored `seg` indices still line
+    // up with the meeting's transcript (see `report::sections`).
     let artifacts_store = json!({
+        "segment_count": seg_texts.len(),
         "dynamics": dyn_metrics,
         "score": score,
         "classification": classification,
