@@ -20,7 +20,7 @@ export interface TranscriptSettingsProps {
 }
 
 // Fallback when the variant selection can't be read; matches GigaamVariant::default().
-const GIGAAM_FALLBACK_MODEL = 'gigaam-v3-e2e-rnnt-fp32';
+const GIGAAM_FALLBACK_MODEL = 'gigaam-v3-e2e-rnnt-en-ru';
 // GigaAM is the only supported engine (2026-07-20): on a real 31-min meeting the
 // SaluteSpeech cloud matched 80.4% of reference words vs GigaAM's 92.4%, and cloud
 // diarization found 4 of 7 speakers vs local's 7/7. Cloud settings were removed.

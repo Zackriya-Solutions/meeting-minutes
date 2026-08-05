@@ -10,9 +10,10 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { getSummaryModelSizeLabel, getSummaryModelSizeMb } from '@/lib/onboarding-summary-model';
 import { useT } from '@/lib/i18n';
 
-const PARAKEET_MODEL = 'parakeet-tdt-0.6b-v3-int8';
-
 type DownloadStatus = 'waiting' | 'downloading' | 'completed' | 'error';
+
+/** Shown until `gigaam_status` reports the selected variant's real size. */
+const TRANSCRIPTION_FALLBACK_MB = 987;
 
 interface DownloadState {
   status: DownloadStatus;
@@ -29,21 +30,27 @@ export function DownloadProgressStep() {
     goNext,
     selectedSummaryModel,
     recommendedSummaryModel,
-    parakeetDownloaded,
-    setParakeetDownloaded,
+    transcriptionModelDownloaded,
+    setTranscriptionModelDownloaded,
     summaryModelDownloaded,
     setSummaryModelDownloaded,
     startBackgroundDownloads,
+    retryTranscriptionModelDownload,
     completeOnboarding,
   } = useOnboarding();
 
   const [isMac, setIsMac] = useState(false);
+  /** Label and size of the transcription variant a fresh install will fetch. */
+  const [transcriptionModel, setTranscriptionModel] = useState<{ label: string; sizeMb: number }>({
+    label: 'GigaAM v3',
+    sizeMb: TRANSCRIPTION_FALLBACK_MB,
+  });
 
-  const [parakeetState, setParakeetState] = useState<DownloadState>({
-    status: parakeetDownloaded ? 'completed' : 'waiting',
-    progress: parakeetDownloaded ? 100 : 0,
+  const [transcriptionState, setTranscriptionState] = useState<DownloadState>({
+    status: transcriptionModelDownloaded ? 'completed' : 'waiting',
+    progress: transcriptionModelDownloaded ? 100 : 0,
     downloadedMb: 0,
-    totalMb: 670,
+    totalMb: TRANSCRIPTION_FALLBACK_MB,
     speedMbps: 0,
   });
 
@@ -56,7 +63,7 @@ export function DownloadProgressStep() {
   });
 
   const [isCompleting, setIsCompleting] = useState(false);
-  const parakeetDownloadStartedRef = useRef(false);
+  const transcriptionDownloadStartedRef = useRef(false);
   const summaryDownloadStartedRef = useRef(false);
   const retryingRef = useRef(false);
   const retryingSummaryRef = useRef(false);
@@ -69,13 +76,13 @@ export function DownloadProgressStep() {
       return;
     }
 
-    console.log('[DownloadProgressStep] Retrying Parakeet download');
+    console.log('[DownloadProgressStep] Retrying the transcription model download');
     retryingRef.current = true;
 
     // Reset error state
-    setParakeetState((prev) => ({
+    setTranscriptionState((prev) => ({
       ...prev,
-      status: 'waiting',
+      status: 'downloading',
       error: undefined,
       progress: 0,
       downloadedMb: 0,
@@ -83,14 +90,14 @@ export function DownloadProgressStep() {
     }));
 
     try {
-      await invoke('parakeet_retry_download', { modelName: PARAKEET_MODEL });
+      await retryTranscriptionModelDownload();
       // Progress events will update state
     } catch (error) {
       console.error('[DownloadProgressStep] Retry failed:', error);
-      setParakeetState((prev) => ({
+      setTranscriptionState((prev) => ({
         ...prev,
         status: 'error',
-        error: error instanceof Error ? error.message : 'Retry failed',
+        error: error instanceof Error ? error.message : String(error),
       }));
 
       toast.error(t('Download retry failed'), {
@@ -166,78 +173,88 @@ export function DownloadProgressStep() {
     checkPlatform();
   }, []);
 
-  // Downloads are OPT-IN. Transcription is chosen in Settings → Transcription, and the
-  // local summary model is optional (cloud providers — GigaChat/DeepSeek — can be used
-  // instead). Nothing auto-starts; the user triggers a download or skips and continues.
-  const startParakeetDownload = async () => {
-    if (parakeetDownloadStartedRef.current) return;
-    parakeetDownloadStartedRef.current = true;
-    setParakeetState((prev) => ({ ...prev, status: 'downloading' }));
+  // Which variant a download would fetch, and how big it is. Read from the backend rather
+  // than hardcoded so the card can't drift from `GigaamVariant::default()`.
+  useEffect(() => {
+    invoke<{
+      selected: string;
+      model_present: boolean;
+      variants: { id: string; label: string; size_mb: number }[];
+    }>('gigaam_status')
+      .then((status) => {
+        const selected = status.variants?.find((v) => v.id === status.selected);
+        if (selected) {
+          setTranscriptionModel({ label: selected.label, sizeMb: selected.size_mb });
+          setTranscriptionState((prev) => ({
+            ...prev,
+            totalMb: prev.totalMb === TRANSCRIPTION_FALLBACK_MB ? selected.size_mb : prev.totalMb,
+          }));
+        }
+        if (status.model_present) {
+          setTranscriptionModelDownloaded(true);
+          setTranscriptionState((prev) => ({ ...prev, status: 'completed', progress: 100 }));
+        }
+      })
+      .catch((error) => console.warn('[DownloadProgressStep] gigaam_status failed:', error));
+  }, [setTranscriptionModelDownloaded]);
+
+  // Downloads are OPT-IN. The transcription model can also be fetched later from
+  // Settings → Transcription, and the local summary model is optional (cloud providers —
+  // GigaChat/DeepSeek — can be used instead). Nothing auto-starts; the user triggers a
+  // download or skips and continues.
+  const startTranscriptionDownload = async () => {
+    if (transcriptionDownloadStartedRef.current) return;
+    transcriptionDownloadStartedRef.current = true;
+    setTranscriptionState((prev) => ({ ...prev, status: 'downloading' }));
     try {
-      await startBackgroundDownloads({ includeParakeet: true, includeSummary: false });
+      await startBackgroundDownloads({ includeTranscription: true, includeSummary: false });
     } catch (error) {
-      console.error('Failed to start Parakeet download:', error);
-      parakeetDownloadStartedRef.current = false;
-      setParakeetState((prev) => ({ ...prev, status: 'error', error: String(error) }));
+      console.error('Failed to start the transcription model download:', error);
+      transcriptionDownloadStartedRef.current = false;
+      setTranscriptionState((prev) => ({ ...prev, status: 'error', error: String(error) }));
     }
   };
 
-  // Listen to Parakeet download progress
+  // Listen to transcription model (GigaAM) download progress. `extracting` reports no byte
+  // counts, so the bar holds its last value and the size line reads as a stage instead.
   useEffect(() => {
     const unlistenProgress = listen<{
-      modelName: string;
-      progress: number;
-      downloaded_mb?: number;
-      total_mb?: number;
-      speed_mbps?: number;
-      status?: string;
-    }>('parakeet-model-download-progress', (event) => {
-      const { modelName, progress, downloaded_mb, total_mb, speed_mbps, status } = event.payload;
-      if (modelName === PARAKEET_MODEL) {
-        setParakeetState((prev) => ({
-          ...prev,
-          status: status === 'completed' ? 'completed' : 'downloading',
-          progress,
-          downloadedMb: downloaded_mb ?? prev.downloadedMb,
-          totalMb: total_mb ?? prev.totalMb,
-          speedMbps: speed_mbps ?? prev.speedMbps,
-        }));
-
-        if (status === 'completed' || progress >= 100) {
-          setParakeetDownloaded(true);
-        }
-      }
+      downloaded: number;
+      total: number;
+      percent: number;
+      stage: string;
+    }>('gigaam-download-progress', (event) => {
+      const { downloaded, total, percent, stage } = event.payload;
+      setTranscriptionState((prev) =>
+        stage === 'downloading'
+          ? {
+              ...prev,
+              status: 'downloading',
+              progress: percent,
+              downloadedMb: downloaded / (1024 * 1024),
+              totalMb: total / (1024 * 1024),
+              speedMbps: 0,
+            }
+          : { ...prev, status: 'downloading', progress: 100 },
+      );
     });
 
-    const unlistenComplete = listen<{ modelName: string }>(
-      'parakeet-model-download-complete',
-      (event) => {
-        if (event.payload.modelName === PARAKEET_MODEL) {
-          setParakeetState((prev) => ({ ...prev, status: 'completed', progress: 100 }));
-          setParakeetDownloaded(true);
-        }
-      }
-    );
+    const unlistenComplete = listen('gigaam-ready', () => {
+      setTranscriptionState((prev) => ({ ...prev, status: 'completed', progress: 100 }));
+      setTranscriptionModelDownloaded(true);
+    });
 
-    const unlistenError = listen<{ modelName: string; error: string }>(
-      'parakeet-model-download-error',
-      (event) => {
-        if (event.payload.modelName === PARAKEET_MODEL) {
-          setParakeetState((prev) => ({
-            ...prev,
-            status: 'error',
-            error: event.payload.error,
-          }));
-        }
-      }
-    );
+    const unlistenError = listen<string>('gigaam-download-error', (event) => {
+      transcriptionDownloadStartedRef.current = false;
+      setTranscriptionState((prev) => ({ ...prev, status: 'error', error: event.payload }));
+    });
 
     return () => {
       unlistenProgress.then((fn) => fn());
       unlistenComplete.then((fn) => fn());
       unlistenError.then((fn) => fn());
     };
-  }, []);
+  }, [setTranscriptionModelDownloaded]);
 
   // Listen to Summary Model download progress (always downloading for builtin-ai)
   useEffect(() => {
@@ -312,7 +329,7 @@ export function DownloadProgressStep() {
         totalMb: getSummaryModelSizeMb(selectedSummaryModel),
       }));
       await startBackgroundDownloads({
-        includeParakeet: false,
+        includeTranscription: false,
         includeSummary: true,
         summaryModel: selectedSummaryModel,
       });
@@ -327,18 +344,18 @@ export function DownloadProgressStep() {
     // Downloads are optional; sync transcription availability if a model happens to be
     // present, but never block continuing.
     try {
-      const actuallyAvailable = await invoke<boolean>('parakeet_has_available_models');
-      if (actuallyAvailable && !parakeetDownloaded) {
-        setParakeetDownloaded(true);
-        setParakeetState((prev) => ({ ...prev, status: 'completed', progress: 100 }));
+      const status = await invoke<{ model_present?: boolean }>('gigaam_status');
+      if (status?.model_present && !transcriptionModelDownloaded) {
+        setTranscriptionModelDownloaded(true);
+        setTranscriptionState((prev) => ({ ...prev, status: 'completed', progress: 100 }));
       }
     } catch (error) {
-      // No transcription model installed yet — expected; user picks one in Settings.
+      // No transcription model installed yet — expected; the user can fetch it in Settings.
       console.warn('[DownloadProgressStep] transcription model not available yet:', error);
     }
 
     // If a download is still running, let the user know it continues in the background.
-    if (parakeetState.status === 'downloading' || summaryState.status === 'downloading') {
+    if (transcriptionState.status === 'downloading' || summaryState.status === 'downloading') {
       toast.info(t('Downloads will continue in the background'), {
         description: t('You can start using the app now.'),
         duration: 5000,
@@ -477,11 +494,11 @@ export function DownloadProgressStep() {
             'transcription',
             t('Transcription Engine'),
             <Mic className="w-5 h-5 text-muted-foreground" />,
-            parakeetState,
-            'Parakeet · ~670 MB',
+            transcriptionState,
+            `${transcriptionModel.label} · ~${transcriptionModel.sizeMb} MB`,
             'MB',
-            startParakeetDownload,
-            t('Optional — or choose a model later in Settings → Transcription')
+            startTranscriptionDownload,
+            t('Needed to transcribe on this device — you can also download it later in Settings → Transcription')
           )}
 
           {renderDownloadCard(
@@ -498,7 +515,7 @@ export function DownloadProgressStep() {
 
         {/* Info Message */}
         <AnimatePresence>
-          {(parakeetState.status === 'downloading' || summaryState.status === 'downloading') && (
+          {(transcriptionState.status === 'downloading' || summaryState.status === 'downloading') && (
             <motion.div
               initial={{ opacity: 0, y: -10 }}
               animate={{ opacity: 1, y: 0 }}
@@ -526,9 +543,9 @@ export function DownloadProgressStep() {
           >
             {isCompleting ? (
               <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-            ) : parakeetState.status === 'downloading' || summaryState.status === 'downloading' ? (
+            ) : transcriptionState.status === 'downloading' || summaryState.status === 'downloading' ? (
               t('Continue in background')
-            ) : parakeetDownloaded || summaryModelDownloaded ? (
+            ) : transcriptionModelDownloaded || summaryModelDownloaded ? (
               t('Continue')
             ) : (
               t('Skip & continue')

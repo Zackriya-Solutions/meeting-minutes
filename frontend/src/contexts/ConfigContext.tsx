@@ -112,7 +112,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
   // engine offered in Settings (cloud ASR measured far worse on real meetings).
   const [transcriptModelConfig, setTranscriptModelConfig] = useState<TranscriptModelProps>({
     provider: 'gigaam',
-    model: 'gigaam-v3-e2e-rnnt-fp32',
+    model: 'gigaam-v3-e2e-rnnt-en-ru',
     apiKey: null
   });
 
