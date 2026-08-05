@@ -712,6 +712,7 @@ pub fn run() {
             openspec::commands::check_node_runtime_status,
             openspec::commands::install_node_runtime,
             openspec::commands::install_openspec_cli,
+            openspec::commands::cancel_openspec_generation,
             openspec::commands::install_openspec_setup,
             openspec::commands::skip_openspec_setup,
             // Built-in AI commands

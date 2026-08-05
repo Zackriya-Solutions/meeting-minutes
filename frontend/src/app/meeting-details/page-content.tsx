@@ -233,8 +233,9 @@ export default function PageContent({
           isModelConfigLoading={false}
           onOpenModelSettings={handleRegisterModalOpen}
           openSpecStatus={openSpecGeneration.openSpecStatus}
-          onGenerateOpenSpec={openSpecGeneration.handleGenerateOpenSpec}
-          onRegenerateOpenSpec={openSpecGeneration.handleRegenerateOpenSpec}
+           onGenerateOpenSpec={openSpecGeneration.handleGenerateOpenSpec}
+           onRegenerateOpenSpec={openSpecGeneration.handleRegenerateOpenSpec}
+           onCancelOpenSpec={openSpecGeneration.cancelOpenSpecGeneration}
         />
       </div>
     </motion.div>

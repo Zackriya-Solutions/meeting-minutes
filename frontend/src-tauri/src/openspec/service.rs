@@ -2,6 +2,7 @@ use crate::database::repositories::{
     meeting::MeetingsRepository, summary::SummaryProcessesRepository,
 };
 use crate::openspec::setup;
+use crate::openspec::generator;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::{Read, Write};
@@ -154,15 +155,17 @@ impl OpenSpecService {
         app: &AppHandle<R>,
         pool: &sqlx::SqlitePool,
         meeting_id: String,
+        generate_with_ai: bool,
     ) -> OpenSpecGenerationResult {
         let runner = SystemCommandRunner;
-        Self::generate_bundle_with_runner(app, pool, &meeting_id, &runner).await
+        Self::generate_bundle_with_runner(app, pool, &meeting_id, generate_with_ai, &runner).await
     }
 
     async fn generate_bundle_with_runner<R: Runtime>(
         app: &AppHandle<R>,
         pool: &sqlx::SqlitePool,
         meeting_id: &str,
+        generate_with_ai: bool,
         runner: &(dyn CommandRunner + Sync),
     ) -> OpenSpecGenerationResult {
         if meeting_id.trim().is_empty() {
@@ -190,7 +193,7 @@ impl OpenSpecService {
         };
 
         let cli = Self::detect_cli_for_app(app, &app_data_dir, runner);
-        Self::generate_bundle_for_seed_with_runner_and_cli(&app_data_dir, meeting_id, seed, runner, cli).await
+        Self::generate_bundle_for_seed_with_runner_and_cli(app, pool, &app_data_dir, meeting_id, seed, generate_with_ai, runner, cli).await
     }
 
     #[cfg(test)]
@@ -205,10 +208,10 @@ impl OpenSpecService {
             Err(err) => return to_result_error(err),
         };
 
-        Self::generate_bundle_for_seed_with_runner_and_cli(app_data_dir, meeting_id, seed, runner, Ok(cli)).await
+        Self::generate_bundle_for_seed_with_runner_and_cli_for_tests(app_data_dir, meeting_id, seed, runner, Ok(cli)).await
     }
 
-    async fn generate_bundle_for_seed_with_runner_and_cli(
+    async fn generate_bundle_for_seed_with_runner_and_cli_for_tests(
         app_data_dir: &Path,
         meeting_id: &str,
         seed: TranscriptSeed,
@@ -318,6 +321,30 @@ impl OpenSpecService {
             suggested_filename,
             slug,
         }
+    }
+
+    async fn generate_bundle_for_seed_with_runner_and_cli<R: Runtime>(
+        app: &AppHandle<R>,
+        pool: &sqlx::SqlitePool,
+        app_data_dir: &Path,
+        meeting_id: &str,
+        seed: TranscriptSeed,
+        generate_with_ai: bool,
+        runner: &(dyn CommandRunner + Sync),
+        cli: Result<OpenSpecCli, OpenSpecErrorPayload>,
+    ) -> OpenSpecGenerationResult {
+        let result = Self::generate_bundle_for_seed_with_runner_and_cli_for_tests(app_data_dir, meeting_id, seed.clone(), runner, cli).await;
+        let OpenSpecGenerationResult::Success { zip_temp_path, suggested_filename, slug } = result else { return result };
+        if !generate_with_ai { return OpenSpecGenerationResult::Success { zip_temp_path, suggested_filename, slug } }
+        let change_dir = app_data_dir.join("openspec-generation").join(slugify(meeting_id)).join("openspec").join("changes").join(&slug);
+        if let Err(error) = generator::generate_artifacts(app, pool, meeting_id, &seed.title, &seed.transcript_markdown, seed.summary_markdown.as_deref(), &change_dir).await {
+            return OpenSpecGenerationResult::Error { code: OpenSpecErrorCode::CliFailed, message: "Selected AI provider failed to generate OpenSpec artifacts".to_string(), stderr: Some(error) };
+        }
+        let zip_path = app_data_dir.join("openspec-generation").join(slugify(meeting_id)).join(format!("{}.zip", slug));
+        if let Err(error) = zip_directory(&change_dir, &zip_path) {
+            return OpenSpecGenerationResult::Error { code: OpenSpecErrorCode::IoFailure, message: "Failed to package AI-generated OpenSpec artifacts".to_string(), stderr: Some(error) };
+        }
+        OpenSpecGenerationResult::Success { zip_temp_path: zip_path.to_string_lossy().to_string(), suggested_filename, slug }
     }
 
     fn detect_cli_for_app<R: Runtime>(

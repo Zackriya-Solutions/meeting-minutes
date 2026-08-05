@@ -18,8 +18,9 @@ pub async fn api_generate_openspec_bundle<R: Runtime>(
     app: AppHandle<R>,
     state: tauri::State<'_, AppState>,
     meeting_id: String,
+    generate_with_ai: Option<bool>,
 ) -> Result<OpenSpecGenerationResult, OpenSpecErrorPayload> {
-    Ok(OpenSpecService::generate_bundle(&app, state.db_manager.pool(), meeting_id).await)
+    Ok(OpenSpecService::generate_bundle(&app, state.db_manager.pool(), meeting_id, generate_with_ai.unwrap_or(true)).await)
 }
 
 #[tauri::command]
@@ -110,6 +111,11 @@ pub async fn install_node_runtime<R: Runtime>(app: AppHandle<R>) -> Result<(), S
 #[tauri::command]
 pub async fn install_openspec_cli<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
     setup::install_openspec_cli(&app).await
+}
+
+#[tauri::command]
+pub fn cancel_openspec_generation(meeting_id: String) -> bool {
+    crate::openspec::generator::cancel(&meeting_id)
 }
 
 /// Runs the full OpenSpec CLI setup flow (portable Node.js download if
