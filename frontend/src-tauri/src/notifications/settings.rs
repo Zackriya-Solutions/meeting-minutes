@@ -98,6 +98,24 @@ impl Default for NotificationSettings {
     }
 }
 
+impl NotificationSettings {
+    /// Clears preferences the product no longer supports.
+    ///
+    /// Silent background capture was removed, but `background_auto_recording` stays in
+    /// the serialized shape so an older settings file still deserializes. Every
+    /// boundary that reads or writes settings funnels through here, so the invariant
+    /// lives in one place instead of being restated at each call site — where a future
+    /// field would be easy to normalize in three of four spots.
+    ///
+    /// Returns whether a legacy `true` was coerced, so a migration can be logged
+    /// rather than happening invisibly.
+    pub fn sanitize(&mut self) -> bool {
+        let coerced_background_auto_recording = self.background_auto_recording;
+        self.background_auto_recording = false;
+        coerced_background_auto_recording
+    }
+}
+
 const fn default_auto_meeting_detection() -> bool {
     true
 }
@@ -164,9 +182,13 @@ impl<R: Runtime> ConsentManager<R> {
         let content = tokio::fs::read_to_string(&self.settings_path).await?;
         let mut settings: NotificationSettings = serde_json::from_str(&content)?;
 
-        // Silent background capture was removed from the product. Normalize legacy
-        // preferences before the meeting detector can act on them.
-        settings.background_auto_recording = false;
+        // Normalize legacy preferences before the meeting detector can act on them.
+        if settings.sanitize() {
+            log_info!(
+                "Migrated a legacy silent background-recording preference to off; \
+                 that mode was removed from the product"
+            );
+        }
 
         log_info!("Loaded notification settings from disk");
         Ok(settings)
@@ -175,7 +197,7 @@ impl<R: Runtime> ConsentManager<R> {
     /// Save notification settings to disk
     pub async fn save_settings(&self, settings: &NotificationSettings) -> Result<()> {
         let mut normalized = settings.clone();
-        normalized.background_auto_recording = false;
+        normalized.sanitize();
         let content = serde_json::to_string_pretty(&normalized)?;
         tokio::fs::write(&self.settings_path, content).await?;
 
@@ -300,10 +322,10 @@ pub fn validate_settings(settings: &NotificationSettings) -> Result<()> {
 pub fn merge_with_defaults(partial: NotificationSettings) -> NotificationSettings {
     let _defaults = NotificationSettings::default();
 
-    NotificationSettings {
+    let mut merged = NotificationSettings {
         auto_meeting_detection: partial.auto_meeting_detection,
         auto_listening: partial.auto_listening,
-        background_auto_recording: false,
+        background_auto_recording: partial.background_auto_recording,
         recording_notifications: partial.recording_notifications,
         time_based_reminders: partial.time_based_reminders,
         meeting_reminders: partial.meeting_reminders,
@@ -313,7 +335,9 @@ pub fn merge_with_defaults(partial: NotificationSettings) -> NotificationSetting
         consent_given: partial.consent_given,
         manual_dnd_mode: partial.manual_dnd_mode,
         notification_preferences: partial.notification_preferences,
-    }
+    };
+    merged.sanitize();
+    merged
 }
 
 #[cfg(test)]
@@ -353,5 +377,49 @@ mod tests {
         assert!(!settings.recording_notifications);
         assert!(!settings.notification_preferences.show_recording_started);
         assert!(!settings.notification_preferences.show_recording_stopped);
+    }
+
+    #[test]
+    fn sanitize_reports_only_a_coerced_legacy_flag() {
+        let mut legacy = NotificationSettings {
+            background_auto_recording: true,
+            ..NotificationSettings::default()
+        };
+        assert!(legacy.sanitize(), "a coerced legacy flag must be reportable");
+        assert!(!legacy.background_auto_recording);
+        // Idempotent, so re-saving an already-migrated file logs nothing.
+        assert!(!legacy.sanitize());
+    }
+
+    #[test]
+    fn a_stored_silent_capture_preference_never_survives_a_round_trip() {
+        // An upgrading user with silent capture enabled: whichever boundary the
+        // settings travel through, the detector must not see the flag set.
+        let stored = serde_json::json!({
+            "auto_meeting_detection": true,
+            "auto_listening": false,
+            "background_auto_recording": true,
+            "recording_notifications": true,
+            "time_based_reminders": true,
+            "meeting_reminders": true,
+            "respect_do_not_disturb": true,
+            "notification_sound": true,
+            "system_permission_granted": true,
+            "consent_given": true,
+            "manual_dnd_mode": false,
+            "notification_preferences": NotificationPreferences::default(),
+        });
+
+        // Deserializing alone preserves it — that is why every boundary sanitizes.
+        let parsed: NotificationSettings = serde_json::from_value(stored).unwrap();
+        assert!(parsed.background_auto_recording);
+
+        assert!(!merge_with_defaults(parsed.clone()).background_auto_recording);
+
+        let mut sanitized = parsed;
+        sanitized.sanitize();
+        let written = serde_json::to_string(&sanitized).unwrap();
+        let reread: NotificationSettings = serde_json::from_str(&written).unwrap();
+        assert!(!reread.background_auto_recording);
     }
 }

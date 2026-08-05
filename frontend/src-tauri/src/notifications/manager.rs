@@ -226,9 +226,9 @@ impl<R: Runtime> NotificationManager<R> {
 
     /// Update notification settings
     pub async fn update_settings(&self, mut new_settings: NotificationSettings) -> Result<()> {
-        // Ignore stale clients and legacy settings that still submit the removed
-        // silent background-recording flag.
-        new_settings.background_auto_recording = false;
+        // Ignore stale clients that still submit the removed silent
+        // background-recording flag.
+        new_settings.sanitize();
         log_info!("📝 Updating notification settings:");
         log_info!(
             "   show_recording_started: {}",
