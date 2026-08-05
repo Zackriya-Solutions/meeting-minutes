@@ -56,6 +56,34 @@ REM Once it succeeds, Tauri serves frontendDist (../out) internally. This is
 REM deterministic desktop startup: no Next dev/HMR process, no 3118 race and
 REM no remote devUrl bridge/capability ambiguity.
 
+REM Set libclang path for whisper-rs-sys (bindgen needs this or it silently
+REM mis-parses whisper.h into an opaque struct with a single `_address` field,
+REM which is the root cause of "no field X on type whisper_full_params" errors).
+set "LIBCLANG_PATH=C:\Program Files\LLVM\bin"
+
+REM Try to find and setup Visual Studio environment (same fallback chain as build.bat)
+if exist "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat" (
+    echo Setting up Visual Studio 2022 Build Tools environment...
+    call "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat"
+) else if exist "C:\Program Files\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat" (
+    echo Setting up Visual Studio 2022 Build Tools environment...
+    call "C:\Program Files\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat"
+) else if exist "C:\Program Files (x86)\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat" (
+    echo Setting up Visual Studio 2022 Community environment...
+    call "C:\Program Files (x86)\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat"
+) else if exist "C:\Program Files (x86)\Microsoft Visual Studio\2022\Professional\VC\Auxiliary\Build\vcvars64.bat" (
+    echo Setting up Visual Studio 2022 Professional environment...
+    call "C:\Program Files (x86)\Microsoft Visual Studio\2022\Professional\VC\Auxiliary\Build\vcvars64.bat"
+) else if exist "C:\Program Files (x86)\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat" (
+    echo Setting up Visual Studio 2022 Enterprise environment...
+    call "C:\Program Files (x86)\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+) else if exist "C:\Program Files (x86)\Microsoft Visual Studio\2019\BuildTools\VC\Auxiliary\Build\vcvars64.bat" (
+    echo Setting up Visual Studio 2019 Build Tools environment...
+    call "C:\Program Files (x86)\Microsoft Visual Studio\2019\BuildTools\VC\Auxiliary\Build\vcvars64.bat"
+) else (
+    echo Warning: Visual Studio environment not found. whisper-rs-sys build may fail.
+)
+
 echo Preparing llama-helper sidecar...
 for /f "tokens=2" %%i in ('rustc -vV ^| findstr "host:"') do set TARGET_TRIPLE=%%i
 
