@@ -52,7 +52,7 @@ import argparse
 import json
 import os
 import pathlib
-import platform
+import re
 import subprocess
 import sys
 import urllib.error
@@ -150,6 +150,53 @@ def conf_version() -> str:
     return conf["version"]
 
 
+def is_semver(version: str) -> bool:
+    """Tauri parses manifest versions as semver, so a four-component version is unusable.
+
+    Guards against .github/workflows/release.yml, which appends a fourth component
+    (0.4.0.1) when a tag already exists: clients silently see no update.
+    """
+    return bool(re.fullmatch(r"\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?", version))
+
+
+def now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def start_manifest(
+    version: str,
+    notes: str | None,
+    pub_date: str,
+    remote: dict | None,
+    publishing: set[str],
+) -> tuple[dict, str | None]:
+    """Fresh manifest, or the remote one folded in when it covers the same version.
+
+    Returns (manifest, status_line). Platform entries for the versions being published
+    are left for the caller to fill in; entries for *other* platforms are carried over
+    so a per-platform publish doesn't drop the rest of the release.
+    """
+    manifest = {
+        "version": version,
+        "notes": notes or f"Release {version}",
+        "pub_date": pub_date,
+        "platforms": {},
+    }
+    if not remote:
+        return manifest, None
+
+    if remote.get("version") != version:
+        return manifest, f"replacing remote manifest (was v{remote.get('version')}, now v{version})"
+
+    manifest["platforms"] = dict(remote.get("platforms") or {})
+    if not notes and remote.get("notes"):
+        manifest["notes"] = remote["notes"]
+    if remote.get("pub_date"):
+        manifest["pub_date"] = remote["pub_date"]
+    kept = [p for p in manifest["platforms"] if p not in publishing]
+    return manifest, f"merging into existing v{version} manifest (keeping: {', '.join(kept) or 'nothing'})"
+
+
 def configured_endpoint() -> str | None:
     """The manifest URL the shipped app actually polls, for a sanity check."""
     conf = json.loads(TAURI_CONF.read_text())
@@ -160,13 +207,18 @@ def configured_endpoint() -> str | None:
 # ------------------------------------------------------------------ artifacts
 
 
-def host_platform_key() -> str:
-    system = {"Darwin": "darwin", "Windows": "windows", "Linux": "linux"}.get(
-        platform.system(), platform.system().lower()
-    )
-    machine = platform.machine().lower()
-    arch = "aarch64" if machine in ("arm64", "aarch64") else "x86_64"
-    return f"{system}-{arch}"
+def arch_from_name(name: str) -> str | None:
+    """Read the arch out of a bundle filename, e.g. Memento_0.4.0_x64-setup.exe.
+
+    aarch64 is checked first: "x86_64" contains "x86", and an arm64 name must not
+    fall through to it.
+    """
+    lowered = name.lower()
+    if any(token in lowered for token in ("aarch64", "arm64")):
+        return "aarch64"
+    if any(token in lowered for token in ("x86_64", "x64", "amd64", "intel")):
+        return "x86_64"
+    return None
 
 
 def arch_from_path(path: pathlib.Path) -> str | None:
@@ -207,8 +259,14 @@ def arch_from_sibling_app(payload: pathlib.Path) -> str | None:
     return None
 
 
-def platform_key_for(payload: pathlib.Path, override: str | None) -> tuple[str, str]:
-    """Return (platform_key, how_it_was_determined)."""
+def platform_key_for(payload: pathlib.Path, override: str | None) -> tuple[str | None, str]:
+    """Return (platform_key, how_it_was_determined), or (None, why_it_is_ambiguous).
+
+    Never guesses from the host: the publishing machine's architecture says nothing
+    about a cross-compiled or copied-in artifact, and a mislabelled entry serves an
+    incompatible binary while leaving the correct entry stale in the manifest.
+    Ambiguity is the caller's cue to demand --target.
+    """
     if override:
         return override, "--target"
 
@@ -220,18 +278,21 @@ def platform_key_for(payload: pathlib.Path, override: str | None) -> tuple[str, 
         arch = arch_from_sibling_app(payload)
         if arch:
             return f"darwin-{arch}", "arch of the sibling .app binary"
-        host = host_platform_key()
-        return host, "host architecture (no arch in path or .app)"
+        return None, "no target triple in the path, and the sibling .app is missing or universal"
+
+    if name.endswith(".dmg"):
+        arch = arch_from_name(name) or arch_from_path(payload)
+        return (f"darwin-{arch}", "filename") if arch else (None, "no arch in the filename or path")
 
     if name.endswith("-setup.exe") or name.endswith(".msi"):
-        arch = "aarch64" if "arm64" in name or "aarch64" in name else "x86_64"
-        return f"windows-{arch}", "installer filename"
+        arch = arch_from_name(name) or arch_from_path(payload)
+        return (f"windows-{arch}", "filename") if arch else (None, "no arch in the filename or path")
 
-    if name.endswith(".appimage"):
-        arch = "aarch64" if "aarch64" in name or "arm64" in name else "x86_64"
-        return f"linux-{arch}", "AppImage filename"
+    if name.endswith(".appimage") or name.endswith(".deb") or name.endswith(".rpm"):
+        arch = arch_from_name(name) or arch_from_path(payload)
+        return (f"linux-{arch}", "filename") if arch else (None, "no arch in the filename or path")
 
-    return host_platform_key(), "host architecture (unrecognized artifact)"
+    return None, "unrecognized artifact type"
 
 
 def find_files(roots: list[pathlib.Path], suffixes: tuple[str, ...]) -> list[pathlib.Path]:
@@ -379,6 +440,10 @@ def main() -> int:
     prefix = os.environ.get("OBS_PREFIX", DEFAULT_PREFIX).strip("/")
 
     version = (args.version or conf_version()).lstrip("v")
+    if not is_semver(version):
+        print(f"error: '{version}' is not a semver version, so Tauri clients cannot parse it", file=sys.stderr)
+        print("       and would silently see no update. Use MAJOR.MINOR.PATCH.", file=sys.stderr)
+        return 1
     manifest_key = f"{prefix}/{MANIFEST_NAME}"
     manifest_url = public_url(endpoint, bucket, manifest_key)
 
@@ -409,6 +474,11 @@ def main() -> int:
     entries: dict[str, tuple[pathlib.Path, pathlib.Path]] = {}
     for payload in signed:
         key, how = platform_key_for(payload, args.target)
+        if key is None:
+            print(f"error: cannot tell which platform {payload} is for — {how}.", file=sys.stderr)
+            print("       Re-run with --target (e.g. --target darwin-aarch64). Guessing from the", file=sys.stderr)
+            print("       publishing machine would risk serving an incompatible binary.", file=sys.stderr)
+            return 1
         if key not in VALID_PLATFORMS:
             print(f"error: detected unsupported platform key '{key}' for {payload}", file=sys.stderr)
             return 1
@@ -430,11 +500,15 @@ def main() -> int:
     installers: list[tuple[str, pathlib.Path]] = []
     if not args.no_installers:
         for installer in find_files(roots, INSTALLER_SUFFIXES):
-            key, _ = platform_key_for(installer, args.target)
-            # DMG/deb names carry their own arch; group them under a platform dir
-            # that exists in this publish, else the detected one.
-            if key not in entries and len(entries) == 1:
-                key = next(iter(entries))
+            key, how = platform_key_for(installer, args.target)
+            # Installers are direct downloads, not manifest entries, so an unplaceable
+            # one is skipped rather than fatal. A single-platform publish is unambiguous.
+            if key is None or key not in entries:
+                if len(entries) == 1:
+                    key = next(iter(entries))
+                elif key is None:
+                    print(f"warning: skipping {installer.name} — {how}", file=sys.stderr)
+                    continue
             installers.append((key, installer))
 
     notes: str | None = args.notes
@@ -444,24 +518,10 @@ def main() -> int:
     s3 = None if args.dry_run else make_client(endpoint, region)
 
     # Build the manifest, merging the remote one when it is the same version.
-    manifest = {
-        "version": version,
-        "notes": notes or f"Release {version}",
-        "pub_date": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-        "platforms": {},
-    }
-    if not args.no_merge:
-        remote = fetch_remote_manifest(s3, bucket, manifest_key) if s3 else None
-        if remote and remote.get("version") == version:
-            manifest["platforms"] = dict(remote.get("platforms") or {})
-            if not notes and remote.get("notes"):
-                manifest["notes"] = remote["notes"]
-            if remote.get("pub_date"):
-                manifest["pub_date"] = remote["pub_date"]
-            kept = [p for p in manifest["platforms"] if p not in entries]
-            print(f"==> merging into existing v{version} manifest (keeping: {', '.join(kept) or 'nothing'})")
-        elif remote:
-            print(f"==> replacing remote manifest (was v{remote.get('version')}, now v{version})")
+    remote = None if (args.no_merge or not s3) else fetch_remote_manifest(s3, bucket, manifest_key)
+    manifest, status = start_manifest(version, notes, now_iso(), remote, set(entries))
+    if status:
+        print(f"==> {status}")
 
     uploads: list[tuple[str, pathlib.Path, str]] = []  # key, file, cache-control
     for plat, (payload, sig) in entries.items():

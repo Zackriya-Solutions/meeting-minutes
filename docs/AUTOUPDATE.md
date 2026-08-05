@@ -137,6 +137,22 @@ confirms the served version.
 Useful flags: `--version`, `--target darwin-x86_64` (force the platform key),
 `--notes-file`, `--no-installers` (skip the DMG), `--no-merge`, `--no-verify`, `--no-public`.
 
+The platform of each payload is derived from the Rust target triple in its path, else
+from the architecture of the sibling `.app` (via `lipo`), else from an arch token in the
+filename. It is **never** guessed from the publishing machine: a cross-compiled or
+copied-in artifact would get mislabelled, which serves clients an incompatible binary and
+leaves the correct entry stale in the merged manifest. When detection is ambiguous — a
+`.app.tar.gz` with no triple in its path and no sibling `.app`, or a universal binary —
+the script refuses to publish and asks for `--target`. Unplaceable *installers* are
+skipped with a warning instead, since they are direct downloads rather than manifest
+entries.
+
+The version is checked against semver before anything is uploaded, so the four-component
+scheme below can't reach clients as an unparseable manifest.
+
+`scripts/test_publish_update_obs.py` covers the detection rules, the semver guard and the
+merge behaviour: `python3 -m pytest scripts/test_publish_update_obs.py`.
+
 Settings come from the environment, `.env`, or `frontend/.env.signing` (both gitignored):
 
 | Var | Default |
@@ -181,7 +197,8 @@ To rehearse without touching OBS, serve a manifest locally with
 | `incorrect updater private key password: Device not configured` | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` is unset. It must be exported *even when empty* — otherwise the CLI tries to read a password from the tty. The build scripts do this for you. |
 | `failed to decode base64 secret key: Invalid symbol 46` | A file **path** was put in `TAURI_SIGNING_PRIVATE_KEY`. That variable takes the key *contents*; use `TAURI_SIGNING_PRIVATE_KEY_PATH` for a path. |
 | Build aborts asking for a signing key | `createUpdaterArtifacts` is `true` in `tauri.conf.json` and no key was found. Run a build script (they handle it) or export the key. |
-| Client reports "no update available" while `latest.json` looks right | Manifest version is ≤ the installed version, or isn't valid semver. |
+| Client reports "no update available" while `latest.json` looks right | Manifest version is ≤ the installed version, or isn't valid semver (the publish script now refuses non-semver up front). |
+| `error: cannot tell which platform … is for` | Publishing a `.app.tar.gz` that was copied away from its `.app` and carries no target triple in its path. Pass `--target darwin-aarch64` / `darwin-x86_64`. |
 | Manual "Check for Updates" errors on every client | Nothing published yet — OBS answers `403` for a key that doesn't exist, and the plugin treats that as a failed check. Startup checks swallow it; only manual checks surface it. Goes away with the first publish. |
 | Only some platforms error | The manifest has no entry for that `platforms` key. A Windows client checking a mac-only manifest fails with "platform windows-x86_64 was not found". Publish every platform you ship for a given version. |
 | Client 403s while downloading | Payload uploaded without `public-read`. Re-run publish (its pre-flight HEAD check catches this). |
