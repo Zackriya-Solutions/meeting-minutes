@@ -1,18 +1,18 @@
-use anyhow::Result;
-use cpal::traits::{DeviceTrait, HostTrait};
+use anyhow::{anyhow, Result};
+use cidre::core_audio::hardware::System;
 
 use crate::audio::devices::configuration::{AudioDevice, DeviceType};
 
 /// Configure macOS audio devices using ScreenCaptureKit and CoreAudio
-pub fn configure_macos_audio(host: &cpal::Host) -> Result<Vec<AudioDevice>> {
+///
+/// CPAL's macOS `input_devices()` implementation probes every device by creating
+/// a temporary AudioUnit. Doing that while a recording stream is starting (or
+/// every two seconds from the disconnect monitor) can contend with the real
+/// microphone AudioUnit and make Core Audio reconfigure the active input.
+/// Core Audio's hardware property API gives us the same device list without
+/// opening any capture streams.
+pub fn configure_macos_audio(_host: &cpal::Host) -> Result<Vec<AudioDevice>> {
     let mut devices: Vec<AudioDevice> = Vec::new();
-
-    // Existing macOS implementation
-    for device in host.input_devices()? {
-        if let Ok(name) = device.name() {
-            devices.push(AudioDevice::new(name, DeviceType::Input));
-        }
-    }
 
     // Filter function to exclude macOS built-in speakers for output devices
     // NOTE: AirPods and other Bluetooth devices are now allowed (with device monitoring for disconnect handling)
@@ -21,13 +21,38 @@ pub fn configure_macos_audio(host: &cpal::Host) -> Result<Vec<AudioDevice>> {
         !name.to_lowercase().contains("speakers")
     }
 
-    // Use default host for all macOS output devices
-    // Core Audio backend uses direct cidre API for system capture, not cpal
-    for device in host.output_devices()? {
-        if let Ok(name) = device.name() {
-            if should_include_output_device(&name) {
-                devices.push(AudioDevice::new(name, DeviceType::Output));
-            }
+    let core_audio_devices = System::devices()
+        .map_err(|error| anyhow!("Failed to enumerate Core Audio devices: {error}"))?;
+
+    for device in core_audio_devices {
+        let Ok(name) = device.name().map(|name| name.to_string()) else {
+            continue;
+        };
+
+        let has_input = device
+            .input_stream_cfg()
+            .map(|config| {
+                config
+                    .buffers()
+                    .iter()
+                    .any(|buffer| buffer.number_channels > 0)
+            })
+            .unwrap_or(false);
+        if has_input {
+            devices.push(AudioDevice::new(name.clone(), DeviceType::Input));
+        }
+
+        let has_output = device
+            .output_stream_cfg()
+            .map(|config| {
+                config
+                    .buffers()
+                    .iter()
+                    .any(|buffer| buffer.number_channels > 0)
+            })
+            .unwrap_or(false);
+        if has_output && should_include_output_device(&name) {
+            devices.push(AudioDevice::new(name, DeviceType::Output));
         }
     }
 

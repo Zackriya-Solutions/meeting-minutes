@@ -124,6 +124,16 @@ pub async fn get_device_and_config(
 
         match audio_device.device_type {
             DeviceType::Input => {
+                #[cfg(target_os = "macos")]
+                if let Some(device) = host.default_input_device() {
+                    if device.name().ok().as_deref() == Some(audio_device.name.as_str()) {
+                        let default_config = device
+                            .default_input_config()
+                            .map_err(|e| anyhow!("Failed to get default input config: {}", e))?;
+                        return Ok((device, default_config));
+                    }
+                }
+
                 for device in host.input_devices()? {
                     if let Ok(name) = device.name() {
                         if name == audio_device.name {
