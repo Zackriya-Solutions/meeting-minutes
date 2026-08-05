@@ -81,7 +81,7 @@ if [ -z "$TAURI_GPU_FEATURE" ]; then
     fi
 fi
 
-if [ -n "$TAURI_GPU_FEATURE" ]; then
+if [ -n "$TAURI_GPU_FEATURE" ] && [ "$TAURI_GPU_FEATURE" != "none" ]; then
     echo -e "${GREEN}✅ Detected GPU feature: $TAURI_GPU_FEATURE${NC}"
     export TAURI_GPU_FEATURE
 else
