@@ -3,19 +3,17 @@
 import { useState, useEffect, useRef } from 'react';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
 import { useRecordingState, RecordingStatus } from '@/contexts/RecordingStateContext';
-import { useTranscripts } from '@/contexts/TranscriptContext';
 import { useConfig } from '@/contexts/ConfigContext';
 import { StatusOverlays } from '@/app/_components/StatusOverlays';
 import Analytics from '@/lib/analytics';
 import { SettingsModals } from './_components/SettingsModal';
-import { TranscriptPanel } from './_components/TranscriptPanel';
+import { HomePanel } from './_components/HomePanel';
 import { useModalState } from '@/hooks/useModalState';
 import { useRecordingStateSync } from '@/hooks/useRecordingStateSync';
 import { useRecordingStart } from '@/hooks/useRecordingStart';
 import { useRecordingStop } from '@/hooks/useRecordingStop';
 import { toast } from 'sonner';
 import { listen } from '@tauri-apps/api/event';
-import { Icon } from '@/components/memento/Icon';
 import { useT } from '@/lib/i18n';
 
 export default function Home() {
@@ -23,19 +21,20 @@ export default function Home() {
   const [isRecording, setIsRecordingState] = useState(false);
 
   // Use contexts for state management
-  const { transcripts } = useTranscripts();
   const { transcriptModelConfig } = useConfig();
   const recordingState = useRecordingState();
 
   // Extract status from global state
-  const { status, isStopping, isProcessing, isSaving } = recordingState;
+  const { status } = recordingState;
 
   // Hooks
   const t = useT();
   const { setIsMeetingActive } = useSidebar();
   const { modals, messages, showModal, hideModal } = useModalState(transcriptModelConfig);
-  const { isRecordingDisabled, setIsRecordingDisabled } = useRecordingStateSync(isRecording, setIsRecordingState, setIsMeetingActive);
-  const { handleRecordingStart } = useRecordingStart(isRecording, setIsRecordingState, showModal);
+  const { setIsRecordingDisabled } = useRecordingStateSync(isRecording, setIsRecordingState, setIsMeetingActive);
+  // Home starts no recording of its own, but this hook owns the sidebar/auto-listening
+  // start listeners, which must stay registered while home is the active route.
+  useRecordingStart(isRecording, setIsRecordingState, showModal);
 
   // Get handleRecordingStop function and setIsStopping (state comes from global context)
   const { handleRecordingStop, setIsStopping } = useRecordingStop(
@@ -143,8 +142,6 @@ export default function Home() {
     };
   }, [handleRecordingStop, showModal, t]);
 
-  // Computed values using global status
-  const isProcessingStop = status === RecordingStatus.PROCESSING_TRANSCRIPTS || isProcessing;
   return (
     <div className="memento-shell flex h-screen flex-col">
       {/* All Modals supported*/}
@@ -155,11 +152,7 @@ export default function Home() {
       />
 
       <div className="flex flex-1 overflow-hidden">
-        <TranscriptPanel
-          isProcessingStop={isProcessingStop}
-          isStopping={isStopping}
-          showModal={showModal}
-        />
+        <HomePanel showModal={showModal} />
 
         {/* No in-place recording controls here: <GlobalRecordingPill> owns the
             off-route recording affordance (return + Finish) on every screen. This
@@ -167,29 +160,9 @@ export default function Home() {
             navigation guard pinned recording to /recording. With navigation free,
             it would have been a second Finish button backed by a second
             useRecordingStop instance — whose duplicate-stop guard cannot see the
-            provider's in-flight stop. */}
-
-        {/* Start-recording button — bottom center of the content area when idle */}
-        {!recordingState.isRecording &&
-          transcripts.length > 0 &&
-          status !== RecordingStatus.STARTING &&
-          status !== RecordingStatus.PROCESSING_TRANSCRIPTS &&
-          status !== RecordingStatus.SAVING && (
-            <div
-              className="pointer-events-none fixed bottom-8 right-0 z-10 flex items-center justify-center transition-[left] duration-300"
-              style={{ left: 0 }}
-            >
-              <button
-                onClick={() => handleRecordingStart()}
-                disabled={isRecordingDisabled}
-                aria-label={t('Record meeting')}
-                className="memento-primary-action pointer-events-auto inline-flex items-center gap-2 px-6 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <Icon name="mic" size={18} />
-                {t('Record meeting')}
-              </button>
-            </div>
-          )}
+            provider's in-flight stop. The floating "Record meeting" button that
+            used to sit here belonged to the old full-page transcript screen; the
+            archive header's "New meeting" action starts one now. */}
 
         {/* Status Overlays - Processing and Saving */}
         <StatusOverlays
