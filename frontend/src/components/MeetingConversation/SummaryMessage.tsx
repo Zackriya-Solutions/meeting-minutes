@@ -168,7 +168,7 @@ export function SummaryMessage({ summaryPanelProps: p, actualDurationSeconds, sp
           {p.getSummaryStatusMessage(p.summaryStatus)}
         </div>
       ) : hasSummary ? (
-        <div className="flex flex-col gap-8">
+        <div className="flex flex-col gap-6">
           {content.lead ? (
             <section>
               <h2 className="text-sm font-normal leading-5 text-[var(--primary-50)]">{t('About the meeting')}</h2>
