@@ -19,6 +19,8 @@ import { readMeetingSummaryLanguage, saveMeetingSummaryLanguage } from '@/lib/su
 import { labelForCode } from '@/lib/summary-languages';
 import { useT } from '@/lib/i18n';
 import { useMeetingDrawer } from '@/contexts/MeetingDrawerContext';
+import { useAnalyticsReport } from '@/hooks/meeting-details/useAnalyticsReport';
+import { AnalyticsReportDialog } from './AnalyticsReportDialog';
 
 /**
  * The "⋯" menu for the meeting conversation. Composed from Fluid Functionalism's
@@ -32,6 +34,7 @@ import { useMeetingDrawer } from '@/contexts/MeetingDrawerContext';
 interface MeetingOverflowMenuProps {
   meetingId: string;
   hasSummary: boolean;
+  hasTranscript: boolean;
   onCopySummary: () => Promise<void> | void;
   onRenameMeeting: () => void;
   onSaveSummary: () => Promise<void> | void;
@@ -46,6 +49,7 @@ interface MeetingOverflowMenuProps {
 export function MeetingOverflowMenu({
   meetingId,
   hasSummary,
+  hasTranscript,
   onCopySummary,
   onRenameMeeting,
   onSaveSummary,
@@ -57,7 +61,9 @@ export function MeetingOverflowMenu({
 }: MeetingOverflowMenuProps) {
   const t = useT();
   const meetingDrawer = useMeetingDrawer();
+  const report = useAnalyticsReport(meetingId);
   const [open, setOpen] = useState(false);
+  const [reportDialogOpen, setReportDialogOpen] = useState(false);
   const [modelOpen, setModelOpen] = useState(false);
   const [languageOpen, setLanguageOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -105,6 +111,31 @@ export function MeetingOverflowMenu({
 
   const languageLabel = language ? labelForCode(language) : t('Auto');
   const modelLabel = modelConfig.model || modelConfig.provider || '—';
+  const reportTrailing = report.status === 'completed'
+    ? t('Generate again')
+    : report.status === 'running'
+      ? `${report.stageIndex}/${report.totalStages}`
+      : report.status === 'waiting_input'
+        ? t('Answer')
+        : report.status === 'failed'
+          ? t('Retry')
+          : undefined;
+  const reportIcon = report.status === 'completed'
+    ? 'refresh'
+    : report.status === 'running'
+      ? 'progress_activity'
+      : report.status === 'waiting_input'
+        ? 'help'
+        : report.status === 'failed'
+          ? 'error'
+          : 'analytics';
+
+  const handleAnalyticsReport = () => {
+    setReportDialogOpen(true);
+    if (report.status === 'idle' || report.status === 'completed' || report.status === 'failed') {
+      void report.generate();
+    }
+  };
 
   return (
     <div className="no-drag relative z-[1]">
@@ -129,7 +160,7 @@ export function MeetingOverflowMenu({
         <DropdownContent
           align="end"
           sideOffset={6}
-          className="w-[248px]"
+          className="bg-[var(--elevation-2)]"
         >
           <MenuItem
             index={0}
@@ -168,6 +199,17 @@ export function MeetingOverflowMenu({
 
           <MenuItem
             index={4}
+            iconName={reportIcon}
+            label={t('Analytical report')}
+            trailing={reportTrailing}
+            disabled={!hasTranscript && report.status !== 'completed'}
+            onSelect={handleAnalyticsReport}
+          />
+
+          <DropdownSeparator />
+
+          <MenuItem
+            index={5}
             iconName="language"
             label={t('Summary language')}
             trailing={languageLabel}
@@ -175,7 +217,7 @@ export function MeetingOverflowMenu({
           />
 
           <MenuItem
-            index={5}
+            index={6}
             iconName="settings"
             label={t('AI Model')}
             trailing={modelLabel}
@@ -185,7 +227,7 @@ export function MeetingOverflowMenu({
           <DropdownSeparator />
 
           <MenuItem
-            index={6}
+            index={7}
             iconName={deleting ? 'progress_activity' : 'delete'}
             label={t('Delete meeting')}
             disabled={deleting}
@@ -195,6 +237,12 @@ export function MeetingOverflowMenu({
           />
         </DropdownContent>
       </DropdownMenu>
+
+      <AnalyticsReportDialog
+        open={reportDialogOpen}
+        onOpenChange={setReportDialogOpen}
+        report={report}
+      />
 
       <Dialog open={languageOpen} onOpenChange={setLanguageOpen}>
         <DialogContent className="max-w-[320px] p-1.5">

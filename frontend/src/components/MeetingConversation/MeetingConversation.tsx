@@ -318,6 +318,7 @@ export function MeetingConversation({
           <MeetingOverflowMenu
             meetingId={meetingId}
             hasSummary={hasSummary}
+            hasTranscript={(totalCount ?? transcripts.length) > 0}
             onCopySummary={onCopySummary}
             onRenameMeeting={onStartEditTitle}
             onSaveSummary={summaryPanelProps.onSaveAll}
