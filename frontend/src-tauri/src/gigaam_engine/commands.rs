@@ -199,11 +199,48 @@ impl Drop for DownloadGuard {
     }
 }
 
+/// Whether a finished transfer is intact.
+///
+/// `content_length` is what the response itself promised (0 when it promised nothing, as a
+/// chunked response does); `expected` is a size known out of band — for an archive, the
+/// Disk API's own figure. Both are checked, because a response with no `Content-Length`
+/// would otherwise go entirely unverified, which is precisely how a truncated ~1 GB archive
+/// slips through to fail later at unpack.
+fn verify_transfer(
+    label: &str,
+    downloaded: u64,
+    content_length: u64,
+    expected: Option<u64>,
+) -> Result<(), String> {
+    if let Some(expected) = expected {
+        if downloaded != expected {
+            return Err(format!(
+                "download {label}: got {downloaded} bytes, expected {expected}"
+            ));
+        }
+        return Ok(());
+    }
+    if content_length > 0 && downloaded != content_length {
+        return Err(format!(
+            "download {label}: connection ended after {downloaded} of {content_length} bytes"
+        ));
+    }
+    // Nothing to compare against, so catch at least the unmistakable failure: no model asset
+    // is ever empty.
+    if downloaded == 0 {
+        return Err(format!("download {label}: the server sent no data"));
+    }
+    Ok(())
+}
+
+/// Download `url` to `dest`. `expected` is the size the file should have, when known
+/// independently of the response headers — see [`verify_transfer`].
 async fn download_file<R: Runtime>(
     app: &AppHandle<R>,
     url: &str,
     dest: &Path,
     label: &str,
+    expected: Option<u64>,
 ) -> Result<(), String> {
     if dest.exists() {
         return Ok(());
@@ -220,7 +257,14 @@ async fn download_file<R: Runtime>(
     if !resp.status().is_success() {
         return Err(format!("download {label}: HTTP {}", resp.status()));
     }
-    let total = resp.content_length().unwrap_or(0);
+    let content_length = resp.content_length().unwrap_or(0);
+    // Percentages can still be reported for a chunked response when the size is known
+    // out of band.
+    let total = if content_length > 0 {
+        content_length
+    } else {
+        expected.unwrap_or(0)
+    };
 
     use std::io::Write;
     let mut file = std::fs::File::create(&tmp).map_err(|e| e.to_string())?;
@@ -254,11 +298,9 @@ async fn download_file<R: Runtime>(
     // A connection dropped mid-stream yields a short file with no error of its own. Renaming
     // it into place would make the model look installed and fail at load (or, for an archive,
     // at unpack) with a far less obvious message.
-    if total > 0 && downloaded != total {
+    if let Err(e) = verify_transfer(label, downloaded, content_length, expected) {
         let _ = std::fs::remove_file(&tmp);
-        return Err(format!(
-            "download {label}: connection ended after {downloaded} of {total} bytes"
-        ));
+        return Err(e);
     }
     std::fs::rename(&tmp, dest).map_err(|e| e.to_string())?;
     Ok(())
@@ -293,6 +335,29 @@ async fn resolve_yandex_disk_href(public_url: &str) -> Result<String, String> {
     Ok(link.href)
 }
 
+/// The size the Disk API reports for a public file, used to verify the transfer.
+///
+/// Deliberately fetched rather than hardcoded: the archive is a file in someone's Disk folder
+/// and can be replaced with a newer export, which a pinned constant would turn into a hard
+/// failure. `None` on any problem — an unverifiable download is still better than no
+/// download, and [`verify_transfer`] falls back to the response's own `Content-Length`.
+async fn yandex_disk_file_size(public_url: &str) -> Option<u64> {
+    #[derive(serde::Deserialize)]
+    struct PublicResource {
+        size: Option<u64>,
+    }
+    let resp = reqwest::Client::new()
+        .get("https://cloud-api.yandex.net/v1/disk/public/resources")
+        .query(&[("public_key", public_url)])
+        .send()
+        .await
+        .ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    resp.json::<PublicResource>().await.ok()?.size
+}
+
 /// Fetch an [`GigaamVariant::archive_url`] variant: resolve the link, download the archive
 /// into the variant's own directory, unpack just the files the variant needs, and delete the
 /// archive.
@@ -313,9 +378,10 @@ async fn download_archive_variant<R: Runtime>(
 
     let archive = target.join("model.zip");
     if !archive.exists() {
+        let expected = yandex_disk_file_size(public_url).await;
         let href = resolve_yandex_disk_href(public_url).await?;
         let label = format!("{}.zip", v.id());
-        download_file(app, &href, &archive, &label).await?;
+        download_file(app, &href, &archive, &label, expected).await?;
     }
 
     publish_stage(app, "model.zip", "extracting");
@@ -449,7 +515,7 @@ async fn ensure_ane_model<R: Runtime>(
     let work = dir.join("ane");
     std::fs::create_dir_all(&work).map_err(|e| e.to_string())?;
     let archive = work.join(asset);
-    download_file(app, &format!("{ANE_BASE}/{asset}"), &archive, asset).await?;
+    download_file(app, &format!("{ANE_BASE}/{asset}"), &archive, asset, None).await?;
 
     publish_stage(app, asset, "extracting");
     let staging = work.join("staging");
@@ -602,7 +668,7 @@ pub async fn gigaam_download_model<R: Runtime>(app: AppHandle<R>) -> Result<(), 
             download_archive_variant(&app, &dir, v).await?;
         } else {
             for f in v.all_files() {
-                download_file(&app, &format!("{HF_BASE}/{f}"), &dir.join(f), f).await?;
+                download_file(&app, &format!("{HF_BASE}/{f}"), &dir.join(f), f, None).await?;
             }
         }
         #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
@@ -678,6 +744,27 @@ mod tests {
         assert!(!DOWNLOAD_IN_PROGRESS.load(Ordering::SeqCst));
         let second = DownloadGuard::acquire().expect("guard is reusable after completion");
         drop(second);
+    }
+
+    /// A short transfer must be rejected however the size became known — including the case
+    /// the response promised nothing, which is how a chunked CDN reply arrives.
+    #[test]
+    fn truncated_transfers_are_rejected() {
+        // Content-Length known and matched / short.
+        assert!(verify_transfer("m", 100, 100, None).is_ok());
+        assert!(verify_transfer("m", 60, 100, None).is_err());
+
+        // No Content-Length, but the Disk API told us the size.
+        assert!(verify_transfer("m", 100, 0, Some(100)).is_ok());
+        let err = verify_transfer("m", 60, 0, Some(100)).expect_err("short archive");
+        assert!(err.contains("expected 100"), "{err}");
+
+        // An out-of-band size also catches a *wrong* file, not just a short one.
+        assert!(verify_transfer("m", 140, 140, Some(100)).is_err());
+
+        // Nothing to compare against: an empty body is still unmistakably wrong.
+        assert!(verify_transfer("m", 1, 0, None).is_ok());
+        assert!(verify_transfer("m", 0, 0, None).is_err());
     }
 
     /// Touch every file a variant needs, as a completed download would.
@@ -830,15 +917,19 @@ mod tests {
         assert!((850_000_000..950_000_000).contains(&total), "total {total}");
     }
 
-    /// The Yandex Disk public API mints the real download link. Network-gated:
+    /// The Yandex Disk public API mints the real download link and reports the size the
+    /// transfer is checked against. Network-gated:
     ///   cargo test --lib gigaam_engine::commands::tests::resolves_the_archive_link -- --ignored --nocapture
     #[tokio::test]
     #[ignore]
     async fn resolves_the_archive_link() {
         let url = GigaamVariant::E2eRnntEnRu.archive_url().unwrap();
         let href = resolve_yandex_disk_href(url).await.expect("resolve");
-        eprintln!("{href}");
+        let size = yandex_disk_file_size(url).await.expect("size");
+        eprintln!("{size} bytes\n{href}");
         assert!(href.starts_with("https://"));
+        // Sanity-check against the advertised ~987 MB, so a swapped-out archive is visible.
+        assert!((900_000_000..1_100_000_000).contains(&size), "size {size}");
     }
 
     /// The Neural Engine variant is only offered where it can actually run.
