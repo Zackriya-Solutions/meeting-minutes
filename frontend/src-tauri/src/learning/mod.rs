@@ -328,6 +328,119 @@ mod integration_tests {
         assert_eq!(decision, "auto_assign");
     }
 
+    /// Meetings named before learning existed carry the same evidence as a fresh rename,
+    /// so one backfill pass can pick them up — but only the names the user stands behind.
+    #[tokio::test]
+    async fn backfill_learns_confirmed_names_and_ignores_guesses() {
+        let pool = migrated_pool().await;
+        insert_meeting(&pool, "old-meeting", "Team sync").await;
+        insert_meeting(&pool, "older-meeting", "Imported recording").await;
+        let (confirmed, _) = diarize_one_voice(&pool, "old-meeting", voice_embedding(3, 0.0)).await;
+        let (guessed, _) = diarize_one_voice(&pool, "older-meeting", voice_embedding(5, 0.0)).await;
+
+        // How the two names got there: one typed, one applied by an automatic pass.
+        crate::database::repositories::speaker::SpeakersRepository::rename(
+            &pool, confirmed, "Анна",
+        )
+        .await
+        .unwrap();
+        sqlx::query("UPDATE speakers SET display_name='Ну' WHERE id=?")
+            .bind(guessed)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        assert!(
+            super::identity::learn_from_named_speakers(&pool)
+                .await
+                .is_err(),
+            "the backfill must say why it did nothing while recognition is off"
+        );
+        sqlx::query(
+            "INSERT INTO app_settings_kv(key, value) VALUES('identity.auto_assign_enabled','true')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let outcome = super::identity::learn_from_named_speakers(&pool)
+            .await
+            .unwrap();
+        assert_eq!((outcome.speakers, outcome.clusters), (1, 1));
+        let learned: Vec<String> = sqlx::query_scalar(
+            "SELECT s.display_name FROM speakers s \
+             JOIN voice_centroids vc ON vc.speaker_id=s.id AND vc.is_active=1",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(learned, vec!["Анна".to_string()]);
+
+        // Running it twice must not learn the same audio again.
+        let again = super::identity::learn_from_named_speakers(&pool)
+            .await
+            .unwrap();
+        assert_eq!(again.speakers, 0);
+        assert_eq!(again.skipped, 1);
+    }
+
+    /// Re-diarizing a meeting leaves the names on the superseded run, because the new run
+    /// creates fresh speaker rows. That audio is still the named speaker's, so a backfill
+    /// has to look at the newest run *that speaker* appears in, not the meeting's newest.
+    #[tokio::test]
+    async fn a_rediarized_meeting_still_teaches_the_names_it_carried() {
+        let pool = migrated_pool().await;
+        insert_meeting(&pool, "rerun-meeting", "Team sync").await;
+        sqlx::query(
+            "INSERT INTO app_settings_kv(key, value) VALUES('identity.auto_assign_enabled','true')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let (named_speaker, _) =
+            diarize_one_voice(&pool, "rerun-meeting", voice_embedding(13, 0.0)).await;
+        crate::database::repositories::speaker::SpeakersRepository::rename(
+            &pool,
+            named_speaker,
+            "Пётр",
+        )
+        .await
+        .unwrap();
+
+        // Detect speakers again: a second run, new cluster rows, new placeholder speakers.
+        let turns = vec![crate::pipeline::diarization::SpeakerTurn {
+            start_ms: 0,
+            end_ms: 40_000,
+            cluster_id: 0,
+        }];
+        super::identity::resolve_clusters(
+            &pool,
+            "rerun-meeting",
+            "second-run",
+            &turns,
+            &[(0, voice_embedding(13, 0.5))],
+        )
+        .await
+        .unwrap();
+
+        let outcome = super::identity::learn_from_named_speakers(&pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            (outcome.speakers, outcome.clusters),
+            (1, 1),
+            "the name outlived the run it was given on"
+        );
+        let learned: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM voice_centroids WHERE speaker_id=? AND is_active=1",
+        )
+        .bind(named_speaker)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(learned, 1);
+    }
+
     /// Automatic labels are placeholders, not names: they are the app's own guess, and a
     /// guess must never become a training example.
     #[tokio::test]

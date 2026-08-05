@@ -720,6 +720,7 @@ pub fn run() {
             learning::identity::list_speaker_profile_versions,
             learning::identity::rollback_speaker_profile,
             learning::identity::purge_speaker_learning_data,
+            learning::identity::learn_voices_from_past_meetings,
             learning::advanced::get_speaker_advanced_learning,
             learning::advanced::set_speaker_advanced_learning,
             learning::classification::classify_meeting,

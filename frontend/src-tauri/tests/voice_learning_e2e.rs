@@ -404,3 +404,76 @@ async fn known_voices_are_recognised_in_a_later_meeting() {
         rows.len()
     );
 }
+
+/// What would the backfill learn from a real library? Runs
+/// [`identity::learn_from_named_speakers`] against a **copy** of an app database and
+/// reports the profiles it produced.
+///
+/// ```sh
+/// cp "$HOME/Library/Application Support/com.meetily.ai/meeting_minutes.sqlite" /tmp/probe.sqlite
+/// VOICE_DB=/tmp/probe.sqlite cargo test --test voice_learning_e2e -- --ignored --nocapture
+/// ```
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs a copy of a real app database"]
+async fn backfill_learns_voices_from_a_real_library() {
+    let db_path = std::env::var("VOICE_DB").expect("VOICE_DB");
+    // This writes voice profiles. Refuse to touch the database the app is using.
+    assert!(
+        !db_path.contains("Application Support") && !db_path.contains("AppData"),
+        "point VOICE_DB at a copy, not the live database"
+    );
+
+    let manager = app_lib::database::manager::DatabaseManager::new(&db_path, &db_path)
+        .await
+        .expect("open database copy");
+    let pool = manager.pool();
+    sqlx::query(
+        "INSERT INTO app_settings_kv(key, value) VALUES('identity.auto_assign_enabled','true') \
+         ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+    )
+    .execute(pool)
+    .await
+    .expect("enable recognition");
+
+    let named: Vec<(i64, String, i64)> = sqlx::query_as(
+        "SELECT s.id, s.display_name, \
+                (SELECT COUNT(*) FROM speaker_clusters sc \
+                  WHERE (sc.operational_speaker_id=s.id OR sc.placeholder_speaker_id=s.id) \
+                    AND sc.embedding IS NOT NULL AND sc.speech_duration_ms >= 15000) \
+         FROM speakers s WHERE s.is_confirmed=1 AND s.deleted_at IS NULL ORDER BY s.id",
+    )
+    .fetch_all(pool)
+    .await
+    .expect("read named speakers");
+    println!("\n=== confirmed names in this library ===");
+    for (id, name, clusters) in &named {
+        println!("  speaker {id:>4} {name:<16} {clusters} eligible cluster(s)");
+    }
+
+    let outcome = identity::learn_from_named_speakers(pool)
+        .await
+        .expect("backfill");
+    println!(
+        "\nlearned {} speaker(s) from {} cluster(s), skipped {}",
+        outcome.speakers, outcome.clusters, outcome.skipped
+    );
+
+    let profiles: Vec<(String, i64)> = sqlx::query_as(
+        "SELECT s.display_name, COUNT(vc.id) FROM speakers s \
+         JOIN voice_centroids vc ON vc.speaker_id=s.id AND vc.is_active=1 \
+         GROUP BY s.id ORDER BY s.display_name",
+    )
+    .fetch_all(pool)
+    .await
+    .expect("read profiles");
+    println!("=== voices now known ===");
+    for (name, centroids) in &profiles {
+        println!("  {name:<16} {centroids} centroid(s)");
+    }
+
+    // Re-running must be a no-op rather than double-counting the same audio.
+    let again = identity::learn_from_named_speakers(pool)
+        .await
+        .expect("rerun");
+    assert_eq!(again.speakers, 0, "the backfill must be idempotent");
+}

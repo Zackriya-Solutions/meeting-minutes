@@ -1089,8 +1089,10 @@ pub async fn learn_named_speaker(
         return Ok(0);
     }
 
-    // Only the newest run of each meeting: re-diarizing leaves older cluster rows behind
-    // that describe the same audio, and learning from them would double-weight it.
+    // One run per meeting, so re-diarizing the same audio cannot double-weight it — but
+    // the newest run *that this speaker appears in*, not the newest run overall. A meeting
+    // re-diarized after its speakers were named leaves those names on the superseded run,
+    // and that audio is still theirs.
     let clusters: Vec<i64> = sqlx::query_scalar(
         "SELECT sc.id FROM speaker_clusters sc \
          WHERE (sc.operational_speaker_id=?1 OR sc.placeholder_speaker_id=?1) \
@@ -1098,8 +1100,10 @@ pub async fn learn_named_speaker(
            AND sc.speech_duration_ms >= ?3 AND COALESCE(sc.speech_quality, 0.0) >= ?4 \
            AND COALESCE(sc.overlap_ratio, 1.0) <= ?5 \
            AND sc.diarization_run_id=( \
-               SELECT diarization_run_id FROM speaker_clusters \
-               WHERE meeting_id=sc.meeting_id ORDER BY id DESC LIMIT 1) \
+               SELECT sc2.diarization_run_id FROM speaker_clusters sc2 \
+               WHERE sc2.meeting_id=sc.meeting_id \
+                 AND (sc2.operational_speaker_id=?1 OR sc2.placeholder_speaker_id=?1) \
+               ORDER BY sc2.id DESC LIMIT 1) \
            AND NOT EXISTS( \
                SELECT 1 FROM voice_samples vs \
                WHERE vs.speaker_id=?1 AND vs.cluster_id=sc.id) \
@@ -1132,6 +1136,73 @@ pub async fn learn_named_speaker(
         learned += 1;
     }
     Ok(learned)
+}
+
+/// What a backfill pass over already-named speakers managed to learn.
+#[derive(Debug, Default, Clone, Copy, Serialize)]
+pub struct VoiceBackfillOutcome {
+    /// Speakers that gained (or extended) a voice profile.
+    pub speakers: usize,
+    /// Clusters those profiles were built from.
+    pub clusters: usize,
+    /// Named speakers with nothing new to learn — already learned, or no clip long and
+    /// clean enough to be a trusted sample.
+    pub skipped: usize,
+}
+
+/// Learn voices from meetings that were named before learning existed.
+///
+/// Voices are normally learned at the moment the user names a speaker, which leaves every
+/// earlier meeting — and every imported recording named before this feature shipped —
+/// carrying names the app never listened to. This walks those meetings once and applies
+/// the same rule retroactively: a name the user stands behind (`is_confirmed`) is consent
+/// to remember that voice.
+///
+/// Deliberately excludes provisional names, the ones the regex and model passes guessed.
+/// They are predictions, they are wrong often enough to matter (a meeting can end up with
+/// a speaker called «Ну»), and a wrong voiceprint is far more expensive than a missing
+/// one. Renaming such a speaker by hand still teaches it.
+pub async fn learn_from_named_speakers(pool: &SqlitePool) -> Result<VoiceBackfillOutcome, String> {
+    if !IdentityPolicy::load(pool).await.auto_assign_enabled {
+        return Err("Turn on recognising known voices first".to_string());
+    }
+    let named: Vec<(i64, String)> = sqlx::query_as(
+        "SELECT id, display_name FROM speakers \
+         WHERE is_confirmed=1 AND deleted_at IS NULL AND length(trim(display_name)) > 0 \
+         ORDER BY id",
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|error| format!("Failed to load named speakers: {error}"))?;
+
+    let mut outcome = VoiceBackfillOutcome::default();
+    for (speaker_id, display_name) in named {
+        if is_automatic_speaker_name(&display_name) {
+            continue;
+        }
+        match learn_named_speaker(pool, speaker_id, &display_name).await {
+            Ok(0) => outcome.skipped += 1,
+            Ok(clusters) => {
+                outcome.speakers += 1;
+                outcome.clusters += clusters;
+                log::info!(
+                    "[identity] backfill learned {display_name} (speaker {speaker_id}) \
+                     from {clusters} cluster(s)"
+                );
+            }
+            Err(error) => {
+                outcome.skipped += 1;
+                log::warn!("[identity] backfill could not learn speaker {speaker_id}: {error}");
+            }
+        }
+    }
+    log::info!(
+        "[identity] backfill learned {} speaker(s) from {} cluster(s), skipped {}",
+        outcome.speakers,
+        outcome.clusters,
+        outcome.skipped
+    );
+    Ok(outcome)
 }
 
 #[derive(Debug, Clone)]
@@ -1605,6 +1676,13 @@ pub async fn list_speaker_profile_versions(
     speaker_id: i64,
 ) -> Result<Vec<SpeakerProfileVersionRow>, String> {
     list_profile_versions(state.db_manager.pool(), speaker_id).await
+}
+
+#[tauri::command]
+pub async fn learn_voices_from_past_meetings(
+    state: tauri::State<'_, crate::state::AppState>,
+) -> Result<VoiceBackfillOutcome, String> {
+    learn_from_named_speakers(state.db_manager.pool()).await
 }
 
 #[tauri::command]

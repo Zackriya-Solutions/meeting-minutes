@@ -1799,4 +1799,10 @@ export const RU: Record<string, string> = {
   "System audio capture is not available. You can still record with your microphone, but computer audio won\\'t be captured.": "Системный звук недоступен. Можно продолжить запись с микрофона, но звук компьютера не сохранится.",
   "Unpromoted capture metadata, minutes": "Хранить метаданные, мин",
   "Name a speaker in a transcript and Memento remembers that voice, then fills the name in automatically at later meetings. Voice profiles stay on this device.": "Назовите спикера в расшифровке — Memento запомнит голос и подставит имя на следующих встречах. Профили голосов остаются на устройстве.",
+  "Speakers you named in earlier or imported meetings can be learned in one pass — automatic names are left out.": "Спикеров, которых вы назвали в прошлых и импортированных встречах, можно запомнить одним проходом — автоматически подставленные имена не берутся.",
+  "Learn from past meetings": "Запомнить голоса",
+  "Learning…": "Запоминание…",
+  "Voices remembered": "Запомнено голосов",
+  "No new voices to learn": "Новых голосов нет",
+  "Could not learn voices from past meetings": "Не удалось запомнить голоса. Попробуйте ещё раз.",
 };
