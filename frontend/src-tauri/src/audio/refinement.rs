@@ -169,15 +169,9 @@ fn spawn_refinement<R: Runtime>(
     trigger: RefinementTrigger,
 ) {
     tauri::async_runtime::spawn(async move {
-        if let Err(e) =
-            run_post_meeting_refinement(&app, &meeting_id, &folder_path, trigger).await
-        {
-            warn!("[refinement] meeting {meeting_id}: pass did not complete: {e}");
-            let _ = app.emit(
-                "refinement-error",
-                serde_json::json!({ "meeting_id": meeting_id, "error": e.to_string() }),
-            );
-        }
+        // The error event comes from run_post_meeting_refinement itself, so that the
+        // recovery job — which calls it directly — cannot leave a pass unterminated.
+        let _ = run_post_meeting_refinement(&app, &meeting_id, &folder_path, trigger).await;
     });
 }
 
@@ -226,7 +220,32 @@ pub async fn rerun_meeting_refinement<R: Runtime>(
     Ok(())
 }
 
+/// Runs a pass and guarantees the UI hears how it ended.
+///
+/// Every `refinement-started` must be closed by exactly one `refinement-complete` or
+/// `refinement-error`, or the progress chip shows work that is no longer running. The
+/// terminal event belongs here rather than at the call site because callers differ: the save
+/// hook and the menu item spawn the pass and ignore its result, while the recovery job awaits
+/// it and propagates the error to the job runner. Emitting from the spawn wrapper alone left
+/// the job's failures silent.
 pub(crate) async fn run_post_meeting_refinement<R: Runtime>(
+    app: &AppHandle<R>,
+    meeting_id: &str,
+    folder_path: &str,
+    trigger: RefinementTrigger,
+) -> anyhow::Result<()> {
+    let result = refine_meeting(app, meeting_id, folder_path, trigger).await;
+    if let Err(error) = &result {
+        warn!("[refinement] meeting {meeting_id}: pass did not complete: {error}");
+        let _ = app.emit(
+            "refinement-error",
+            serde_json::json!({ "meeting_id": meeting_id, "error": error.to_string() }),
+        );
+    }
+    result
+}
+
+async fn refine_meeting<R: Runtime>(
     app: &AppHandle<R>,
     meeting_id: &str,
     folder_path: &str,
@@ -277,6 +296,16 @@ pub(crate) async fn run_post_meeting_refinement<R: Runtime>(
             .bind(meeting_id)
             .fetch_one(pool)
             .await?;
+    // Announce here, not further down: everything above returns without doing any work, and
+    // everything below ends in `refinement-complete` or, via the wrapper, in
+    // `refinement-error`. Announcing after the branch below meant an attribution-only pass
+    // completed without ever having started, so a listener that keys off the pair saw a
+    // completion for a pass it never knew about.
+    let _ = app.emit(
+        "refinement-started",
+        serde_json::json!({ "meeting_id": meeting_id }),
+    );
+
     if attribution_only(auto_refine_enabled(pool).await, transcript_count, trigger) {
         info!(
             "[refinement] meeting {meeting_id}: batch re-transcription disabled; \
@@ -305,10 +334,6 @@ pub(crate) async fn run_post_meeting_refinement<R: Runtime>(
             .ok_or_else(|| anyhow::anyhow!("no transcription model configured"))?;
 
     info!("[refinement] meeting {meeting_id}: refinement with {provider}/{model}");
-    let _ = app.emit(
-        "refinement-started",
-        serde_json::json!({ "meeting_id": meeting_id }),
-    );
 
     // Preferred: turn-aligned pass — diarize first, transcribe per speaker turn, so
     // every row is one reply (the reference-app shape). Falls back to the silence-cut
