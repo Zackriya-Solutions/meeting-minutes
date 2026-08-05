@@ -27,7 +27,12 @@ use super::vad::{ContinuousVadProcessor, SpeechSegment};
 // always sees the pair the writer published: two separate atomics would let a
 // poll land between the two stores and age a fresh level against the previous
 // timestamp. High 32 bits hold the RMS as `f32::to_bits`, low 32 bits hold
-// milliseconds on `LEVEL_CLOCK`.
+// milliseconds on `LEVEL_CLOCK`. An all-zero word reads as silence either way,
+// so the initial value needs no special case.
+//
+// One word for the whole process, matching the one-recording-at-a-time model
+// the rest of the module assumes: two concurrent microphone captures would
+// overwrite each other here.
 static MICROPHONE_LEVEL: AtomicU64 = AtomicU64::new(0);
 static LEVEL_CLOCK: LazyLock<Instant> = LazyLock::new(Instant::now);
 
@@ -1540,6 +1545,20 @@ mod tests {
             assert_eq!(packed as u32, at_ms);
             assert_eq!(f32::from_bits((packed >> 32) as u32), rms);
         }
+    }
+
+    #[test]
+    fn the_never_written_level_reads_as_silence() {
+        // `MICROPHONE_LEVEL` starts at zero, so the Tauri command answers a
+        // poll that arrives before any recording with silence rather than
+        // whatever an all-zero word happens to decode to. Both the fresh and
+        // the expired branch have to agree on that.
+        let untouched = 0u64;
+        assert_eq!(level_from_packed(untouched, 0), 0.0);
+        assert_eq!(
+            level_from_packed(untouched, MICROPHONE_LEVEL_MAX_AGE_MS + 1),
+            0.0
+        );
     }
 
     #[test]

@@ -124,6 +124,17 @@ pub async fn get_device_and_config(
 
         match audio_device.device_type {
             DeviceType::Input => {
+                // The loop below calls `host.input_devices()`, which probes every
+                // input on macOS by opening a temporary AudioUnit — the contention
+                // this module exists to avoid. Asking for the default device by
+                // name never probes anything, and the default is what the user is
+                // recording with almost every time.
+                //
+                // Devices are identified by display name throughout, so two inputs
+                // sharing one name are ambiguous here no matter what: the loop
+                // below resolves such a tie by cpal's enumeration order, which is
+                // arbitrary and can change between runs. Preferring the OS default
+                // is at least stable and is the likelier intent.
                 #[cfg(target_os = "macos")]
                 if let Some(device) = host.default_input_device() {
                     if device.name().ok().as_deref() == Some(audio_device.name.as_str()) {

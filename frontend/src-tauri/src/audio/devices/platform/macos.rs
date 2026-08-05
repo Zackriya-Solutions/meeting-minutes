@@ -154,4 +154,51 @@ mod tests {
             );
         }
     }
+
+    /// Every input the picker offers must still resolve to a device of that
+    /// name, whether `get_device_and_config` takes the macOS default-device
+    /// fast path or falls through to enumeration. The fast path is what makes
+    /// this worth asserting: it returns `default_input_device()` rather than
+    /// the enumerated match, so a mismatch would hand the recorder a different
+    /// microphone than the one the user picked.
+    ///
+    /// Ignored for the same reason as the test above, and it says nothing at
+    /// all on a machine with no inputs.
+    #[test]
+    #[ignore = "reads the host's real audio hardware"]
+    fn every_listed_input_resolves_to_a_device_of_that_name() {
+        let host = cpal::default_host();
+        let listed = configure_macos_audio(&host).expect("Core Audio enumeration");
+        let inputs: Vec<&AudioDevice> = listed
+            .iter()
+            .filter(|device| device.device_type == DeviceType::Input)
+            .collect();
+
+        if inputs.is_empty() {
+            println!("no input devices attached — nothing to resolve");
+            return;
+        }
+
+        let default_input = host
+            .default_input_device()
+            .and_then(|device| device.name().ok());
+        println!("default input: {default_input:?}");
+
+        let runtime = tokio::runtime::Runtime::new().expect("runtime");
+        for device in inputs {
+            let took_fast_path = default_input.as_deref() == Some(device.name.as_str());
+            let (resolved, _config) = runtime
+                .block_on(crate::audio::devices::configuration::get_device_and_config(
+                    device,
+                ))
+                .unwrap_or_else(|error| panic!("'{}' did not resolve: {error}", device.name));
+
+            assert_eq!(
+                resolved.name().ok().as_deref(),
+                Some(device.name.as_str()),
+                "'{}' resolved to a different device (fast path: {took_fast_path})",
+                device.name
+            );
+        }
+    }
 }
