@@ -82,6 +82,12 @@ interface ConfigContextType {
   // Summary configuration
   isAutoSummary: boolean;
   toggleIsAutoSummary: (checked: boolean) => void;
+  defaultTemplateId: string;
+  setDefaultTemplateId: (id: string) => void;
+
+  // Recording deletion
+  deleteFilesOnDelete: boolean;
+  toggleDeleteFilesOnDelete: (checked: boolean) => void;
 
   // Provider-specific API keys
   providerApiKeys: {
@@ -192,6 +198,21 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('isAutoSummary');
       return saved !== null ? saved === 'true' : false
+    }
+    return false;
+  });
+
+  const [defaultTemplateId, setDefaultTemplateIdState] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('defaultTemplateId') || 'standard_meeting';
+    }
+    return 'standard_meeting';
+  });
+
+  const [deleteFilesOnDelete, setDeleteFilesOnDeleteState] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('deleteFilesOnDelete');
+      return saved === 'true';
     }
     return false;
   });
@@ -422,6 +443,20 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
+  const setDefaultTemplateId = useCallback((id: string) => {
+    setDefaultTemplateIdState(id);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('defaultTemplateId', id);
+    }
+  }, [])
+
+  const toggleDeleteFilesOnDelete = useCallback((checked: boolean) => {
+    setDeleteFilesOnDeleteState(checked);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('deleteFilesOnDelete', checked.toString());
+    }
+  }, [])
+
   // Toggle beta feature with localStorage persistence and analytics
   const toggleBetaFeature = useCallback((featureKey: BetaFeatureKey, enabled: boolean) => {
     setBetaFeatures(prev => {
@@ -575,6 +610,10 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     setModelConfig,
     isAutoSummary,
     toggleIsAutoSummary,
+    defaultTemplateId,
+    setDefaultTemplateId,
+    deleteFilesOnDelete,
+    toggleDeleteFilesOnDelete,
     providerApiKeys,
     updateProviderApiKey,
     transcriptModelConfig,
@@ -604,6 +643,10 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     modelConfig,
     isAutoSummary,
     toggleIsAutoSummary,
+    defaultTemplateId,
+    setDefaultTemplateId,
+    deleteFilesOnDelete,
+    toggleDeleteFilesOnDelete,
     providerApiKeys,
     updateProviderApiKey,
     transcriptModelConfig,

@@ -3,14 +3,17 @@ import { invoke as invokeTauri } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { toast } from 'sonner';
 import Analytics from '@/lib/analytics';
+import { useConfig } from '@/contexts/ConfigContext';
 
 export function useTemplates() {
+  const { defaultTemplateId } = useConfig();
+
   const [availableTemplates, setAvailableTemplates] = useState<Array<{
     id: string;
     name: string;
     description: string;
   }>>([]);
-  const [selectedTemplate, setSelectedTemplate] = useState<string>('standard_meeting');
+  const [selectedTemplate, setSelectedTemplate] = useState<string>(defaultTemplateId || 'standard_meeting');
 
   const fetchTemplates = useCallback(async () => {
     try {

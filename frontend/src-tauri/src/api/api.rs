@@ -750,18 +750,44 @@ pub async fn api_delete_meeting<R: Runtime>(
     state: tauri::State<'_, AppState>,
     meeting_id: String,
     auth_token: Option<String>,
+    delete_files: Option<bool>,
 ) -> Result<serde_json::Value, String> {
     log_info!(
-        "api_delete_meeting called for meeting_id(native): {}, auth_token: {}",
+        "api_delete_meeting called for meeting_id(native): {}, auth_token: {}, delete_files: {}",
         meeting_id,
-        auth_token.is_some()
+        auth_token.is_some(),
+        delete_files.unwrap_or(false)
     );
 
     let pool = state.db_manager.pool();
 
+    // Fetch folder_path before deletion if we need to remove files
+    let folder_path: Option<String> = if delete_files.unwrap_or(false) {
+        sqlx::query_scalar("SELECT folder_path FROM meetings WHERE id = ?")
+            .bind(&meeting_id)
+            .fetch_optional(pool)
+            .await
+            .unwrap_or(None)
+            .flatten()
+    } else {
+        None
+    };
+
     match MeetingsRepository::delete_meeting(pool, &meeting_id).await {
         Ok(true) => {
             log_info!("Successfully deleted meeting {}", meeting_id);
+
+            if let Some(path) = folder_path {
+                let path = std::path::Path::new(&path);
+                if path.exists() {
+                    if let Err(e) = std::fs::remove_dir_all(path) {
+                        log_warn!("Failed to remove meeting folder {:?}: {}", path, e);
+                    } else {
+                        log_info!("Removed meeting folder {:?}", path);
+                    }
+                }
+            }
+
             Ok(serde_json::json!({
                 "status": "success",
                 "message": "Meeting deleted successfully"

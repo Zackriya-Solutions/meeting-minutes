@@ -61,7 +61,7 @@ const Sidebar: React.FC = () => {
   // Get recording state from RecordingStateContext (single source of truth)
   const { isRecording } = useRecordingState();
   const { openImportDialog } = useImportDialog();
-  const { betaFeatures } = useConfig();
+  const { betaFeatures, deleteFilesOnDelete } = useConfig();
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set(['meetings']));
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [showModelSettings, setShowModelSettings] = useState(false);
@@ -326,14 +326,12 @@ const Sidebar: React.FC = () => {
 
   const handleDelete = async (itemId: string) => {
     console.log('Deleting item:', itemId);
-    const payload = {
-      meetingId: itemId
-    };
 
     try {
       const { invoke } = await import('@tauri-apps/api/core');
       await invoke('api_delete_meeting', {
         meetingId: itemId,
+        deleteFiles: deleteFilesOnDelete,
       });
       console.log('Meeting deleted successfully');
       const updatedMeetings = meetings.filter((m: CurrentMeeting) => m.id !== itemId);

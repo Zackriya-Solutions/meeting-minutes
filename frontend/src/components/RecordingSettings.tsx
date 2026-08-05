@@ -5,6 +5,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { DeviceSelection, SelectedDevices } from '@/components/DeviceSelection';
 import Analytics from '@/lib/analytics';
 import { toast } from 'sonner';
+import { useConfig } from '@/contexts/ConfigContext';
 
 export interface RecordingPreferences {
   save_folder: string;
@@ -19,6 +20,7 @@ interface RecordingSettingsProps {
 }
 
 export function RecordingSettings({ onSave }: RecordingSettingsProps) {
+  const { deleteFilesOnDelete, toggleDeleteFilesOnDelete } = useConfig();
   const [preferences, setPreferences] = useState<RecordingPreferences>({
     save_folder: '',
     auto_save: true,
@@ -224,6 +226,20 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
         <Switch
           checked={showRecordingNotification}
           onCheckedChange={handleNotificationToggle}
+        />
+      </div>
+
+      {/* Auto-delete files on meeting deletion */}
+      <div className="flex items-center justify-between p-4 border rounded-lg">
+        <div className="flex-1">
+          <div className="font-medium">Delete Files on Meeting Deletion</div>
+          <div className="text-sm text-gray-600">
+            Automatically remove recording files from disk when a meeting is deleted
+          </div>
+        </div>
+        <Switch
+          checked={deleteFilesOnDelete}
+          onCheckedChange={toggleDeleteFilesOnDelete}
         />
       </div>
 

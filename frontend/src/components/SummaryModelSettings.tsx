@@ -7,7 +7,14 @@ import { ModelConfig, ModelSettingsModal } from '@/components/ModelSettingsModal
 import { SummaryLanguageSettings } from '@/components/SummaryLanguageSettings';
 import { TemplateManagementSettings } from '@/components/TemplateManagementSettings';
 import { Switch } from './ui/switch';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { useConfig } from '@/contexts/ConfigContext';
+
+interface TemplateInfo {
+  id: string;
+  name: string;
+  description: string;
+}
 
 interface SummaryModelSettingsProps {
   refetchTrigger?: number; // Change this to trigger refetch
@@ -22,7 +29,15 @@ export function SummaryModelSettings({ refetchTrigger }: SummaryModelSettingsPro
     ollamaEndpoint: null
   });
 
-  const { isAutoSummary, toggleIsAutoSummary } = useConfig();
+  const [availableTemplates, setAvailableTemplates] = useState<TemplateInfo[]>([]);
+
+  const { isAutoSummary, toggleIsAutoSummary, defaultTemplateId, setDefaultTemplateId } = useConfig();
+
+  useEffect(() => {
+    invoke<TemplateInfo[]>('api_list_templates')
+      .then(setAvailableTemplates)
+      .catch((err: unknown) => console.error('Failed to load templates:', err));
+  }, []);
 
   // Reusable fetch function
   const fetchModelConfig = useCallback(async () => {
@@ -133,6 +148,26 @@ export function SummaryModelSettings({ refetchTrigger }: SummaryModelSettingsPro
           </div>
           <Switch checked={isAutoSummary} onCheckedChange={toggleIsAutoSummary} />
         </div>
+        {availableTemplates.length > 0 && (
+          <div className="flex items-center justify-between mt-4 pt-4 border-t border-gray-100">
+            <div>
+              <p className="text-sm font-medium text-gray-700">Default template</p>
+              <p className="text-xs text-gray-500">Used when auto-summary runs</p>
+            </div>
+            <Select value={defaultTemplateId} onValueChange={setDefaultTemplateId}>
+              <SelectTrigger className="w-48 h-8 text-sm">
+                <SelectValue placeholder="Select template" />
+              </SelectTrigger>
+              <SelectContent>
+                {availableTemplates.map((t) => (
+                  <SelectItem key={t.id} value={t.id} className="text-sm">
+                    {t.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
       </div>
 
       <SummaryLanguageSettings />
