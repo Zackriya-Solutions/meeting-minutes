@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useRef, type HTMLAttributes } from "react"
+import { invoke } from "@tauri-apps/api/core"
 
 import { cn } from "@/lib/utils"
 
@@ -37,9 +38,7 @@ export function SiriWave4({
 }: SiriWave4Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  const analyserRef = useRef<AnalyserNode | null>(null)
-  const audioContextRef = useRef<AudioContext | null>(null)
-  const streamRef = useRef<MediaStream | null>(null)
+  const microphoneLevelRef = useRef(0)
   const amplitudeRef = useRef(BASE_AMPLITUDE)
   const phaseRef = useRef(0)
 
@@ -68,49 +67,22 @@ export function SiriWave4({
 
     let cancelled = false
 
-    const connectMicrophone = async () => {
+    const readNativeMicrophoneLevel = async () => {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true,
-          },
-        })
-        if (cancelled) {
-          stream.getTracks().forEach((track) => track.stop())
-          return
-        }
-
-        const AudioContextConstructor = window.AudioContext
-          || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
-        const audioContext = new AudioContextConstructor()
-        const analyser = audioContext.createAnalyser()
-        analyser.fftSize = 256
-        analyser.smoothingTimeConstant = 0.84
-        audioContext.createMediaStreamSource(stream).connect(analyser)
-
-        streamRef.current = stream
-        audioContextRef.current = audioContext
-        analyserRef.current = analyser
+        const level = await invoke<number>("get_current_microphone_level")
+        if (!cancelled) microphoneLevelRef.current = level
       } catch {
-        // The native recorder may already own the device. Keep the wave alive
-        // with a restrained synthetic pulse instead of showing a broken state.
-        analyserRef.current = null
+        microphoneLevelRef.current = 0
       }
     }
 
-    void connectMicrophone()
+    void readNativeMicrophoneLevel()
+    const timer = window.setInterval(() => void readNativeMicrophoneLevel(), 50)
 
     return () => {
       cancelled = true
-      streamRef.current?.getTracks().forEach((track) => track.stop())
-      streamRef.current = null
-      analyserRef.current = null
-      if (audioContextRef.current?.state !== "closed") {
-        void audioContextRef.current?.close()
-      }
-      audioContextRef.current = null
+      window.clearInterval(timer)
+      microphoneLevelRef.current = 0
     }
   }, [active])
 
@@ -122,7 +94,6 @@ export function SiriWave4({
     if (!context) return
 
     const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches
-    const audioData = new Uint8Array(128)
     let frame = 0
     let lastTime = performance.now()
 
@@ -134,14 +105,8 @@ export function SiriWave4({
       lastTime = now
 
       let targetAmplitude = BASE_AMPLITUDE
-      if (active && analyserRef.current) {
-        analyserRef.current.getByteTimeDomainData(audioData)
-        let energy = 0
-        for (const sample of audioData) {
-          const centered = (sample - 128) / 128
-          energy += centered * centered
-        }
-        const voiceLevel = Math.sqrt(energy / audioData.length) * 6.2 * sensitivity
+      if (active && microphoneLevelRef.current > 0) {
+        const voiceLevel = microphoneLevelRef.current * 6.2 * sensitivity
         const easedVoiceLevel = easeInOutCubic(voiceLevel)
         targetAmplitude = BASE_AMPLITUDE + easedVoiceLevel * (1 - BASE_AMPLITUDE)
       } else if (active) {

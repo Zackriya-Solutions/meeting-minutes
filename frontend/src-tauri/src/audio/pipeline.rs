@@ -6,6 +6,7 @@ use rubato::{
     Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType, WindowFunction,
 };
 use std::collections::VecDeque;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
@@ -16,6 +17,15 @@ use super::audio_processing::{
 use super::devices::AudioDevice;
 use super::recording_state::{AudioChunk, AudioError, DeviceType, RecordingState};
 use super::vad::{ContinuousVadProcessor, SpeechSegment};
+
+// The recording UI reads this value instead of opening a second WebKit
+// getUserMedia stream. A second microphone client makes macOS rebuild its
+// voice-processing graph and can lower the shared input level for call apps.
+static CURRENT_MICROPHONE_LEVEL: AtomicU32 = AtomicU32::new(0.0f32.to_bits());
+
+pub fn current_microphone_level() -> f32 {
+    f32::from_bits(CURRENT_MICROPHONE_LEVEL.load(Ordering::Relaxed))
+}
 
 /// Ring buffer for synchronized audio mixing
 /// Accumulates samples from mic and system streams until we have aligned windows
@@ -747,6 +757,15 @@ impl AudioCapture {
                     }
                 }
             }
+
+            let rms = if mono_data.is_empty() {
+                0.0
+            } else {
+                (mono_data.iter().map(|sample| sample * sample).sum::<f32>()
+                    / mono_data.len() as f32)
+                    .sqrt()
+            };
+            CURRENT_MICROPHONE_LEVEL.store(rms.clamp(0.0, 1.0).to_bits(), Ordering::Relaxed);
         }
 
         // Create audio chunk with stream-specific timestamp (get ID first for logging)
