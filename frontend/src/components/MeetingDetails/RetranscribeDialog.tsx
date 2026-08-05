@@ -111,7 +111,7 @@ export function RetranscribeDialog({
   const isParakeetModel = selectedModelDetails?.provider === 'parakeet';
   const isGigaamModel = selectedModelDetails?.provider === 'gigaam';
   const isSaluteSpeechModel = selectedModelDetails?.provider === 'salutespeech';
-  // GigaAM (Russian e2e), Parakeet, and SaluteSpeech don't take a language hint here —
+  // GigaAM (Russian + English e2e), Parakeet, and SaluteSpeech don't take a language hint here —
   // they always auto-detect (SaluteSpeech transcribes Russian in the cloud).
   const languageAutoOnly = isParakeetModel || isGigaamModel || isSaluteSpeechModel;
   const usesSameModel = Boolean(
@@ -399,7 +399,7 @@ export function RetranscribeDialog({
                   {isSaluteSpeechModel
                     ? t('SaluteSpeech transcribes Russian in the Sber cloud and always auto-detects — no language selection needed.')
                     : isGigaamModel
-                      ? t('GigaAM transcribes Russian and always auto-detects — no language selection needed.')
+                      ? t('GigaAM transcribes Russian and English and always auto-detects — no language selection needed.')
                       : t("Language selection isn't supported for Parakeet. It always uses automatic detection.")}
                 </p>
               </div>

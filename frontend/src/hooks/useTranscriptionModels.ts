@@ -72,7 +72,7 @@ export function useTranscriptionModels(transcriptModelConfig: TranscriptModelCon
         allModels.push({
           provider: 'gigaam' as const,
           name: `gigaam-v3-${gigaam.selected}`,
-          displayName: `${t('GigaAM v3 (Russian)')}${selected ? ` · ${selected.label}` : ''}`,
+          displayName: `${t('GigaAM v3 (Russian + English)')}${selected ? ` · ${selected.label}` : ''}`,
           size_mb: selected?.size_mb ?? 0,
         });
       }

@@ -1,9 +1,10 @@
-//! GigaAM v3 (Russian ASR) transcription engine — ONNX via `ort`, mirroring the
+//! GigaAM v3 transcription engine — ONNX via `ort`, mirroring the
 //! `parakeet_engine`/`embedder` global-instance pattern. Supports e2e-CTC and e2e-RNN-T
 //! variants (int8/fp32) selectable at runtime for A/B quality testing — see `variant.rs`.
 //! On Apple Silicon one more variant runs the RNN-T encoder on the Neural Engine instead of
 //! the CPU (`coreml`), keeping the decoder and joiner on `ort`.
-//! Output is punctuated, capitalized Russian.
+//! Output is punctuated and capitalized; the default variant handles Russian and English,
+//! the others Russian only.
 
 pub mod commands;
 /// Encoder on the Apple Neural Engine — Apple Silicon only (see [`coreml`]).
@@ -55,31 +56,43 @@ impl LoadedModel {
 static ENGINE: Mutex<Option<LoadedModel>> = Mutex::new(None);
 static LOADED_VARIANT: Mutex<Option<GigaamVariant>> = Mutex::new(None);
 
-/// Load `variant`'s files from `dir` into the global slot, replacing any previous model.
+/// Where `variant`'s ONNX files and vocabulary live, given the GigaAM model root. Most
+/// variants sit in the root; ones with a [`GigaamVariant::subdir`] get their own folder
+/// because their file names collide with another variant's — see `variant.rs`.
+pub fn variant_dir(root: &std::path::Path, variant: GigaamVariant) -> PathBuf {
+    match variant.subdir() {
+        Some(sub) => root.join(sub),
+        None => root.to_path_buf(),
+    }
+}
+
+/// Load `variant`'s files from the model root `dir` into the global slot, replacing any
+/// previous model.
 ///
 /// The previous model stays loaded if this fails: the new one is fully built before the slot
 /// is reassigned. That matters most for the Neural Engine variant, whose load can fail on an
 /// unsupported OS or a half-compiled CoreML model.
 pub fn load_global(variant: GigaamVariant, dir: PathBuf) -> anyhow::Result<()> {
+    let files = variant_dir(&dir, variant);
     let model = match variant.decode_kind() {
         DecodeKind::Ctc => {
-            let files = variant.model_files();
+            let f = variant.model_files();
             LoadedModel::Ctc(CtcModel::load(
-                &dir.join(files[0]),
-                &dir.join(variant.vocab_file()),
+                &files.join(f[0]),
+                &files.join(variant.vocab_file()),
             )?)
         }
         // Encoder on the Neural Engine: `model_files` holds only decoder + joiner, and the
-        // encoder is the compiled CoreML model in `dir`.
+        // encoder is the compiled CoreML model under the model root.
         DecodeKind::Rnnt if variant.uses_ane_encoder() => {
             #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
             {
                 let f = variant.model_files();
                 LoadedModel::Rnnt(RnntModel::load_with_ane_encoder(
                     &ane_model_dir(&dir),
-                    &dir.join(f[0]),
-                    &dir.join(f[1]),
-                    &dir.join(variant.vocab_file()),
+                    &files.join(f[0]),
+                    &files.join(f[1]),
+                    &files.join(variant.vocab_file()),
                 )?)
             }
             #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
@@ -93,10 +106,10 @@ pub fn load_global(variant: GigaamVariant, dir: PathBuf) -> anyhow::Result<()> {
         DecodeKind::Rnnt => {
             let f = variant.model_files();
             LoadedModel::Rnnt(RnntModel::load(
-                &dir.join(f[0]),
-                &dir.join(f[1]),
-                &dir.join(f[2]),
-                &dir.join(variant.vocab_file()),
+                &files.join(f[0]),
+                &files.join(f[1]),
+                &files.join(f[2]),
+                &files.join(variant.vocab_file()),
             )?)
         }
     };

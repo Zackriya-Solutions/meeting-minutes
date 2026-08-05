@@ -164,8 +164,12 @@ rubato = "0.15.0"
 ringbuf = "0.4.8"
 tempfile = "3.3.0"
 whatlang = "0.16.4"
+# Unpacks downloaded model archives: the bilingual GigaAM export (every platform) and the
+# CoreML/Neural Engine encoder (macOS) — see `gigaam_engine::commands`. Same version the
+# build script uses.
+zip = "2.2"
 
-ffmpeg-sidecar = { git = "https://github.com/nathanbabcock/ffmpeg-sidecar", rev = "b0f48a514235d1278d860f4a0af66aa9d6e1618d" }
+ffmpeg-sidecar ={ git = "https://github.com/nathanbabcock/ffmpeg-sidecar", rev = "b0f48a514235d1278d860f4a0af66aa9d6e1618d" }
 
 sqlx = { version = "0.8", features = [ "runtime-tokio", "sqlite", "chrono", "json"] }
 
@@ -221,9 +225,6 @@ core-foundation-sys = "0.8"
 # Keychain Services, so the install token actually survives a restart.
 keyring = { version = "3.6", features = ["apple-native"] }
 cidre = { git = "https://github.com/yury/cidre", rev = "a9587fa", features = ["av"] }
-# Unpacks the CoreML/Neural Engine encoder archive at download time (see
-# `gigaam_engine::commands::extract_mlpackage`). Same version the build script uses.
-zip = "2.2"
 dasp = "0.11.0"
 futures-channel = "0.3.31"
 

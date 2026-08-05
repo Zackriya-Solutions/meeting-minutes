@@ -17,6 +17,8 @@ interface VariantInfo {
   present: boolean;
   /** The encoder runs on the Apple Neural Engine (Apple Silicon builds only). */
   neural_engine: boolean;
+  /** The weights cover English too; the Russian-only ones transliterate it into Cyrillic. */
+  bilingual: boolean;
 }
 
 interface GigaamStatus {
@@ -36,8 +38,9 @@ interface DownloadProgress {
   total: number;
   percent: number;
   /**
-   * `downloading` has byte progress; `extracting` and `compiling` are local CPU steps of the
-   * Neural Engine model install and report none, so they render as indeterminate.
+   * `downloading` has byte progress; `extracting` (unpacking a model archive) and
+   * `compiling` (the Neural Engine encoder) are local CPU steps and report none, so they
+   * render as indeterminate.
    */
   stage: 'downloading' | 'extracting' | 'compiling';
 }
@@ -49,8 +52,8 @@ function mb(bytes: number): string {
 }
 
 /**
- * GigaAM v3 (Russian ASR) model manager: pick a variant (CTC/RNN-T × int8/fp32) for A/B
- * quality testing, download it, and see load status. The transcript provider is set to
+ * GigaAM v3 model manager: pick a variant (bilingual RU+EN, or Russian-only CTC/RNN-T ×
+ * int8/fp32) for A/B quality testing, download it, and see load status. The transcript provider is set to
  * `gigaam` by the parent when this is shown.
  */
 export function GigaamModelManager({ compact = false }: { compact?: boolean }) {
@@ -162,11 +165,11 @@ export function GigaamModelManager({ compact = false }: { compact?: boolean }) {
   const selected = status?.variants.find((v) => v.id === status.selected) ?? null;
   const present = !!status?.model_present;
   const loaded = !!status?.loaded;
-  // Unpacking and compiling the CoreML encoder have no byte counts to report.
+  // Unpacking an archive and compiling the CoreML encoder have no byte counts to report.
   const indeterminate = !!progress && progress.stage !== 'downloading';
   const stageLabel = (stage: DownloadProgress['stage']) =>
     stage === 'extracting'
-      ? t('Unpacking the Neural Engine model')
+      ? t('Unpacking the model')
       : stage === 'compiling'
         ? t('Compiling the model for this Mac (one time)')
         : t('Downloading');
@@ -191,7 +194,7 @@ export function GigaamModelManager({ compact = false }: { compact?: boolean }) {
           {present ? (
             <div className="settings-cell__control">
               <Select
-                value={status?.selected ?? 'e2e-rnnt-fp32'}
+                value={status?.selected ?? 'e2e-rnnt-en-ru'}
                 onValueChange={selectVariant}
                 disabled={!status || downloading || switching}
               >
@@ -229,7 +232,7 @@ export function GigaamModelManager({ compact = false }: { compact?: boolean }) {
     <div className="rounded-xl border border-border p-5">
       <div className="mb-1 flex items-center justify-between">
         <div>
-          <h3 className="text-sm font-semibold text-foreground">{t('GigaAM v3 (Russian)')}</h3>
+          <h3 className="text-sm font-semibold text-foreground">{t('GigaAM v3 (Russian + English)')}</h3>
           <p className="text-xs text-muted-foreground">
             {t('Sber ASR · punctuated & capitalized · fully local')}
           </p>
@@ -249,7 +252,7 @@ export function GigaamModelManager({ compact = false }: { compact?: boolean }) {
       <div className="mt-4">
         <label className="mb-1 block text-xs font-medium text-muted-foreground">{t('Model variant')}</label>
         <Select
-          value={status?.selected ?? 'e2e-rnnt-fp32'}
+          value={status?.selected ?? 'e2e-rnnt-en-ru'}
           onValueChange={selectVariant}
           disabled={!status || downloading || switching}
         >
@@ -269,9 +272,11 @@ export function GigaamModelManager({ compact = false }: { compact?: boolean }) {
           </SelectContent>
         </Select>
         <p className="mt-1 text-xs text-muted-foreground">
-          {selected?.neural_engine
-            ? t('The encoder runs on the Apple Neural Engine (macOS 14+): the same transcripts as fp32, several times faster and much lighter on the CPU. The first load takes about a minute while macOS optimizes the model for this Mac.')
-            : t('RNN-T usually beats CTC on accuracy; fp32 avoids int8 quantization loss (larger & slower).')}
+          {selected?.bilingual
+            ? t('Recognizes Russian and English, including sentences that mix them. The Russian-only models spell English words out in Cyrillic instead.')
+            : selected?.neural_engine
+              ? t('The encoder runs on the Apple Neural Engine (macOS 14+): the same transcripts as fp32, several times faster and much lighter on the CPU. The first load takes about a minute while macOS optimizes the model for this Mac.')
+              : t('RNN-T usually beats CTC on accuracy; fp32 avoids int8 quantization loss (larger & slower).')}
         </p>
       </div>
 
