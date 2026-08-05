@@ -106,11 +106,13 @@ export interface UseAnalyticsReportResult {
   submitAnswers: (answers: AnalyticsAnswer[]) => Promise<void>;
   /** Open the meeting folder in Finder/Explorer with the report file selected. */
   revealReport: () => Promise<void>;
+  /** Save a copy of the completed HTML report through the system file dialog. */
+  downloadReport: () => Promise<void>;
 }
 
-// The pipeline has 12 stages; used as the optimistic default before the first
+// The pipeline has 11 stages; used as the optimistic default before the first
 // progress event (and as a fallback if the backend omits a stage total).
-const DEFAULT_TOTAL_STAGES = 12;
+const DEFAULT_TOTAL_STAGES = 11;
 
 // The DB row stores the machine stage id (English); progress events carry the
 // Russian label. Mirror of STAGE_META in src-tauri/src/report/pipeline.rs so
@@ -118,7 +120,6 @@ const DEFAULT_TOTAL_STAGES = 12;
 const STAGE_LABELS_RU: Record<string, string> = {
   dynamics: 'Анализ динамики разговора',
   classify: 'Классификация встречи',
-  clarify: 'Уточняющие вопросы',
   topics: 'Темы и повестка',
   decisions: 'Решения',
   commitments: 'Обязательства',
@@ -173,9 +174,14 @@ export function useAnalyticsReport(meetingId: string | null): UseAnalyticsReport
   // Tracked for commands that need the report id (not the meeting id), e.g.
   // cancel / submit answers. Kept in a ref so those callbacks stay stable.
   const reportIdRef = useRef<string | null>(null);
+  // Only reports explicitly started from this mounted meeting view should open
+  // the save dialog on completion. Restoring an already-completed report must
+  // never summon a native dialog unexpectedly.
+  const autoDownloadRequestedRef = useRef(false);
 
   const reset = useCallback(() => {
     reportIdRef.current = null;
+    autoDownloadRequestedRef.current = false;
     setStatus('idle');
     setStageLabel('');
     setStageIndex(0);
@@ -251,6 +257,7 @@ export function useAnalyticsReport(meetingId: string | null): UseAnalyticsReport
         const p = event.payload;
         if (p.meeting_id !== meetingId) return;
         reportIdRef.current = p.report_id;
+        autoDownloadRequestedRef.current = false;
         setStatus('failed');
         setError(p.error ?? 'Unknown error');
         void Analytics.trackError('analytics_report_failed', p.error ?? 'Unknown error');
@@ -300,6 +307,7 @@ export function useAnalyticsReport(meetingId: string | null): UseAnalyticsReport
     // Optimistic running state so the button reacts immediately; real stage labels
     // arrive via the progress events.
     reportIdRef.current = null;
+    autoDownloadRequestedRef.current = true;
     setStatus('running');
     setStageLabel('Подготовка');
     setStageIndex(0);
@@ -311,6 +319,7 @@ export function useAnalyticsReport(meetingId: string | null): UseAnalyticsReport
       reportIdRef.current = res?.report_id ?? null;
     } catch (e) {
       console.error('Failed to start analytics report:', e);
+      autoDownloadRequestedRef.current = false;
       setStatus('failed');
       setError(e instanceof Error ? e.message : String(e));
       toast.error(t('Report failed'));
@@ -361,6 +370,27 @@ export function useAnalyticsReport(meetingId: string | null): UseAnalyticsReport
     }
   }, [htmlPath]);
 
+  const downloadReport = useCallback(async () => {
+    if (!meetingId || status !== 'completed') return;
+    Analytics.trackButtonClick('download_analytics_report', 'meeting_details');
+    try {
+      const savedPath = await invoke<string | null>('download_analytics_report', { meetingId });
+      if (savedPath) toast.success(t('Report saved'));
+    } catch (e) {
+      console.error('Failed to save analytics report:', e);
+      toast.error(`${t('Failed to save report')}: ${String(e)}`);
+    }
+  }, [meetingId, status, t]);
+
+  // A report started by the user is a single action: generate, then immediately
+  // offer to save the completed HTML. Clear the intent before invoking so a
+  // cancelled dialog or a duplicate completion signal cannot open it twice.
+  useEffect(() => {
+    if (status !== 'completed' || !autoDownloadRequestedRef.current) return;
+    autoDownloadRequestedRef.current = false;
+    void downloadReport();
+  }, [status, downloadReport]);
+
   return {
     status,
     stageLabel,
@@ -374,5 +404,6 @@ export function useAnalyticsReport(meetingId: string | null): UseAnalyticsReport
     cancel,
     submitAnswers,
     revealReport,
+    downloadReport,
   };
 }
