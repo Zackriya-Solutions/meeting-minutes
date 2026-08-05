@@ -1,8 +1,7 @@
 'use client';
 
-import { useCallback, useRef, useEffect, useState, memo } from "react";
+import { useCallback, useRef, useEffect, useMemo, useState, memo } from "react";
 import { useTranscriptStreaming } from "@/hooks/useTranscriptStreaming";
-import { motion } from "framer-motion";
 import { TranscriptSegmentData, localizeSpeakerLabel, resolveSpeakerLabel } from "@/types";
 import { SpeakerRenameDialog } from "./MeetingDetails/SpeakerRenameDialog";
 import { useT } from "@/lib/i18n";
@@ -103,17 +102,21 @@ function isPlaybackSegmentActive(
     return playbackTime >= start && playbackTime < end;
 }
 
+// Compiled once at module scope: this runs per segment, and rebuilding eight RegExp
+// objects on every row of a long transcript was pure allocation churn.
+const STOP_WORD_PATTERNS = ['uh', 'um', 'er', 'ah', 'hmm', 'hm', 'eh', 'oh'].map(
+    (word) => new RegExp(`\\b${word}\\b[,\\s]*`, 'gi')
+);
+const WHITESPACE_RUN = /\s+/g;
+
 // Helper function to remove filler words and repetitions
 function cleanStopWords(text: string): string {
-    const stopWords = ['uh', 'um', 'er', 'ah', 'hmm', 'hm', 'eh', 'oh'];
-
     let cleanedText = text;
-    stopWords.forEach(word => {
-        const pattern = new RegExp(`\\b${word}\\b[,\\s]*`, 'gi');
+    for (const pattern of STOP_WORD_PATTERNS) {
         cleanedText = cleanedText.replace(pattern, ' ');
-    });
+    }
 
-    return cleanedText.replace(/\s+/g, ' ').trim();
+    return cleanedText.replace(WHITESPACE_RUN, ' ').trim();
 }
 
 function speakerInitials(label: string): string {
@@ -178,6 +181,9 @@ function RollCallTip({ onDismiss }: { onDismiss: () => void }) {
 }
 
 // Memoized transcript segment component
+// Every prop here must be stable across parent renders or `memo` is decorative: a row
+// that receives a freshly built callback re-renders even when nothing it displays moved.
+// That is why the props are exactly what the row draws — nothing is accepted and ignored.
 const TranscriptSegment = memo(function TranscriptSegment({
     id,
     text,
@@ -191,19 +197,14 @@ const TranscriptSegment = memo(function TranscriptSegment({
     isOwn = false,
 }: {
     id: string;
-    timestamp: number;
     text: string;
-    confidence?: number;
     isStreaming: boolean;
-    showConfidence: boolean;
     highlight?: boolean;
     speakerLabel?: string | null;
     speakerId?: number | null;
     speakerRenamable?: boolean;
     onSpeakerClick?: (speakerId: number) => void;
-    onPlayTimestamp?: (timestamp: number) => void;
     playbackActive?: boolean;
-    onEdit?: () => void;
     isOwn?: boolean;
 }) {
     const t = useT();
@@ -337,6 +338,24 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
         setShowRollCallTip(false);
     }, []);
 
+    // `playbackTime` advances on every `timeupdate` (~4 Hz). Feeding it to each row would
+    // rebuild the whole list four times a second for a highlight that moves once per
+    // segment, so collapse it to the set of ids under the playhead and keep that value
+    // referentially stable until the highlight actually moves. Overlapping mic/system
+    // segments can both be under the playhead, hence a set rather than a single id.
+    const activePlaybackKey = useMemo(() => {
+        if (playbackTime == null) return '';
+        let key = '';
+        for (const segment of segments) {
+            if (isPlaybackSegmentActive(segment, playbackTime)) key += `${segment.id}\n`;
+        }
+        return key;
+    }, [segments, playbackTime]);
+    const activePlaybackIds = useMemo(
+        () => new Set(activePlaybackKey ? activePlaybackKey.split('\n').slice(0, -1) : []),
+        [activePlaybackKey]
+    );
+
     // Stable so memoized segments don't re-render on every parent render.
     const handleSpeakerClick = useCallback((speakerId: number) => {
         setRenamingSpeaker({
@@ -467,18 +486,16 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                     messageId={segment.id}
                                     scrollAnchor={isRecording && segment.id === segments.at(-1)?.id}
                                 >
-                                  <motion.div
-                                    initial={{ opacity: 0, y: 5 }}
-                                    animate={{ opacity: 1, y: 0 }}
-                                    transition={{ duration: 0.15 }}
-                                  >
+                                  {/* A CSS entry animation instead of a per-row motion
+                                      component: framer-motion allocates an animation
+                                      controller per instance, and a saved transcript
+                                      mounts every row at once. Only the live view gains
+                                      anything from animating arrivals. */}
+                                  <div className={isRecording ? 'animate-in fade-in slide-in-from-bottom-1 duration-150' : undefined}>
                                     <TranscriptSegment
                                         id={segment.id}
-                                        timestamp={segment.timestamp}
                                         text={getDisplayText(segment)}
-                                        confidence={segment.confidence}
                                         isStreaming={isStreaming}
-                                        showConfidence={showConfidence}
                                         highlight={highlightedId === segment.id}
                                         speakerLabel={speakerLabel}
                                         speakerId={segment.speaker_id}
@@ -488,12 +505,10 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                             !!speakersById?.has(segment.speaker_id)
                                         }
                                         onSpeakerClick={handleSpeakerClick}
-                                        onPlayTimestamp={onPlayTimestamp}
-                                        playbackActive={isPlaybackSegmentActive(segment, playbackTime)}
-                                        onEdit={onCorrectTranscript ? () => setEditingSegment({ id: segment.id, text: segment.text }) : undefined}
+                                        playbackActive={activePlaybackIds.has(segment.id)}
                                         isOwn={isOwnSegment}
                                     />
-                                  </motion.div>
+                                  </div>
                                 </MessageScrollerItem>
                             );
                         })}
