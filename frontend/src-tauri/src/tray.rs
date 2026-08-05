@@ -33,7 +33,9 @@ pub fn create_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     Ok(())
 }
 
-fn handle_menu_event<R: Runtime>(app: &AppHandle<R>, item_id: &str) {
+/// Dispatch a menu selection by item id. Shared by the tray and the macOS menu bar
+/// ([`crate::app_menu`]) so an item present in both behaves identically.
+pub fn handle_menu_event<R: Runtime>(app: &AppHandle<R>, item_id: &str) {
     match item_id {
         "toggle_recording" => toggle_recording_handler(app),
         "pause_recording" => pause_recording_handler(app),

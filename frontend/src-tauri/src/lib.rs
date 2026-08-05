@@ -40,6 +40,9 @@ pub(crate) use perf_trace;
 pub mod analytics;
 pub mod anthropic;
 pub mod api;
+/// The macOS application menu bar (Check for Updates, Settings, standard edit commands).
+#[cfg(target_os = "macos")]
+pub mod app_menu;
 pub mod audio;
 pub mod background_capture;
 pub mod calendar;
@@ -365,6 +368,15 @@ pub fn run() {
         }));
     }
 
+    // Menu-bar selections arrive here, not through the tray's own handler, so they are
+    // routed to the same place (see `app_menu`).
+    #[cfg(target_os = "macos")]
+    {
+        builder = builder.on_menu_event(|app, event| {
+            tray::handle_menu_event(app, event.id.as_ref());
+        });
+    }
+
     builder
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_store::Builder::default().build())
@@ -391,6 +403,13 @@ pub fn run() {
                 // Initialize system tray
                 if let Err(e) = tray::create_tray(_app.handle()) {
                     log::error!("Failed to create system tray: {}", e);
+                }
+
+                // macOS menu bar. Non-fatal: a missing menu bar is a degraded UI, not a
+                // reason to refuse to start.
+                #[cfg(target_os = "macos")]
+                if let Err(e) = app_menu::install(_app.handle()) {
+                    log::error!("Failed to install the application menu: {}", e);
                 }
 
                 // Initialize notification system with proper defaults
