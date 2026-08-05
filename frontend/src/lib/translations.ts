@@ -64,7 +64,6 @@ export const RU: Record<string, string> = {
   "More — decisions and tasks": "Подробнее — решения и задачи",
   "Collapse details": "Свернуть подробности",
   "Copy summary": "Скопировать итоги",
-  "Save to note": "Сохранить в заметку",
 
   // Sharing a summary to Telegram. The app opens Telegram's chat picker — it never
   // sends on its own, and the copy must not imply that it does.

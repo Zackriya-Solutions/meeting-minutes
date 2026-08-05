@@ -34,7 +34,6 @@ interface MeetingOverflowMenuProps {
   hasSummary: boolean;
   onCopySummary: () => Promise<void> | void;
   onRenameMeeting: () => void;
-  onSaveSummary: () => Promise<void> | void;
   /** Omitted (along with `canShareToTelegram`) when Telegram sharing is unavailable. */
   onShareSummaryToTelegram?: () => Promise<void> | void;
   canShareToTelegram?: boolean;
@@ -48,7 +47,6 @@ export function MeetingOverflowMenu({
   hasSummary,
   onCopySummary,
   onRenameMeeting,
-  onSaveSummary,
   onShareSummaryToTelegram,
   canShareToTelegram = false,
   modelConfig,
@@ -148,17 +146,9 @@ export function MeetingOverflowMenu({
             onSelect={() => void onCopySummary()}
           />
 
-          <MenuItem
-            index={2}
-            iconName="save"
-            label={t('Save to note')}
-            disabled={!hasSummary}
-            onSelect={() => void onSaveSummary()}
-          />
-
           {canShareToTelegram && onShareSummaryToTelegram && (
             <MenuItem
-              index={3}
+              index={2}
               iconName="send"
               label={t('Send to Telegram')}
               disabled={!hasSummary}
@@ -167,7 +157,7 @@ export function MeetingOverflowMenu({
           )}
 
           <MenuItem
-            index={4}
+            index={3}
             iconName="language"
             label={t('Summary language')}
             trailing={languageLabel}
@@ -175,7 +165,7 @@ export function MeetingOverflowMenu({
           />
 
           <MenuItem
-            index={5}
+            index={4}
             iconName="settings"
             label={t('AI Model')}
             trailing={modelLabel}
@@ -185,7 +175,7 @@ export function MeetingOverflowMenu({
           <DropdownSeparator />
 
           <MenuItem
-            index={6}
+            index={5}
             iconName={deleting ? 'progress_activity' : 'delete'}
             label={t('Delete meeting')}
             disabled={deleting}
