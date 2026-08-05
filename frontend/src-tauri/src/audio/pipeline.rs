@@ -804,6 +804,17 @@ impl AudioCapture {
                 }
             }
 
+            // STEP 4: Publish the level for the recording waveform.
+            //
+            // Microphone only, and mic-only: this runs inside the
+            // DeviceType::Microphone branch, one AudioCapture serves one
+            // device, and mixing with system audio happens downstream in
+            // AudioPipeline. No system energy can reach this number, so the
+            // wave cannot show "speaking" while only the far end is talking.
+            //
+            // Measured after normalization on purpose — the wave should track
+            // what the meeting hears, so it reads the same for a quiet mic and
+            // a loud one.
             let rms = if mono_data.is_empty() {
                 0.0
             } else {
@@ -1442,6 +1453,16 @@ impl Default for AudioPipelineManager {
 mod tests {
     use super::*;
 
+    /// The published level is process-wide, so the tests that write it take
+    /// turns rather than racing each other under the parallel test harness.
+    static LEVEL_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn level_test_guard() -> std::sync::MutexGuard<'static, ()> {
+        LEVEL_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
     #[test]
     fn ring_buffer_flush_returns_the_aligned_tail_then_nothing() {
         // 600ms windows: at 1000 Hz that is 600 samples, so 100 samples is a tail.
@@ -1523,11 +1544,102 @@ mod tests {
 
     #[test]
     fn stopping_the_pipeline_retires_the_published_level() {
+        let _guard = level_test_guard();
+
         store_microphone_level(0.4);
         assert_eq!(current_microphone_level(), 0.4);
 
         reset_microphone_level();
         assert_eq!(current_microphone_level(), 0.0);
+    }
+
+    /// One capture serves one device, and mixing happens downstream, so loud
+    /// system audio must leave the published level alone — otherwise the wave
+    /// shows the user speaking while only the far end is talking.
+    #[test]
+    fn only_the_microphone_capture_publishes_a_level() {
+        let _guard = level_test_guard();
+
+        fn capture_for(device_type: DeviceType) -> AudioCapture {
+            let state = RecordingState::new();
+            state.start_recording().expect("start recording");
+            AudioCapture::new(
+                Arc::new(AudioDevice::new(
+                    "test device".to_string(),
+                    super::super::devices::DeviceType::Input,
+                )),
+                state,
+                48_000, // matches the pipeline rate, so nothing is resampled away
+                1,
+                device_type,
+                None,
+            )
+        }
+
+        let loud = vec![0.5f32; 4_800];
+
+        reset_microphone_level();
+        capture_for(DeviceType::System).process_audio_data(&loud);
+        assert_eq!(
+            current_microphone_level(),
+            0.0,
+            "system audio must not reach the microphone level"
+        );
+
+        capture_for(DeviceType::Microphone).process_audio_data(&loud);
+        assert!(
+            current_microphone_level() > 0.0,
+            "microphone audio must reach the level the waveform polls"
+        );
+
+        reset_microphone_level();
+    }
+
+    /// A reader must never see one publication's level paired with another's
+    /// timestamp. Packing both into a single word makes that impossible; this
+    /// pins the invariant so splitting them apart again fails loudly.
+    #[test]
+    fn concurrent_readers_never_observe_a_torn_level_and_timestamp() {
+        use std::sync::atomic::AtomicBool;
+        use std::thread;
+
+        let _guard = level_test_guard();
+
+        // Each publication stores a level that encodes its own timestamp, so a
+        // torn pair is detectable from the packed word alone.
+        fn level_for(at_ms: u32) -> f32 {
+            (at_ms % 1_000) as f32 / 1_000.0
+        }
+        let done = Arc::new(AtomicBool::new(false));
+
+        let writer_done = Arc::clone(&done);
+        let writer = thread::spawn(move || {
+            for at_ms in 0..200_000u32 {
+                MICROPHONE_LEVEL.store(
+                    pack_microphone_level(level_for(at_ms), at_ms),
+                    Ordering::Relaxed,
+                );
+            }
+            writer_done.store(true, Ordering::Release);
+        });
+
+        // Read at least once even if the writer has already finished.
+        loop {
+            let finished = done.load(Ordering::Acquire);
+            let packed = MICROPHONE_LEVEL.load(Ordering::Relaxed);
+            let at_ms = packed as u32;
+            assert_eq!(
+                f32::from_bits((packed >> 32) as u32),
+                level_for(at_ms),
+                "observed a level that was never published with timestamp {at_ms}"
+            );
+            if finished {
+                break;
+            }
+        }
+
+        writer.join().expect("writer thread");
+        reset_microphone_level();
     }
 
     #[test]
