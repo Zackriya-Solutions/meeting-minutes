@@ -7,6 +7,40 @@
  * Generated/maintained alongside the Settings i18n conversion.
  */
 export const RU: Record<string, string> = {
+  // Onboarding: welcome, the one model package, the DeepSeek tier
+  "A meeting turns into its outcome": "Встреча превращается в итоги",
+  "Memento listens to the call, writes down who said what, and collects the decisions, tasks and figures.":
+    "Memento слушает встречу, записывает, кто что сказал, и собирает решения, задачи и цифры",
+  "What it looks like": "Как это выглядит",
+  "Texts are on me, I will send them by end of day": "Тексты на мне, пришлю до конца дня",
+  "Then I will put the build together on Thursday morning":
+    "Тогда соберу сборку в четверг утром",
+  "Task": "Задача",
+  "Release on Friday the 21st": "релиз в пятницу, 21-го",
+  "Игорь — build on Thursday, before 12:00": "Игорь — сборка в четверг до 12:00",
+  "Setup takes about a minute. A ready example meeting opens at the end — you can delete it.":
+    "Настройка займёт около минуты. В конце откроется готовый пример встречи — его можно удалить",
+  "Models and summaries": "Модели и итоги",
+  "Speech is recognised on this computer. Summaries are written by DeepSeek, so they need the internet.":
+    "Речь распознаётся на этом компьютере. Итоги пишет DeepSeek — для этого нужен интернет",
+  "Recognition models": "Модели распознавания",
+  "Downloaded once, then transcription works without the internet":
+    "Загружаются один раз, дальше расшифровка работает без интернета",
+  "Downloaded — transcription works without the internet":
+    "Загружены — расшифровка работает без интернета",
+  "Speech recognition": "Распознавание речи",
+  "Labels who said what": "Определяет, кто говорит",
+  "MB of": "МБ из",
+  "Model for summaries": "Модель для итогов",
+  "More precise with details and figures": "Точнее в деталях и цифрах",
+  "Faster and cheaper": "Быстрее и дешевле",
+  "by default": "по умолчанию",
+  "Could not open System Settings": "Не удалось открыть настройки системы",
+  "Other providers (advanced)": "Другие провайдеры — для опытных",
+  "You can change the model later in Settings → Summaries":
+    "Модель можно поменять позже в «Настройки → Суммаризация»",
+  "Continue — download keeps going": "Продолжить — загрузка идёт в фоне",
+
   // Deep Analytics report (meeting top bar + build dialog)
   "Analytical report": "Аналитический отчёт",
   "Open report": "Открыть отчёт",
@@ -564,7 +598,7 @@ export const RU: Record<string, string> = {
   "Open Settings": "Открыть настройки",
   "Enable": "Разрешить",
   "Access Granted": "Доступ предоставлен",
-  "Access Denied - Please grant in System Settings": "Доступ запрещён — разреши его в настройках системы",
+  "Access Denied - Please grant in System Settings": "Доступ запрещён — разрешите его в настройках системы",
   "Welcome to Meetily": "Встречи остаются с тобой",
   "Record. Transcribe. Summarize. All on your device.": "Записывай, расшифровывай и суммаризируй на своём устройстве",
   "Your data never leaves your device": "Данные остаются на твоём устройстве",
@@ -581,9 +615,9 @@ export const RU: Record<string, string> = {
   "You can also select external AI providers like OpenAI, Claude, or Ollama for summary generation in settings.": "В настройках доступны внешние провайдеры: GigaChat, OpenAI, Ollama и другие.",
   "Let's Go": "Продолжить",
   "Report issues on GitHub": "Сообщить о проблеме на GitHub",
-  "Please enable microphone access in System Preferences > Security & Privacy > Microphone": "Разреши доступ к микрофону в настройках конфиденциальности системы.",
-  "Please enable Audio Capture in System Settings → Privacy & Security → Audio Capture": "Разреши захват аудио в настройках конфиденциальности системы.",
-  "Grant Permissions": "Разреши запись звука",
+  "Please enable microphone access in System Preferences > Security & Privacy > Microphone": "Разрешите доступ к микрофону в настройках конфиденциальности системы.",
+  "Please enable Audio Capture in System Settings → Privacy & Security → Audio Capture": "Разрешите захват аудио в настройках конфиденциальности системы.",
+  "Grant Permissions": "Разрешите запись звука",
   "Meetily needs access to your microphone and system audio to record meetings": "Memento использует микрофон и системный звук только во время записи встречи",
   "Memento needs access to your microphone and system audio to record meetings": "Memento использует микрофон и системный звук только во время записи встречи",
   "Microphone": "Микрофон",

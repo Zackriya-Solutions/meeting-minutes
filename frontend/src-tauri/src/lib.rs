@@ -50,6 +50,7 @@ pub mod collections;
 pub mod config;
 pub mod console_utils;
 pub mod database;
+pub mod demo_meeting;
 pub mod gateway_identity;
 pub mod gigaam_engine;
 pub mod groq;
@@ -1076,6 +1077,7 @@ pub fn run() {
             onboarding::get_onboarding_status,
             onboarding::save_onboarding_status_cmd,
             onboarding::reset_onboarding_status_cmd,
+            onboarding::onboarding_should_run,
             onboarding::complete_onboarding,
             // System settings commands
             #[cfg(target_os = "macos")]

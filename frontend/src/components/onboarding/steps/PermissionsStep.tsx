@@ -1,15 +1,18 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Icon } from '@/components/memento/Icon';
 import { OnboardingContainer } from '../OnboardingContainer';
 import { PermissionRow } from '../shared';
+import { useFinishOnboarding } from '../useFinishOnboarding';
 import { useOnboarding } from '@/contexts/OnboardingContext';
 import { useT } from '@/lib/i18n';
 
 export function PermissionsStep() {
   const t = useT();
-  const { setPermissionStatus, setPermissionsSkipped, permissions, completeOnboarding } = useOnboarding();
+  const { setPermissionStatus, setPermissionsSkipped, permissions } = useOnboarding();
+  const { finish, isFinishing } = useFinishOnboarding();
   const [isPending, setIsPending] = useState(false);
 
   // Check permissions - only logs current state, doesn't auto-authorize
@@ -27,15 +30,35 @@ export function PermissionsStep() {
     checkPermissions();
   }, [checkPermissions]);
 
+  /**
+   * Open the System Settings pane for a permission the user has already denied.
+   *
+   * The pane anchor is required: `open_system_settings` takes it as an argument, and calling
+   * the command without one made the button silently do nothing (the rejected invoke fell into
+   * a catch whose `alert()` a Tauri webview never shows). If macOS does not recognise the
+   * anchor it opens Privacy & Security itself, which is still where the user needs to be.
+   */
+  const openSettingsPane = async (
+    pane: string,
+    permission: 'microphone' | 'systemAudio',
+  ) => {
+    try {
+      await invoke('open_system_settings', { preferencePane: pane });
+    } catch (error) {
+      console.error('[PermissionsStep] Could not open System Settings:', error);
+      toast.error(t('Could not open System Settings'), {
+        description:
+          permission === 'microphone'
+            ? t('Please enable microphone access in System Preferences > Security & Privacy > Microphone')
+            : t('Please enable Audio Capture in System Settings → Privacy & Security → Audio Capture'),
+      });
+    }
+  };
+
   // Request microphone permission
   const handleMicrophoneAction = async () => {
     if (permissions.microphone === 'denied') {
-      // Try to open system settings
-      try {
-        await invoke('open_system_settings');
-      } catch {
-        alert(t('Please enable microphone access in System Preferences > Security & Privacy > Microphone'));
-      }
+      await openSettingsPane('Privacy_Microphone', 'microphone');
       return;
     }
 
@@ -62,12 +85,7 @@ export function PermissionsStep() {
   // Request system audio permission
   const handleSystemAudioAction = async () => {
     if (permissions.systemAudio === 'denied') {
-      // Try to open system settings
-      try {
-        await invoke('open_system_settings');
-      } catch {
-        alert(t('Please enable Audio Capture in System Settings → Privacy & Security → Audio Capture'));
-      }
+      await openSettingsPane('Privacy_AudioCapture', 'systemAudio');
       return;
     }
 
@@ -95,18 +113,9 @@ export function PermissionsStep() {
     }
   };
 
-  const handleFinish = async () => {
-    try {
-      await completeOnboarding();
-      window.location.reload();
-    } catch (error) {
-      console.error('Failed to complete onboarding:', error);
-    }
-  };
-
   const handleSkip = async () => {
     setPermissionsSkipped(true);
-    await handleFinish();
+    await finish();
   };
 
   const allPermissionsGranted =
@@ -117,10 +126,8 @@ export function PermissionsStep() {
     <OnboardingContainer
       title={t('Grant Permissions')}
       description={t('Memento needs access to your microphone and system audio to record meetings')}
-      step={4}
-      hideProgress={true}
-      showNavigation={allPermissionsGranted}
-      canGoNext={allPermissionsGranted}
+      step={3}
+      totalSteps={3}
     >
       <div className="max-w-lg mx-auto space-y-6">
         {/* Permission Rows */}
@@ -148,7 +155,11 @@ export function PermissionsStep() {
 
         {/* Action Buttons */}
         <div className="flex flex-col gap-3 pt-4">
-          <Button onClick={handleFinish} disabled={!allPermissionsGranted} className="w-full h-11">
+          <Button
+            onClick={() => void finish()}
+            disabled={!allPermissionsGranted || isFinishing}
+            className="w-full h-11"
+          >
             {t('Finish Setup')}
           </Button>
 

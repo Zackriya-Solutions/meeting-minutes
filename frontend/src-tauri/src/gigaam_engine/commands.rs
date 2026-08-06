@@ -620,6 +620,19 @@ pub async fn gigaam_status<R: Runtime>(app: AppHandle<R>) -> Result<serde_json::
     }))
 }
 
+/// The model label to record in `transcript_settings` for this install: whichever variant is
+/// selected on disk, not the compiled-in default.
+///
+/// Onboarding can run on a machine that already holds a non-default variant (a re-run after a
+/// reset, a reinstall over existing models). Writing the default there would label the engine
+/// as something the user is not running.
+pub fn selected_model_label<R: Runtime>(app: &AppHandle<R>) -> String {
+    let selected = gigaam_dir(app)
+        .map(|dir| read_selected(&dir))
+        .unwrap_or_default();
+    format!("gigaam-v3-{}", selected.id())
+}
+
 /// Persist a variant selection. If its files are already present, load it immediately
 /// (and emit `gigaam-ready`); otherwise the frontend will prompt a download. The
 /// previously loaded model is left running until the new one is ready.

@@ -9,10 +9,27 @@ use std::time::Duration;
 
 pub const DEFAULT_BASE_URL: &str = crate::gateway_identity::PRIMARY_DEEPSEEK_BASE_URL;
 pub const DEFAULT_MODEL: &str = "deepseek-v4-pro";
+/// Cheaper, faster tier. Offered next to [`DEFAULT_MODEL`] as the only summary choice.
+pub const FLASH_MODEL: &str = "deepseek-v4-flash";
+/// The two tiers the app offers for summaries and reports, best first.
+pub const OFFERED_MODELS: [&str; 2] = [DEFAULT_MODEL, FLASH_MODEL];
 pub const DEFAULT_MAX_TOKENS: u32 = 8_192;
 pub const MIN_MAX_TOKENS: u32 = 1_024;
 pub const MAX_MAX_TOKENS: u32 = 32_768;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(300);
+
+/// Coerce a model name to one of the offered tiers.
+///
+/// Model names arrive from saved settings and from the frontend, both of which can be older
+/// than this build — the retired `deepseek-chat` / `deepseek-reasoner` aliases would 400 at
+/// the gateway. Anything unrecognised becomes [`DEFAULT_MODEL`].
+pub fn normalize_model(candidate: &str) -> &'static str {
+    let candidate = candidate.trim();
+    OFFERED_MODELS
+        .into_iter()
+        .find(|model| model.eq_ignore_ascii_case(candidate))
+        .unwrap_or(DEFAULT_MODEL)
+}
 
 /// Summary/extraction calls need predictable latency and a complete final answer rather
 /// than a long chain-of-thought. DeepSeek V4 enables thinking by default, so disable it

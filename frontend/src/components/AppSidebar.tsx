@@ -9,6 +9,7 @@ import {
   SidebarFooter,
 } from '@/components/ui/sidebar';
 import { useT } from '@/lib/i18n';
+import { Wordmark } from '@/components/memento/Wordmark';
 import { useImportDialog } from '@/contexts/ImportDialogContext';
 import { fluidFontWeight, spring } from '@/lib/fluid/springs';
 import {
@@ -254,20 +255,7 @@ export function AppSidebar() {
         aria-label={t('Meetings')}
         onClick={() => router.push('/')}
       >
-        <span
-          aria-hidden="true"
-          className="aspect-[10/3] w-[115.2px] bg-[var(--deslop-primary-40)]"
-          style={{
-            WebkitMaskImage: "url('/memento-logo-handwritten.svg')",
-            maskImage: "url('/memento-logo-handwritten.svg')",
-            WebkitMaskPosition: 'center',
-            maskPosition: 'center',
-            WebkitMaskRepeat: 'no-repeat',
-            maskRepeat: 'no-repeat',
-            WebkitMaskSize: 'contain',
-            maskSize: 'contain',
-          }}
-        />
+        <Wordmark />
       </button>
       <div className="flex-1" />
       <SidebarFooter className="mt-auto border-0 p-3">
