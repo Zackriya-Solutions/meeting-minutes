@@ -6,7 +6,9 @@
 //! particular, bodies, attachments, recipient addresses, and credentials are
 //! never requested.
 
-use super::local_outlook::{LocalOutlookCalendarStatus, LocalOutlookMeeting};
+use super::local_outlook::{
+    normalize_attendees, LocalOutlookCalendarStatus, LocalOutlookMeeting,
+};
 use chrono::{DateTime, Duration, Local, LocalResult, NaiveDate, NaiveDateTime, TimeZone};
 use std::collections::{HashMap, HashSet};
 use std::ptr;
@@ -189,6 +191,21 @@ struct CalendarFolder {
 
 fn trimmed_bounded(value: String, max_chars: usize) -> String {
     value.trim().chars().take(max_chars).collect::<String>()
+}
+
+/// Invitee names for one appointment, organizer first.
+///
+/// The Outlook Object Model exposes the invitee lists as the semicolon-separated
+/// display names Outlook itself shows, so no address book lookup is needed and the
+/// appointment body is never touched.
+fn attendee_names(item: &AutomationObject) -> Vec<String> {
+    let mut names: Vec<String> = item.optional_string("Organizer").into_iter().collect();
+    for property in ["RequiredAttendees", "OptionalAttendees"] {
+        if let Some(value) = item.optional_string(property) {
+            names.extend(value.split(';').map(|name| name.trim().to_string()));
+        }
+    }
+    normalize_attendees(names)
 }
 
 fn string_from_variant(value: &VARIANT) -> Result<String, String> {
@@ -442,6 +459,7 @@ fn query_calendar(
                         .optional_string("Location")
                         .map(|value| trimmed_bounded(value, 500)),
                     response_status: response_status_label(response_status).to_string(),
+                    attendees: attendee_names(&item),
                 });
             }
         }

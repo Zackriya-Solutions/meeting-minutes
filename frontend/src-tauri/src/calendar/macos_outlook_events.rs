@@ -24,14 +24,23 @@ use chrono::{DateTime, Duration, Local, LocalResult, NaiveDateTime, TimeZone};
 use sha2::{Digest, Sha256};
 
 use super::{
-    local_outlook::LocalOutlookMeeting,
+    local_outlook::{normalize_attendees, LocalOutlookMeeting, MAX_ATTENDEES},
     macos_outlook::{outlook_installed, outlook_pid},
 };
 
 const OUTLOOK_BUNDLE_ID: &str = "com.microsoft.Outlook";
 const RECORD_SEPARATOR: char = '\u{1e}';
 const UNIT_SEPARATOR: char = '\u{1f}';
+/// Separates the invitee names inside a record's attendee field.
+const GROUP_SEPARATOR: char = '\u{1d}';
 const SCRIPT_TIMEOUT: StdDuration = StdDuration::from_secs(150);
+/// Invitee names one calendar read may fetch in total.
+///
+/// Every name is two Apple Event round trips, so a full week of large invitations could
+/// otherwise turn a background refresh into a minute of automation traffic. A calendar
+/// busy enough to exhaust this budget still returns every meeting, with the later
+/// entries simply carrying no invitee list.
+const ATTENDEE_NAME_BUDGET: usize = 400;
 /// Meetings that already started are still worth offering as a recording target.
 const LOOKBEHIND_HOURS: i64 = 2;
 
@@ -218,7 +227,10 @@ pub fn upcoming_meetings(days: u32) -> Result<Vec<LocalOutlookMeeting>, String> 
         }
     }
 
-    let script = CALENDAR_SCRIPT.replace("__DAYS__", &days.to_string());
+    let script = CALENDAR_SCRIPT
+        .replace("__DAYS__", &days.to_string())
+        .replace("__MAX_ATTENDEES__", &MAX_ATTENDEES.to_string())
+        .replace("__ATTENDEE_BUDGET__", &ATTENDEE_NAME_BUDGET.to_string());
     let output = run_osascript(&script, SCRIPT_TIMEOUT)?;
 
     let now = Local::now();
@@ -276,6 +288,14 @@ fn parse_record(
     let is_recurring = fields[7].trim() == "true";
     let location = fields[8].trim();
     let attendee_count = fields[9].trim().parse::<u32>().unwrap_or(0);
+    // Older records carried no invitee field; a meeting without one is still usable.
+    let attendees = normalize_attendees(
+        fields
+            .get(10)
+            .copied()
+            .unwrap_or_default()
+            .split(GROUP_SEPARATOR),
+    );
 
     if subject.is_empty() {
         return None;
@@ -312,10 +332,11 @@ fn parse_record(
         start_at: start_at.to_rfc3339(),
         end_at: end_at.to_rfc3339(),
         is_all_day,
-        is_meeting: attendee_count > 0,
+        is_meeting: attendee_count > 0 || !attendees.is_empty(),
         is_recurring,
         location: (!location.is_empty()).then(|| location.to_string()),
         response_status: "none".to_string(),
+        attendees,
     })
 }
 
@@ -403,8 +424,9 @@ fn run_osascript(script: &str, timeout: StdDuration) -> Result<String, String> {
     }
 }
 
-/// Reads only the documented calendar fields. `content` and `plain text
-/// content` (the appointment body) are deliberately never requested.
+/// Reads only the documented calendar fields, now including the invitee names an
+/// invitation carries. `content` and `plain text content` (the appointment body) are
+/// deliberately never requested.
 const CALENDAR_SCRIPT: &str = r#"
 on padNumber(value, width)
 	set rendered to (value as integer) as text
@@ -426,7 +448,7 @@ end textOrEmpty
 on flattenText(value)
 	set rendered to value as text
 	set saved to AppleScript's text item delimiters
-	set AppleScript's text item delimiters to {return, linefeed, tab, (character id 30), (character id 31)}
+	set AppleScript's text item delimiters to {return, linefeed, tab, (character id 29), (character id 30), (character id 31)}
 	set parts to text items of rendered
 	set AppleScript's text item delimiters to " "
 	set rendered to parts as text
@@ -436,11 +458,13 @@ end flattenText
 
 set unitSeparator to (character id 31)
 set recordSeparator to (character id 30)
+set groupSeparator to (character id 29)
 set rightNow to (current date)
 set rangeStart to rightNow - (2 * hours)
 set rangeEnd to rightNow + (__DAYS__ * days)
 set collected to {}
 set failureText to ""
+set attendeeBudget to __ATTENDEE_BUDGET__
 
 tell application "Microsoft Outlook"
 	launch
@@ -502,12 +526,53 @@ tell application "Microsoft Outlook"
 						end try
 					end if
 
+					-- Invitee names, so a recording started from this entry knows who was
+					-- invited. Only the name and address of each invitee are read; the
+					-- appointment body is still never requested. The per-event cap keeps a
+					-- distribution list from spending the whole Apple Events budget.
 					set attendeeTotal to 0
+					set attendeeNames to {}
 					try
-						set attendeeTotal to (count of attendees of currentEvent)
+						set eventAttendees to attendees of currentEvent
+						set attendeeTotal to (count of eventAttendees)
+						set attendeeLimit to attendeeTotal
+						if attendeeLimit > __MAX_ATTENDEES__ then set attendeeLimit to __MAX_ATTENDEES__
+						if attendeeLimit > attendeeBudget then set attendeeLimit to attendeeBudget
+						set attendeeBudget to attendeeBudget - attendeeLimit
+						repeat with attendeeIndex from 1 to attendeeLimit
+							set attendeeName to ""
+							try
+								set attendeeAddress to email address of item attendeeIndex of eventAttendees
+								try
+									set attendeeName to my textOrEmpty(name of attendeeAddress)
+								end try
+								if attendeeName is "" then
+									try
+										set attendeeName to my textOrEmpty(address of attendeeAddress)
+									end try
+								end if
+							end try
+							if attendeeName is not "" then set end of attendeeNames to attendeeName
+						end repeat
 					end try
 
-					set end of collected to (calendarIdentifier & unitSeparator & calendarName & unitSeparator & eventKey & unitSeparator & eventSubject & unitSeparator & my isoStamp(startsAt) & unitSeparator & my isoStamp(endsAt) & unitSeparator & (eventAllDay as text) & unitSeparator & (eventRecurring as text) & unitSeparator & eventLocation & unitSeparator & (attendeeTotal as text))
+					-- `organizer` is plain display text on a calendar event, unlike an
+					-- attendee's `email address` record.
+					set organizerName to ""
+					try
+						set organizerName to my textOrEmpty(organizer of currentEvent)
+					end try
+					if organizerName is not "" then set beginning of attendeeNames to organizerName
+
+					set attendeeText to ""
+					if (count of attendeeNames) > 0 then
+						set savedDelimiters to AppleScript's text item delimiters
+						set AppleScript's text item delimiters to groupSeparator
+						set attendeeText to attendeeNames as text
+						set AppleScript's text item delimiters to savedDelimiters
+					end if
+
+					set end of collected to (calendarIdentifier & unitSeparator & calendarName & unitSeparator & eventKey & unitSeparator & eventSubject & unitSeparator & my isoStamp(startsAt) & unitSeparator & my isoStamp(endsAt) & unitSeparator & (eventAllDay as text) & unitSeparator & (eventRecurring as text) & unitSeparator & eventLocation & unitSeparator & (attendeeTotal as text) & unitSeparator & attendeeText)
 				end try
 			end repeat
 		end repeat
@@ -560,6 +625,8 @@ mod tests {
         assert_eq!(meetings.len(), 1);
         let meeting = &meetings[0];
         assert_eq!(meeting.subject, "Командный синк");
+        // A record from an older read carries no invitee field at all.
+        assert!(meeting.attendees.is_empty());
         assert_eq!(meeting.calendar_name, "Календарь");
         assert_eq!(meeting.location.as_deref(), Some("Переговорная 1"));
         assert!(meeting.is_recurring);
@@ -567,6 +634,79 @@ mod tests {
         assert!(!meeting.is_all_day);
         assert!(meeting.start_at.contains("T10:30:00"));
         assert!(meeting.end_at.contains("T11:15:00"));
+    }
+
+    #[test]
+    fn reads_the_invitee_names_organizer_first() {
+        let range_start = Local
+            .with_ymd_and_hms(2026, 7, 28, 0, 0, 0)
+            .single()
+            .unwrap();
+        let range_end = range_start + Duration::days(7);
+        let invitees = [
+            "Андрей Евлампиев",
+            "Мария Петрова",
+            // A duplicate spelling, and an invitee Outlook could only name by address.
+            "андрей евлампиев",
+            "guest@example.com",
+        ]
+        .join(&GROUP_SEPARATOR.to_string());
+        let meetings = parse_records(
+            &record(&[
+                "42",
+                "Календарь",
+                "AAMkAD==",
+                "Планирование спринта",
+                "2026-07-29T10:30:00",
+                "2026-07-29T11:15:00",
+                "false",
+                "false",
+                "",
+                "3",
+                &invitees,
+            ]),
+            range_start,
+            range_end,
+        )
+        .unwrap();
+
+        assert_eq!(
+            meetings[0].attendees,
+            vec![
+                "Андрей Евлампиев".to_string(),
+                "Мария Петрова".to_string(),
+                "guest@example.com".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn counts_an_event_with_invitees_as_a_meeting() {
+        let range_start = Local
+            .with_ymd_and_hms(2026, 7, 28, 0, 0, 0)
+            .single()
+            .unwrap();
+        let range_end = range_start + Duration::days(7);
+        // Outlook can refuse the attendee count and still list the invitees.
+        let meetings = parse_records(
+            &record(&[
+                "42",
+                "Календарь",
+                "AAMkAD==",
+                "Синк",
+                "2026-07-29T10:30:00",
+                "2026-07-29T11:00:00",
+                "false",
+                "false",
+                "",
+                "0",
+                "Мария Петрова",
+            ]),
+            range_start,
+            range_end,
+        )
+        .unwrap();
+        assert!(meetings[0].is_meeting);
     }
 
     #[test]

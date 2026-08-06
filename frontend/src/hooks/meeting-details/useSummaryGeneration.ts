@@ -229,6 +229,17 @@ export function useSummaryGeneration({
       startSummaryPolling(meeting.id, process_id, async (pollingResult) => {
         console.log('Summary status:', pollingResult);
 
+        // `pollEnded` marks the last update for this run. Anything not handled explicitly
+        // below still has to leave `summaryStatus`, or the progress spinner keeps turning
+        // after the poller is gone — with no further update able to stop it.
+        const settleUnhandledEnd = async () => {
+          if (!pollingResult.pollEnded) return;
+          console.warn('Summary polling ended without a usable result:', pollingResult.status);
+          if (await restorePersistedSummary()) return;
+          setSummaryError(pollingResult.error || t('Summary generation stopped without producing a summary.'));
+          setSummaryStatus('error');
+        };
+
         // Handle cancellation
         if (pollingResult.status === 'cancelled') {
           console.log('Summary generation was cancelled');
@@ -403,7 +414,12 @@ export function useSummaryGeneration({
           if (onMeetingUpdated) await onMeetingUpdated();
 
           onSummaryGenerated?.(formattedSummary);
+          return;
         }
+
+        // Reached by a 'completed' status carrying no parseable result and by the 'idle'
+        // status the poller reports when the process row is gone.
+        await settleUnhandledEnd();
       });
     } catch (error) {
       console.error(`Failed to ${isRegeneration ? 'regenerate' : 'generate'} summary:`, error);

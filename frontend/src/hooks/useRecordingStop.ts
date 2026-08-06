@@ -15,6 +15,10 @@ import { migrateMarkedMoments } from '@/lib/markedMoments';
 import { migrateStandupLiveState } from '@/lib/standupLiveState';
 import { migrateInterviewLiveState } from '@/lib/interviewLiveState';
 import { takeDiarizationPrefs } from '@/lib/diarizationPrefs';
+import {
+  saveMeetingParticipants,
+  takeMeetingParticipants,
+} from '@/lib/meetingParticipants';
 import Analytics from '@/lib/analytics';
 import { useT } from '@/lib/i18n';
 import {
@@ -303,6 +307,18 @@ export function useRecordingStop(
           if (!meetingId) {
             console.error('No meeting_id in response:', responseData);
             throw new Error(t('No meeting ID received from save operation'));
+          }
+
+          // Who the calendar invited, learned when the recording started. Attaching it
+          // now is what lets speaker naming put those names to the voices; a failure
+          // here costs names, never the meeting.
+          const invitedParticipants = takeMeetingParticipants(sessionStorage);
+          if (invitedParticipants.length > 0) {
+            try {
+              await saveMeetingParticipants(meetingId, invitedParticipants);
+            } catch (error) {
+              console.warn('Failed to attach the invited participants:', error);
+            }
           }
 
           const autoListeningSessionId = sessionStorage.getItem('autoListeningSessionId');

@@ -38,6 +38,11 @@ pub const PERMISSION_DENIED: &str = "denied";
 pub const PERMISSION_UNDETERMINED: &str = "undetermined";
 pub const PERMISSION_UNKNOWN: &str = "unknown";
 
+/// Upper bound on the invitee names carried with one event. A distribution list can
+/// expand to hundreds of recipients, and a recording only needs the people who might
+/// speak; the cap also keeps the Apple Events read inside its timeout.
+pub const MAX_ATTENDEES: usize = 40;
+
 #[derive(Debug, Clone, Serialize)]
 pub struct LocalOutlookMeeting {
     pub id: String,
@@ -52,6 +57,67 @@ pub struct LocalOutlookMeeting {
     pub is_recurring: bool,
     pub location: Option<String>,
     pub response_status: String,
+    /// Invited people as Outlook names them, organizer first, deduplicated and capped
+    /// at [`MAX_ATTENDEES`]. Empty when the connector cannot read the invitee list
+    /// (the macOS Accessibility fallback only sees the rendered calendar grid).
+    pub attendees: Vec<String>,
+}
+
+/// Normalize an invitee list read from Outlook: trim, drop empties and AppleScript's
+/// `missing value`, deduplicate case-insensitively while keeping the first spelling,
+/// and cap the result.
+pub fn normalize_attendees<I>(names: I) -> Vec<String>
+where
+    I: IntoIterator,
+    I::Item: AsRef<str>,
+{
+    let mut seen = std::collections::HashSet::new();
+    let mut attendees = Vec::new();
+    for name in names {
+        let name = name.as_ref().trim();
+        if name.is_empty() || name.eq_ignore_ascii_case("missing value") {
+            continue;
+        }
+        if !seen.insert(name.to_lowercase()) {
+            continue;
+        }
+        attendees.push(name.to_string());
+        if attendees.len() == MAX_ATTENDEES {
+            break;
+        }
+    }
+    attendees
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalizes_an_invitee_list() {
+        let attendees = normalize_attendees([
+            " Андрей Евлампиев ",
+            "",
+            "missing value",
+            "andrey@example.com",
+            "АНДРЕЙ ЕВЛАМПИЕВ",
+        ]);
+        assert_eq!(
+            attendees,
+            vec![
+                "Андрей Евлампиев".to_string(),
+                "andrey@example.com".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn caps_a_distribution_list() {
+        let many: Vec<String> = (0..200).map(|index| format!("Person {index}")).collect();
+        let attendees = normalize_attendees(&many);
+        assert_eq!(attendees.len(), MAX_ATTENDEES);
+        assert_eq!(attendees[0], "Person 0");
+    }
 }
 
 #[tauri::command]

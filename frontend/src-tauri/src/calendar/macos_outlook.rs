@@ -531,6 +531,8 @@ fn parse_event_label(
         is_recurring,
         location,
         response_status: "none".to_string(),
+        // This connector reads the rendered calendar grid, which names no invitees.
+        attendees: Vec::new(),
     })
 }
 

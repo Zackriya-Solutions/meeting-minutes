@@ -13,8 +13,10 @@ import { useLanguage, useT } from "@/lib/i18n";
 import { useMeetingDrawer } from "@/contexts/MeetingDrawerContext";
 import { MeetingDrawerShell } from "./meeting-drawer-shell";
 import { requestAutoStart } from "@/lib/autoStartRecording";
+import { findLocalOutlookMeeting } from "@/lib/localOutlookCalendar";
 import { useRecordingState } from "@/contexts/RecordingStateContext";
 import { canStartRecordingNow } from "@/lib/recordingNavigation";
+import { isSummaryRunStalled } from "@/lib/summaryRunProgress";
 import {
   cacheMeetingSummary,
   parsePersistedSummary,
@@ -39,6 +41,7 @@ function UpcomingMeetingPreview() {
   const router = useRouter();
   const { isRecording, status } = useRecordingState();
   const { t, lang } = useLanguage();
+  const calendarId = searchParams.get('id');
   const title = searchParams.get('title') || t('Upcoming meeting');
   const start = new Date(searchParams.get('start') || '');
   const end = new Date(searchParams.get('end') || '');
@@ -57,9 +60,29 @@ function UpcomingMeetingPreview() {
     ? `${timeFormatter.format(start)}${hasEnd ? `\u00a0–\u00a0${timeFormatter.format(end)}` : ''}`
     : '';
 
+  // Who the invitation names. The row that opened this screen cannot carry a list
+  // through the query string, so the entry is looked up again by id — the calendar
+  // read is cached, so this is normally free.
+  const [participants, setParticipants] = useState<string[]>([]);
+  useEffect(() => {
+    if (!calendarId) return;
+    let cancelled = false;
+    findLocalOutlookMeeting(calendarId)
+      .then((meeting) => {
+        if (!cancelled) setParticipants(meeting?.attendees ?? []);
+      })
+      .catch((error) => {
+        console.warn('Could not read the invited participants:', error);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [calendarId]);
+
   // A calendar entry is a plan, not a recording, so nothing starts on its own here.
   // What the screen owes the user is a one-tap way to record the meeting it names —
-  // the recorder then uses that name instead of a timestamp.
+  // the recorder then uses that name, and those participants, instead of a timestamp
+  // and nobody.
   const now = Date.now();
   const inProgress = hasStart
     && start.getTime() <= now
@@ -68,7 +91,7 @@ function UpcomingMeetingPreview() {
 
   const recordThisMeeting = () => {
     if (!canRecord) return;
-    requestAutoStart(window.sessionStorage, title);
+    requestAutoStart(window.sessionStorage, title, participants);
     router.push('/recording');
   };
 
@@ -92,6 +115,12 @@ function UpcomingMeetingPreview() {
           <p className="mt-2 text-sm leading-relaxed text-[var(--primary-40)]">
             {t('The transcript and summary will appear here after the meeting is recorded.')}
           </p>
+          {participants.length > 0 && (
+            <p className="mt-4 text-sm leading-relaxed text-[var(--primary-40)]">
+              <span className="font-medium text-foreground">{t('Invited')}: </span>
+              {participants.join(', ')}
+            </p>
+          )}
           <button
             type="button"
             onClick={recordThisMeeting}
@@ -121,6 +150,7 @@ function MeetingDetailsContent() {
   const [meetingSummary, setMeetingSummary] = useState<Summary | null>(initialCachedSummary);
   const meetingSummaryRef = useRef<Summary | null>(initialCachedSummary);
   const summaryLoadRequestRef = useRef(0);
+  const pendingSinceRef = useRef<number | null>(null);
   const [summaryLoadStatus, setSummaryLoadStatus] = useState<SummaryLoadStatus>(
     initialCachedSummary ? 'loaded' : 'loading',
   );
@@ -264,6 +294,12 @@ function MeetingDetailsContent() {
     console.log('fetchMeetingDetails called - pagination hook will handle refetch');
   }, [meetingId]);
 
+  const hasSummaryRunStalled = useCallback((startedAt?: string | null) => isSummaryRunStalled({
+    startedAt,
+    firstSeenAt: (pendingSinceRef.current ??= Date.now()),
+    now: Date.now(),
+  }), []);
+
   const fetchMeetingSummary = useCallback(async (showPageLoader = false) => {
     if (!meetingId || meetingId === 'intro-call') return;
 
@@ -303,6 +339,14 @@ function MeetingDetailsContent() {
           }
 
           if (['pending', 'processing', 'summarizing', 'regenerating'].includes(response?.status)) {
+            if (hasSummaryRunStalled(response?.start)) {
+              // Treat an abandoned run as a missing summary rather than a permanent spinner:
+              // 'absent' lets the automatic generation effect start a fresh, tracked run.
+              console.warn(`Summary run for ${meetingId} looks abandoned; started at ${response?.start}`);
+              setSummaryLoadStatus(meetingSummaryRef.current ? 'loaded' : 'absent');
+              setSummaryLoadError(t('Summary generation was interrupted. Try again.'));
+              return;
+            }
             setSummaryLoadStatus(meetingSummaryRef.current ? 'loaded' : 'loading');
             return;
           }
@@ -339,7 +383,7 @@ function MeetingDetailsContent() {
     } finally {
       if (summaryLoadRequestRef.current === requestId) setIsLoading(false);
     }
-  }, [meetingId, commitMeetingSummary, t]);
+  }, [meetingId, commitMeetingSummary, hasSummaryRunStalled, t]);
 
   // Reset states when meetingId changes (prevent race conditions)
   useEffect(() => {
@@ -347,6 +391,7 @@ function MeetingDetailsContent() {
     setMeetingDetails(null);
     setMeetingSummary(cachedSummary);
     meetingSummaryRef.current = cachedSummary;
+    pendingSinceRef.current = null;
     setSummaryLoadStatus(cachedSummary ? 'loaded' : 'loading');
     setSummaryLoadError(null);
     setError(null);
