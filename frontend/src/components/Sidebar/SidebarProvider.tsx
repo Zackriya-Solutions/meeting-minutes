@@ -5,7 +5,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import Analytics from '@/lib/analytics';
 import { invoke } from '@tauri-apps/api/core';
 import { useRecordingState } from '@/contexts/RecordingStateContext';
-import { useT } from '@/lib/i18n';
+import { translate, useT } from '@/lib/i18n';
 import { prefetchMeetingSummary } from '@/lib/meetingSummaryCache';
 
 
@@ -88,7 +88,8 @@ interface SidebarContextType {
   serverAddress: string;
   transcriptServerAddress: string;
   setTranscriptServerAddress: (address: string) => void;
-  // Summary polling management
+  // Summary polling management. `activeSummaryPolls` is a live map for inspection only — it is
+  // mutated in place and does not re-render consumers.
   activeSummaryPolls: Map<string, NodeJS.Timeout>;
   startSummaryPolling: (meetingId: string, processId: string, onUpdate: (result: any) => void) => void;
   stopSummaryPolling: (meetingId: string) => void;
@@ -120,7 +121,10 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
   const [isSearching, setIsSearching] = useState(false);
   const [serverAddress, setServerAddress] = useState('');
   const [transcriptServerAddress, setTranscriptServerAddress] = useState('');
-  const [activeSummaryPolls, setActiveSummaryPolls] = useState<Map<string, NodeJS.Timeout>>(new Map());
+  // Live poll timers live in a ref, never in state: a re-render must not be able to cancel a
+  // generation that is still running. Keying the lifecycle off a state Map used to hand the
+  // cleanup effect a stale snapshot and clear intervals belonging to other meetings.
+  const activeSummaryPollsRef = React.useRef<Map<string, NodeJS.Timeout>>(new Map());
   const latestSearchRequestRef = React.useRef(0);
   const meetingsRequestRef = React.useRef<Promise<boolean> | null>(null);
 
@@ -325,15 +329,20 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  // Summary polling management
+  // Summary polling management. Both callbacks are referentially stable: consumers keep them
+  // in effect dependency lists, and an identity change there would tear down a running poll.
   const startSummaryPolling = React.useCallback((
     meetingId: string,
     processId: string,
     onUpdate: (result: any) => void
   ) => {
+    const polls = activeSummaryPollsRef.current;
+
     // Stop existing poll for this meeting if any
-    if (activeSummaryPolls.has(meetingId)) {
-      clearInterval(activeSummaryPolls.get(meetingId)!);
+    const previousInterval = polls.get(meetingId);
+    if (previousInterval) {
+      clearInterval(previousInterval);
+      polls.delete(meetingId);
     }
 
     console.log(`📊 Starting polling for meeting ${meetingId}, process ${processId}`);
@@ -341,21 +350,21 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
     let pollCount = 0;
     const MAX_POLLS = 200; // ~16.5 minutes at 5-second intervals (slightly longer than backend's 15-min timeout to avoid race conditions)
 
+    const finish = () => {
+      clearInterval(pollInterval);
+      if (polls.get(meetingId) === pollInterval) polls.delete(meetingId);
+    };
+
     const pollInterval = setInterval(async () => {
       pollCount++;
 
       // Timeout safety: Stop after 10 minutes
       if (pollCount >= MAX_POLLS) {
         console.warn(`⏱️ Polling timeout for ${meetingId} after ${MAX_POLLS} iterations`);
-        clearInterval(pollInterval);
-        setActiveSummaryPolls(prev => {
-          const next = new Map(prev);
-          next.delete(meetingId);
-          return next;
-        });
+        finish();
         onUpdate({
           status: 'error',
-          error: t('Summary generation timed out after 15 minutes. Please try again or check your model configuration.')
+          error: translate('Summary generation timed out after 15 minutes. Please try again or check your model configuration.')
         });
         return;
       }
@@ -366,67 +375,54 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
 
         console.log(`📊 Polling update for ${meetingId}:`, result.status);
 
-        // Call the update callback with result
-        onUpdate(result);
-
-        // Stop polling if completed, error, failed, cancelled, or idle (after initial processing)
-        if (result.status === 'completed' || result.status === 'error' || result.status === 'failed' || result.status === 'cancelled') {
-          console.log(`Polling completed for ${meetingId}, status: ${result.status}`);
-          clearInterval(pollInterval);
-          setActiveSummaryPolls(prev => {
-            const next = new Map(prev);
-            next.delete(meetingId);
-            return next;
-          });
-        } else if (result.status === 'idle' && pollCount > 1) {
-          // If we get 'idle' after polling started, process completed/disappeared
-          console.log(`Process completed or not found for ${meetingId}, stopping poll`);
-          clearInterval(pollInterval);
-          setActiveSummaryPolls(prev => {
-            const next = new Map(prev);
-            next.delete(meetingId);
-            return next;
-          });
+        // Stop polling if completed, error, failed, cancelled, or idle (after initial
+        // processing). `pollEnded` is handed to the callback so it can always settle its own
+        // status instead of leaving a progress indicator running after the last update.
+        const isTerminal = result.status === 'completed'
+          || result.status === 'error'
+          || result.status === 'failed'
+          || result.status === 'cancelled'
+          // 'idle' after polling started means the process row completed/disappeared.
+          || (result.status === 'idle' && pollCount > 1);
+        if (isTerminal) {
+          console.log(`Polling finished for ${meetingId}, status: ${result.status}`);
+          finish();
         }
+
+        onUpdate({ ...result, pollEnded: isTerminal });
       } catch (error) {
         console.error(`Polling error for ${meetingId}:`, error);
+        finish();
         // Report error to callback
         onUpdate({
           status: 'error',
-          error: error instanceof Error ? error.message : t('Unknown error')
-        });
-        clearInterval(pollInterval);
-        setActiveSummaryPolls(prev => {
-          const next = new Map(prev);
-          next.delete(meetingId);
-          return next;
+          pollEnded: true,
+          error: error instanceof Error ? error.message : translate('Unknown error')
         });
       }
     }, 5000); // Poll every 5 seconds
 
-    setActiveSummaryPolls(prev => new Map(prev).set(meetingId, pollInterval));
-  }, [activeSummaryPolls]);
+    polls.set(meetingId, pollInterval);
+  }, []);
 
   const stopSummaryPolling = React.useCallback((meetingId: string) => {
-    const pollInterval = activeSummaryPolls.get(meetingId);
+    const pollInterval = activeSummaryPollsRef.current.get(meetingId);
     if (pollInterval) {
       console.log(`⏹️ Stopping polling for meeting ${meetingId}`);
       clearInterval(pollInterval);
-      setActiveSummaryPolls(prev => {
-        const next = new Map(prev);
-        next.delete(meetingId);
-        return next;
-      });
+      activeSummaryPollsRef.current.delete(meetingId);
     }
-  }, [activeSummaryPolls]);
+  }, []);
 
   // Cleanup all polling intervals on unmount
   useEffect(() => {
+    const polls = activeSummaryPollsRef.current;
     return () => {
       console.log('🧹 Cleaning up all summary polling intervals');
-      activeSummaryPolls.forEach(interval => clearInterval(interval));
+      polls.forEach(interval => clearInterval(interval));
+      polls.clear();
     };
-  }, [activeSummaryPolls]);
+  }, []);
 
 
 
@@ -453,7 +449,7 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
       serverAddress,
       transcriptServerAddress,
       setTranscriptServerAddress,
-      activeSummaryPolls,
+      activeSummaryPolls: activeSummaryPollsRef.current,
       startSummaryPolling,
       stopSummaryPolling,
       refetchMeetings,

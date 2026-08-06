@@ -293,7 +293,10 @@ export function MeetingConversation({
   );
   const showSummaryContent = hasSummary
     || summaryPanelProps.summaryLoadStatus === 'loading'
-    || ['processing', 'summarizing', 'regenerating'].includes(summaryPanelProps.summaryStatus);
+    || ['processing', 'summarizing', 'regenerating'].includes(summaryPanelProps.summaryStatus)
+    // A run that produced nothing still has to be reportable — with a way to try again.
+    || !!summaryPanelProps.summaryError
+    || !!summaryPanelProps.summaryLoadError;
 
   const meetingTitleFor = useCallback(() => meetingTitle || meeting.title, [meetingTitle, meeting.title]);
   const latestUserMessageIndex = messages.reduce(

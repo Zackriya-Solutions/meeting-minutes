@@ -626,7 +626,24 @@ pub fn run() {
                 let app_handle = _app.handle().clone();
                 if let Some(state) = _app.try_state::<state::AppState>() {
                     let pool = state.db_manager.pool().clone();
+                    let launched_at = chrono::Utc::now();
                     tauri::async_runtime::spawn(async move {
+                        // A generation cannot survive an app exit, so anything still marked
+                        // pending here is dead. Clear it first: otherwise the backfill below
+                        // skips the meeting as "already running" and the meeting screen keeps
+                        // polling that pending status with a spinner that never resolves.
+                        match summary::commands::recover_interrupted_summaries(&pool, launched_at)
+                            .await
+                        {
+                            Ok(recovered) if recovered.is_empty() => {}
+                            Ok(recovered) => log::info!(
+                                "Recovered {} interrupted meeting summary generation(s)",
+                                recovered.len()
+                            ),
+                            Err(error) => {
+                                log::warn!("Could not recover interrupted summaries: {error}")
+                            }
+                        }
                         match pipeline::speaker_names::backfill_existing_speaker_names(&pool).await {
                             Ok((checked, 0)) => log::info!(
                                 "Checked automatic speaker names for {checked} diarized meeting(s)"

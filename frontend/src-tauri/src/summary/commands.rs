@@ -760,6 +760,28 @@ pub fn spawn_automatic_summary_for_meeting<R: Runtime>(app: AppHandle<R>, meetin
     });
 }
 
+pub const INTERRUPTED_SUMMARY_ERROR: &str =
+    "Summary generation was interrupted before it finished (the app closed while it was running).";
+
+/// Clears generations that were still marked as running when the app last exited.
+///
+/// Must run before [`backfill_missing_automatic_summaries`]: while such a row claims to be
+/// pending, the backfill treats the meeting as already in progress and the drawer polls that
+/// status forever. `launched_at` must be captured at startup so that a generation queued by
+/// the current session is never mistaken for a leftover. Returns the recovered meeting ids.
+pub async fn recover_interrupted_summaries(
+    pool: &SqlitePool,
+    launched_at: chrono::DateTime<chrono::Utc>,
+) -> Result<Vec<String>, String> {
+    SummaryProcessesRepository::fail_interrupted_processes(
+        pool,
+        INTERRUPTED_SUMMARY_ERROR,
+        launched_at,
+    )
+    .await
+    .map_err(|error| error.to_string())
+}
+
 /// Catch up meetings created by older versions or interrupted before generation started.
 pub async fn backfill_missing_automatic_summaries<R: Runtime>(
     app: AppHandle<R>,

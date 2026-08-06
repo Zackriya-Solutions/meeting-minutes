@@ -16,6 +16,7 @@ import { requestAutoStart } from "@/lib/autoStartRecording";
 import { findLocalOutlookMeeting } from "@/lib/localOutlookCalendar";
 import { useRecordingState } from "@/contexts/RecordingStateContext";
 import { canStartRecordingNow } from "@/lib/recordingNavigation";
+import { isSummaryRunStalled } from "@/lib/summaryRunProgress";
 import {
   cacheMeetingSummary,
   parsePersistedSummary,
@@ -149,6 +150,7 @@ function MeetingDetailsContent() {
   const [meetingSummary, setMeetingSummary] = useState<Summary | null>(initialCachedSummary);
   const meetingSummaryRef = useRef<Summary | null>(initialCachedSummary);
   const summaryLoadRequestRef = useRef(0);
+  const pendingSinceRef = useRef<number | null>(null);
   const [summaryLoadStatus, setSummaryLoadStatus] = useState<SummaryLoadStatus>(
     initialCachedSummary ? 'loaded' : 'loading',
   );
@@ -292,6 +294,12 @@ function MeetingDetailsContent() {
     console.log('fetchMeetingDetails called - pagination hook will handle refetch');
   }, [meetingId]);
 
+  const hasSummaryRunStalled = useCallback((startedAt?: string | null) => isSummaryRunStalled({
+    startedAt,
+    firstSeenAt: (pendingSinceRef.current ??= Date.now()),
+    now: Date.now(),
+  }), []);
+
   const fetchMeetingSummary = useCallback(async (showPageLoader = false) => {
     if (!meetingId || meetingId === 'intro-call') return;
 
@@ -331,6 +339,14 @@ function MeetingDetailsContent() {
           }
 
           if (['pending', 'processing', 'summarizing', 'regenerating'].includes(response?.status)) {
+            if (hasSummaryRunStalled(response?.start)) {
+              // Treat an abandoned run as a missing summary rather than a permanent spinner:
+              // 'absent' lets the automatic generation effect start a fresh, tracked run.
+              console.warn(`Summary run for ${meetingId} looks abandoned; started at ${response?.start}`);
+              setSummaryLoadStatus(meetingSummaryRef.current ? 'loaded' : 'absent');
+              setSummaryLoadError(t('Summary generation was interrupted. Try again.'));
+              return;
+            }
             setSummaryLoadStatus(meetingSummaryRef.current ? 'loaded' : 'loading');
             return;
           }
@@ -367,7 +383,7 @@ function MeetingDetailsContent() {
     } finally {
       if (summaryLoadRequestRef.current === requestId) setIsLoading(false);
     }
-  }, [meetingId, commitMeetingSummary, t]);
+  }, [meetingId, commitMeetingSummary, hasSummaryRunStalled, t]);
 
   // Reset states when meetingId changes (prevent race conditions)
   useEffect(() => {
@@ -375,6 +391,7 @@ function MeetingDetailsContent() {
     setMeetingDetails(null);
     setMeetingSummary(cachedSummary);
     meetingSummaryRef.current = cachedSummary;
+    pendingSinceRef.current = null;
     setSummaryLoadStatus(cachedSummary ? 'loaded' : 'loading');
     setSummaryLoadError(null);
     setError(null);

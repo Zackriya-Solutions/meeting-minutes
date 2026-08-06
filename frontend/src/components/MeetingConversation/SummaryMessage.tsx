@@ -99,6 +99,7 @@ export function SummaryMessage({ summaryPanelProps: p, actualDurationSeconds, sp
   const isGenerating =
     p.summaryStatus === 'processing' || p.summaryStatus === 'summarizing' || p.summaryStatus === 'regenerating';
   const hasSummary = !!p.aiSummary;
+  const failureMessage = isGenerating ? null : (p.summaryError || p.summaryLoadError);
 
   const content = useMemo(() => {
     if (!hasSummary) return { participants: '', lead: '', timing: '', agreements: [] };
@@ -258,6 +259,22 @@ export function SummaryMessage({ summaryPanelProps: p, actualDurationSeconds, sp
         <div className="flex items-center gap-2 py-4 text-sm text-muted-foreground">
           <FluidSpinner className="h-4 w-4 text-primary" />
           {t('Loading saved summary...')}
+        </div>
+      ) : failureMessage ? (
+        // A run that ended without a summary must say so and offer a way forward: silently
+        // replacing the spinner with an empty panel reads as "this meeting has nothing".
+        <div className="flex flex-col items-start gap-3 py-4">
+          <p className="text-sm text-muted-foreground">{failureMessage}</p>
+          <FluidButton
+            type="button"
+            variant="secondary"
+            size="sm"
+            leadingIcon={RegenerateIcon}
+            className="text-[var(--primary-60)]"
+            onClick={() => void p.onGenerateSummary('')}
+          >
+            {t('Generate Summary')}
+          </FluidButton>
         </div>
       ) : null}
 
