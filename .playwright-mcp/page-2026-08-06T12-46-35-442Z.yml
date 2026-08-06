@@ -1,0 +1,21 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - generic [ref=e3]:
+      - button [ref=e4] [cursor=pointer]
+      - generic [ref=e11]:
+        - button [ref=e12] [cursor=pointer]:
+          - img "Logo" [ref=e13]
+        - button [ref=e14] [cursor=pointer]
+        - button [ref=e18] [cursor=pointer]
+        - button [ref=e22] [cursor=pointer]
+        - button [ref=e26] [cursor=pointer]
+        - button [ref=e30] [cursor=pointer]
+        - button "About Meetily" [ref=e34] [cursor=pointer]
+    - main [ref=e37]:
+      - generic [ref=e41]:
+        - group [ref=e46]:
+          - button "Language" [ref=e47] [cursor=pointer]
+        - generic [ref=e54]:
+          - paragraph [ref=e55]: Welcome to meetily!
+          - paragraph [ref=e56]: Start recording to see live transcription
+  - region "Notifications alt+T"
