@@ -101,9 +101,11 @@ const ConfigContext = createContext<ConfigContextType | undefined>(undefined);
 
 export function ConfigProvider({ children }: { children: ReactNode }) {
   // Model configuration state
+  // Summaries default to DeepSeek v4 Pro — the tier onboarding configures and the only
+  // provider Settings offers up front. Anything else is opened from "other providers".
   const [modelConfig, setModelConfig] = useState<ModelConfig>({
-    provider: 'openrouter',
-    model: '~anthropic/claude-sonnet-latest',
+    provider: 'deepseek',
+    model: 'deepseek-v4-pro',
     whisperModel: 'large-v3',
     ollamaEndpoint: null
   });

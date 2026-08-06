@@ -21,6 +21,7 @@ import { OllamaDownloadProvider } from '@/contexts/OllamaDownloadContext'
 import { TranscriptProvider } from '@/contexts/TranscriptContext'
 import { ConfigProvider } from '@/contexts/ConfigContext'
 import { OnboardingProvider } from '@/contexts/OnboardingContext'
+import { OnboardingGate } from '@/components/onboarding'
 import { loadBetaFeatures } from '@/types/betaFeatures'
 import { DownloadProgressToastProvider } from '@/components/shared/DownloadProgressToast'
 import { UpdateCheckProvider } from '@/components/UpdateCheckProvider'
@@ -135,8 +136,17 @@ export default function RootLayout({
 }: {
   children: React.ReactNode
 }) {
-  // Managed cloud providers make model-download onboarding unnecessary.
-  const showOnboarding = false
+  // Whether setup is running is decided by `OnboardingGate` from the saved status; this flag
+  // only suppresses shortcuts that assume a configured install (see the tray listener below).
+  const [showOnboarding, setShowOnboarding] = useState(false)
+
+  useEffect(() => {
+    invoke<boolean>('onboarding_should_run')
+      .then(setShowOnboarding)
+      .catch((error) => {
+        console.warn('[Layout] Could not read onboarding status', error)
+      })
+  }, [])
 
   // Tauri's native macOS material lives behind the webview. Keep the regular
   // opaque canvas in browsers and on other desktop platforms.
@@ -300,6 +310,7 @@ export default function RootLayout({
                         <UpdateCheckProvider>
                           <SidebarProvider>
                             <ImportDialogProvider onOpen={handleOpenImportDialog}>
+                              <OnboardingGate>
                               <ShadcnSidebarProvider defaultOpen>
                                 <AppSidebar />
                                 <SidebarInset className="min-w-0 bg-transparent">
@@ -323,6 +334,7 @@ export default function RootLayout({
                               </TooltipProvider>
                                 </SidebarInset>
                               </ShadcnSidebarProvider>
+                              </OnboardingGate>
                             </ImportDialogProvider>
                           </SidebarProvider>
                         </UpdateCheckProvider>

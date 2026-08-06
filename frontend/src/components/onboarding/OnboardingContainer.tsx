@@ -3,8 +3,8 @@ import { cn } from '@/lib/utils';
 import { ProgressIndicator } from './shared/ProgressIndicator';
 import { useOnboarding } from '@/contexts/OnboardingContext';
 import type { OnboardingContainerProps } from '@/types/onboarding';
-import Image from 'next/image';
 import { Icon } from '@/components/memento/Icon';
+import { Wordmark } from '@/components/memento/Wordmark';
 
 export function OnboardingContainer({
   title,
@@ -46,9 +46,8 @@ export function OnboardingContainer({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center overflow-hidden bg-background">
       <div className={cn('flex h-full max-h-screen w-full max-w-2xl flex-col px-6 py-6', className)}>
-        <div className="mb-5 flex items-center justify-center gap-3 text-xl font-semibold tracking-[-.04em]">
-          <Image src="/memento-mark.svg" alt="" width={30} height={30} />
-          <span>memento</span>
+        <div className="mb-5 flex items-center justify-center">
+          <Wordmark />
         </div>
         {/* Progress Indicator with Navigation - Fixed */}
         {step && !hideProgress && (

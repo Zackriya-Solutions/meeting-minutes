@@ -1,10 +1,13 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import type { PermissionStatus, OnboardingPermissions } from '@/types/onboarding';
-import { resolveOnboardingSummaryModelStatus } from '@/lib/onboarding-summary-model';
+import {
+  DEFAULT_SUMMARY_MODEL,
+  isOfferedSummaryModel,
+} from '@/lib/onboarding-summary-model';
 
 interface OnboardingStatus {
   version: string;
@@ -23,84 +26,75 @@ interface OnboardingStatus {
   last_updated: string;
 }
 
-interface SummaryModelProgressInfo {
+/**
+ * The models a fresh install needs, downloaded as one package.
+ *
+ * Transcription (GigaAM) and speaker recognition arrive from two different backends with
+ * their own progress events, but the user asked for one download, so they are presented and
+ * driven as one: a single byte total, a single bar, one retry.
+ */
+export type ModelPackStatus = 'idle' | 'checking' | 'downloading' | 'ready' | 'error';
+
+export interface ModelPackState {
+  status: ModelPackStatus;
+  /** 0..100 over the package's combined bytes. */
   percent: number;
   downloadedMb: number;
   totalMb: number;
-  speedMbps: number;
+  transcriptionReady: boolean;
+  speakersReady: boolean;
+  error?: string;
 }
 
-interface TranscriptionModelProgressInfo {
-  percent: number;
-  downloadedMb: number;
-  totalMb: number;
-  speedMbps: number;
-}
+/** Shown until `gigaam_status` reports the selected variant's real size. */
+const TRANSCRIPTION_FALLBACK_MB = 987;
+/** Shown until `diarization_status` reports the real combined size. */
+const SPEAKERS_FALLBACK_MB = 34;
+
+const INITIAL_PACK: ModelPackState = {
+  status: 'checking',
+  percent: 0,
+  downloadedMb: 0,
+  totalMb: TRANSCRIPTION_FALLBACK_MB + SPEAKERS_FALLBACK_MB,
+  transcriptionReady: false,
+  speakersReady: false,
+};
 
 interface OnboardingContextType {
   currentStep: number;
-  transcriptionModelDownloaded: boolean;
-  transcriptionModelProgress: number;
-  transcriptionModelProgressInfo: TranscriptionModelProgressInfo;
-  summaryModelDownloaded: boolean;
-  summaryModelProgress: number;
-  summaryModelProgressInfo: SummaryModelProgressInfo;
-  selectedSummaryModel: string;
-  recommendedSummaryModel: string;
-  databaseExists: boolean;
-  isBackgroundDownloading: boolean;
-  // Permissions
+  /** 3 with the macOS permissions step, 2 without it. */
+  totalSteps: number;
+  isMac: boolean;
+  /** False until the saved status has been read — the gate must not flash. */
+  statusLoaded: boolean;
+  shouldRun: boolean;
+  modelPack: ModelPackState;
+  transcriptionLabel: string;
+  summaryModel: string;
+  setSummaryModel: (model: string) => void;
   permissions: OnboardingPermissions;
   permissionsSkipped: boolean;
-  // Navigation
   goToStep: (step: number) => void;
   goNext: () => void;
   goPrevious: () => void;
-  // Setters
-  setTranscriptionModelDownloaded: (value: boolean) => void;
-  setSummaryModelDownloaded: (value: boolean) => void;
-  setSelectedSummaryModel: (value: string) => void;
-  setDatabaseExists: (value: boolean) => void;
   setPermissionStatus: (permission: keyof OnboardingPermissions, status: PermissionStatus) => void;
   setPermissionsSkipped: (skipped: boolean) => void;
-  completeOnboarding: () => Promise<void>;
-  startBackgroundDownloads: (options: StartBackgroundDownloadsOptions) => Promise<void>;
-  retryTranscriptionModelDownload: () => Promise<void>;
-}
-
-interface StartBackgroundDownloadsOptions {
-  includeTranscription: boolean;
-  includeSummary: boolean;
-  summaryModel?: string;
+  startModelPack: () => Promise<void>;
+  /** Resolves to the example meeting's id when one was seeded. */
+  completeOnboarding: () => Promise<string | null>;
 }
 
 const OnboardingContext = createContext<OnboardingContextType | undefined>(undefined);
 
 export function OnboardingProvider({ children }: { children: React.ReactNode }) {
   const [currentStep, setCurrentStep] = useState(1);
-  const [completed, setCompleted] = useState(false);
-  const [transcriptionModelDownloaded, setTranscriptionModelDownloaded] = useState(false);
-  const [transcriptionModelProgress, setTranscriptionModelProgress] = useState(0);
-  const [transcriptionModelProgressInfo, setTranscriptionModelProgressInfo] = useState<TranscriptionModelProgressInfo>({
-    percent: 0,
-    downloadedMb: 0,
-    totalMb: 0,
-    speedMbps: 0,
-  });
-  const [summaryModelDownloaded, setSummaryModelDownloaded] = useState(false);
-  const [summaryModelProgress, setSummaryModelProgress] = useState(0);
-  const [summaryModelProgressInfo, setSummaryModelProgressInfo] = useState<SummaryModelProgressInfo>({
-    percent: 0,
-    downloadedMb: 0,
-    totalMb: 0,
-    speedMbps: 0,
-  });
-  const [selectedSummaryModel, setSelectedSummaryModel] = useState<string>('');
-  const [recommendedSummaryModel, setRecommendedSummaryModel] = useState<string>('');
-  const [databaseExists, setDatabaseExists] = useState(false);
-  const [isBackgroundDownloading, setIsBackgroundDownloading] = useState(false);
+  const [isMac, setIsMac] = useState(false);
+  const [statusLoaded, setStatusLoaded] = useState(false);
+  const [shouldRun, setShouldRun] = useState(false);
+  const [summaryModel, setSummaryModelState] = useState<string>(DEFAULT_SUMMARY_MODEL);
+  const [modelPack, setModelPack] = useState<ModelPackState>(INITIAL_PACK);
+  const [transcriptionLabel, setTranscriptionLabel] = useState('GigaAM v3');
 
-  // Permissions state
   const [permissions, setPermissions] = useState<OnboardingPermissions>({
     microphone: 'not_determined',
     systemAudio: 'not_determined',
@@ -108,333 +102,239 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
   });
   const [permissionsSkipped, setPermissionsSkipped] = useState(false);
 
+  const totalSteps = isMac ? 3 : 2;
+
+  // Byte counters, kept outside React state so progress events can be merged without
+  // depending on the previous render's numbers.
+  const bytes = useRef({
+    transcriptionMb: 0,
+    transcriptionTotalMb: TRANSCRIPTION_FALLBACK_MB,
+    speakersTotalMb: SPEAKERS_FALLBACK_MB,
+    transcriptionReady: false,
+    speakersReady: false,
+  });
+  const packStartedRef = useRef(false);
   const saveTimeoutRef = useRef<NodeJS.Timeout>();
-
-  const initializeSummaryModelSelection = async (preferredModel = selectedSummaryModel) => {
-    try {
-      const recommendedModel = await invoke<string>('builtin_ai_get_recommended_model');
-      setRecommendedSummaryModel(recommendedModel);
-      const modelToCheck = preferredModel || recommendedModel;
-      setSelectedSummaryModel(modelToCheck);
-
-      const selectedModelReady = await invoke<boolean>('builtin_ai_is_model_ready', {
-        modelName: modelToCheck,
-        refresh: true,
-      });
-      const resolved = resolveOnboardingSummaryModelStatus({
-        selectedModel: preferredModel,
-        recommendedModel,
-        selectedModelReady,
-      });
-
-      setSelectedSummaryModel(resolved.selectedSummaryModel);
-      setSummaryModelDownloaded(resolved.summaryModelDownloaded);
-      console.log('[OnboardingContext] Set recommended model:', resolved.selectedSummaryModel);
-
-      return resolved;
-    } catch (error) {
-      console.error('[OnboardingContext] Failed to initialize summary model:', error);
-      return null;
-    }
-  };
-
-  const requestSummaryModelDownload = (modelName: string) => {
-    console.log('[OnboardingContext] Starting Summary Model download');
-    invoke('builtin_ai_download_model', { modelName })
-      .catch(err => {
-        if (String(err).includes('Download already in progress')) {
-          return;
-        }
-        console.error('[OnboardingContext] Summary Model download failed:', err);
-      });
-  };
-
-  // Load status on mount and initialize database
-  useEffect(() => {
-    loadOnboardingStatus();
-    checkDatabaseStatus();
-    initializeDatabaseInBackground();
-  }, []);
-
-  // Initialize database silently in background (moved from SetupOverviewStep)
-  const initializeDatabaseInBackground = async () => {
-    try {
-      console.log('[OnboardingContext] Starting background database initialization');
-      const isFirstLaunch = await invoke<boolean>('check_first_launch');
-
-      if (!isFirstLaunch) {
-        console.log('[OnboardingContext] Database exists, skipping initialization');
-        setDatabaseExists(true);
-        return;
-      }
-
-      // First launch - attempt auto-detection and import
-      await performAutoDetection();
-    } catch (error) {
-      console.error('[OnboardingContext] Database initialization failed:', error);
-      // Don't throw - database init failure shouldn't block onboarding
-    }
-  };
-
-  const performAutoDetection = async () => {
-    // Check Homebrew (macOS only)
-    if (typeof navigator !== 'undefined' && navigator.platform?.toLowerCase().includes('mac')) {
-      const homebrewDbPath = '/usr/local/var/meetily/meeting_minutes.db';
-      try {
-        const homebrewCheck = await invoke<{ exists: boolean; size: number } | null>(
-          'check_homebrew_database',
-          { path: homebrewDbPath }
-        );
-
-        if (homebrewCheck?.exists) {
-          console.log('[OnboardingContext] Found Homebrew database, importing');
-          await invoke('import_and_initialize_database', { legacyDbPath: homebrewDbPath });
-          setDatabaseExists(true);
-          return;
-        }
-      } catch (e) {
-        console.log('[OnboardingContext] Homebrew check failed, continuing:', e);
-      }
-    }
-
-    // Check default legacy database location
-    try {
-      const legacyPath = await invoke<string | null>('check_default_legacy_database');
-      if (legacyPath) {
-        console.log('[OnboardingContext] Found legacy database, importing');
-        await invoke('import_and_initialize_database', { legacyDbPath: legacyPath });
-        setDatabaseExists(true);
-        return;
-      }
-    } catch (e) {
-      console.log('[OnboardingContext] Legacy check failed, continuing:', e);
-    }
-
-    // No legacy database found - initialize fresh
-    console.log('[OnboardingContext] No legacy database found, initializing fresh');
-    await invoke('initialize_fresh_database');
-    setDatabaseExists(true);
-  };
-
   const isCompletingRef = useRef(false);
 
-  // Auto-save on state change (debounced)
+  const publishPack = useCallback((patch: Partial<ModelPackState> = {}) => {
+    const b = bytes.current;
+    const total = b.transcriptionTotalMb + b.speakersTotalMb;
+    // Speaker recognition is ~3% of the package and arrives as two files whose progress
+    // restarts per file. Counting it only once finished keeps the bar monotonic; the caption
+    // names what is still running.
+    const downloaded =
+      (b.transcriptionReady ? b.transcriptionTotalMb : b.transcriptionMb) +
+      (b.speakersReady ? b.speakersTotalMb : 0);
+
+    setModelPack((prev) => ({
+      ...prev,
+      totalMb: total,
+      downloadedMb: Math.min(downloaded, total),
+      percent: total > 0 ? Math.min(100, (downloaded / total) * 100) : 0,
+      transcriptionReady: b.transcriptionReady,
+      speakersReady: b.speakersReady,
+      ...patch,
+    }));
+  }, []);
+
   useEffect(() => {
-    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
-
-    // Don't auto-save if completed (to avoid overwriting completion status)
-    // Also don't auto-save if we are currently in the process of completing
-    if (completed || isCompletingRef.current) return;
-
-    saveTimeoutRef.current = setTimeout(() => {
-      saveOnboardingStatus();
-    }, 1000);
-
-    return () => {
-      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+    const detectPlatform = async () => {
+      try {
+        const { platform } = await import('@tauri-apps/plugin-os');
+        setIsMac(platform() === 'macos');
+      } catch {
+        setIsMac(navigator.userAgent.includes('Mac'));
+      }
     };
-  }, [currentStep, transcriptionModelDownloaded, summaryModelDownloaded, completed]);
+    void detectPlatform();
+  }, []);
 
-  // Listen to transcription-model (GigaAM) download progress. `gigaam-ready` fires once the
-  // downloaded variant is also loaded into the engine, which is what "ready to record" means.
+  // Whether onboarding runs at all, plus the step to resume on.
   useEffect(() => {
-    const unlisten = listen<{
+    const load = async () => {
+      try {
+        const [needed, status] = await Promise.all([
+          invoke<boolean>('onboarding_should_run'),
+          invoke<OnboardingStatus | null>('get_onboarding_status').catch(() => null),
+        ]);
+
+        setShouldRun(needed);
+        const savedModel = status?.model_status?.selected_summary_model;
+        if (savedModel && isOfferedSummaryModel(savedModel)) {
+          setSummaryModelState(savedModel);
+        }
+        if (needed && status && status.current_step >= 1) {
+          setCurrentStep(Math.min(status.current_step, 3));
+        }
+      } catch (error) {
+        console.error('[OnboardingContext] Failed to read onboarding status:', error);
+        // A status we cannot read is not a reason to block the app.
+        setShouldRun(false);
+      } finally {
+        setStatusLoaded(true);
+      }
+    };
+    void load();
+  }, []);
+
+  // What the package contains and what is already on disk.
+  useEffect(() => {
+    if (!shouldRun) return;
+
+    const checkPresence = async () => {
+      // A download can already be running — the app was restarted mid-setup, or Settings
+      // started one. Saying `idle` then would make the step re-issue the same request.
+      let inFlight = false;
+
+      try {
+        const status = await invoke<{
+          selected: string;
+          model_present: boolean;
+          downloading?: boolean;
+          variants: { id: string; label: string; size_mb: number }[];
+        }>('gigaam_status');
+        const selected = status.variants?.find((variant) => variant.id === status.selected);
+        if (selected) {
+          setTranscriptionLabel(selected.label);
+          bytes.current.transcriptionTotalMb = selected.size_mb || TRANSCRIPTION_FALLBACK_MB;
+        }
+        bytes.current.transcriptionReady = Boolean(status.model_present);
+        inFlight = inFlight || Boolean(status.downloading);
+      } catch (error) {
+        console.warn('[OnboardingContext] gigaam_status failed:', error);
+      }
+
+      try {
+        const status = await invoke<{
+          available: boolean;
+          download_mb: number;
+          downloading: boolean;
+        }>('diarization_status');
+        bytes.current.speakersTotalMb = status.download_mb || SPEAKERS_FALLBACK_MB;
+        bytes.current.speakersReady = status.available;
+        inFlight = inFlight || status.downloading;
+      } catch (error) {
+        console.warn('[OnboardingContext] diarization_status failed:', error);
+      }
+
+      const ready = bytes.current.transcriptionReady && bytes.current.speakersReady;
+      if (inFlight && !ready) packStartedRef.current = true;
+      publishPack({ status: ready ? 'ready' : inFlight ? 'downloading' : 'idle' });
+    };
+
+    void checkPresence();
+  }, [shouldRun, publishPack]);
+
+  // Transcription model progress. `extracting` reports no byte counts, so the bar holds its
+  // last value instead of snapping back to zero.
+  useEffect(() => {
+    const unlistenProgress = listen<{
       downloaded: number;
       total: number;
       percent: number;
       stage: string;
     }>('gigaam-download-progress', (event) => {
-      const { downloaded, total, percent } = event.payload;
-      setTranscriptionModelProgress(percent);
-      setTranscriptionModelProgressInfo({
-        percent,
-        downloadedMb: downloaded / (1024 * 1024),
-        totalMb: total / (1024 * 1024),
-        // The GigaAM downloader reports bytes, not throughput.
-        speedMbps: 0,
-      });
+      const { downloaded, total, stage } = event.payload;
+      if (stage === 'downloading') {
+        bytes.current.transcriptionMb = downloaded / (1024 * 1024);
+        if (total > 0) bytes.current.transcriptionTotalMb = total / (1024 * 1024);
+      }
+      publishPack({ status: 'downloading', error: undefined });
     });
 
-    const unlistenComplete = listen('gigaam-ready', () => {
-      setTranscriptionModelDownloaded(true);
-      setTranscriptionModelProgress(100);
+    const unlistenReady = listen('gigaam-ready', () => {
+      bytes.current.transcriptionReady = true;
+      publishPack(
+        bytes.current.speakersReady ? { status: 'ready', error: undefined } : { error: undefined },
+      );
     });
 
     const unlistenError = listen<string>('gigaam-download-error', (event) => {
-      console.error('Transcription model download error:', event.payload);
+      packStartedRef.current = false;
+      publishPack({ status: 'error', error: event.payload });
+    });
+
+    const unlistenSpeakersReady = listen('diarization-ready', () => {
+      bytes.current.speakersReady = true;
+      publishPack(bytes.current.transcriptionReady ? { status: 'ready' } : {});
+    });
+
+    const unlistenSpeakersError = listen<string>('diarization-download-error', (event) => {
+      // Speaker recognition is the smaller, less critical half of the package: report it,
+      // but do not present the whole download as failed while transcription is still coming.
+      console.warn('[OnboardingContext] speaker models failed:', event.payload);
+      if (bytes.current.transcriptionReady) {
+        // Nothing else is in flight, so "Повторить" has to be able to start a new attempt.
+        packStartedRef.current = false;
+        publishPack({ status: 'error', error: event.payload });
+      }
     });
 
     return () => {
-      unlisten.then(fn => fn());
-      unlistenComplete.then(fn => fn());
-      unlistenError.then(fn => fn());
+      unlistenProgress.then((fn) => fn());
+      unlistenReady.then((fn) => fn());
+      unlistenError.then((fn) => fn());
+      unlistenSpeakersReady.then((fn) => fn());
+      unlistenSpeakersError.then((fn) => fn());
     };
-  }, []);
+  }, [publishPack]);
 
-  // Listen to summary model (Built-in AI) download progress
-  useEffect(() => {
-    const unlisten = listen<{
-      model: string;
-      progress: number;
-      downloaded_mb?: number;
-      total_mb?: number;
-      speed_mbps?: number;
-      status: string;
-    }>(
-      'builtin-ai-download-progress',
-      (event) => {
-        const { model, progress, downloaded_mb, total_mb, speed_mbps, status } = event.payload;
-        if (selectedSummaryModel && model === selectedSummaryModel) {
-          setSummaryModelProgress(progress);
-          setSummaryModelProgressInfo({
-            percent: progress,
-            downloadedMb: downloaded_mb ?? 0,
-            totalMb: total_mb ?? 0,
-            speedMbps: speed_mbps ?? 0,
-          });
-          if (status === 'completed' || progress >= 100) {
-            setSummaryModelDownloaded(true);
-          }
-        }
-      }
-    );
-
-    return () => {
-      unlisten.then(fn => fn());
-    };
-  }, [selectedSummaryModel]);
-
-  const checkDatabaseStatus = async () => {
-    try {
-      const isFirstLaunch = await invoke<boolean>('check_first_launch');
-      setDatabaseExists(!isFirstLaunch);
-      console.log('[OnboardingContext] Database exists:', !isFirstLaunch);
-    } catch (error) {
-      console.error('[OnboardingContext] Failed to check database status:', error);
-      setDatabaseExists(false);
-    }
-  };
-
-  const loadOnboardingStatus = async () => {
-    try {
-      const status = await invoke<OnboardingStatus | null>('get_onboarding_status');
-      if (status) {
-        console.log('[OnboardingContext] Loaded saved status:', status);
-
-        if (status.completed) {
-          setCurrentStep(status.current_step);
-          setCompleted(true);
-          setTranscriptionModelDownloaded(status.model_status.parakeet === 'downloaded');
-          setSummaryModelDownloaded(status.model_status.summary === 'downloaded');
-          if (status.model_status.selected_summary_model) {
-            setSelectedSummaryModel(status.model_status.selected_summary_model);
-          }
-          console.log('[OnboardingContext] Restored completed onboarding status without model verification');
-          return;
-        }
-
-        // Don't trust saved status - verify actual model status on disk
-        const verifiedStatus = await verifyModelStatus(status);
-
-        setCurrentStep(verifiedStatus.currentStep);
-        setCompleted(verifiedStatus.completed);
-        setTranscriptionModelDownloaded(verifiedStatus.transcriptionModelDownloaded);
-        setSummaryModelDownloaded(verifiedStatus.summaryModelDownloaded);
-        if (verifiedStatus.selectedSummaryModel) {
-          setSelectedSummaryModel(verifiedStatus.selectedSummaryModel);
-        }
-
-        console.log('[OnboardingContext] Verified status:', verifiedStatus);
-
-        // Check if any downloads are active to restore isBackgroundDownloading state
-        await checkActiveDownloads();
-      } else {
-        await initializeSummaryModelSelection();
-      }
-    } catch (error) {
-      console.error('[OnboardingContext] Failed to load onboarding status:', error);
-    }
-  };
-
-  // Verify that models actually exist on disk, not just trust saved JSON
-  const verifyModelStatus = async (savedStatus: OnboardingStatus) => {
-    let transcriptionModelDownloaded = false;
-    let summaryModelDownloaded = false;
-    let selectedSummaryModel = '';
-
-    // Verify the transcription model (GigaAM) exists on disk
-    try {
-      const status = await invoke<{ model_present?: boolean }>('gigaam_status');
-      transcriptionModelDownloaded = !!status?.model_present;
-      console.log('[OnboardingContext] Transcription model verified on disk:', transcriptionModelDownloaded);
-    } catch (error) {
-      console.warn('[OnboardingContext] Failed to verify the transcription model:', error);
-      transcriptionModelDownloaded = false;
-    }
-
-    // Verify the selected/recommended Summary model exists on disk.
-    try {
-      const recommendedModel = await invoke<string>('builtin_ai_get_recommended_model');
-      setRecommendedSummaryModel(recommendedModel);
-      const savedSelectedModel = savedStatus.model_status.selected_summary_model || '';
-      const modelToCheck = savedSelectedModel || recommendedModel;
-      const selectedModelReady = await invoke<boolean>('builtin_ai_is_model_ready', {
-        modelName: modelToCheck,
-        refresh: true,
-      });
-      const resolved = resolveOnboardingSummaryModelStatus({
-        selectedModel: savedSelectedModel,
-        recommendedModel,
-        selectedModelReady,
-      });
-      selectedSummaryModel = resolved.selectedSummaryModel;
-      summaryModelDownloaded = resolved.summaryModelDownloaded;
-      console.log('[OnboardingContext] Summary model verified on disk:', summaryModelDownloaded, 'model:', selectedSummaryModel);
-    } catch (error) {
-      console.warn('[OnboardingContext] Failed to verify Summary model:', error);
-      summaryModelDownloaded = false;
-    }
-
-    // Determine the correct step based on verified status
-    // New simplified flow: Step 1: Welcome, Step 2: Setup Overview, Step 3: Download Progress, Step 4: Permissions (macOS)
-    let currentStep = savedStatus.current_step;
-    let completed = savedStatus.completed;
-
-    // Clamp step to new max (4)
-    if (currentStep > 4) {
-      currentStep = 3; // Go to download progress step
-    }
-
-    // Trust the completed status - don't revert based on model downloads
-    // Downloads continue in background; user stays in main app regardless
-    return {
-      currentStep,
-      completed,
-      transcriptionModelDownloaded,
-      summaryModelDownloaded,
-      selectedSummaryModel,
-    };
-  };
-
-  const saveOnboardingStatus = async () => {
-    // Safety check: if we are in the process of completing, DO NOT save
-    // This prevents a race condition where a download completion event triggers a save
-    // that overwrites the "completed" status set by completeOnboarding
-    if (isCompletingRef.current) {
-      console.log('[OnboardingContext] Skipping saveOnboardingStatus because completion is in progress');
+  /**
+   * Fetch everything the package is missing. Both backends skip files already on disk, so
+   * this doubles as retry: an interrupted download resumes rather than starting over.
+   */
+  const startModelPack = useCallback(async () => {
+    if (packStartedRef.current) return;
+    if (bytes.current.transcriptionReady && bytes.current.speakersReady) {
+      publishPack({ status: 'ready' });
       return;
     }
 
+    packStartedRef.current = true;
+    publishPack({ status: 'downloading', error: undefined });
+
+    const failures: string[] = [];
+    if (!bytes.current.transcriptionReady) {
+      try {
+        await invoke('gigaam_download_model');
+      } catch (error) {
+        // "already in progress" means someone else is doing the work we wanted done.
+        const message = String(error);
+        if (!message.toLowerCase().includes('progress')) failures.push(message);
+      }
+    }
+    if (!bytes.current.speakersReady) {
+      try {
+        await invoke('download_diarization_models');
+      } catch (error) {
+        console.warn('[OnboardingContext] speaker model download failed to start:', error);
+      }
+    }
+
+    if (failures.length > 0) {
+      packStartedRef.current = false;
+      publishPack({ status: 'error', error: failures[0] });
+    }
+  }, [publishPack]);
+
+  const setSummaryModel = useCallback((model: string) => {
+    if (!isOfferedSummaryModel(model)) return;
+    setSummaryModelState(model);
+  }, []);
+
+  const saveOnboardingStatus = useCallback(async () => {
+    if (isCompletingRef.current) return;
     try {
       await invoke('save_onboarding_status_cmd', {
         status: {
           version: '1.0',
-          completed: completed,
+          completed: false,
           current_step: currentStep,
           model_status: {
-            parakeet: transcriptionModelDownloaded ? 'downloaded' : 'not_downloaded',
-            summary: summaryModelDownloaded ? 'downloaded' : 'not_downloaded',
-            selected_summary_model: selectedSummaryModel || undefined,
+            parakeet: modelPack.transcriptionReady ? 'downloaded' : 'not_downloaded',
+            summary: 'cloud',
+            selected_summary_model: summaryModel,
           },
           last_updated: new Date().toISOString(),
         },
@@ -442,185 +342,100 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
     } catch (error) {
       console.error('[OnboardingContext] Failed to save onboarding status:', error);
     }
-  };
+  }, [currentStep, modelPack.transcriptionReady, summaryModel]);
 
-  const completeOnboarding = async () => {
+  // Persist progress so a restart mid-setup resumes where it stopped.
+  useEffect(() => {
+    if (!shouldRun || !statusLoaded) return;
+    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+    saveTimeoutRef.current = setTimeout(() => {
+      void saveOnboardingStatus();
+    }, 1000);
+
+    return () => {
+      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+    };
+  }, [shouldRun, statusLoaded, saveOnboardingStatus]);
+
+  const completeOnboarding = useCallback(async () => {
+    isCompletingRef.current = true;
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+      saveTimeoutRef.current = undefined;
+    }
+
     try {
-      // Set completion flag to prevent race conditions with auto-save
-      isCompletingRef.current = true;
-
-      // Clear any pending auto-saves
-      if (saveTimeoutRef.current) {
-        clearTimeout(saveTimeoutRef.current);
-        saveTimeoutRef.current = undefined;
-      }
-
-      let modelToSave = selectedSummaryModel;
-      if (!modelToSave) {
-        modelToSave = await invoke<string>('builtin_ai_get_recommended_model');
-        setSelectedSummaryModel(modelToSave);
-      }
-
-      const selectedModelReady = await invoke<boolean>('builtin_ai_is_model_ready', {
-        modelName: modelToSave,
-        refresh: true,
+      const demoMeetingId = await invoke<string | null>('complete_onboarding', {
+        model: summaryModel,
       });
-      setSummaryModelDownloaded(selectedModelReady);
-      // Do NOT auto-download the local summary model — it's optional. Users who want
-      // local summaries download it from Settings → Summary; cloud users configure
-      // GigaChat/DeepSeek instead. (Onboarding no longer forces this download.)
-
-      // Persist a default config (builtin-ai model name); the provider can be changed in
-      // Settings → Summary. This only records config — it does not download anything.
-      await invoke('complete_onboarding', {
-        model: modelToSave,
-      });
-      setCompleted(true);
-      console.log('[OnboardingContext] Onboarding completed with model:', modelToSave);
-
-      // Reset the flag so subsequent state updates can be saved
+      console.log('[OnboardingContext] Onboarding completed with model:', summaryModel);
+      // The flag stays set on success. Download progress keeps arriving after this point, and
+      // any one of those events could otherwise schedule a debounced save that writes
+      // `completed: false` back over the completion just recorded.
+      return demoMeetingId ?? null;
+    } catch (error) {
       isCompletingRef.current = false;
-    } catch (error) {
-      console.error('[OnboardingContext] Failed to complete onboarding:', error);
-      isCompletingRef.current = false; // Reset flag on error
-      throw error; // Re-throw so PermissionsStep can handle it
-    }
-  };
-
-  // Start background downloads for models.
-  const startBackgroundDownloads = async ({
-    includeTranscription,
-    includeSummary,
-    summaryModel,
-  }: StartBackgroundDownloadsOptions) => {
-    console.log('[OnboardingContext] Starting background downloads:', {
-      includeTranscription,
-      includeSummary,
-      summaryModel,
-    });
-
-    try {
-      const shouldStartTranscription = includeTranscription && !transcriptionModelDownloaded;
-      const shouldStartSummary = includeSummary && !summaryModelDownloaded && !!summaryModel;
-
-      if (!shouldStartTranscription && !shouldStartSummary) {
-        if (includeSummary && !summaryModelDownloaded && !summaryModel) {
-          console.warn('[OnboardingContext] Summary Model download skipped until recommendation is loaded');
-        }
-        return;
-      }
-
-      setIsBackgroundDownloading(true);
-
-      // Start the transcription model first — nothing can be recorded without it. The
-      // variant is whichever `gigaam_status` reports as selected (the bilingual RU+EN
-      // default on a fresh install).
-      if (shouldStartTranscription) {
-        console.log('[OnboardingContext] Starting transcription model download');
-        invoke('gigaam_download_model')
-          .catch(err => console.error('[OnboardingContext] Transcription model download failed:', err));
-      }
-
-      // Start selected Summary Model download immediately so completion cannot race the request.
-      if (shouldStartSummary && summaryModel) {
-        requestSummaryModelDownload(summaryModel);
-      }
-    } catch (error) {
-      console.error('[OnboardingContext] Failed to start background downloads:', error);
-      setIsBackgroundDownloading(false);
       throw error;
     }
-  };
+  }, [summaryModel]);
 
-  // Check if any models are currently downloading (for re-entry)
-  const checkActiveDownloads = async () => {
-    try {
-      const status = await invoke<{ downloading?: boolean }>('gigaam_status');
-      if (status?.downloading) {
-        console.log('[OnboardingContext] Detected active background downloads on mount');
-        setIsBackgroundDownloading(true);
-      }
-
-      // Also check for Built-in AI downloads if possible (though less critical as the
-      // transcription model is the main blocker)
-
-    } catch (error) {
-      console.warn('[OnboardingContext] Failed to check active downloads:', error);
-    }
-  };
-
-  /// Retry is the same call as the initial download: `gigaam_download_model` skips files
-  /// already on disk, so a failure part-way through resumes rather than starting over.
-  const retryTranscriptionModelDownload = async () => {
-    console.log('[OnboardingContext] Retrying the transcription model download');
-    try {
-      await invoke('gigaam_download_model');
-    } catch (error) {
-      console.error('[OnboardingContext] Retry failed:', error);
-      throw error;
-    }
-  };
-
-  const setPermissionStatus = useCallback((permission: keyof OnboardingPermissions, status: PermissionStatus) => {
-    setPermissions((prev: OnboardingPermissions) => ({
-      ...prev,
-      [permission]: status,
-    }));
-  }, []);
-
-  const goToStep = useCallback((step: number) => {
-    setCurrentStep(Math.max(1, Math.min(step, 4)));
-  }, []);
-
-  const goNext = useCallback(() => {
-    setCurrentStep((prev: number) => {
-      const next = prev + 1;
-      // Don't go past step 4
-      return Math.min(next, 4);
-    });
-  }, []);
-
-  const goPrevious = useCallback(() => {
-    setCurrentStep((prev: number) => {
-      const previous = prev - 1;
-      // Don't go below step 1
-      return Math.max(previous, 1);
-    });
-  }, []);
-
-  return (
-    <OnboardingContext.Provider
-      value={{
-        currentStep,
-        transcriptionModelDownloaded,
-        transcriptionModelProgress,
-        transcriptionModelProgressInfo,
-        summaryModelDownloaded,
-        summaryModelProgress,
-        summaryModelProgressInfo,
-        selectedSummaryModel,
-        recommendedSummaryModel,
-        databaseExists,
-        isBackgroundDownloading,
-        permissions,
-        permissionsSkipped,
-        goToStep,
-        goNext,
-        goPrevious,
-        setTranscriptionModelDownloaded,
-        setSummaryModelDownloaded,
-        setSelectedSummaryModel,
-        setDatabaseExists,
-        setPermissionStatus,
-        setPermissionsSkipped,
-        completeOnboarding,
-        startBackgroundDownloads,
-        retryTranscriptionModelDownload,
-      }}
-    >
-      {children}
-    </OnboardingContext.Provider>
+  const setPermissionStatus = useCallback(
+    (permission: keyof OnboardingPermissions, status: PermissionStatus) => {
+      setPermissions((prev) => ({ ...prev, [permission]: status }));
+    },
+    [],
   );
+
+  const goToStep = useCallback(
+    (step: number) => setCurrentStep(Math.max(1, Math.min(step, 3))),
+    [],
+  );
+  const goNext = useCallback(() => setCurrentStep((prev) => Math.min(prev + 1, 3)), []);
+  const goPrevious = useCallback(() => setCurrentStep((prev) => Math.max(prev - 1, 1)), []);
+
+  const value = useMemo<OnboardingContextType>(
+    () => ({
+      currentStep,
+      totalSteps,
+      isMac,
+      statusLoaded,
+      shouldRun,
+      modelPack,
+      transcriptionLabel,
+      summaryModel,
+      setSummaryModel,
+      permissions,
+      permissionsSkipped,
+      goToStep,
+      goNext,
+      goPrevious,
+      setPermissionStatus,
+      setPermissionsSkipped,
+      startModelPack,
+      completeOnboarding,
+    }),
+    [
+      currentStep,
+      totalSteps,
+      isMac,
+      statusLoaded,
+      shouldRun,
+      modelPack,
+      transcriptionLabel,
+      summaryModel,
+      setSummaryModel,
+      permissions,
+      permissionsSkipped,
+      goToStep,
+      goNext,
+      goPrevious,
+      setPermissionStatus,
+      startModelPack,
+      completeOnboarding,
+    ],
+  );
+
+  return <OnboardingContext.Provider value={value}>{children}</OnboardingContext.Provider>;
 }
 
 export function useOnboarding() {

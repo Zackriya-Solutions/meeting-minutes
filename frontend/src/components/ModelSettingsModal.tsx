@@ -173,6 +173,16 @@ export function ModelSettingsModal({
   // Combobox state
   const [modelComboboxOpen, setModelComboboxOpen] = useState<boolean>(false);
 
+  // Summarization is a DeepSeek v4 choice; every other provider lives behind a disclosure.
+  // It opens by itself for anyone already on another provider — their configuration must not
+  // become invisible just because it is no longer the offered path.
+  const [showOtherProviders, setShowOtherProviders] = useState<boolean>(
+    modelConfig.provider !== 'deepseek',
+  );
+  useEffect(() => {
+    if (modelConfig.provider !== 'deepseek') setShowOtherProviders(true);
+  }, [modelConfig.provider]);
+
   // Dynamic model fetching state for OpenAI, Claude, and Groq
   const [openaiModels, setOpenaiModels] = useState<string[]>([]);
   const [claudeModels, setClaudeModels] = useState<string[]>([]);
@@ -825,6 +835,64 @@ export function ModelSettingsModal({
       </div>
 
       <div className="space-y-4">
+        {/* The offered choice: two DeepSeek tiers. */}
+        <div>
+          <Label>{t('Model for summaries')}</Label>
+          <div className="mt-2 grid gap-2 sm:grid-cols-2">
+            {DEEPSEEK_FALLBACK_MODELS.map((model) => {
+              const selected = modelConfig.provider === 'deepseek' && modelConfig.model === model;
+              const isPro = model === 'deepseek-v4-pro';
+              return (
+                <button
+                  key={model}
+                  type="button"
+                  aria-pressed={selected}
+                  onClick={() =>
+                    setModelConfig((prev: ModelConfig) => ({
+                      ...prev,
+                      provider: 'deepseek',
+                      model,
+                    }))
+                  }
+                  className={cn(
+                    'rounded-lg border p-3 text-left transition-colors',
+                    selected
+                      ? 'border-primary bg-primary/5 ring-1 ring-ring'
+                      : 'border-border hover:bg-muted/50',
+                  )}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-medium">
+                      {isPro ? 'DeepSeek v4 Pro' : 'DeepSeek v4 Flash'}
+                    </span>
+                    {selected && <CheckCircle2 className="h-4 w-4 shrink-0 text-primary" />}
+                  </div>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    {isPro
+                      ? t('More precise with details and figures')
+                      : t('Faster and cheaper')}
+                  </p>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Everything else, for anyone who needs it. */}
+        <div
+          className="flex cursor-pointer items-center justify-between py-2"
+          onClick={() => setShowOtherProviders(!showOtherProviders)}
+        >
+          <Label className="cursor-pointer">{t('Other providers (advanced)')}</Label>
+          {showOtherProviders ? (
+            <ChevronUp className="h-4 w-4 text-muted-foreground" />
+          ) : (
+            <ChevronDown className="h-4 w-4 text-muted-foreground" />
+          )}
+        </div>
+
+        {showOtherProviders && (
+        <div className="space-y-4">
         <div>
           <Label>{t('Summarization Model')}</Label>
           <div className="flex space-x-2 mt-1">
@@ -1394,6 +1462,8 @@ export function ModelSettingsModal({
               }
             />
           </div>
+        )}
+        </div>
         )}
       </div>
 

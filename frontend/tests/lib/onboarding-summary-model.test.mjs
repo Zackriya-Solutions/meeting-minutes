@@ -35,50 +35,36 @@ function loadTsModule(filePath) {
 }
 
 const {
+  DEFAULT_SUMMARY_MODEL,
+  OFFERED_SUMMARY_MODELS,
   getDownloadTotalMb,
   getSummaryModelSizeLabel,
   getSummaryModelSizeMb,
-  resolveOnboardingSummaryModelStatus,
+  isOfferedSummaryModel,
+  normalizeSummaryModel,
 } = loadTsModule(modulePath);
 
+// Summarization offers exactly two tiers. Anything else — a retired DeepSeek alias, or a
+// local model saved by an older build — must resolve to the default rather than reaching
+// the gateway, which would reject it.
 assert.equal(
-  JSON.stringify(resolveOnboardingSummaryModelStatus({
-    selectedModel: 'qwen3.5:4b',
-    recommendedModel: 'qwen3.5:4b',
-    selectedModelReady: false,
-  })),
-  JSON.stringify({
-    selectedSummaryModel: 'qwen3.5:4b',
-    summaryModelDownloaded: false,
-  }),
-  'legacy Gemma availability must not make an undownloaded selected Qwen model ready'
+  JSON.stringify(OFFERED_SUMMARY_MODELS),
+  JSON.stringify(['deepseek-v4-pro', 'deepseek-v4-flash'])
 );
+assert.equal(DEFAULT_SUMMARY_MODEL, 'deepseek-v4-pro');
 
-assert.equal(
-  JSON.stringify(resolveOnboardingSummaryModelStatus({
-    selectedModel: 'gemma3:1b',
-    recommendedModel: 'qwen3.5:4b',
-    selectedModelReady: true,
-  })),
-  JSON.stringify({
-    selectedSummaryModel: 'gemma3:1b',
-    summaryModelDownloaded: true,
-  }),
-  'explicit selected model should win over a different recommendation'
-);
+assert.equal(isOfferedSummaryModel('deepseek-v4-flash'), true);
+assert.equal(isOfferedSummaryModel('deepseek-v4-pro'), true);
+assert.equal(isOfferedSummaryModel('deepseek-chat'), false);
+assert.equal(isOfferedSummaryModel('qwen3.5:4b'), false);
+assert.equal(isOfferedSummaryModel(''), false);
+assert.equal(isOfferedSummaryModel(null), false);
 
-assert.equal(
-  JSON.stringify(resolveOnboardingSummaryModelStatus({
-    selectedModel: '',
-    recommendedModel: 'qwen3.5:2b',
-    selectedModelReady: true,
-  })),
-  JSON.stringify({
-    selectedSummaryModel: 'qwen3.5:2b',
-    summaryModelDownloaded: true,
-  }),
-  'recommended Qwen should become the selected model when no model is selected yet'
-);
+assert.equal(normalizeSummaryModel('deepseek-v4-flash'), 'deepseek-v4-flash');
+assert.equal(normalizeSummaryModel(' deepseek-v4-flash '), 'deepseek-v4-flash');
+assert.equal(normalizeSummaryModel('deepseek-reasoner'), 'deepseek-v4-pro');
+assert.equal(normalizeSummaryModel('gemma3:1b'), 'deepseek-v4-pro');
+assert.equal(normalizeSummaryModel(undefined), 'deepseek-v4-pro');
 
 assert.equal(getSummaryModelSizeMb('qwen3.5:2b'), 1221);
 assert.equal(getSummaryModelSizeMb('qwen3.5:4b'), 2614);

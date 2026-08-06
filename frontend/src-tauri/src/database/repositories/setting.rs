@@ -96,6 +96,21 @@ impl SettingsRepository {
         .execute(pool)
         .await?;
 
+        // The analytics report resolves its DeepSeek model from `app_settings_kv`, not from
+        // this table (see `report::pipeline::resolve_model`). Mirroring the choice here is
+        // what keeps a Flash install from silently billing Pro for every report.
+        if provider == "deepseek" {
+            let normalized = crate::llm::providers::deepseek::normalize_model(model);
+            sqlx::query(
+                "INSERT INTO app_settings_kv(key, value, updated_at) \
+                 VALUES('deepseek.model', ?, datetime('now')) \
+                 ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+            )
+            .bind(normalized)
+            .execute(pool)
+            .await?;
+        }
+
         Ok(())
     }
 
@@ -385,5 +400,85 @@ impl SettingsRepository {
         .await?;
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sqlx::sqlite::SqlitePoolOptions;
+
+    async fn migrated_pool() -> SqlitePool {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+        pool
+    }
+
+    async fn kv(pool: &SqlitePool, key: &str) -> Option<String> {
+        sqlx::query_scalar::<_, String>("SELECT value FROM app_settings_kv WHERE key = ?")
+            .bind(key)
+            .fetch_optional(pool)
+            .await
+            .unwrap()
+    }
+
+    /// Summaries read the model from `settings`; the analytics report reads it from
+    /// `app_settings_kv`. Choosing Flash and getting Pro-priced reports is invisible to the
+    /// user, so saving the config has to write both.
+    #[tokio::test]
+    async fn saving_a_deepseek_tier_also_updates_the_key_reports_read() {
+        let pool = migrated_pool().await;
+
+        SettingsRepository::save_model_config(
+            &pool,
+            "deepseek",
+            "deepseek-v4-flash",
+            "large-v3",
+            None,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            kv(&pool, "deepseek.model").await.as_deref(),
+            Some("deepseek-v4-flash")
+        );
+
+        // A model this build does not offer must not reach the gateway.
+        SettingsRepository::save_model_config(&pool, "deepseek", "deepseek-chat", "large-v3", None)
+            .await
+            .unwrap();
+        assert_eq!(
+            kv(&pool, "deepseek.model").await.as_deref(),
+            Some("deepseek-v4-pro")
+        );
+    }
+
+    /// Switching to another provider leaves the DeepSeek tier alone: it is what the user picked
+    /// for reports, and reports keep using DeepSeek regardless of the summary provider.
+    #[tokio::test]
+    async fn other_providers_do_not_touch_the_deepseek_tier() {
+        let pool = migrated_pool().await;
+
+        SettingsRepository::save_model_config(
+            &pool,
+            "deepseek",
+            "deepseek-v4-flash",
+            "large-v3",
+            None,
+        )
+        .await
+        .unwrap();
+        SettingsRepository::save_model_config(&pool, "ollama", "llama3.2:latest", "large-v3", None)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            kv(&pool, "deepseek.model").await.as_deref(),
+            Some("deepseek-v4-flash")
+        );
     }
 }

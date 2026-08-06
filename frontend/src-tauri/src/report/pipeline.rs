@@ -288,7 +288,7 @@ fn sanitize_component(id: &str) -> String {
 /// Write the report HTML. Preferred location is the meeting's own folder (alongside its
 /// audio/transcript); if `folder_path` is unset, unusable, or the write fails, fall back
 /// to `{app_data_dir}/reports/{meeting_id}/`.
-fn write_html<R: Runtime>(
+pub(crate) fn write_html<R: Runtime>(
     app: &AppHandle<R>,
     meeting_id: &str,
     folder_path: Option<&str>,
