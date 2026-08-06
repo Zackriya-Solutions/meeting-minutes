@@ -1,9 +1,11 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import {
   AUTO_START_FLAG_KEY,
+  AUTO_START_PARTICIPANTS_KEY,
   AUTO_START_TITLE_KEY,
   clearAutoStartRequest,
   requestAutoStart,
+  takeRequestedMeetingParticipants,
   takeRequestedMeetingTitle,
 } from "../../src/lib/autoStartRecording";
 
@@ -61,6 +63,53 @@ describe("requestAutoStart", () => {
     requestAutoStart(storage, "   ");
     expect(storage.getItem(AUTO_START_TITLE_KEY)).toBeNull();
   });
+
+  test("carries the people the calendar entry invited", () => {
+    requestAutoStart(storage, "Sprint planning", ["Андрей Евлампиев", "Мария Петрова"]);
+    expect(JSON.parse(storage.getItem(AUTO_START_PARTICIPANTS_KEY)!)).toEqual([
+      "Андрей Евлампиев",
+      "Мария Петрова",
+    ]);
+  });
+
+  test("a request without participants clears those left by an earlier one", () => {
+    requestAutoStart(storage, "Client call", ["Мария Петрова"]);
+    requestAutoStart(storage, "Untitled follow-up");
+    expect(storage.getItem(AUTO_START_PARTICIPANTS_KEY)).toBeNull();
+  });
+
+  test("drops blanks and repeated spellings before storing", () => {
+    requestAutoStart(storage, "Client call", [
+      "  Мария Петрова  ",
+      "",
+      "мария петрова",
+      "Гость",
+    ]);
+    expect(JSON.parse(storage.getItem(AUTO_START_PARTICIPANTS_KEY)!)).toEqual([
+      "Мария Петрова",
+      "Гость",
+    ]);
+  });
+});
+
+describe("takeRequestedMeetingParticipants", () => {
+  test("returns the invited people once, then nothing", () => {
+    const storage = fakeStorage();
+    requestAutoStart(storage, "Sprint planning", ["Мария Петрова"]);
+
+    expect(takeRequestedMeetingParticipants(storage)).toEqual(["Мария Петрова"]);
+    expect(takeRequestedMeetingParticipants(storage)).toEqual([]);
+  });
+
+  test("is empty when the request carried nobody", () => {
+    expect(takeRequestedMeetingParticipants(fakeStorage())).toEqual([]);
+  });
+
+  test("an unreadable stored value reads as empty and is cleared", () => {
+    const storage = fakeStorage({ [AUTO_START_PARTICIPANTS_KEY]: "not json" });
+    expect(takeRequestedMeetingParticipants(storage)).toEqual([]);
+    expect(storage.getItem(AUTO_START_PARTICIPANTS_KEY)).toBeNull();
+  });
 });
 
 describe("takeRequestedMeetingTitle", () => {
@@ -92,13 +141,14 @@ describe("takeRequestedMeetingTitle", () => {
 });
 
 describe("clearAutoStartRequest", () => {
-  test("withdraws both halves of a pending request", () => {
+  test("withdraws every part of a pending request", () => {
     const storage = fakeStorage();
-    requestAutoStart(storage, "Client call");
+    requestAutoStart(storage, "Client call", ["Мария Петрова"]);
 
     clearAutoStartRequest(storage);
 
     expect(storage.getItem(AUTO_START_FLAG_KEY)).toBeNull();
     expect(storage.getItem(AUTO_START_TITLE_KEY)).toBeNull();
+    expect(storage.getItem(AUTO_START_PARTICIPANTS_KEY)).toBeNull();
   });
 });

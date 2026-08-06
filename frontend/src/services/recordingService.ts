@@ -61,6 +61,13 @@ export class RecordingService {
 
   /**
    * Start recording with device configuration and meeting name
+   *
+   * The keys must be camelCase: a `#[tauri::command]` reads its arguments under the
+   * camelCase form of the Rust parameter name, and every one of these three is an
+   * `Option`, so a snake_case key is not an error — it simply arrives as `None`.
+   * That silently discarded the meeting name (Rust then named the recording after a
+   * timestamp, losing a calendar subject) and the chosen devices.
+   *
    * @param micDeviceName - Microphone device name (null for default)
    * @param systemDeviceName - System audio device name (null for none)
    * @param meetingName - Meeting name/title
@@ -72,9 +79,9 @@ export class RecordingService {
     meetingName: string
   ): Promise<void> {
     return invoke('start_recording_with_devices_and_meeting', {
-      mic_device_name: micDeviceName,
-      system_device_name: systemDeviceName,
-      meeting_name: meetingName
+      micDeviceName,
+      systemDeviceName,
+      meetingName
     });
   }
 

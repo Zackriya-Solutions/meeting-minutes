@@ -12,7 +12,12 @@ import {
 } from '@/lib/transcriptionReadiness';
 import { toast } from 'sonner';
 import { useT } from '@/lib/i18n';
-import { takeRequestedMeetingTitle } from '@/lib/autoStartRecording';
+import {
+  takeRequestedMeetingParticipants,
+  takeRequestedMeetingTitle,
+} from '@/lib/autoStartRecording';
+import { getCurrentLocalOutlookMeeting } from '@/lib/localOutlookCalendar';
+import { rememberMeetingParticipants } from '@/lib/meetingParticipants';
 
 interface UseRecordingStartReturn {
   handleRecordingStart: (meetingTitle?: string) => Promise<void>;
@@ -58,12 +63,46 @@ export function useRecordingStart(
     return `${prefix} ${day}_${month}_${year}_${hours}_${minutes}_${seconds}`;
   }, []);
 
-  // Title for a start the user did not type a name for: a requested one if a calendar
-  // entry supplied it, otherwise the generated stamp.
-  const takeMeetingTitle = useCallback(() => {
-    if (typeof window === 'undefined') return generateMeetingTitle();
-    return takeRequestedMeetingTitle(window.sessionStorage) ?? generateMeetingTitle();
+  /**
+   * Name and invitees for a start the user did not type a name for.
+   *
+   * A request from a calendar entry already carries both. Otherwise the Outlook entry
+   * under way right now is asked, so a meeting the user joined without picking it from
+   * the list is still recorded under its own name with its own participants; that
+   * lookup can never hold up the start (see `getCurrentLocalOutlookMeeting`). The
+   * generated stamp is the last resort.
+   *
+   * The invitees are left in the one-shot pending slot for the stop sequence, which is
+   * the first moment there is a meeting row to attach them to.
+   */
+  const takeMeetingIdentity = useCallback(async (): Promise<{
+    title: string;
+    participants: string[];
+  }> => {
+    if (typeof window === 'undefined') {
+      return { title: generateMeetingTitle(), participants: [] };
+    }
+
+    const storage = window.sessionStorage;
+    const requestedTitle = takeRequestedMeetingTitle(storage);
+    const requestedParticipants = takeRequestedMeetingParticipants(storage);
+    if (requestedTitle) {
+      rememberMeetingParticipants(storage, requestedParticipants);
+      return { title: requestedTitle, participants: requestedParticipants };
+    }
+
+    const current = await getCurrentLocalOutlookMeeting();
+    const title = current?.subject.trim() || generateMeetingTitle();
+    const participants = current?.attendees ?? [];
+    rememberMeetingParticipants(storage, participants);
+    return { title, participants };
   }, [generateMeetingTitle]);
+
+  // Title only, for the paths that do not care who was invited.
+  const takeMeetingTitle = useCallback(
+    async () => (await takeMeetingIdentity()).title,
+    [takeMeetingIdentity],
+  );
 
   const reportAutoListeningFailure = useCallback(async (
     failureReason: 'model_unavailable' | 'permission_denied' | 'start_failed',
@@ -156,7 +195,11 @@ export function useRecordingStart(
 
       console.log('Parakeet ready - setting up meeting title and state');
 
-      const randomTitle = calendarMeetingTitle?.trim() || takeMeetingTitle();
+      // Resolve the identity either way: a caller-supplied name wins, but the pending
+      // request still has to be consumed so its title and invitees cannot survive into
+      // the next, unrelated recording.
+      const identity = await takeMeetingIdentity();
+      const randomTitle = calendarMeetingTitle?.trim() || identity.title;
       setMeetingTitle(randomTitle);
 
       // Set STARTING status before initiating backend recording
@@ -187,7 +230,7 @@ export function useRecordingStart(
       // Re-throw so RecordingControls can handle device-specific errors
       throw error;
     }
-  }, [takeMeetingTitle, setMeetingTitle, setIsRecording, clearTranscripts, setIsMeetingActive, checkTranscriptionReadiness, showTranscriptionReadinessError, selectedDevices, setStatus]);
+  }, [takeMeetingIdentity, setMeetingTitle, setIsRecording, clearTranscripts, setIsMeetingActive, checkTranscriptionReadiness, showTranscriptionReadinessError, selectedDevices, setStatus]);
 
   // Check for autoStartRecording flag and start recording automatically
   useEffect(() => {
@@ -212,7 +255,7 @@ export function useRecordingStart(
           // Start the actual backend recording
           try {
             // Name the meeting after whoever requested the start, or stamp it
-            const generatedMeetingTitle = takeMeetingTitle();
+            const generatedMeetingTitle = await takeMeetingTitle();
 
             // Set STARTING status before initiating backend recording
             setStatus(RecordingStatus.STARTING, 'Initializing recording...');
@@ -286,7 +329,7 @@ export function useRecordingStart(
 
       try {
         // Name the meeting after whoever requested the start, or stamp it
-        const generatedMeetingTitle = takeMeetingTitle();
+        const generatedMeetingTitle = await takeMeetingTitle();
 
         // Set STARTING status before initiating backend recording
         setStatus(RecordingStatus.STARTING, 'Initializing recording...');

@@ -62,6 +62,12 @@ export interface LocalOutlookMeeting {
   is_recurring: boolean;
   location: string | null;
   response_status: 'none' | 'organized' | 'tentative' | 'accepted' | 'declined' | 'not_responded';
+  /**
+   * Invited people as Outlook names them, organizer first. Empty when the connector
+   * cannot read the invitee list (the macOS Accessibility fallback), so every caller
+   * has to treat participants as optional.
+   */
+  attendees: string[];
 }
 
 export async function getLocalOutlookCalendarStatus(): Promise<LocalOutlookCalendarStatus> {
@@ -100,6 +106,66 @@ export async function getUpcomingLocalOutlookMeetings(
 
   inFlightRequests.set(days, request);
   return request;
+}
+
+/** How early or late a calendar entry still counts as "the meeting happening now". */
+export const MEETING_IN_PROGRESS_GRACE_MS = 5 * 60 * 1000;
+
+/**
+ * The timed entry covering `now`, or null. When entries overlap the one that started
+ * most recently wins: that is the meeting the user just joined.
+ *
+ * Only entries that are meetings with other people qualify. An all-day marker, a focus
+ * block, or a personal reminder shares the clock with a call without being one, and
+ * naming a recording after it would be worse than not naming it at all.
+ */
+export function selectMeetingInProgress(
+  meetings: LocalOutlookMeeting[],
+  now = Date.now(),
+  graceMs = MEETING_IN_PROGRESS_GRACE_MS,
+): LocalOutlookMeeting | null {
+  return meetings
+    .filter((meeting) => {
+      if (meeting.is_all_day || !meeting.is_meeting) return false;
+      const start = new Date(meeting.start_at).getTime();
+      const end = new Date(meeting.end_at).getTime();
+      if (!Number.isFinite(start) || !Number.isFinite(end)) return false;
+      return start - graceMs <= now && now <= end + graceMs;
+    })
+    .sort((left, right) => (
+      new Date(right.start_at).getTime() - new Date(left.start_at).getTime()
+    ))[0] ?? null;
+}
+
+/** One calendar entry by the id the upcoming list handed out, or null. */
+export async function findLocalOutlookMeeting(id: string): Promise<LocalOutlookMeeting | null> {
+  if (!await isLocalOutlookCalendarEnabled()) return null;
+  const meetings = await getUpcomingLocalOutlookMeetings();
+  return meetings.find((meeting) => meeting.id === id) ?? null;
+}
+
+/**
+ * The Outlook meeting under way right now, for naming a recording the user started
+ * without picking a calendar entry.
+ *
+ * Never worth delaying a recording for: the answer is the fresh cache when there is
+ * one, and otherwise a read that is abandoned after `timeoutMs`. Returns null on any
+ * failure — an unnamed recording is a far better outcome than a late one.
+ */
+export async function getCurrentLocalOutlookMeeting(
+  { timeoutMs = 1_500 }: { timeoutMs?: number } = {},
+): Promise<LocalOutlookMeeting | null> {
+  try {
+    if (!await isLocalOutlookCalendarEnabled()) return null;
+    const meetings = await Promise.race([
+      getUpcomingLocalOutlookMeetings(),
+      new Promise<null>((resolve) => { window.setTimeout(() => resolve(null), timeoutMs); }),
+    ]);
+    return meetings ? selectMeetingInProgress(meetings) : null;
+  } catch (error) {
+    console.warn('Could not check the Outlook calendar for the meeting in progress:', error);
+    return null;
+  }
 }
 
 export async function isLocalOutlookCalendarEnabled(): Promise<boolean> {

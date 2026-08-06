@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use super::manager::DatabaseManager;
+use super::repositories::participant::{ParticipantsRepository, SOURCE_OUTLOOK_CALENDAR};
 use crate::state::AppState;
 
 #[derive(Serialize)]
@@ -63,6 +64,33 @@ pub async fn get_meeting_source_title(
     })
     .await
     .map_err(|error| format!("Source-title task failed: {error}"))?
+}
+
+/// Attach the people a calendar invitation named to a saved meeting.
+///
+/// Called once, right after the recording is saved, with the invitee list the recorder
+/// captured when it started. Repeating it is harmless: an invitee already recorded for
+/// the meeting is ignored rather than duplicated.
+#[tauri::command]
+pub async fn set_meeting_participants(
+    state: State<'_, AppState>,
+    meeting_id: String,
+    participants: Vec<String>,
+    source: Option<String>,
+) -> Result<usize, String> {
+    let source = source.unwrap_or_else(|| SOURCE_OUTLOOK_CALENDAR.to_string());
+    let inserted = ParticipantsRepository::add(
+        state.db_manager.pool(),
+        &meeting_id,
+        &participants,
+        &source,
+    )
+    .await
+    .map_err(|error| format!("Failed to save the meeting participants: {error}"))?;
+    info!(
+        "Recorded {inserted} participant(s) for meeting {meeting_id} from {source}"
+    );
+    Ok(inserted)
 }
 
 /// Check if this is the first launch (no database exists yet)

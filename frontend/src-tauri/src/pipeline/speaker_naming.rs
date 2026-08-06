@@ -19,6 +19,7 @@
 use sqlx::SqlitePool;
 use std::collections::{HashMap, HashSet};
 
+use crate::database::repositories::participant::ParticipantsRepository;
 use crate::database::repositories::speaker::{is_automatic_speaker_name, SpeakersRepository};
 use crate::llm::{complete_routed, router::Scope, LlmError, Purpose};
 use crate::report::dynamics;
@@ -245,7 +246,26 @@ pub async fn infer_and_apply(pool: &SqlitePool, meeting_id: &str) -> Result<Nami
             )
         })
         .collect();
-    let (system, user) = prompts::speakers(&transcript, &prompts::speaker_roster(&roster_lines));
+    // Who the calendar said would be here. An invitation names people who never say
+    // their own name out loud, which is exactly the case a transcript-only pass cannot
+    // solve; a missing list is the normal case and changes nothing.
+    let invited = ParticipantsRepository::names(pool, meeting_id)
+        .await
+        .unwrap_or_else(|error| {
+            log::warn!("[speaker-naming] meeting {meeting_id}: could not read participants: {error}");
+            Vec::new()
+        });
+    if !invited.is_empty() {
+        log::info!(
+            "[speaker-naming] meeting {meeting_id}: {} invited participant(s) available as hints",
+            invited.len()
+        );
+    }
+    let (system, user) = prompts::speakers(
+        &transcript,
+        &prompts::speaker_roster(&roster_lines),
+        &prompts::invited_participants(&invited),
+    );
 
     let Some(guesses) = ask_model(pool, meeting_id, &system, &user, transcript.len()).await else {
         return Ok(NamingOutcome::default());

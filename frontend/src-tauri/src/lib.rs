@@ -1072,6 +1072,7 @@ pub fn run() {
             database::commands::get_database_directory,
             database::commands::open_database_folder,
             database::commands::get_meeting_source_title,
+            database::commands::set_meeting_participants,
             whisper_engine::commands::open_models_folder,
             // Onboarding commands
             onboarding::get_onboarding_status,

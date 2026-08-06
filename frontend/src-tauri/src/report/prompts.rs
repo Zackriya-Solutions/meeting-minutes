@@ -455,9 +455,30 @@ pub fn speaker_roster(entries: &[(i64, String, i64)]) -> String {
         .join("\n")
 }
 
+/// The people a calendar invitation named, as a hint for the speakers stage.
+///
+/// A hint and not an answer: an invitee can skip the call and a walk-in can join it, so
+/// the transcript stays the only evidence. What the list adds is the spelling of a name
+/// and a way to resolve the short form people actually say out loud. Returns an empty
+/// string when no invitation is known, leaving the prompt exactly as it was.
+pub fn invited_participants(names: &[String]) -> String {
+    if names.is_empty() {
+        return String::new();
+    }
+    format!(
+        "Приглашённые участники (из календаря): {}.\n\
+Это подсказка, а не ответ: кто-то из приглашённых мог не прийти, а в разговоре могут участвовать люди не из списка. \
+Если в стенограмме звучит имя из списка — в том числе краткая форма («Маша» для «Мария Петрова») — используй написание из списка. \
+Не приписывай имя из списка спикеру, если в стенограмме нет опоры на это.",
+        names.join(", ")
+    )
+}
+
 /// Speakers stage: guess real names for diarized speakers and propose merging ids that
-/// belong to the same person. Fed the roster + the speaker-labeled transcript.
-pub fn speakers(transcript: &str, roster: &str) -> (String, String) {
+/// belong to the same person. Fed the roster + the speaker-labeled transcript, and the
+/// invitee list when the meeting came from a calendar entry (see
+/// [`invited_participants`]; pass `""` when nobody was invited).
+pub fn speakers(transcript: &str, roster: &str, invited: &str) -> (String, String) {
     let schema = "{ \"names\": [ { \"speaker_id\": id спикера из списка (число), \
 \"name\": предполагаемое реальное имя (как звучит в стенограмме, напр. \"Андрей\"), \
 \"confidence\": число 0..1, \
@@ -466,6 +487,11 @@ pub fn speakers(transcript: &str, roster: &str) -> (String, String) {
 \"merges\": [ { \"keep_id\": id спикера, которого оставить (с бОльшим числом реплик), \
 \"merge_ids\": [id спикеров, которые на самом деле ТОТ ЖЕ человек], \
 \"reason\": краткое обоснование } ] }";
+    let invited_block = if invited.trim().is_empty() {
+        String::new()
+    } else {
+        format!("{}\n\n", invited.trim())
+    };
     let user = format!(
         "Определи реальные имена спикеров и найди дубликаты среди них.\n\n\
 Имена (names): угадывай ТОЛЬКО по стенограмме — представления («меня зовут…», «это Аня»), \
@@ -477,7 +503,7 @@ pub fn speakers(transcript: &str, roster: &str) -> (String, String) {
 к обоим id обращаются одним именем, id почти не «разговаривают» друг с другом. \
 Предлагай объединение только при высокой уверенности; в keep_id ставь id с бОльшим числом реплик. \
 Каждый id может входить не более чем в одну группу. Если дубликатов нет — верни пустой список merges.\n\n\
-Спикеры встречи (id → текущее имя, число реплик):\n{roster}\n\nСтенограмма:\n{transcript}"
+{invited_block}Спикеры встречи (id → текущее имя, число реплик):\n{roster}\n\nСтенограмма:\n{transcript}"
     );
     (stage_system(schema), user)
 }
@@ -653,6 +679,30 @@ mod tests {
     use super::*;
 
     #[test]
+    fn invited_participants_reach_the_speakers_prompt() {
+        let invited = invited_participants(&[
+            "Андрей Евлампиев".to_string(),
+            "Мария Петрова".to_string(),
+        ]);
+        let (_, user) = speakers("[0|00:05] Спикер 1: Привет", "- id 1: «Спикер 1»", &invited);
+
+        assert!(user.contains("Андрей Евлампиев, Мария Петрова"));
+        // The list must stay a hint: the transcript is still the only evidence.
+        assert!(user.contains("угадывай ТОЛЬКО по стенограмме"));
+        assert!(user.contains("Не приписывай имя из списка спикеру"));
+        // And it must come before the roster it helps interpret.
+        assert!(user.find("Приглашённые участники").unwrap() < user.find("Спикеры встречи").unwrap());
+    }
+
+    #[test]
+    fn a_meeting_without_an_invitation_keeps_the_original_prompt() {
+        assert_eq!(invited_participants(&[]), "");
+        let (_, without) = speakers("стенограмма", "- id 1: «Спикер 1»", "");
+        assert!(!without.contains("Приглашённые участники"));
+        assert!(without.contains("Спикеры встречи"));
+    }
+
+    #[test]
     fn transcript_is_numbered_with_timestamps() {
         let timed = vec![
             TimedSegment {
@@ -748,7 +798,7 @@ mod tests {
         ]);
         assert!(roster.contains("- id 12: «Speaker 1», реплик: 42"));
         assert!(roster.contains("- id 15: «Аня», реплик: 7"));
-        let (system, user) = speakers("[0|00:00] Speaker 1: тест\n", &roster);
+        let (system, user) = speakers("[0|00:00] Speaker 1: тест\n", &roster, "");
         assert!(system.contains("keep_id"));
         assert!(system.contains("speaker_id"));
         assert!(user.contains("id 12"));

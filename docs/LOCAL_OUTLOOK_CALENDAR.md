@@ -51,12 +51,46 @@ The bridge reads only:
 - start and end time;
 - calendar and local Outlook store name on Windows;
 - location;
-- all-day, recurring, meeting, and response-status flags.
+- all-day, recurring, meeting, and response-status flags;
+- the invitee names the invitation itself lists — organizer, required and
+  optional attendees — capped at 40 per entry. Only the display name is taken;
+  an e-mail address is used solely when an invitee has no display name, and no
+  address book, contact, or directory lookup is performed.
 
-It does not request appointment bodies, attachments, recipient names or
-addresses, credentials, mail, or contacts. Calendar responses are kept in
-memory and are not written to the Memento SQLite database. Event content must
-not be added to analytics events or logs.
+It does not request appointment bodies, attachments, credentials, mail, or
+contacts.
+
+Calendar responses are kept in memory. The one exception is deliberate: when a
+recording is started for a calendar entry, that entry's subject becomes the
+meeting title and its invitee names are stored in `meeting_participants` for
+that meeting alone (see [Recording a calendar
+meeting](#recording-a-calendar-meeting)). Those rows are deleted with the
+meeting. Event content must not be added to analytics events or logs.
+
+## Recording a calendar meeting
+
+A calendar entry is a plan; a recording is a separate act the user starts. When
+they do — from **Record this meeting** on the entry, or simply by recording
+while an Outlook entry is under way — the entry supplies two things a recorder
+cannot otherwise know:
+
+- the **name**: the Outlook subject becomes the meeting title instead of a
+  timestamp. The subject travels through the one-shot session hand-off in
+  `lib/autoStartRecording.ts` and reaches the recorder as the `meetingName`
+  argument of `start_recording_with_devices_and_meeting`. That argument, like
+  every Tauri command argument, is read under its camelCase name; because it is
+  an `Option`, a mis-cased key is not an error and silently costs the title.
+- the **participants**: the invitee names are held in the pending slot in
+  `lib/meetingParticipants.ts` until the stop sequence has saved the meeting,
+  then attached with `set_meeting_participants`. Automatic speaker naming reads
+  them as hints (`report::prompts::invited_participants`), which is how an
+  invited person who never says their own name can still be recognized. The
+  transcript remains the only evidence: a name is applied only when the
+  conversation supports it.
+
+Only the macOS Apple Events connector and the Windows Object Model connector can
+read invitees. The macOS Accessibility fallback sees the rendered calendar grid,
+which names nobody, so participants are always optional.
 
 ## Windows compatibility
 
@@ -113,8 +147,9 @@ bypass.
 The Apple Events connector asks Outlook for each calendar's events in the
 requested window through the documented Calendar Suite (`calendar event`:
 `subject`, `start time`, `end time`, `location`, `all day flag`,
-`is recurring`, `exchange id`, attendee count). It never reads `content` or
-`plain text content`, which are the appointment body. Unlike the Accessibility
+`is recurring`, `exchange id`, `organizer`, and the `name` / `address` of each
+attendee's `email address`). It never reads `content` or `plain text content`,
+which are the appointment body. Unlike the Accessibility
 connector it is not limited to the rendered week and does not depend on
 localized VoiceOver label wording.
 
@@ -130,11 +165,14 @@ contact Exchange, Graph, or OWA directly.
    seven days.
 4. Confirm canceled and declined meetings are absent.
 5. Start a recording from an upcoming meeting and confirm the Outlook subject
-   becomes the recording title.
-6. Inspect the Memento database and logs to confirm appointment content is not
+   becomes the recording title, and that the entry lists its invitees before the
+   recording starts.
+6. Stop that recording and confirm `meeting_participants` holds the invitees for
+   the saved meeting, organizer first.
+7. Inspect the Memento database and logs to confirm appointment content is not
    persisted.
-7. Repeat with Outlook closed; it should start on the first read.
-8. Repeat with new Outlook only; Settings should report that local access is
+8. Repeat with Outlook closed; it should start on the first read.
+9. Repeat with new Outlook only; Settings should report that local access is
    unavailable.
 
 ## Manual verification on macOS
@@ -151,11 +189,15 @@ the case the connector exists for.
 5. Confirm the preview lists meetings from the next seven days, including
    occurrences of recurring series, and that Outlook did **not** come to the
    front or change its view.
-6. Start a recording from a preview item and confirm its title is used.
-7. Confirm event titles do not appear in Memento logs or its SQLite database.
-8. Deny the permission instead (**System Settings → Privacy & Security →
+6. Start a recording from a preview item and confirm its title is used, and that
+   the invitees it listed are attached to the saved meeting.
+7. Start a recording *without* picking an entry while an Outlook meeting is under
+   way, and confirm it, too, is named after that meeting rather than the clock.
+8. Confirm event titles do not appear in Memento logs, and that the only calendar
+   data in SQLite is the recorded meeting's own title and participants.
+9. Deny the permission instead (**System Settings → Privacy & Security →
    Automation**, switch Microsoft Outlook off for Memento — again with no
    administrator prompt) and confirm Memento reports it and offers the
    permission button rather than failing silently.
-9. Switch Outlook to New Outlook and confirm Settings reports that New Outlook
-   has no local calendar automation.
+10. Switch Outlook to New Outlook and confirm Settings reports that New Outlook
+    has no local calendar automation.
