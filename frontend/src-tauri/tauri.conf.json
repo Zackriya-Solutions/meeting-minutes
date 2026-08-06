@@ -12,12 +12,13 @@
     "app": {
         "windows": [
             {
-                "title": "meetily",
+                "title": "Conversationaly",
                 "width": 1100,
                 "height": 700,
+                "minWidth": 720,
+                "minHeight": 520,
                 "resizable": true,
                 "fullscreen": false,
-                "theme": "Light",
                 "decorations": true
             }
         ],

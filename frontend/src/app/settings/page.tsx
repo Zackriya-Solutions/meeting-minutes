@@ -12,6 +12,7 @@ import { SummaryModelSettings } from '@/components/SummaryModelSettings';
 import { BetaSettings } from '@/components/BetaSettings';
 import { useConfig } from '@/contexts/ConfigContext';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import { ThemeToggle } from '@/components/ThemeToggle';
 
 // Tabs configuration (constant)
 const TABS = [
@@ -39,7 +40,7 @@ export default function SettingsPage() {
         if (config) {
           console.log('Loaded saved transcript config:', config);
           setTranscriptModelConfig({
-            provider: config.provider || 'localWhisper',
+            provider: config.provider || 'local',
             model: config.model || 'large-v3',
             apiKey: config.apiKey || null
           });
@@ -63,29 +64,24 @@ export default function SettingsPage() {
   }, [activeTab]);
 
   return (
-    <div className="h-screen bg-gray-50 flex flex-col">
-      {/* Fixed Header */}
-      <div className="sticky top-0 z-10 bg-gray-50 border-b border-gray-200">
-        <div className="max-w-6xl mx-auto px-8 py-6">
-          <div className="flex items-center gap-4">
-            <button
-              onClick={() => router.back()}
-              className="flex items-center gap-2 text-gray-600 hover:text-gray-900 transition-colors"
-            >
-              <ArrowLeft className="w-5 h-5" />
-              <span>Back</span>
-            </button>
-            <h1 className="text-3xl font-bold">Settings</h1>
-          </div>
+    <div className="flex h-screen flex-col bg-canvas">
+      <header className="sticky top-0 z-sticky border-b border-line bg-canvas">
+        <div className="mx-auto flex h-14 max-w-5xl items-center gap-3 px-8">
+          <button
+            onClick={() => router.back()}
+            className="flex h-8 w-8 items-center justify-center rounded-md text-ink-muted transition-colors duration-fast hover:bg-ink/5 hover:text-ink"
+            aria-label="Back"
+          >
+            <ArrowLeft className="h-4 w-4" />
+          </button>
+          <h1 className="text-xl font-semibold text-ink">Settings</h1>
         </div>
-      </div>
+      </header>
 
-      {/* Scrollable Content */}
-      <div className="flex-1 overflow-y-auto">
-        <div className="max-w-6xl mx-auto p-8 pt-6">
-          {/* Tabs */}
+      <div className="scrollbar-slim flex-1 overflow-y-auto">
+        <div className="mx-auto max-w-5xl px-8 pb-16">
           <Tabs value={activeTab} onValueChange={setActiveTab}>
-            <TabsList className="bg-transparent relative rounded-none border-b border-gray-200 p-0 h-auto">
+            <TabsList className="relative h-auto w-full justify-start gap-0 rounded-none border-b border-line bg-transparent p-0">
               {TABS.map((tab, index) => {
                 const Icon = tab.icon;
                 return (
@@ -93,35 +89,48 @@ export default function SettingsPage() {
                     key={tab.value}
                     value={tab.value}
                     ref={el => { tabRefs.current[index] = el }}
-                    className="flex items-center gap-2 px-6 py-4 bg-transparent rounded-none border-0 data-[state=active]:bg-transparent data-[state=active]:text-blue-600 data-[state=active]:shadow-none text-gray-600 hover:text-gray-900 relative z-10"
+                    className="relative z-10 flex items-center gap-2 rounded-none border-0 bg-transparent px-3.5 py-3 text-base text-ink-muted transition-colors duration-fast hover:text-ink data-[state=active]:bg-transparent data-[state=active]:font-medium data-[state=active]:text-ink data-[state=active]:shadow-none"
                   >
-                    <Icon className="w-4 h-4" />
+                    <Icon className="h-4 w-4" aria-hidden />
                     {tab.label}
                   </TabsTrigger>
                 );
               })}
 
+              {/* The one place a spring is right: it tracks a direct manipulation. */}
               <motion.div
-                className="absolute bottom-0 z-20 h-0.5 bg-blue-600"
+                aria-hidden
+                className="absolute -bottom-px z-20 h-0.5 bg-brand"
                 layoutId="underline"
                 style={{ left: underlineStyle.left, width: underlineStyle.width }}
-                transition={{ type: 'spring', stiffness: 400, damping: 40 }}
+                transition={{ type: 'spring', stiffness: 500, damping: 42 }}
               />
             </TabsList>
 
-            <TabsContent value="general">
+            <TabsContent value="general" className="mt-6">
+              {/* Theme lives here rather than in a hidden menu — it is the one
+                  setting a user changes because the room changed. */}
+              <section className="mb-8 flex flex-wrap items-center justify-between gap-3 border-b border-line pb-6">
+                <div>
+                  <h2 className="text-base font-medium text-ink">Appearance</h2>
+                  <p className="mt-0.5 text-sm text-ink-muted">
+                    System follows your OS setting.
+                  </p>
+                </div>
+                <ThemeToggle />
+              </section>
               <PreferenceSettings />
             </TabsContent>
-            <TabsContent value="recording">
+            <TabsContent value="recording" className="mt-6">
               <RecordingSettings />
             </TabsContent>
-            <TabsContent value="Transcriptionmodels">
+            <TabsContent value="Transcriptionmodels" className="mt-6">
               <TranscriptSettings
                 transcriptModelConfig={transcriptModelConfig}
                 setTranscriptModelConfig={setTranscriptModelConfig}
               />
             </TabsContent>
-            <TabsContent value="summaryModels">
+            <TabsContent value="summaryModels" className="mt-6">
               <SummaryModelSettings />
             </TabsContent>
             <TabsContent value="beta" className="mt-6">

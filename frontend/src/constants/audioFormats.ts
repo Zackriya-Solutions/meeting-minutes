@@ -37,5 +37,5 @@ export const AUDIO_FORMAT_DISPLAY_NAMES: Record<AudioExtension, string> = {
  * Example: "MP4, M4A, WAV, MP3, FLAC, OGG, AAC, MKV, WebM, WMA"
  */
 export function getAudioFormatsDisplayList(): string {
-  return AUDIO_EXTENSIONS.map(ext => AUDIO_FORMAT_DISPLAY_NAMES[ext]).join(', ');
+  return AUDIO_EXTENSIONS.map(ext => AUDIO_FORMAT_DISPLAY_NAMES[ext]).join(',');
 }

@@ -7,6 +7,7 @@ import { toast } from 'sonner';
 import Analytics from '@/lib/analytics';
 import { isOllamaNotInstalledError } from '@/lib/utils';
 import { BuiltInModelInfo } from '@/lib/builtin-ai';
+import { RECOMMENDED_SUMMARY_MODEL } from '@/lib/onboarding-summary-model';
 import {
   detectAndCacheSummaryLanguage,
   readMeetingSummaryLanguage,
@@ -488,7 +489,7 @@ export function useSummaryGeneration({
 
         if (!models || models.length === 0) {
           toast.error(
-            'No Ollama models found. Please download gemma3:1b from Model Settings.',
+            `No Ollama models found. Please download ${RECOMMENDED_SUMMARY_MODEL} from Model Settings.`,
             { duration: 5000 }
           );
           return;

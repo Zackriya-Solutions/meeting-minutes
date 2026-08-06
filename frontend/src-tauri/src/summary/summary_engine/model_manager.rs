@@ -37,6 +37,14 @@ pub struct DownloadProgress {
     pub percent: u8,
 }
 
+/// One file to fetch for a model. Weights and projector differ only in these three
+/// values, so the download loop is written once against this.
+struct DownloadTarget {
+    url: String,
+    file: String,
+    size_mb: u64,
+}
+
 impl DownloadProgress {
     pub fn new(downloaded: u64, total: u64, speed_mbps: f64) -> Self {
         let percent = if total > 0 {
@@ -240,8 +248,23 @@ impl ModelManager {
                         );
 
                         if file_size_mb >= expected_min && file_size_mb <= expected_max {
-                            log::info!("Model '{}': AVAILABLE", model_def.name);
-                            ModelStatus::Available
+                            // An audio model is only usable with its projector. Weights
+                            // alone would scan as Available and then fail at the first
+                            // transcription instead of offering a download.
+                            match &model_def.mmproj {
+                                Some(p) if !self.models_dir.join(&p.file).exists() => {
+                                    log::warn!(
+                                        "Model '{}': projector {} missing, needs download",
+                                        model_def.name,
+                                        p.file
+                                    );
+                                    ModelStatus::NotDownloaded
+                                }
+                                _ => {
+                                    log::info!("Model '{}': AVAILABLE", model_def.name);
+                                    ModelStatus::Available
+                                }
+                            }
                         } else {
                             log::warn!(
                                 "Model '{}': CORRUPTED (size mismatch: {} MB, expected {} MB)",
@@ -274,7 +297,8 @@ impl ModelManager {
                 display_name: model_def.display_name.clone(),
                 status,
                 path: model_path,
-                size_mb: model_def.size_mb,
+                // What the user has to download, so the UI quotes weights + projector.
+                size_mb: model_def.total_size_mb(),
                 context_size: model_def.context_size,
                 description: model_def.description.clone(),
                 gguf_file: model_def.gguf_file.clone(),
@@ -337,21 +361,25 @@ impl ModelManager {
     pub async fn download_model(
         &self,
         model_name: &str,
-        progress_callback: Option<Box<dyn Fn(u8) + Send>>,
+        progress_callback: Option<Box<dyn Fn(u8) + Send + Sync>>,
     ) -> Result<()> {
         // Wrap the simple callback to use detailed progress internally
-        let detailed_callback: Option<Box<dyn Fn(DownloadProgress) + Send>> =
+        let detailed_callback: Option<Box<dyn Fn(DownloadProgress) + Send + Sync>> =
             progress_callback.map(|cb| {
-                Box::new(move |p: DownloadProgress| cb(p.percent)) as Box<dyn Fn(DownloadProgress) + Send>
+                Box::new(move |p: DownloadProgress| cb(p.percent)) as Box<dyn Fn(DownloadProgress) + Send + Sync>
             });
         self.download_model_detailed(model_name, detailed_callback).await
     }
 
     /// Download a model with detailed progress (MB, speed, etc.)
+    ///
+    /// An audio-capable model is two files — weights plus projector — fetched in
+    /// sequence and reported as one progress bar, because from the user's side it is
+    /// one "download this model" action.
     pub async fn download_model_detailed(
         &self,
         model_name: &str,
-        progress_callback: Option<Box<dyn Fn(DownloadProgress) + Send>>,
+        progress_callback: Option<Box<dyn Fn(DownloadProgress) + Send + Sync>>,
     ) -> Result<()> {
         log::info!("Starting download for model: {}", model_name);
 
@@ -388,40 +416,99 @@ impl ModelManager {
             }
         }
 
-        let file_path = self.models_dir.join(&model_def.gguf_file);
+        let mut targets = vec![DownloadTarget {
+            url: model_def.download_url.clone(),
+            file: model_def.gguf_file.clone(),
+            size_mb: model_def.size_mb,
+        }];
+        if let Some(projector) = &model_def.mmproj {
+            targets.push(DownloadTarget {
+                url: projector.url.clone(),
+                file: projector.file.clone(),
+                size_mb: projector.size_mb,
+            });
+        }
 
-        // Check if model already exists and is valid (skip re-download)
+        const MIB: u64 = 1024 * 1024;
+        let grand_total = targets.iter().map(|t| t.size_mb).sum::<u64>() * MIB;
+        let weights_path = self.models_dir.join(&model_def.gguf_file);
+
+        let mut offset: u64 = 0;
+        for target in &targets {
+            self.download_one(model_name, target, offset, grand_total, &progress_callback)
+                .await?;
+            offset += target.size_mb * MIB;
+        }
+
+        if let Some(ref callback) = progress_callback {
+            callback(DownloadProgress::new(grand_total, grand_total, 0.0));
+        }
+
+        // Update status to available
+        {
+            let mut models = self.available_models.write().await;
+            if let Some(model_info) = models.get_mut(model_name) {
+                model_info.status = ModelStatus::Available;
+                model_info.path = weights_path;
+            }
+        }
+
+        // Remove from active downloads
+        {
+            let mut active = self.active_downloads.write().await;
+            active.remove(model_name);
+        }
+
+        Ok(())
+    }
+
+    /// Fetch one file of a model, reporting progress against the model's grand total.
+    ///
+    /// `progress_offset` is how many bytes of earlier files are already done, so a
+    /// two-file model still shows a single monotonic bar.
+    async fn download_one(
+        &self,
+        model_name: &str,
+        target: &DownloadTarget,
+        progress_offset: u64,
+        grand_total: u64,
+        progress_callback: &Option<Box<dyn Fn(DownloadProgress) + Send + Sync>>,
+    ) -> Result<()> {
+        let file_path = self.models_dir.join(&target.file);
+
+        // Progress is always reported against the whole model, never this one file.
+        let report = |downloaded: u64, speed: f64| {
+            DownloadProgress::new(
+                (progress_offset + downloaded).min(grand_total),
+                grand_total,
+                speed,
+            )
+        };
+        let overall_percent = |downloaded: u64| -> u8 {
+            if grand_total == 0 {
+                0
+            } else {
+                (((progress_offset + downloaded) as f64 / grand_total as f64) * 100.0).min(100.0)
+                    as u8
+            }
+        };
+
+        // Check if file already exists and is valid (skip re-download)
         if file_path.exists() {
             if let Ok(metadata) = fs::metadata(&file_path).await {
                 let file_size_mb = metadata.len() / (1024 * 1024);
-                let expected_min = (model_def.size_mb as f64 * 0.9) as u64;
-                let expected_max = (model_def.size_mb as f64 * 1.1) as u64;
+                let expected_min = (target.size_mb as f64 * 0.9) as u64;
+                let expected_max = (target.size_mb as f64 * 1.1) as u64;
 
                 if file_size_mb >= expected_min && file_size_mb <= expected_max {
                     log::info!(
-                        "Model '{}' already exists and is valid ({} MB), skipping download",
-                        model_name,
+                        "'{}' already exists and is valid ({} MB), skipping download",
+                        target.file,
                         file_size_mb
                     );
 
-                    // Update status to available
-                    {
-                        let mut models = self.available_models.write().await;
-                        if let Some(model_info) = models.get_mut(model_name) {
-                            model_info.status = ModelStatus::Available;
-                        }
-                    }
-
-                    // Remove from active downloads
-                    {
-                        let mut active = self.active_downloads.write().await;
-                        active.remove(model_name);
-                    }
-
-                    // Report 100% progress
                     if let Some(ref callback) = progress_callback {
-                        let total = metadata.len();
-                        callback(DownloadProgress::new(total, total, 0.0));
+                        callback(report(metadata.len(), 0.0));
                     }
 
                     return Ok(());
@@ -429,8 +516,8 @@ impl ModelManager {
                     // File is LARGER than expected - possibly corrupted or wrong file
                     // Delete and re-download in this case
                     log::warn!(
-                        "Model '{}' exists but is too large ({} MB, expected max {} MB), deleting and re-downloading",
-                        model_name,
+                        "'{}' exists but is too large ({} MB, expected max {} MB), deleting and re-downloading",
+                        target.file,
                         file_size_mb,
                         expected_max
                     );
@@ -441,8 +528,8 @@ impl ModelManager {
                     // File is SMALLER than expected - likely partial download
                     // DON'T DELETE - let resume logic handle it
                     log::info!(
-                        "Model '{}' exists but is incomplete ({} MB, expected min {} MB), will resume download",
-                        model_name,
+                        "'{}' exists but is incomplete ({} MB, expected min {} MB), will resume download",
+                        target.file,
                         file_size_mb,
                         expected_min
                     );
@@ -451,7 +538,7 @@ impl ModelManager {
             }
         }
 
-        log::info!("Downloading from: {}", model_def.download_url);
+        log::info!("Downloading from: {}", target.url);
         log::info!("Saving to: {}", file_path.display());
 
         // Create models directory if needed
@@ -479,7 +566,7 @@ impl ModelManager {
             .map_err(|e| anyhow!("Failed to create HTTP client: {}", e))?;
 
         // Build request with Range header if resuming
-        let mut request = client.get(&model_def.download_url);
+        let mut request = client.get(&target.url);
         if existing_size > 0 {
             log::info!(
                 "Resuming download from byte {} ({:.1} MB)",
@@ -535,7 +622,7 @@ impl ModelManager {
 
         // Emit initial progress (showing resumed position if applicable)
         if let Some(ref callback) = progress_callback {
-            callback(DownloadProgress::new(downloaded, total_size, 0.0));
+            callback(report(downloaded, 0.0));
         }
         log::info!(
             "Starting at {:.1} MB / {:.1} MB",
@@ -695,14 +782,14 @@ impl ModelManager {
                     let mut models = self.available_models.write().await;
                     if let Some(model_info) = models.get_mut(model_name) {
                         model_info.status = ModelStatus::Downloading {
-                            progress: if is_download_complete { 100 } else { progress_percent }
+                            progress: overall_percent(downloaded)
                         };
                     }
                 }
 
                 // Call progress callback with detailed info
                 if let Some(ref callback) = progress_callback {
-                    callback(DownloadProgress::new(downloaded, total_size, speed_mbps));
+                    callback(report(downloaded, speed_mbps));
                 }
 
                 last_progress_percent = progress_percent;
@@ -714,20 +801,13 @@ impl ModelManager {
         writer.flush().await?;
         drop(writer);
 
-        log::info!("Download completed for model: {}", model_name);
-
-        {
-            let mut models = self.available_models.write().await;
-            if let Some(model_info) = models.get_mut(model_name) {
-                model_info.status = ModelStatus::Downloading { progress: 100 };
-            }
-        }
+        log::info!("Download completed: {}", target.file);
 
         if let Some(ref callback) = progress_callback {
-            callback(DownloadProgress::new(total_size, total_size, 0.0));
+            callback(report(total_size, 0.0));
         }
 
-        // Small delay to ensure UI receives 100% event
+        // Small delay to ensure UI receives the progress event
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
         if let Err(e) = self.validate_gguf_file(&file_path).await {
@@ -749,21 +829,6 @@ impl ModelManager {
             active.remove(model_name);
 
             return Err(anyhow!("File validation failed: {}", e));
-        }
-
-        // Update status to available
-        {
-            let mut models = self.available_models.write().await;
-            if let Some(model_info) = models.get_mut(model_name) {
-                model_info.status = ModelStatus::Available;
-                model_info.path = file_path.clone();
-            }
-        }
-
-        // Remove from active downloads
-        {
-            let mut active = self.active_downloads.write().await;
-            active.remove(model_name);
         }
 
         Ok(())

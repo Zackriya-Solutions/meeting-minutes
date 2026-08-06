@@ -91,7 +91,7 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
 
     // Validate that transcription models are available before starting recording
     info!("🔍 Validating transcription model availability before starting recording...");
-    if let Err(validation_error) = transcription::validate_transcription_model_ready(&app).await {
+    if let Err(validation_error) = crate::transcribe_engine::commands::transcribe_validate_model_ready(app.clone()).await {
         error!("Model validation failed: {}", validation_error);
 
         // Emit error event for frontend - actionable: false to show toast instead of modal
@@ -273,7 +273,7 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
                     audio_end_time: update.audio_end_time,
                     duration: update.duration,
                     display_time: update.timestamp.clone(), // Use wall-clock timestamp for display
-                    confidence: update.confidence,
+                    confidence: update.confidence.unwrap_or(1.0),
                     sequence_id: update.sequence_id,
                 };
 
@@ -337,7 +337,7 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
 
     // Validate that transcription models are available before starting recording
     info!("🔍 Validating transcription model availability before starting recording...");
-    if let Err(validation_error) = transcription::validate_transcription_model_ready(&app).await {
+    if let Err(validation_error) = crate::transcribe_engine::commands::transcribe_validate_model_ready(app.clone()).await {
         error!("Model validation failed: {}", validation_error);
 
         // Emit error event for frontend - actionable: false to show toast instead of modal
@@ -444,7 +444,7 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
                     audio_end_time: update.audio_end_time,
                     duration: update.duration,
                     display_time: update.timestamp.clone(), // Use wall-clock timestamp for display
-                    confidence: update.confidence,
+                    confidence: update.confidence.unwrap_or(1.0),
                     sequence_id: update.sequence_id,
                 };
 
@@ -622,81 +622,26 @@ pub async fn stop_recording<R: Runtime>(
 
     info!("🧠 All transcript chunks processed. Now safely unloading transcription model...");
 
-    // Determine which provider was used and unload the appropriate model (with timeout)
-    let config = match tokio::time::timeout(
-        tokio::time::Duration::from_secs(30), // 30 seconds max for DB operation
-        crate::api::api::api_get_transcript_config(
-            app.clone(),
-            app.clone().state(),
-            None,
-        )
-    )
-    .await
-    {
-        Ok(Ok(Some(config))) => Some(config.provider),
-        Ok(Ok(None)) => None,
-        Ok(Err(e)) => {
-            warn!("⚠️ Failed to get transcript config: {:?}", e);
-            None
-        }
-        Err(_) => {
-            warn!("⏱️ Transcript config timeout (30s), continuing shutdown");
-            None
-        }
+    // One engine now, so there is no provider to look up before unloading.
+    let engine = {
+        let guard = crate::transcribe_engine::commands::TRANSCRIBE_ENGINE
+            .lock()
+            .unwrap();
+        guard.as_ref().cloned()
     };
 
-    match config.as_deref() {
-        Some("parakeet") => {
-            info!("🦜 Unloading Parakeet model...");
-            let engine_clone = {
-                let engine_guard = crate::parakeet_engine::commands::PARAKEET_ENGINE
-                    .lock()
-                    .unwrap();
-                engine_guard.as_ref().cloned()
-            };
-
-            if let Some(engine) = engine_clone {
-                let current_model = engine
-                    .get_current_model()
-                    .await
-                    .unwrap_or_else(|| "unknown".to_string());
-                info!("Current Parakeet model before unload: '{}'", current_model);
-
-                if engine.unload_model().await {
-                    info!("✅ Parakeet model '{}' unloaded successfully", current_model);
-                } else {
-                    warn!("⚠️ Failed to unload Parakeet model '{}'", current_model);
-                }
-            } else {
-                warn!("⚠️ No Parakeet engine found to unload model");
-            }
+    if let Some(engine) = engine {
+        let current_model = engine
+            .get_current_model()
+            .await
+            .unwrap_or_else(|| "unknown".to_string());
+        if engine.unload_model().await {
+            info!("✅ Model '{}' unloaded successfully", current_model);
+        } else {
+            info!("No model was loaded, nothing to unload");
         }
-        _ => {
-            // Default to Whisper
-            info!("🎤 Unloading Whisper model...");
-            let engine_clone = {
-                let engine_guard = crate::whisper_engine::commands::WHISPER_ENGINE
-                    .lock()
-                    .unwrap();
-                engine_guard.as_ref().cloned()
-            };
-
-            if let Some(engine) = engine_clone {
-                let current_model = engine
-                    .get_current_model()
-                    .await
-                    .unwrap_or_else(|| "unknown".to_string());
-                info!("Current Whisper model before unload: '{}'", current_model);
-
-                if engine.unload_model().await {
-                    info!("✅ Whisper model '{}' unloaded successfully", current_model);
-                } else {
-                    warn!("⚠️ Failed to unload Whisper model '{}'", current_model);
-                }
-            } else {
-                warn!("⚠️ No Whisper engine found to unload model");
-            }
-        }
+    } else {
+        warn!("⚠️ No transcription engine found to unload model");
     }
 
     // Step 3.5: Track meeting ended analytics with privacy-safe metadata
@@ -898,6 +843,12 @@ pub async fn stop_recording<R: Runtime>(
 
 /// Check if recording is active
 pub async fn is_recording() -> bool {
+    IS_RECORDING.load(Ordering::SeqCst)
+}
+
+/// Synchronous view of the same flag, for code that must not switch state
+/// mid-recording — see `SidecarManager::ensure_running`.
+pub fn is_recording_now() -> bool {
     IS_RECORDING.load(Ordering::SeqCst)
 }
 

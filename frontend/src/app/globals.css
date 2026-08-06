@@ -2,134 +2,174 @@
 @tailwind components;
 @tailwind utilities;
 
-@keyframes vibrate {
-  0% {
-    transform: translate(0);
-  }
+/* ===========================================================================
+   Conversationaly — token layer
+   Source of truth for the visual system. See /DESIGN.md.
 
-  20% {
-    transform: translate(-2px, 2px);
-  }
-
-  40% {
-    transform: translate(-2px, -2px);
-  }
-
-  60% {
-    transform: translate(2px, 2px);
-  }
-
-  80% {
-    transform: translate(2px, -2px);
-  }
-
-  100% {
-    transform: translate(0);
-  }
-}
-
-.animate-vibrate {
-  animation: vibrate 0.3s linear;
-}
-
-@keyframes fade-in {
-  0% {
-    opacity: 0;
-    transform: translateY(-4px);
-  }
-
-  100% {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-.animate-fade-in {
-  animation: fade-in 0.4s ease-out;
-}
-
-@keyframes fade-in-up {
-  from {
-    opacity: 0;
-    transform: translateY(10px);
-  }
-
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-.animate-fade-in-up {
-  animation: fade-in-up 0.5s ease-out forwards;
-}
-
-.delay-75 {
-  animation-delay: 75ms;
-}
-
-.delay-100 {
-  animation-delay: 100ms;
-}
-
-.delay-150 {
-  animation-delay: 150ms;
-}
+   Colors are stored as bare OKLCH *components* (`L C H`) rather than full
+   color functions so Tailwind's alpha modifiers (`bg-brand/40`) work. In raw
+   CSS always wrap them: `color: oklch(var(--ink))`.
+   =========================================================================== */
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 0 0% 3.9%;
-    --card: 0 0% 100%;
-    --card-foreground: 0 0% 3.9%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 0 0% 3.9%;
-    --primary: 0 0% 9%;
-    --primary-foreground: 0 0% 98%;
-    --secondary: 0 0% 96.1%;
-    --secondary-foreground: 0 0% 9%;
-    --muted: 0 0% 96.1%;
-    --muted-foreground: 0 0% 45.1%;
-    --accent: 0 0% 96.1%;
-    --accent-foreground: 0 0% 9%;
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 0 0% 98%;
-    --border: 0 0% 89.8%;
-    --input: 0 0% 89.8%;
-    --ring: 0 0% 3.9%;
-    --radius: 0.5rem;
-    --chart-1: 12 76% 61%;
-    --chart-2: 173 58% 39%;
-    --chart-3: 197 37% 24%;
-    --chart-4: 43 74% 66%;
-    --chart-5: 27 87% 67%;
+    /* --- neutrals · light --------------------------------------------- */
+    --bg: 1 0 0;
+    --panel: 0.976 0.004 110;
+    --elevated: 1 0 0;
+    --sunken: 0.968 0.005 110;
+    --border-c: 0.912 0.006 110;
+    --border-strong: 0.855 0.008 110;
+
+    /* Three tiers, all of which clear AA (4.5:1) against bg, panel AND sunken.
+       An "only for large text" tier is a footgun in a codebase this size —
+       every ramp step here is safe for body copy. */
+    --ink: 0.215 0.013 110;
+    --ink-muted: 0.46 0.014 110;
+    --ink-faint: 0.54 0.012 110;
+
+    /* --- brand · light -------------------------------------------------
+       Deep olive. Carries white text. Doubles as the success color. */
+    --brand: 0.365 0.082 110;
+    --brand-hover: 0.315 0.078 110;
+    --brand-ink: 1 0 0; /* text ON a brand fill */
+    --brand-soft: 0.955 0.022 110;
+    --brand-soft-ink: 0.33 0.075 110;
+    --ring-c: 0.5 0.1 110;
+
+    /* --- signal · light ------------------------------------------------
+       Red is not decoration. Live capture and destructive actions only. */
+    --danger: 0.545 0.205 25;
+    --danger-hover: 0.485 0.2 25;
+    --danger-ink: 0.47 0.19 25;
+    --danger-soft: 0.962 0.022 25;
+
+    --warn: 0.72 0.15 72;
+    --warn-ink: 0.47 0.11 72;
+    --warn-soft: 0.966 0.03 72;
+
+    --info: 0.52 0.115 262;
+    --info-ink: 0.52 0.115 262;
+    --info-soft: 0.962 0.018 262;
+
+    /* --- elevation · light --------------------------------------------- */
+    --shadow-pop: 0 1px 2px oklch(0.2 0.01 110 / 0.06),
+      0 4px 12px oklch(0.2 0.01 110 / 0.08);
+    --shadow-float: 0 2px 4px oklch(0.2 0.01 110 / 0.06),
+      0 12px 32px oklch(0.2 0.01 110 / 0.12);
+    --scrim: 0.215 0.013 110;
+
+    /* --- shape ---------------------------------------------------------- */
+    --r-sm: 4px;
+    --r-md: 6px;
+    --r-lg: 10px;
+    --r-xl: 14px;
+    --radius: var(--r-lg); /* shadcn compat */
+
+    /* --- motion --------------------------------------------------------- */
+    --dur-fast: 120ms;
+    --dur: 180ms;
+    --dur-slow: 260ms;
+    --ease: cubic-bezier(0.16, 1, 0.3, 1);
+
+    /* --- layout --------------------------------------------------------- */
+    --measure: 68ch;
+    --rail-w: 16rem;
+    --rail-w-collapsed: 3.5rem;
+    /* Live width of the sidebar rail. Sidebar writes this; the recording
+       transport and overlays read it instead of duplicating the math. */
+    --rail: var(--rail-w);
+
+    /* --- z-index -------------------------------------------------------- */
+    --z-dropdown: 100;
+    --z-sticky: 200;
+    --z-rail: 300;
+    --z-overlay: 400;
+    --z-modal: 500;
+    --z-toast: 600;
+    --z-tooltip: 700;
+
+    /* --- shadcn compat -------------------------------------------------
+       Existing primitives in components/ui/* reference these names. Mapping
+       them here means the whole primitive layer inherits the redesign
+       without being rewritten. Do not use these names in new code. */
+    --background: var(--bg);
+    --foreground: var(--ink);
+    --card: var(--elevated);
+    --card-foreground: var(--ink);
+    --popover: var(--elevated);
+    --popover-foreground: var(--ink);
+    --primary: var(--brand);
+    --primary-foreground: var(--brand-ink);
+    --secondary: var(--sunken);
+    --secondary-foreground: var(--ink);
+    --muted: var(--sunken);
+    --muted-foreground: var(--ink-muted);
+    --accent: var(--brand-soft);
+    --accent-foreground: var(--brand-soft-ink);
+    --destructive: var(--danger);
+    --destructive-foreground: 1 0 0;
+    --border: var(--border-c);
+    --input: var(--border-strong);
+    --ring: var(--ring-c);
   }
 
   .dark {
-    --background: 0 0% 3.9%;
-    --foreground: 0 0% 98%;
-    --card: 0 0% 3.9%;
-    --card-foreground: 0 0% 98%;
-    --popover: 0 0% 3.9%;
-    --popover-foreground: 0 0% 98%;
-    --primary: 0 0% 98%;
-    --primary-foreground: 0 0% 9%;
-    --secondary: 0 0% 14.9%;
-    --secondary-foreground: 0 0% 98%;
-    --muted: 0 0% 14.9%;
-    --muted-foreground: 0 0% 63.9%;
-    --accent: 0 0% 14.9%;
-    --accent-foreground: 0 0% 98%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 0 0% 98%;
-    --border: 0 0% 14.9%;
-    --input: 0 0% 14.9%;
-    --ring: 0 0% 83.1%;
-    --chart-1: 220 70% 50%;
-    --chart-2: 160 60% 45%;
-    --chart-3: 30 80% 55%;
-    --chart-4: 280 65% 60%;
-    --chart-5: 340 75% 55%;
+    --bg: 0.155 0.004 110;
+    --panel: 0.185 0.005 110;
+    --elevated: 0.225 0.006 110;
+    --sunken: 0.125 0.004 110;
+    --border-c: 0.285 0.007 110;
+    --border-strong: 0.37 0.009 110;
+
+    --ink: 0.945 0.006 110;
+    --ink-muted: 0.72 0.011 110;
+    --ink-faint: 0.625 0.01 110; /* clears 4.5:1 even on --elevated, the lightest dark surface */
+
+    /* Brand flips polarity: bright sage that takes DARK text. */
+    --brand: 0.8 0.115 110;
+    --brand-hover: 0.855 0.12 110;
+    --brand-ink: 0.16 0.03 110;
+    --brand-soft: 0.255 0.032 110;
+    --brand-soft-ink: 0.845 0.1 110;
+    --ring-c: 0.8 0.115 110;
+
+    /* Held at L .55 so white text still clears 4.5:1 on the fill. */
+    --danger: 0.55 0.21 25;
+    --danger-hover: 0.61 0.205 25;
+    --danger-ink: 0.72 0.16 25;
+    --danger-soft: 0.245 0.055 25;
+
+    --warn: 0.78 0.145 72;
+    --warn-ink: 0.82 0.13 72;
+    --warn-soft: 0.245 0.045 72;
+
+    --info: 0.66 0.13 262;
+    --info-ink: 0.76 0.115 262;
+    --info-soft: 0.245 0.045 262;
+
+    --shadow-pop: 0 1px 2px oklch(0 0 0 / 0.4), 0 4px 12px oklch(0 0 0 / 0.36);
+    --shadow-float: 0 2px 4px oklch(0 0 0 / 0.4), 0 12px 32px oklch(0 0 0 / 0.48);
+    --scrim: 0.08 0.004 110;
+
+    --destructive-foreground: 1 0 0;
+  }
+
+  /* Honour a system/user request for more contrast in both themes. */
+  @media (prefers-contrast: more) {
+    :root {
+      --ink-muted: 0.38 0.014 110;
+      --ink-faint: 0.44 0.012 110;
+      --border-c: 0.78 0.008 110;
+      --border-strong: 0.62 0.01 110;
+    }
+
+    .dark {
+      --ink-muted: 0.84 0.011 110;
+      --ink-faint: 0.74 0.01 110;
+      --border-c: 0.42 0.009 110;
+      --border-strong: 0.56 0.011 110;
+    }
   }
 }
 
@@ -138,14 +178,58 @@
     @apply border-border;
   }
 
-  /* html, */
-  body {
-    @apply bg-background text-foreground;
-    overflow: hidden;
+  html {
     height: 100%;
+    color-scheme: light;
   }
 
-  /* Make the window draggable */
+  html.dark {
+    color-scheme: dark;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    height: 100%;
+    overflow: hidden;
+    font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+    font-size: 0.875rem;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Titles set tight and balanced; prose avoids orphans. */
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
+    letter-spacing: -0.011em;
+  }
+
+  p {
+    text-wrap: pretty;
+  }
+
+  /* One focus treatment for the entire app. Keyboard only. */
+  :focus-visible {
+    outline: 2px solid oklch(var(--ring-c));
+    outline-offset: 2px;
+    border-radius: var(--r-sm);
+  }
+
+  /* Radix and most primitives manage their own focus; suppress the double
+     ring where a component already draws one. */
+  [data-radix-focus-guard]:focus-visible {
+    outline: none;
+  }
+
+  ::selection {
+    background: oklch(var(--brand-soft));
+    color: oklch(var(--brand-soft-ink));
+  }
+
+  /* Tauri window drag regions */
   .titlebar {
     -webkit-app-region: drag;
     app-region: drag;
@@ -155,60 +239,194 @@
     -webkit-app-region: no-drag;
     app-region: no-drag;
   }
+}
 
-  /* Custom scrollbar styles */
-  .custom-scrollbar::-webkit-scrollbar {
-    width: 6px;
+@layer components {
+  /* Prose measure — transcript and summary both respect it. */
+  .measure {
+    max-width: var(--measure);
   }
 
-  .custom-scrollbar::-webkit-scrollbar-track {
+  /* Machine facts: timestamps, model ids, device names, durations. */
+  .readout {
+    font-family: var(--font-mono), ui-monospace, monospace;
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "zero" 1;
+    letter-spacing: -0.01em;
+  }
+
+  /* Skeletons — used instead of spinners inside content areas. */
+  .skeleton {
+    background: oklch(var(--ink) / 0.07);
+    border-radius: var(--r-sm);
+    animation: pulse 1.6s ease-in-out infinite;
+  }
+}
+
+@layer utilities {
+  .scrollbar-slim {
+    scrollbar-width: thin;
+    scrollbar-color: oklch(var(--ink) / 0.2) transparent;
+  }
+
+  .scrollbar-slim::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  .scrollbar-slim::-webkit-scrollbar-track {
     background: transparent;
   }
 
-  .custom-scrollbar::-webkit-scrollbar-thumb {
-    background: #d1d5db;
-    border-radius: 3px;
+  .scrollbar-slim::-webkit-scrollbar-thumb {
+    background: oklch(var(--ink) / 0.16);
+    border-radius: 999px;
+    border: 3px solid transparent;
+    background-clip: content-box;
   }
 
-  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-    background: #9ca3af;
+  .scrollbar-slim::-webkit-scrollbar-thumb:hover {
+    background: oklch(var(--ink) / 0.3);
+    background-clip: content-box;
   }
 
-  /* Firefox scrollbar */
+  /* Legacy alias — several components still reference this name. */
   .custom-scrollbar {
-    scrollbar-width: thin;
-    scrollbar-color: #d1d5db transparent;
+    @apply scrollbar-slim;
+  }
+}
+
+/* ===========================================================================
+   Keyframes. Every animation below has a reduced-motion answer at the bottom
+   of this file.
+   =========================================================================== */
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+/* The one place a "breathing" animation is allowed: it reports that capture
+   is live. Paired with a text label and an elapsed timer, never color alone. */
+@keyframes live-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.55;
+    transform: scale(0.86);
+  }
+}
+
+.animate-live {
+  animation: live-pulse 1.8s var(--ease) infinite;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.animate-fade-in {
+  animation: fade-in var(--dur) var(--ease);
+}
+
+/* A transcript segment arriving. Reports state (new content), so it stays. */
+@keyframes segment-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.animate-segment-in {
+  animation: segment-in var(--dur) var(--ease);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+    scroll-behavior: auto !important;
   }
 
-  /* BlockNote Editor - Override fixed dimensions for responsive layout */
-  .bn-container {
-    width: 100% !important;
-    max-width: none !important;
-    overflow: visible !important;
+  /* Reduced motion must not remove information. The live dot stops pulsing
+     but stays fully opaque, and the level meter renders a static readout
+     (see AudioLevelMeter). */
+  .animate-live {
+    animation: none;
+    opacity: 1;
   }
 
-  .bn-editor {
-    width: 100% !important;
-    max-width: none !important;
-    overflow: visible !important;
+  .skeleton {
+    animation: none;
   }
+}
 
-  /* Disable internal scrolling - let parent handle all scrolling */
-  .ProseMirror {
-    overflow: visible !important;
-  }
+/* ===========================================================================
+   Third-party surface overrides
+   =========================================================================== */
 
-  /* Ensure BlockNote content area is responsive */
-  .bn-block-outer {
-    max-width: 100% !important;
-  }
+/* BlockNote (summary editor) — let the parent own width and scrolling, and
+   inherit our type and color instead of shipping its own. */
+.bn-container,
+.bn-editor {
+  width: 100% !important;
+  max-width: none !important;
+  overflow: visible !important;
+  background: transparent !important;
+  font-family: var(--font-serif), ui-serif, Georgia, serif !important;
+}
 
-  .bn-default-styles {
-    max-width: none !important;
-  }
+.bn-container {
+  --bn-colors-editor-background: transparent;
+  --bn-colors-editor-text: oklch(var(--ink));
+  --bn-colors-menu-background: oklch(var(--elevated));
+  --bn-colors-menu-text: oklch(var(--ink));
+  --bn-colors-tooltip-background: oklch(var(--elevated));
+  --bn-colors-tooltip-text: oklch(var(--ink));
+  --bn-colors-hovered-background: oklch(var(--sunken));
+  --bn-colors-hovered-text: oklch(var(--ink));
+  --bn-colors-selected-background: oklch(var(--brand-soft));
+  --bn-colors-selected-text: oklch(var(--brand-soft-ink));
+  --bn-colors-disabled-background: oklch(var(--sunken));
+  --bn-colors-disabled-text: oklch(var(--ink-faint));
+  --bn-colors-border: oklch(var(--border-c));
+  --bn-colors-side-menu: oklch(var(--ink-faint));
+  --bn-font-family: var(--font-serif), ui-serif, Georgia, serif;
+  --bn-border-radius: var(--r-md);
+}
 
-  /* Disable scrolling on any BlockNote wrapper elements */
-  [data-node-type] {
-    overflow: visible !important;
-  }
+.ProseMirror {
+  overflow: visible !important;
+}
+
+.bn-block-outer {
+  max-width: 100% !important;
+}
+
+.bn-default-styles {
+  max-width: none !important;
+}
+
+[data-node-type] {
+  overflow: visible !important;
 }

@@ -230,12 +230,12 @@ export function SummaryPanel({
         <Button
           variant="outline"
           size="sm"
-          title={`Summary language: ${effectiveLangLabel}${isLocalFallbackLanguage ? ' (saved on this device)' : ''}`}
+          title={`Summary language: ${effectiveLangLabel}${isLocalFallbackLanguage ? '(saved on this device)' : ''}`}
           aria-label="Set summary language"
         >
           <Languages size={18} />
           <span className="hidden lg:inline">{effectiveLangLabel}</span>
-          <ChevronDown size={14} className="text-gray-400" />
+          <ChevronDown size={14} className="text-ink-faint" />
         </Button>
       </PopoverTrigger>
       <PopoverContent
@@ -253,20 +253,28 @@ export function SummaryPanel({
   );
 
   return (
-    <div className="flex-1 min-w-0 flex flex-col bg-white overflow-hidden">
+    // The review surface: a document, so it sits on the canvas rather than a
+    // panel tint, and its measure is capped for reading.
+    <div className="flex min-w-0 flex-1 flex-col overflow-hidden bg-canvas">
       {/* Title area */}
-      <div className="p-4 border-b border-gray-200">
-        {/* <EditableTitle
+      <div className="border-b border-line px-5 py-3">
+        <EditableTitle
           title={meetingTitle}
           isEditing={isEditingTitle}
           onStartEditing={onStartEditTitle}
           onFinishEditing={onFinishEditTitle}
           onChange={onTitleChange}
-        /> */}
+        />
+        <p className="readout px-2 pt-0.5 text-2xs text-ink-faint">
+          {new Date(meeting.created_at).toLocaleString(undefined, {
+            dateStyle: 'medium',
+            timeStyle: 'short',
+          })}
+        </p>
 
         {/* Button groups - only show when summary exists */}
         {aiSummary && !isSummaryLoading && (
-          <div className="flex items-center justify-center w-full pt-0 gap-2">
+          <div className="flex w-full flex-wrap items-center gap-2 pt-3">
             {/* Left-aligned: Summary Generator Button Group */}
             <div className="flex-shrink-0">
               <SummaryGeneratorButtonGroup
@@ -289,7 +297,7 @@ export function SummaryPanel({
             </div>
 
             {/* Right-aligned: Summary Updater Button Group */}
-            <div className="flex-shrink-0">
+            <div className="ml-auto flex-shrink-0">
               <SummaryUpdaterButtonGroup
                 isSaving={isSaving}
                 isDirty={isTitleDirty || (summaryRef.current?.isDirty || false)}
@@ -327,18 +335,34 @@ export function SummaryPanel({
               onOpenModelSettings={onOpenModelSettings}
             />
           </div>
-          {/* Loading spinner */}
-          <div className="flex items-center justify-center flex-1">
-            <div className="text-center">
-              <div className="inline-block animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500 mb-4"></div>
-              <p className="text-gray-600">Generating AI Summary...</p>
+          {/* Skeleton, not a spinner: it previews the shape of the document
+              being written and keeps the layout from jumping on arrival. */}
+          <div className="flex-1 overflow-hidden px-6">
+            <div
+              role="status"
+              aria-live="polite"
+              className="mx-auto max-w-measure space-y-6 pt-2"
+            >
+              <span className="sr-only">Generating summary</span>
+              {[0, 1, 2].map((section) => (
+                <div key={section} className="space-y-2.5">
+                  <div className="skeleton h-4 w-40" />
+                  <div className="skeleton h-3 w-full" />
+                  <div className="skeleton h-3 w-[92%]" />
+                  <div className="skeleton h-3 w-[74%]" />
+                </div>
+              ))}
+              <p className="pt-1 text-sm text-ink-muted">
+                {getSummaryStatusMessage(summaryStatus)}
+              </p>
             </div>
           </div>
         </div>
       ) : !aiSummary ? (
-        <div className="flex flex-col h-full">
-          {/* Centered Summary Generator Button Group when no summary */}
-          <div className="flex items-center justify-center gap-2 pt-8 pb-4">
+        <div className="scrollbar-slim flex-1 overflow-y-auto">
+          {/* Empty state carries the primary action; this row keeps only the
+              model / template / language choices next to it. */}
+          <div className="flex flex-wrap items-center justify-center gap-2 px-5 pt-5">
             <SummaryGeneratorButtonGroup
               modelConfig={modelConfig}
               setModelConfig={setModelConfig}
@@ -367,10 +391,10 @@ export function SummaryPanel({
       ) : transcripts?.length > 0 && (
         <div className="flex-1 overflow-y-auto min-h-0">
           {summaryResponse && (
-            <div className="fixed bottom-0 left-0 right-0 bg-white shadow-lg p-4 max-h-1/3 overflow-y-auto">
+            <div className="fixed bottom-0 left-0 right-0 bg-elevated shadow-lg p-4 max-h-1/3 overflow-y-auto">
               <h3 className="text-lg font-semibold mb-2">Meeting Summary</h3>
               <div className="grid grid-cols-2 gap-4">
-                <div className="bg-white p-4 rounded-lg shadow-sm">
+                <div className="bg-elevated p-4 rounded-lg shadow-sm">
                   <h4 className="font-medium mb-1">Key Points</h4>
                   <ul className="list-disc pl-4">
                     {summaryResponse.summary.key_points.blocks.map((block, i) => (
@@ -378,7 +402,7 @@ export function SummaryPanel({
                     ))}
                   </ul>
                 </div>
-                <div className="bg-white p-4 rounded-lg shadow-sm mt-4">
+                <div className="bg-elevated p-4 rounded-lg shadow-sm mt-4">
                   <h4 className="font-medium mb-1">Action Items</h4>
                   <ul className="list-disc pl-4">
                     {summaryResponse.summary.action_items.blocks.map((block, i) => (
@@ -386,7 +410,7 @@ export function SummaryPanel({
                     ))}
                   </ul>
                 </div>
-                <div className="bg-white p-4 rounded-lg shadow-sm mt-4">
+                <div className="bg-elevated p-4 rounded-lg shadow-sm mt-4">
                   <h4 className="font-medium mb-1">Decisions</h4>
                   <ul className="list-disc pl-4">
                     {summaryResponse.summary.decisions.blocks.map((block, i) => (
@@ -394,7 +418,7 @@ export function SummaryPanel({
                     ))}
                   </ul>
                 </div>
-                <div className="bg-white p-4 rounded-lg shadow-sm mt-4">
+                <div className="bg-elevated p-4 rounded-lg shadow-sm mt-4">
                   <h4 className="font-medium mb-1">Main Topics</h4>
                   <ul className="list-disc pl-4">
                     {summaryResponse.summary.main_topics.blocks.map((block, i) => (
@@ -411,7 +435,8 @@ export function SummaryPanel({
               ) : null}
             </div>
           )}
-          <div className="p-6 w-full">
+          {/* Reading measure — the summary is prose, not a dashboard. */}
+          <div className="mx-auto w-full max-w-measure px-6 py-6">
             <BlockNoteSummaryView
               ref={summaryRef}
               summaryData={aiSummary}
@@ -431,11 +456,15 @@ export function SummaryPanel({
               }}
             />
           </div>
-          {summaryStatus !== 'idle' && (
-            <div className={`mt-4 p-4 rounded-lg ${summaryStatus === 'error' ? 'bg-red-100 text-red-700' :
-              summaryStatus === 'completed' ? 'bg-green-100 text-green-700' :
-                'bg-blue-100 text-blue-700'
-              }`}>
+          {summaryStatus !== 'idle' && summaryStatus !== 'completed' && (
+            <div
+              role="status"
+              className={`mx-auto mb-6 max-w-measure rounded-md border px-3 py-2 ${
+                summaryStatus === 'error'
+                  ? 'border-danger/30 bg-danger-soft text-danger-ink'
+                  : 'border-info/30 bg-info-soft text-info-ink'
+              }`}
+            >
               <p className="text-sm font-medium">{getSummaryStatusMessage(summaryStatus)}</p>
             </div>
           )}

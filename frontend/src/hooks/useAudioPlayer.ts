@@ -103,7 +103,7 @@ export const useAudioPlayer = (audioPath: string | null) => {
           },
           error => {
             console.error('Audio decoding failed:', error);
-            reject(new Error('Failed to decode audio data: ' + error));
+            reject(new Error('Failed to decode audio data:' + error));
           }
         );
       });

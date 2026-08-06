@@ -15,26 +15,27 @@ name = "app_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 
-# Hardware acceleration features for whisper-rs
-# Cross-platform GPU acceleration with smart defaults
+# Hardware acceleration, forwarded to transcribe-cpp.
 #
 # BUILD INSTRUCTIONS:
 # ===================
-# macOS:     cargo build --release              (Metal GPU auto-enabledon)
+# macOS:     cargo build --release              (Metal, on by default)
 #
-# Windows:   cargo build --release              (CPU with OpenBLAS)
+# Windows:   cargo build --release              (CPU)
 #            cargo build --release --features cuda    (NVIDIA GPU)
 #            cargo build --release --features vulkan  (AMD/Intel GPU)
 #
-# Linux:     cargo build --release              (CPU with OpenBLAS)
+# Linux:     cargo build --release              (CPU)
 #            cargo build --release --features cuda    (NVIDIA GPU)
-#            cargo build --release --features hipblas (AMD GPU with ROCm)
+#            cargo build --release --features rocm    (AMD GPU with ROCm)
 #            cargo build --release --features vulkan  (Other GPUs)
 #
 # QUICK START: Use the helper scripts!
 #   ./build-gpu.sh (Unix/macOS)
 #   .\build-gpu.ps1 (Windows PowerShell)
 #
+# Dropped vs the whisper-rs era: `coreml` (transcribe.cpp has no CoreML path;
+# Metal covers Apple Silicon) and `openblas` (its CPU path uses tinyBLAS).
 [features]
 default = ["platform-default"]  # Automatically enables best backend per platform
 
@@ -42,15 +43,13 @@ default = ["platform-default"]  # Automatically enables best backend per platfor
 platform-default = []
 
 # Manual GPU acceleration options (for power users to override defaults)
-metal = ["whisper-rs/metal"]       # macOS: Apple Metal GPU (Auto-enabled on macOS)
-coreml = ["whisper-rs/coreml"]     # macOS: Apple CoreML acceleration
-cuda = ["whisper-rs/cuda"]         # Windows/Linux: NVIDIA CUDA GPU
-vulkan = ["whisper-rs/vulkan"]     # Windows/Linux: AMD/Intel Vulkan GPU
-hipblas = ["whisper-rs/hipblas"]   # Linux: AMD ROCm HIP
+metal = ["transcribe-cpp/metal"]   # macOS: Apple Metal GPU (on by default there)
+cuda = ["transcribe-cpp/cuda"]     # Windows/Linux: NVIDIA CUDA GPU
+vulkan = ["transcribe-cpp/vulkan"] # Windows/Linux: AMD/Intel Vulkan GPU
+rocm = ["transcribe-cpp/rocm"]     # Linux: AMD ROCm
 
-# CPU optimizations (fallback for systems without GPU)
-openblas = ["whisper-rs/openblas"] # Optimized BLAS (Auto-enabled on Windows/Linux)
-openmp = ["whisper-rs/openmp"]     # OpenMP parallel processing
+# CPU optimization
+openmp = ["transcribe-cpp/openmp"] # OpenMP parallel processing
 
 [build-dependencies]
 tauri-build = { version = "2.3.0", features = [] }
@@ -65,6 +64,7 @@ xz2 = "0.1"           # XZ decompression (Linux)
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 anyhow = "1.0"
+base64 = "0.22" # Audio payloads for the Ollama transcription provider
 once_cell = "1.17.1"
 uuid = { version = "1.0", features = ["v4", "serde"] }
 posthog-rs = "0.3.7"
@@ -97,14 +97,12 @@ ebur128 = "0.1"
 nnnoiseless = "0.5"
 
 # Speech recognition and async utilities
-# NOTE: whisper-rs is declared in platform-specific sections below (macOS/Windows/Linux)
+# NOTE: transcribe-cpp is declared in platform-specific sections below
 # to ensure correct GPU features are enabled per platform
 futures-util = "0.3"
 silero_rs = { git = "https://github.com/emotechlab/silero-rs", rev = "26a6460", package = "silero" }
 
-# Parakeet (ONNX-based fast transcription) dependencies
-ort = { version = "2.0.0-rc.10" }  # ONNX Runtime for Parakeet models
-thiserror = "2.0.16"                # Error handling for Parakeet
+thiserror = "2.0.16"
 
 # Async
 tokio = { version = "1.32.0", features = ["full", "tracing"] }
@@ -130,7 +128,6 @@ sysinfo = "0.32"
 lazy_static = { version = "1.4.0" }
 realfft = "3.4.0"
 regex = "1.11.0"
-ndarray = "0.16"
 bytes = { version = "1.9.0", features = ["serde"] }
 
 esaxx-rs = "0.1.10"
@@ -173,9 +170,8 @@ cidre = { git = "https://github.com/yury/cidre", rev = "a9587fa", features = ["a
 dasp = "0.11.0"
 futures-channel = "0.3.31"
 
-# PERFORMANCE: Enable Metal GPU + CoreML acceleration automatically on macOS
-# CoreML provides additional acceleration for Apple Silicon chips
-whisper-rs = { version = "0.13.2", features = ["raw-api", "metal", "coreml"] }
+# transcribe.cpp — replaces whisper-rs + ort. `metal` is its default feature.
+transcribe-cpp = { git = "https://github.com/handy-computer/transcribe.cpp", rev = "553f1099a2b3a5bc4421894be171f09960fc0f3a" }
 
 # Windows-specific dependencies
 # Default: CPU-only build (no BLAS)
@@ -184,8 +180,12 @@ whisper-rs = { version = "0.13.2", features = ["raw-api", "metal", "coreml"] }
 #   --features vulkan   (AMD/Intel GPUs)
 #   --features openblas (OpenBLAS optimization, requires BLAS_INCLUDE_DIRS)
 [target.'cfg(target_os = "windows")'.dependencies]
-whisper-rs = { version = "0.13.2", features = ["raw-api"] }
 futures-channel = "0.3.31"
+
+# default-features = false: transcribe-cpp defaults to `metal`, which is a
+# macOS-only no-op elsewhere but must not be the implied backend here.
+# GPU backends come from this crate's cuda/vulkan features (see [features]).
+transcribe-cpp = { git = "https://github.com/handy-computer/transcribe.cpp", rev = "553f1099a2b3a5bc4421894be171f09960fc0f3a", default-features = false }
 
 # Linux-specific dependencies
 # Default: CPU-only build (no BLAS)
@@ -195,8 +195,10 @@ futures-channel = "0.3.31"
 #   --features hipblas  (AMD ROCm)
 #   --features openblas (OpenBLAS optimization, requires BLAS_INCLUDE_DIRS)
 [target.'cfg(target_os = "linux")'.dependencies]
-whisper-rs = { version = "0.13.2", features = ["raw-api"] }
 futures-channel = "0.3.31"
+
+# See the Windows block for why default-features is off.
+transcribe-cpp = { git = "https://github.com/handy-computer/transcribe.cpp", rev = "553f1099a2b3a5bc4421894be171f09960fc0f3a", default-features = false }
 
 [dev-dependencies]
 tempfile = "3.3.0"

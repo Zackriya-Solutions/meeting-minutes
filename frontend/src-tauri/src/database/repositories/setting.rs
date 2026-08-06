@@ -22,9 +22,35 @@ pub struct SaveTranscriptConfigRequest {
     pub api_key: Option<String>,
 }
 
+/// Column holding this transcript provider's API key, or `None` when the
+/// provider needs no key.
+///
+/// Both keyless providers run in-process: `local` is the transcribe.cpp engine,
+/// `builtin-ai` the bundled sidecar. They used to be spelled `localWhisper` /
+/// `parakeet`, and missing them here made `api_get_transcript_config` fail for
+/// the *default* provider, which silently discarded the user's model choice.
+fn transcript_api_key_column(
+    provider: &str,
+) -> std::result::Result<Option<&'static str>, sqlx::Error> {
+    Ok(match provider {
+        crate::config::LOCAL_TRANSCRIPT_PROVIDER | crate::config::BUILTIN_TRANSCRIPT_PROVIDER => {
+            None
+        }
+        "deepgram" => Some("deepgramApiKey"),
+        "elevenLabs" => Some("elevenLabsApiKey"),
+        "groq" => Some("groqApiKey"),
+        "openai" => Some("openaiApiKey"),
+        _ => {
+            return Err(sqlx::Error::Protocol(
+                format!("Invalid provider: {}", provider).into(),
+            ))
+        }
+    })
+}
+
 pub struct SettingsRepository;
 
-// Transcript providers: localWhisper, deepgram, elevenLabs, groq, openai
+// Transcript providers: local, builtin-ai, deepgram, elevenLabs, groq, openai
 // Summary providers: openai, claude, ollama, groq, added openrouter
 // NOTE: Handle data exclusion in the higher layer as this is database abstraction layer(using SELECT *)
 
@@ -177,28 +203,21 @@ impl SettingsRepository {
         provider: &str,
         api_key: &str,
     ) -> std::result::Result<(), sqlx::Error> {
-        let api_key_column = match provider {
-            "localWhisper" => "whisperApiKey",
-            "parakeet" => return Ok(()), // Parakeet doesn't need an API key, return early
-            "deepgram" => "deepgramApiKey",
-            "elevenLabs" => "elevenLabsApiKey",
-            "groq" => "groqApiKey",
-            "openai" => "openaiApiKey",
-            _ => {
-                return Err(sqlx::Error::Protocol(
-                    format!("Invalid provider: {}", provider).into(),
-                ))
-            }
+        let Some(api_key_column) = transcript_api_key_column(provider)? else {
+            return Ok(());
         };
 
         let query = format!(
             r#"
             INSERT INTO transcript_settings (id, provider, model, "{}")
-            VALUES ('1', 'parakeet', '{}', $1)
+            VALUES ('1', '{}', '{}', $1)
             ON CONFLICT(id) DO UPDATE SET
                 "{}" = $1
             "#,
-            api_key_column, crate::config::DEFAULT_PARAKEET_MODEL, api_key_column
+            api_key_column,
+            crate::config::LOCAL_TRANSCRIPT_PROVIDER,
+            crate::config::DEFAULT_TRANSCRIBE_MODEL,
+            api_key_column
         );
         sqlx::query(&query).bind(api_key).execute(pool).await?;
 
@@ -209,18 +228,8 @@ impl SettingsRepository {
         pool: &SqlitePool,
         provider: &str,
     ) -> std::result::Result<Option<String>, sqlx::Error> {
-        let api_key_column = match provider {
-            "localWhisper" => "whisperApiKey",
-            "parakeet" => return Ok(None), // Parakeet doesn't need an API key
-            "deepgram" => "deepgramApiKey",
-            "elevenLabs" => "elevenLabsApiKey",
-            "groq" => "groqApiKey",
-            "openai" => "openaiApiKey",
-            _ => {
-                return Err(sqlx::Error::Protocol(
-                    format!("Invalid provider: {}", provider).into(),
-                ))
-            }
+        let Some(api_key_column) = transcript_api_key_column(provider)? else {
+            return Ok(None);
         };
 
         let query = format!(
@@ -344,5 +353,27 @@ impl SettingsRepository {
         .await?;
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn keyless_providers_are_valid() {
+        // Regression: 'local' hit the catch-all and errored, so reading the
+        // transcript config failed for every default install.
+        for provider in [
+            crate::config::LOCAL_TRANSCRIPT_PROVIDER,
+            crate::config::BUILTIN_TRANSCRIPT_PROVIDER,
+        ] {
+            assert_eq!(transcript_api_key_column(provider).unwrap(), None);
+        }
+        assert_eq!(
+            transcript_api_key_column("openai").unwrap(),
+            Some("openaiApiKey")
+        );
+        assert!(transcript_api_key_column("nope").is_err());
     }
 }

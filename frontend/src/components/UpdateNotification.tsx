@@ -18,30 +18,16 @@ export function showUpdateNotification(updateInfo: UpdateInfo, onUpdateClick?: (
     }
   };
 
-  toast.info(
-    <div className="flex items-center justify-between gap-4">
-      <div className="flex items-center gap-2">
-        <Download className="h-4 w-4" />
-        <div>
-          <p className="font-medium">Update Available</p>
-          <p className="text-sm text-muted-foreground">
-            Version {updateInfo.version} is now available
-          </p>
-        </div>
-      </div>
-      <button
-        onClick={(e) => {
-          e.stopPropagation();
-          handleClick();
-        }}
-        className="text-sm font-medium text-blue-600 hover:text-blue-700 underline"
-      >
-        View Details
-      </button>
-    </div>,
-    {
-      duration: 10000,
-      position: 'bottom-center',
-    }
-  );
+  // Use sonner's own title/description/action slots. The previous version
+  // nested a hand-rolled flex row inside the toast body, which fought sonner's
+  // layout and rendered as a clipped, doubled card.
+  toast('Update available', {
+    description: `Version ${updateInfo.version} is ready to install.`,
+    icon: <Download className="h-4 w-4" />,
+    duration: 10000,
+    action: {
+      label: 'View details',
+      onClick: handleClick,
+    },
+  });
 }

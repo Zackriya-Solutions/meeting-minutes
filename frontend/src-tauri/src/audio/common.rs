@@ -17,7 +17,7 @@ pub(crate) async fn acquire_engine_lifecycle_lock() -> OwnedMutexGuard<()> {
 /// Unload the transcription engine after a batch job (import or retranscription).
 /// Skips unloading if a live recording is currently in progress, since recording
 /// uses the same global engine instances.
-pub(crate) async fn unload_engine_after_batch(use_parakeet: bool) {
+pub(crate) async fn unload_engine_after_batch() {
     let _engine_lifecycle_guard = acquire_engine_lifecycle_lock().await;
 
     if crate::audio::recording_commands::is_recording().await {
@@ -25,24 +25,13 @@ pub(crate) async fn unload_engine_after_batch(use_parakeet: bool) {
         return;
     }
 
-    if use_parakeet {
-        use crate::parakeet_engine::commands::PARAKEET_ENGINE;
-        let engine = {
-            let guard = PARAKEET_ENGINE.lock().unwrap_or_else(|e| e.into_inner());
-            guard.as_ref().cloned()
-        };
-        if let Some(e) = engine {
-            e.unload_model().await;
-        }
-    } else {
-        use crate::whisper_engine::commands::WHISPER_ENGINE;
-        let engine = {
-            let guard = WHISPER_ENGINE.lock().unwrap_or_else(|e| e.into_inner());
-            guard.as_ref().cloned()
-        };
-        if let Some(e) = engine {
-            e.unload_model().await;
-        }
+    use crate::transcribe_engine::commands::TRANSCRIBE_ENGINE;
+    let engine = {
+        let guard = TRANSCRIBE_ENGINE.lock().unwrap_or_else(|e| e.into_inner());
+        guard.as_ref().cloned()
+    };
+    if let Some(e) = engine {
+        e.unload_model().await;
     }
 }
 
@@ -101,6 +90,65 @@ pub(crate) fn write_transcripts_json(folder: &Path, segments: &[TranscriptSegmen
     );
     Ok(())
 }
+
+/// Read the configured local transcription model from the database.
+///
+/// Only the local transcribe.cpp engine runs file work. A stored built-in audio
+/// model is a sidecar model rather than a catalog entry, so it falls back to the
+/// default — otherwise selecting Gemma 4 for live recording would break import and
+/// retranscription with "Unknown model: gemma4:e4b".
+///
+/// Was duplicated in import.rs and retranscription.rs.
+pub(crate) async fn configured_local_model<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> Result<String> {
+    use crate::config::DEFAULT_TRANSCRIBE_MODEL;
+    use tauri::Manager;
+
+    let app_state = app
+        .try_state::<crate::state::AppState>()
+        .ok_or_else(|| anyhow::anyhow!("App state not available"))?;
+
+    let result: Option<(String, String)> =
+        sqlx::query_as("SELECT provider, model FROM transcript_settings WHERE id = '1'")
+            .fetch_optional(app_state.db_manager.pool())
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to query transcript config: {}", e))?;
+
+    Ok(match result {
+        Some((provider, _)) if crate::config::is_builtin_transcript_provider(&provider) => {
+            log::info!(
+                "Transcript provider is the built-in audio LLM, which does not run file \
+                 transcription; using local model '{}' instead",
+                DEFAULT_TRANSCRIBE_MODEL
+            );
+            DEFAULT_TRANSCRIBE_MODEL.to_string()
+        }
+        Some((_, model)) if !model.is_empty() => model,
+        _ => {
+            log::warn!(
+                "No transcript config found, using default model '{}'",
+                DEFAULT_TRANSCRIBE_MODEL
+            );
+            DEFAULT_TRANSCRIBE_MODEL.to_string()
+        }
+    })
+}
+
+/// Longest speech segment handed to one batch transcription, for file work.
+///
+/// Import and retranscription optimize for accuracy — a longer segment gives the
+/// model more context and costs nobody anything, since the file is already on
+/// disk. Was duplicated as a local const in both import.rs and retranscription.rs.
+pub(crate) const MAX_SEGMENT_SAMPLES: usize = 25 * 16000;
+
+/// Same cap for live recording, where it is also the latency floor: nothing
+/// appears on screen until the segment it belongs to has been decoded. Traded
+/// down from 25s for that reason.
+///
+/// `split_segment_at_silence` searches +/-3s for a quiet cut, so real segments
+/// land in the 5-11s range rather than exactly 8.
+pub(crate) const LIVE_MAX_SEGMENT_SAMPLES: usize = 8 * 16000;
 
 /// Split a long speech segment at the lowest-energy (silence) point near the target size.
 ///

@@ -46,7 +46,6 @@ struct AudioContext {
     format: arc::R<av::AudioFormat>,
     producer: HeapProd<f32>,
     waker_state: Arc<Mutex<WakerState>>,
-    current_sample_rate: Arc<AtomicU32>,
     consecutive_drops: Arc<AtomicU32>,
     should_terminate: Arc<AtomicBool>,
 }
@@ -165,16 +164,15 @@ impl CoreAudioCapture {
             ctx: Option<&mut AudioContext>,
         ) -> os::Status {
             let ctx = ctx.unwrap();
+            let _ = device;
 
-            // Check for sample rate changes
-            let after = device
-                .nominal_sample_rate()
-                .unwrap_or(ctx.format.absd().sample_rate) as u32;
-            let before = ctx.current_sample_rate.load(Ordering::Acquire);
-
-            if before != after {
-                ctx.current_sample_rate.store(after, Ordering::Release);
-            }
+            // NO sample rate update here. The samples below are read with
+            // ctx.format (the tap's ASBD), so the tap's rate is the only rate
+            // that describes them. Overwriting the reported rate with the
+            // aggregate device's nominal rate raced with the reader in
+            // stream.rs: whichever value it saw first decided whether the
+            // stream got resampled to 48kHz, so a 44.1kHz output device
+            // produced a correct recording or a drifting one at random.
 
             // Try to get audio data from the buffer list
             if let Some(view) =
@@ -274,7 +272,6 @@ impl CoreAudioCapture {
             format,
             producer,
             waker_state: waker_state.clone(),
-            current_sample_rate: current_sample_rate.clone(),
             consecutive_drops: Arc::new(AtomicU32::new(0)),
             should_terminate: Arc::new(AtomicBool::new(false)),
         });

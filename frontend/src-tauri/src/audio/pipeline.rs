@@ -11,7 +11,6 @@ use rubato::{Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolat
 use super::devices::AudioDevice;
 use super::recording_state::{AudioChunk, AudioError, RecordingState, DeviceType};
 use super::audio_processing::{audio_to_mono, LoudnessNormalizer, NoiseSuppressionProcessor, HighPassFilter};
-use super::vad::{ContinuousVadProcessor};
 
 /// Ring buffer for synchronized audio mixing
 /// Accumulates samples from mic and system streams until we have aligned windows
@@ -20,6 +19,22 @@ struct AudioMixerRingBuffer {
     system_buffer: VecDeque<f32>,
     window_size_samples: usize,  // Fixed mixing window (e.g., 50ms)
     max_buffer_size: usize,  // Safety limit (e.g., 100ms)
+    // ponytail: rate diagnostics. The two streams are supposed to deliver
+    // `sample_rate` samples per second each; when one doesn't, the mix drifts.
+    // Padding is now only applied to streams that have gone silent, so any
+    // padding here means a stream stalled or never started.
+    sample_rate: u32,
+    started: std::time::Instant,
+    mic_in: u64,
+    sys_in: u64,
+    mic_pad: u64,
+    sys_pad: u64,
+    windows: u64,
+    // Last time each stream delivered anything. A stream that is still
+    // delivering must never be zero-padded (see can_mix); one that has gone
+    // quiet must never stall the mix.
+    mic_last: Option<std::time::Instant>,
+    sys_last: Option<std::time::Instant>,
 }
 
 impl AudioMixerRingBuffer {
@@ -43,7 +58,53 @@ impl AudioMixerRingBuffer {
             system_buffer: VecDeque::with_capacity(max_buffer_size),
             window_size_samples,
             max_buffer_size,
+            sample_rate,
+            started: std::time::Instant::now(),
+            mic_in: 0,
+            sys_in: 0,
+            mic_pad: 0,
+            sys_pad: 0,
+            windows: 0,
+            mic_last: None,
+            sys_last: None,
         }
+    }
+
+    /// A stream is "live" while it is still handing us audio. Anything quieter
+    /// than this for longer is treated as absent (no device, stopped stream,
+    /// disconnected headset) and mixed as silence rather than waited for.
+    /// Generous on purpose: capture callbacks arrive every 10-85ms, so a full
+    /// second of nothing means the stream really is gone, not just jittery.
+    const STREAM_IDLE_AFTER: std::time::Duration = std::time::Duration::from_secs(1);
+
+    fn is_live(last: Option<std::time::Instant>) -> bool {
+        last.is_some_and(|t| t.elapsed() < Self::STREAM_IDLE_AFTER)
+    }
+
+    /// Effective delivery rate of each stream vs. the rate the mixer assumes.
+    fn log_rates(&self) {
+        let secs = self.started.elapsed().as_secs_f64();
+        if secs <= 0.0 {
+            return;
+        }
+        let expected = self.sample_rate as f64;
+        let win = self.windows.max(1) as f64;
+        info!(
+            "📐 Mix rates after {:.1}s / {} windows: mic {:.0} Hz ({:.0}% of {:.0}), \
+             sys {:.0} Hz ({:.0}%), padding per window: mic {:.0}ms, sys {:.0}ms, \
+             buffered: mic {} / sys {}",
+            secs,
+            self.windows,
+            self.mic_in as f64 / secs,
+            self.mic_in as f64 / secs / expected * 100.0,
+            expected,
+            self.sys_in as f64 / secs,
+            self.sys_in as f64 / secs / expected * 100.0,
+            self.mic_pad as f64 / win / expected * 1000.0,
+            self.sys_pad as f64 / win / expected * 1000.0,
+            self.mic_buffer.len(),
+            self.system_buffer.len(),
+        );
     }
 
     fn add_samples(&mut self, device_type: DeviceType, samples: Vec<f32>) {
@@ -58,8 +119,16 @@ impl AudioMixerRingBuffer {
         }
 
         match device_type {
-            DeviceType::Microphone => self.mic_buffer.extend(samples),
-            DeviceType::System => self.system_buffer.extend(samples),
+            DeviceType::Microphone => {
+                self.mic_in += samples.len() as u64;
+                self.mic_last = Some(std::time::Instant::now());
+                self.mic_buffer.extend(samples);
+            }
+            DeviceType::System => {
+                self.sys_in += samples.len() as u64;
+                self.sys_last = Some(std::time::Instant::now());
+                self.system_buffer.extend(samples);
+            }
         }
 
         // CRITICAL FIX: Add warnings before dropping samples
@@ -84,9 +153,24 @@ impl AudioMixerRingBuffer {
         }
     }
 
+    /// A window is mixable once one stream has a full window AND no *live*
+    /// stream is short of one.
+    ///
+    /// Mixing on `||` alone is what dismembers recordings: whenever the two
+    /// streams deliver at different rates (different clocks, different
+    /// latency, or an over-delivering Core Audio tap), the faster one hits a
+    /// full window while the slower one is part-filled, and extract_window
+    /// zero-pads the rest. The slower stream's audio then arrives as
+    /// "N ms of speech, silence to the window edge", forever, and the file
+    /// grows longer than the meeting. Waiting for a live stream costs nothing:
+    /// its samples are already on their way.
     fn can_mix(&self) -> bool {
-        self.mic_buffer.len() >= self.window_size_samples ||
-        self.system_buffer.len() >= self.window_size_samples
+        let mic_full = self.mic_buffer.len() >= self.window_size_samples;
+        let sys_full = self.system_buffer.len() >= self.window_size_samples;
+
+        (mic_full || sys_full)
+            && (mic_full || !Self::is_live(self.mic_last))
+            && (sys_full || !Self::is_live(self.sys_last))
     }
 
     fn extract_window(&mut self) -> Option<(Vec<f32>, Vec<f32>)> {
@@ -104,6 +188,7 @@ impl AudioMixerRingBuffer {
         } else if !self.mic_buffer.is_empty() {
             // Some mic data but not enough - consume all + pad with zeros
             let available: Vec<f32> = self.mic_buffer.drain(..).collect();
+            self.mic_pad += (self.window_size_samples - available.len()) as u64;
             let mut padded = Vec::with_capacity(self.window_size_samples);
             padded.extend_from_slice(&available);
 
@@ -114,6 +199,7 @@ impl AudioMixerRingBuffer {
             padded
         } else {
             // No mic data - return silence
+            self.mic_pad += self.window_size_samples as u64;
             vec![0.0; self.window_size_samples]
         };
 
@@ -124,6 +210,7 @@ impl AudioMixerRingBuffer {
         } else if !self.system_buffer.is_empty() {
             // Some system data but not enough - consume all + pad with zeros
             let available: Vec<f32> = self.system_buffer.drain(..).collect();
+            self.sys_pad += (self.window_size_samples - available.len()) as u64;
             let mut padded = Vec::with_capacity(self.window_size_samples);
             padded.extend_from_slice(&available);
 
@@ -134,8 +221,14 @@ impl AudioMixerRingBuffer {
             padded
         } else {
             // No system data - return silence
+            self.sys_pad += self.window_size_samples as u64;
             vec![0.0; self.window_size_samples]
         };
+
+        self.windows += 1;
+        if self.windows % 8 == 0 {
+            self.log_rates();
+        }
 
         Some((mic_window, sys_window))
     }
@@ -211,6 +304,28 @@ pub struct AudioCapture {
     // EBU R128 normalizer for microphone audio (per-device, stateful)
     normalizer: Arc<std::sync::Mutex<Option<LoudnessNormalizer>>>,
     // Note: Using global recording timestamp for synchronization
+    // ponytail: capture-callback health. Says whether a stream that delivers
+    // below its nominal rate is being starved by the device or by us blowing
+    // the callback deadline.
+    started: std::time::Instant,
+    callbacks: Arc<std::sync::atomic::AtomicU64>,
+    raw_frames: Arc<std::sync::atomic::AtomicU64>,
+    busy_micros: Arc<std::sync::atomic::AtomicU64>,
+}
+
+/// Adds this callback's runtime to the total on every exit path.
+struct BusyTimer<'a> {
+    start: std::time::Instant,
+    total: &'a std::sync::atomic::AtomicU64,
+}
+
+impl Drop for BusyTimer<'_> {
+    fn drop(&mut self) {
+        self.total.fetch_add(
+            self.start.elapsed().as_micros() as u64,
+            std::sync::atomic::Ordering::Relaxed,
+        );
+    }
 }
 
 impl AudioCapture {
@@ -320,24 +435,17 @@ impl AudioCapture {
         let resampler = if needs_resampling {
             let ratio = TARGET_SAMPLE_RATE as f64 / sample_rate as f64;
 
-            // Adaptive parameters based on sample rate ratio (same logic as resample_audio)
-            let (sinc_len, interpolation_type, oversampling) = if ratio >= 2.0 {
-                (512, SincInterpolationType::Cubic, 512)
-            } else if ratio >= 1.5 {
-                (384, SincInterpolationType::Cubic, 384)
-            } else if ratio > 1.0 {
-                (256, SincInterpolationType::Linear, 256)
-            } else if ratio <= 0.5 {
-                (512, SincInterpolationType::Cubic, 512)
-            } else {
-                (384, SincInterpolationType::Linear, 384)
-            };
-
+            // This runs INSIDE the realtime capture callback, which has one
+            // buffer period (~7-20ms) to finish. The old settings scaled up to
+            // sinc_len=512 with oversampling=512 — a 1MB filter table walked
+            // per output sample. Overrun the deadline and CoreAudio does not
+            // wait, it drops the next input buffer, so the device appears to
+            // deliver at half its rate. 64 taps is transparent for speech.
             let params = SincInterpolationParameters {
-                sinc_len,
+                sinc_len: 64,
                 f_cutoff: 0.95,
-                interpolation: interpolation_type,
-                oversampling_factor: oversampling,
+                interpolation: SincInterpolationType::Linear,
+                oversampling_factor: 128,
                 window: WindowFunction::BlackmanHarris2,
             };
 
@@ -379,7 +487,42 @@ impl AudioCapture {
             high_pass_filter: Arc::new(std::sync::Mutex::new(high_pass_filter)),
             normalizer: Arc::new(std::sync::Mutex::new(normalizer)),
             // Using global recording time for sync
+            started: std::time::Instant::now(),
+            callbacks: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            raw_frames: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            busy_micros: Arc::new(std::sync::atomic::AtomicU64::new(0)),
         }
+    }
+
+    /// How much audio the device actually handed us, and how much of the
+    /// realtime budget we spent taking it. A device rate well under nominal
+    /// with a high busy share means we are missing callback deadlines and
+    /// CoreAudio is dropping input buffers; a low busy share means the device
+    /// itself is starving us.
+    fn log_capture_health(&self) {
+        use std::sync::atomic::Ordering::Relaxed;
+
+        let secs = self.started.elapsed().as_secs_f64();
+        if secs <= 0.0 {
+            return;
+        }
+        let calls = self.callbacks.load(Relaxed).max(1);
+        let raw_hz = self.raw_frames.load(Relaxed) as f64 / secs;
+        let busy = self.busy_micros.load(Relaxed) as f64;
+
+        info!(
+            "🎚️ [{:?}] '{}': {:.0} Hz raw ({:.0}% of the {} Hz it reports), \
+             {} callbacks in {:.1}s, callback busy {:.0}% of realtime ({:.2}ms avg)",
+            self.device_type,
+            self.device.name,
+            raw_hz,
+            raw_hz / self.sample_rate as f64 * 100.0,
+            self.sample_rate,
+            calls,
+            secs,
+            busy / (secs * 1_000_000.0) * 100.0,
+            busy / calls as f64 / 1000.0,
+        );
     }
 
     /// Process audio data directly from callback
@@ -387,6 +530,14 @@ impl AudioCapture {
         // Check if still recording
         if !self.state.is_recording() {
             return;
+        }
+
+        use std::sync::atomic::Ordering::Relaxed;
+        let _busy = BusyTimer { start: std::time::Instant::now(), total: &self.busy_micros };
+        self.raw_frames
+            .fetch_add((data.len() / self.channels.max(1) as usize) as u64, Relaxed);
+        if self.callbacks.fetch_add(1, Relaxed) % 200 == 199 {
+            self.log_capture_health();
         }
 
         // Convert to mono if needed
@@ -681,7 +832,9 @@ pub struct AudioPipeline {
     receiver: mpsc::UnboundedReceiver<AudioChunk>,
     transcription_sender: mpsc::UnboundedSender<AudioChunk>,
     state: Arc<RecordingState>,
-    vad_processor: ContinuousVadProcessor,
+    // Audio forwarded to the transcription stream so far, in 16kHz samples.
+    // Drives recording-relative timestamps without a wall clock.
+    transcription_samples_sent: u64,
     sample_rate: u32,
     chunk_id_counter: u64,
     // Performance optimization: reduce logging frequency
@@ -719,23 +872,10 @@ impl AudioPipeline {
         // For now, we log it for monitoring and potential optimization
         let _ = (mic_device_name, mic_device_kind, system_device_name, system_device_kind);
 
-        // Create VAD processor with balanced redemption time for speech accumulation
-        // The VAD processor now handles 48kHz->16kHz resampling internally
-        // This bridges natural pauses without excessive fragmentation
-        // For mac os core audio, 900ms, for windows 400ms seems good
-
-        let redemption_time = if cfg!(target_os = "macos") { 400 } else { 400 };
-
-        let vad_processor = match ContinuousVadProcessor::new(sample_rate, redemption_time) {
-            Ok(processor) => {
-                info!("VAD-driven pipeline: VAD segments will be sent directly to Whisper (no time-based accumulation)");
-                processor
-            }
-            Err(e) => {
-                error!("Failed to create VAD processor: {}", e);
-                panic!("VAD processor creation failed: {}", e);
-            }
-        };
+        // No VAD here any more: the transcription engine keeps one continuous
+        // stream open and does its own endpointing. VAD is still used by the
+        // file-import and retranscription paths, which do need segmentation.
+        info!("Pipeline: mixed audio is forwarded continuously to the transcription stream");
 
         // Initialize professional audio mixing components
         let ring_buffer = AudioMixerRingBuffer::new(sample_rate);
@@ -748,7 +888,7 @@ impl AudioPipeline {
             receiver,
             transcription_sender,
             state,
-            vad_processor,
+            transcription_samples_sent: 0,
             sample_rate,
             chunk_id_counter: 0,
             // Performance optimization: reduce logging frequency
@@ -766,6 +906,10 @@ impl AudioPipeline {
     /// Run the VAD-driven audio processing pipeline
     pub async fn run(mut self) -> Result<()> {
         info!("VAD-driven audio pipeline started - segments sent in real-time based on speech detection");
+
+        // Latched once the transcription receiver is dropped, so its warning is
+        // logged once per recording instead of per mixing window.
+        let mut transcription_dead = false;
 
         // CRITICAL FIX: Continue processing until channel is closed, not based on recording state
         // This ensures ALL chunks are processed during shutdown, fixing premature meeting completion
@@ -831,37 +975,33 @@ impl AudioPipeline {
                             // Previous 2x gain was causing excessive limiting/distortion
                             let mixed_with_gain = mixed_clean;
 
-                            // STEP 3: Send mixed audio for transcription (VAD + Whisper)
-                            match self.vad_processor.process_audio(&mixed_with_gain) {
-                                Ok(speech_segments) => {
-                                    for segment in speech_segments {
-                                        let duration_ms = segment.end_timestamp_ms - segment.start_timestamp_ms;
+                            // STEP 3: Send mixed audio for transcription.
+                            //
+                            // No VAD gating: the transcription engine holds one
+                            // continuous stream for the whole meeting and does
+                            // its own endpointing, so handing it only speech
+                            // segments would break its context across pauses.
+                            let samples_16k = super::vad::resample_to_16k(&mixed_with_gain, self.sample_rate);
+                            if !samples_16k.is_empty() {
+                                let transcription_chunk = AudioChunk {
+                                    data: samples_16k,
+                                    sample_rate: 16000,
+                                    timestamp: self.transcription_samples_sent as f64 / 16000.0,
+                                    chunk_id: self.chunk_id_counter,
+                                    device_type: DeviceType::Microphone,  // Mixed audio
+                                };
+                                self.transcription_samples_sent += transcription_chunk.data.len() as u64;
 
-                                        if segment.samples.len() >= 800 {  // Minimum 50ms at 16kHz - matches Parakeet capability
-                                            info!("📤 Sending VAD segment: {:.1}ms, {} samples",
-                                                  duration_ms, segment.samples.len());
-
-                                            let transcription_chunk = AudioChunk {
-                                                data: segment.samples,
-                                                sample_rate: 16000,
-                                                timestamp: segment.start_timestamp_ms / 1000.0,
-                                                chunk_id: self.chunk_id_counter,
-                                                device_type: DeviceType::Microphone,  // Mixed audio
-                                            };
-
-                                            if let Err(e) = self.transcription_sender.send(transcription_chunk) {
-                                                warn!("Failed to send VAD segment: {}", e);
-                                            } else {
-                                                self.chunk_id_counter += 1;
-                                            }
-                                        } else {
-                                            debug!("⏭️ Dropping short VAD segment: {:.1}ms ({} samples < 800)",
-                                                   duration_ms, segment.samples.len());
-                                        }
+                                if let Err(e) = self.transcription_sender.send(transcription_chunk) {
+                                    // The receiver is gone for the rest of the meeting once
+                                    // the transcription task exits, and this fires on every
+                                    // mixing window — say it once, not twice a second.
+                                    if !transcription_dead {
+                                        transcription_dead = true;
+                                        warn!("Transcription stopped receiving audio ({}); recording continues without a live transcript", e);
                                     }
-                                }
-                                Err(e) => {
-                                    warn!("⚠️ VAD error: {}", e);
+                                } else {
+                                    self.chunk_id_counter += 1;
                                 }
                             }
 
@@ -898,43 +1038,15 @@ impl AudioPipeline {
     }
 
     fn flush_remaining_audio(&mut self) -> Result<()> {
-        info!("Flushing remaining audio from pipeline (processed {} chunks)", self.processed_chunks);
+        info!(
+            "Flushing remaining audio from pipeline (processed {} chunks, {:.1}s sent for transcription)",
+            self.processed_chunks,
+            self.transcription_samples_sent as f64 / 16000.0
+        );
 
-        // Flush any remaining audio from VAD processor and send segments to transcription
-        match self.vad_processor.flush() {
-            Ok(final_segments) => {
-                for segment in final_segments {
-                    let duration_ms = segment.end_timestamp_ms - segment.start_timestamp_ms;
-
-                    // Send segments >= 50ms (800 samples at 16kHz) - matches main pipeline filter
-                    if segment.samples.len() >= 800 {
-                        info!("📤 Sending final VAD segment to Whisper: {:.1}ms duration, {} samples",
-                              duration_ms, segment.samples.len());
-
-                        let transcription_chunk = AudioChunk {
-                            data: segment.samples,
-                            sample_rate: 16000,
-                            timestamp: segment.start_timestamp_ms / 1000.0,
-                            chunk_id: self.chunk_id_counter,
-                            device_type: DeviceType::Microphone,
-                        };
-
-                        if let Err(e) = self.transcription_sender.send(transcription_chunk) {
-                            warn!("Failed to send final VAD segment: {}", e);
-                        } else {
-                            self.chunk_id_counter += 1;
-                        }
-                    } else {
-                        info!("⏭️ Skipping short final segment: {:.1}ms ({} samples < 800)",
-                              duration_ms, segment.samples.len());
-                    }
-                }
-            }
-            Err(e) => {
-                warn!("Failed to flush VAD processor: {}", e);
-            }
-        }
-
+        // Nothing to flush on the transcription side: audio is forwarded as soon
+        // as it is mixed, and the stream's own finalize() drains what the model
+        // still holds. Dropping transcription_sender ends the stream loop.
         Ok(())
     }
 
@@ -1076,5 +1188,48 @@ impl AudioPipelineManager {
 impl Default for AudioPipelineManager {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The dismembered-recording bug: system audio delivering faster than the
+    /// mic used to emit a window per system-window and zero-fill the mic to
+    /// match, so the mic arrived as speech-then-silence and the file grew
+    /// longer than the meeting.
+    #[test]
+    fn live_stream_is_never_padded() {
+        let mut rb = AudioMixerRingBuffer::new(48000);
+        let w = rb.window_size_samples;
+
+        // Mic honest, system 1.5x too fast.
+        for _ in 0..10 {
+            rb.add_samples(DeviceType::Microphone, vec![0.5; w / 2]);
+            rb.add_samples(DeviceType::System, vec![0.25; w * 3 / 4]);
+            while rb.can_mix() {
+                rb.extract_window().expect("can_mix said yes");
+            }
+        }
+
+        assert_eq!(rb.mic_pad, 0, "a live mic must never be zero-padded");
+        assert_eq!(rb.windows, 5, "window clock must follow the slower live stream");
+    }
+
+    /// ...but a stream that never starts (no system device, denied permission)
+    /// must not hold the recording hostage.
+    #[test]
+    fn absent_stream_does_not_stall_the_mix() {
+        let mut rb = AudioMixerRingBuffer::new(48000);
+        let w = rb.window_size_samples;
+
+        rb.add_samples(DeviceType::Microphone, vec![0.5; w * 3]);
+        while rb.can_mix() {
+            rb.extract_window().expect("can_mix said yes");
+        }
+
+        assert_eq!(rb.windows, 3);
+        assert_eq!(rb.sys_pad, (w * 3) as u64, "missing system audio mixes as silence");
     }
 }

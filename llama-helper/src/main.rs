@@ -6,14 +6,21 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
-use anyhow::{Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
+use base64::Engine as _;
 use encoding_rs;
 use llama_cpp_2::context::params::LlamaContextParams;
 use llama_cpp_2::llama_backend::LlamaBackend;
 use llama_cpp_2::llama_batch::LlamaBatch;
 use llama_cpp_2::model::params::LlamaModelParams;
 use llama_cpp_2::model::{AddBos, LlamaModel};
+use llama_cpp_2::mtmd::{MtmdBitmap, MtmdContext, MtmdContextParams, MtmdInputText};
 use serde::{Deserialize, Serialize};
+
+const B64: base64::engine::general_purpose::GeneralPurpose = base64::engine::general_purpose::STANDARD;
+
+/// Sample rate the audio projector expects, and what the pipeline delivers.
+const AUDIO_SAMPLE_RATE: u32 = 16_000;
 
 // ============================================================================
 // Protocol Messages (JSON over stdin/stdout)
@@ -27,6 +34,11 @@ enum Request {
         max_tokens: Option<i32>,
         context_size: Option<u32>,
         model_path: Option<String>,
+        /// Multimodal projector for `audio_b64`. Required whenever audio is sent.
+        mmproj_path: Option<String>,
+        /// 16 kHz mono PCM as base64-encoded f32 little-endian bytes. When present,
+        /// `prompt` must contain the media marker (`<__media__>`) once.
+        audio_b64: Option<String>,
         // Sampling parameters
         temperature: Option<f32>,
         top_k: Option<i32>,
@@ -121,6 +133,50 @@ impl SamplingConfig {
                 || self.frequency_penalty > 0.0
                 || (self.repeat_penalty - 1.0).abs() > f32::EPSILON)
     }
+}
+
+/// Conservative thread count: max(1, (cores / 2) + 2), so the UI thread is never starved.
+fn default_threads() -> i32 {
+    std::thread::available_parallelism()
+        .map(|n| {
+            let cores = n.get() as i32;
+            ((cores / 2) + 2).max(1)
+        })
+        .unwrap_or(2)
+}
+
+/// Decode base64 f32 little-endian PCM into samples.
+///
+/// This is the only lossy-by-accident step between the audio pipeline and the
+/// projector: a wrong endianness or a truncated tail yields plausible-looking
+/// noise rather than an error, so the length is checked explicitly.
+fn audio_from_b64(encoded: &str) -> Result<Vec<f32>> {
+    let bytes = B64
+        .decode(encoded)
+        .context("audio_b64 is not valid base64")?;
+    if bytes.is_empty() {
+        bail!("audio_b64 decoded to zero samples");
+    }
+    if bytes.len() % 4 != 0 {
+        bail!(
+            "audio_b64 decoded to {} bytes, which is not a whole number of f32 samples",
+            bytes.len()
+        );
+    }
+    Ok(bytes
+        .chunks_exact(4)
+        .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+        .collect())
+}
+
+/// Encode f32 samples as base64 f32 little-endian PCM — the inverse of
+/// [`audio_from_b64`], used by the self-test and by the round-trip test.
+fn audio_to_b64(samples: &[f32]) -> String {
+    let mut bytes = Vec::with_capacity(samples.len() * 4);
+    for s in samples {
+        bytes.extend_from_slice(&s.to_le_bytes());
+    }
+    B64.encode(bytes)
 }
 
 // ============================================================================
@@ -282,6 +338,10 @@ struct ModelState {
     backend: LlamaBackend,
     model: Option<LlamaModel>,
     model_path: Option<PathBuf>,
+    /// Multimodal projector, when one has been loaded. Holds a raw pointer into
+    /// `model`, so it MUST be dropped before `model` is replaced.
+    mtmd: Option<MtmdContext>,
+    mmproj_path: Option<PathBuf>,
     context_size: u32,
     last_activity: Arc<AtomicU64>,
 }
@@ -293,6 +353,8 @@ impl ModelState {
             backend,
             model: None,
             model_path: None,
+            mtmd: None,
+            mmproj_path: None,
             context_size: 2048,
             last_activity: Arc::new(AtomicU64::new(Self::current_timestamp())),
         })
@@ -314,11 +376,22 @@ impl ModelState {
         Self::current_timestamp() - self.last_activity.load(Ordering::SeqCst)
     }
 
-    fn load_model_if_needed(&mut self, model_path: PathBuf, context_size: u32) -> Result<()> {
+    fn load_model_if_needed(
+        &mut self,
+        model_path: PathBuf,
+        context_size: u32,
+        mmproj_path: Option<PathBuf>,
+    ) -> Result<()> {
         // Check if model is already loaded
         if let Some(ref loaded_path) = self.model_path {
             if loaded_path == &model_path && self.context_size == context_size {
                 eprintln!("✓ Model already loaded");
+                // The projector can still change under an unchanged model: a summary
+                // request omits mmproj_path, a transcription request supplies it.
+                // Only reload when it actually differs, since it costs ~1 GB of reads.
+                if mmproj_path.is_some() && mmproj_path != self.mmproj_path {
+                    self.load_projector(mmproj_path)?;
+                }
                 self.update_activity();
                 return Ok(());
             }
@@ -336,18 +409,67 @@ impl ModelState {
         let model = LlamaModel::load_from_file(&self.backend, model_path.clone(), &model_params)
             .with_context(|| format!("unable to load model at {:?}", model_path))?;
 
+        // Drop the old projector before the model it points into.
+        self.mtmd = None;
+        self.mmproj_path = None;
+
         self.model = Some(model);
         self.model_path = Some(model_path);
         self.context_size = context_size;
+
+        if mmproj_path.is_some() {
+            self.load_projector(mmproj_path)?;
+        }
         self.update_activity();
 
         eprintln!("✅ Model loaded successfully");
         Ok(())
     }
 
+    /// Load a multimodal projector against the currently loaded model.
+    fn load_projector(&mut self, mmproj_path: Option<PathBuf>) -> Result<()> {
+        // Drop first: the existing context points into the model we are about to
+        // hand out another pointer to.
+        self.mtmd = None;
+        self.mmproj_path = None;
+
+        let Some(path) = mmproj_path else {
+            return Ok(());
+        };
+        let model = self
+            .model
+            .as_ref()
+            .context("cannot load a projector before a model")?;
+
+        eprintln!("📥 Loading projector: {}", path.display());
+        let params = MtmdContextParams {
+            use_gpu: true,
+            print_timings: false,
+            n_threads: default_threads(),
+            ..Default::default()
+        };
+        let path_str = path
+            .to_str()
+            .with_context(|| format!("projector path is not valid UTF-8: {:?}", path))?;
+        let mtmd = MtmdContext::init_from_file(path_str, model, &params)
+            .map_err(|e| anyhow!("failed to load projector at {:?}: {e}", path))?;
+
+        eprintln!(
+            "✅ Projector loaded (audio: {}, vision: {}, sample rate: {:?})",
+            mtmd.support_audio(),
+            mtmd.support_vision(),
+            mtmd.get_audio_sample_rate()
+        );
+
+        self.mtmd = Some(mtmd);
+        self.mmproj_path = Some(path);
+        Ok(())
+    }
+
     fn generate(
         &mut self,
         prompt: String,
+        audio: Option<Vec<f32>>,
         max_tokens: i32,
         sampling: SamplingConfig,
         stop_tokens: Vec<String>,
@@ -355,14 +477,7 @@ impl ModelState {
         let start_time = Instant::now();
         let model = self.model.as_ref().context("Model not loaded")?;
 
-        // Calculate thread count (conservative default: max(1, (Cores / 2) + 2))
-        // This ensures the UI thread is never starved
-        let threads: i32 = std::thread::available_parallelism()
-            .map(|n| {
-                let cores = n.get() as i32;
-                ((cores / 2) + 2).max(1)
-            })
-            .unwrap_or(2);
+        let threads = default_threads();
 
         let ctx_params = LlamaContextParams::default()
             .with_n_ctx(Some(
@@ -376,28 +491,69 @@ impl ModelState {
             .new_context(&self.backend, ctx_params)
             .context("unable to create the llama_context")?;
 
-        let tokens_list = model
-            .str_to_token(&prompt, AddBos::Always)
-            .with_context(|| "failed to tokenize prompt")?;
-
-        eprintln!("📝 Tokenized prompt: {} tokens", tokens_list.len());
-
         // Use context size for batch capacity to handle long prompts
         let batch_size = self.context_size as usize;
         let mut batch = LlamaBatch::new(batch_size, 1);
 
-        let last_index: i32 = (tokens_list.len() - 1) as i32;
-        for (i, token) in (0_i32..).zip(tokens_list.into_iter()) {
-            let is_last = i == last_index;
-            batch
-                .add(token, i, &[0], is_last)
-                .context("Failed to add token to batch")?;
-        }
+        let n_prompt_tokens = match audio {
+            // Audio path: mtmd splits the prompt around the media marker, encodes the
+            // PCM through the projector, and decodes text + audio embeddings in order.
+            // `batch` deliberately stays empty — n_tokens() - 1 == -1 below, which is
+            // llama.cpp's "logits of the last decoded token", i.e. what eval_chunks left.
+            Some(samples) => {
+                let mtmd = self
+                    .mtmd
+                    .as_ref()
+                    .context("audio was sent but no projector is loaded (mmproj_path missing)")?;
+                if !mtmd.support_audio() {
+                    bail!("the loaded projector has no audio encoder");
+                }
 
-        ctx.decode(&mut batch).context("llama_decode() failed")?;
+                let bitmap = MtmdBitmap::from_audio_data(&samples)
+                    .map_err(|e| anyhow!("failed to wrap audio samples: {e}"))?;
+                let chunks = mtmd
+                    .tokenize(
+                        MtmdInputText {
+                            text: prompt,
+                            add_special: true,
+                            parse_special: true,
+                        },
+                        &[&bitmap],
+                    )
+                    .map_err(|e| anyhow!("failed to tokenize audio prompt: {e}"))?;
+
+                eprintln!(
+                    "📝 Tokenized audio prompt: {} chunks, {} tokens ({:.1}s of audio)",
+                    chunks.len(),
+                    chunks.total_tokens(),
+                    samples.len() as f32 / AUDIO_SAMPLE_RATE as f32,
+                );
+
+                chunks
+                    .eval_chunks(mtmd, &ctx, 0, 0, self.context_size as i32, true)
+                    .map_err(|e| anyhow!("failed to evaluate audio prompt: {e}"))?
+            }
+            None => {
+                let tokens_list = model
+                    .str_to_token(&prompt, AddBos::Always)
+                    .with_context(|| "failed to tokenize prompt")?;
+
+                eprintln!("📝 Tokenized prompt: {} tokens", tokens_list.len());
+
+                let last_index: i32 = (tokens_list.len() - 1) as i32;
+                for (i, token) in (0_i32..).zip(tokens_list.into_iter()) {
+                    let is_last = i == last_index;
+                    batch
+                        .add(token, i, &[0], is_last)
+                        .context("Failed to add token to batch")?;
+                }
+
+                ctx.decode(&mut batch).context("llama_decode() failed")?;
+                batch.n_tokens()
+            }
+        };
         let prompt_time = start_time.elapsed();
 
-        let n_prompt_tokens = batch.n_tokens();
         let mut n_cur = n_prompt_tokens;
         let mut decoder = encoding_rs::UTF_8.new_decoder();
         let mut output = String::new();
@@ -545,7 +701,92 @@ fn send_response(response: &Response) -> Result<()> {
     Ok(())
 }
 
+/// Prove the audio path end to end: projector loads, reports an audio encoder,
+/// PCM survives the wire format, and mtmd encode + decode actually runs.
+///
+/// Needs a real model on disk, so it is a hand-run check rather than a test:
+///   llama-helper --selftest-audio <model.gguf> <mmproj.gguf>
+fn selftest_audio(model_path: &str, mmproj_path: &str) -> Result<()> {
+    let mut state = ModelState::new()?;
+    state.load_model_if_needed(
+        PathBuf::from(model_path),
+        4096,
+        Some(PathBuf::from(mmproj_path)),
+    )?;
+
+    let mtmd = state.mtmd.as_ref().context("projector failed to load")?;
+    assert!(
+        mtmd.support_audio(),
+        "projector has no audio encoder — wrong mmproj file"
+    );
+    assert_eq!(
+        mtmd.get_audio_sample_rate(),
+        Some(AUDIO_SAMPLE_RATE),
+        "projector expects a different sample rate than the pipeline delivers"
+    );
+
+    // One second of 440 Hz. Not speech, so the text is meaningless — what is being
+    // asserted is that the audio reaches the encoder and decodes without error.
+    let samples: Vec<f32> = (0..AUDIO_SAMPLE_RATE)
+        .map(|i| {
+            (i as f32 * 440.0 * std::f32::consts::TAU / AUDIO_SAMPLE_RATE as f32).sin() * 0.3
+        })
+        .collect();
+
+    let decoded = audio_from_b64(&audio_to_b64(&samples))?;
+    assert_eq!(decoded, samples, "PCM did not survive the wire format");
+
+    let chunks = mtmd
+        .tokenize(
+            MtmdInputText {
+                text: gemma_audio_prompt("Transcribe this audio."),
+                add_special: true,
+                parse_special: true,
+            },
+            &[&MtmdBitmap::from_audio_data(&decoded)
+                .map_err(|e| anyhow!("failed to wrap audio: {e}"))?],
+        )
+        .map_err(|e| anyhow!("tokenize failed: {e}"))?;
+
+    let audio_chunks = (0..chunks.len())
+        .filter_map(|i| chunks.get(i))
+        .filter(|c| c.chunk_type() == llama_cpp_2::mtmd::MtmdInputChunkType::Audio)
+        .count();
+    assert!(
+        audio_chunks >= 1,
+        "tokenize produced no audio chunk — the media marker never matched"
+    );
+
+    let text = state.generate(
+        gemma_audio_prompt("Transcribe this audio."),
+        Some(decoded),
+        32,
+        SamplingConfig::from_request(Some(0.0), None, None, None, None, None, None),
+        vec![],
+    )?;
+
+    println!("✅ selftest-audio passed ({} audio chunk(s))", audio_chunks);
+    println!("   model output: {:?}", text.trim());
+    Ok(())
+}
+
+/// Wrap an instruction in Gemma's turn format with the media marker in the user turn.
+fn gemma_audio_prompt(instruction: &str) -> String {
+    format!(
+        "<start_of_turn>user\n{}\n{}<end_of_turn>\n<start_of_turn>model\n",
+        llama_cpp_2::mtmd::mtmd_default_marker(),
+        instruction
+    )
+}
+
 fn main() -> Result<()> {
+    let args: Vec<String> = std::env::args().collect();
+    if args.get(1).map(String::as_str) == Some("--selftest-audio") {
+        let model = args.get(2).context("usage: --selftest-audio <model> <mmproj>")?;
+        let mmproj = args.get(3).context("usage: --selftest-audio <model> <mmproj>")?;
+        return selftest_audio(model, mmproj);
+    }
+
     // Get idle timeout from environment variable (default 5 minutes)
     let idle_timeout_secs = std::env::var("LLAMA_IDLE_TIMEOUT")
         .ok()
@@ -592,6 +833,8 @@ fn main() -> Result<()> {
                         max_tokens,
                         context_size,
                         model_path,
+                        mmproj_path,
+                        audio_b64,
                         temperature,
                         top_k,
                         top_p,
@@ -615,10 +858,22 @@ fn main() -> Result<()> {
                         );
                         let stop_tokens = stop_tokens.unwrap_or_else(Vec::new);
 
+                        let audio = match audio_b64.as_deref().map(audio_from_b64).transpose() {
+                            Ok(audio) => audio,
+                            Err(e) => {
+                                send_response(&Response::Response {
+                                    text: String::new(),
+                                    error: Some(format!("Invalid audio: {}", e)),
+                                })?;
+                                continue;
+                            }
+                        };
+
                         // Load model if path provided
                         if let Some(path_str) = model_path {
                             let path = PathBuf::from(path_str);
-                            if let Err(e) = state.load_model_if_needed(path, context_size) {
+                            let mmproj = mmproj_path.map(PathBuf::from);
+                            if let Err(e) = state.load_model_if_needed(path, context_size, mmproj) {
                                 send_response(&Response::Response {
                                     text: String::new(),
                                     error: Some(format!("Failed to load model: {}", e)),
@@ -630,6 +885,7 @@ fn main() -> Result<()> {
                         // Generate response with sampling parameters
                         match state.generate(
                             prompt,
+                            audio,
                             max_tokens,
                             sampling,
                             stop_tokens,
@@ -709,6 +965,49 @@ mod tests {
         assert_eq!(sampling.repeat_penalty, 1.0);
         assert_eq!(sampling.penalty_last_n, 0);
         assert!(!sampling.uses_penalties());
+    }
+
+    #[test]
+    fn audio_survives_the_base64_f32_wire_format() {
+        // Values chosen to catch endianness swaps and sign/exponent truncation.
+        let samples = vec![0.0, 1.0, -1.0, 0.5, -0.000_123_4, f32::MIN_POSITIVE, 0.999_999];
+        assert_eq!(audio_from_b64(&audio_to_b64(&samples)).unwrap(), samples);
+    }
+
+    #[test]
+    fn audio_rejects_a_truncated_tail() {
+        // Three bytes is not a whole f32; silently dropping them would shift every
+        // following sample and produce plausible noise instead of an error.
+        let err = audio_from_b64(&B64.encode([1u8, 2, 3])).unwrap_err().to_string();
+        assert!(err.contains("not a whole number of f32 samples"), "{err}");
+
+        assert!(audio_from_b64("").is_err(), "empty audio must be rejected");
+        assert!(audio_from_b64("not base64!!").is_err());
+    }
+
+    #[test]
+    fn generate_request_carries_audio_and_projector() {
+        let json = r#"{"type":"generate","prompt":"<__media__>","audio_b64":"AAAAAA==","mmproj_path":"/m/p.gguf"}"#;
+        let Request::Generate { audio_b64, mmproj_path, .. } =
+            serde_json::from_str(json).unwrap() else { panic!("expected generate") };
+        assert_eq!(mmproj_path.as_deref(), Some("/m/p.gguf"));
+        assert_eq!(audio_from_b64(&audio_b64.unwrap()).unwrap(), vec![0.0]);
+    }
+
+    #[test]
+    fn generate_request_without_audio_stays_text_only() {
+        let json = r#"{"type":"generate","prompt":"summarize"}"#;
+        let Request::Generate { audio_b64, mmproj_path, .. } =
+            serde_json::from_str(json).unwrap() else { panic!("expected generate") };
+        assert!(audio_b64.is_none() && mmproj_path.is_none());
+    }
+
+    #[test]
+    fn gemma_audio_prompt_contains_exactly_one_media_marker() {
+        let prompt = gemma_audio_prompt("Transcribe this audio.");
+        let marker = llama_cpp_2::mtmd::mtmd_default_marker();
+        assert_eq!(prompt.matches(marker).count(), 1, "{prompt}");
+        assert!(prompt.contains("<start_of_turn>model\n"));
     }
 
     #[test]

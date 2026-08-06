@@ -9,6 +9,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { LoaderIcon } from "lucide-react";
 import { useConfig } from "@/contexts/ConfigContext";
 import { usePaginatedTranscripts } from "@/hooks/usePaginatedTranscripts";
+import { RECOMMENDED_SUMMARY_MODEL } from "@/lib/onboarding-summary-model";
 
 interface MeetingDetailsResponse {
   id: string;
@@ -48,12 +49,12 @@ function MeetingDetailsContent() {
     error: transcriptError,
   } = usePaginatedTranscripts({ meetingId: meetingId || '' });
 
-  // Check if gemma3:1b model is available in Ollama
+  // Check if the recommended summary model is available in Ollama
   const checkForGemmaModel = useCallback(async (): Promise<boolean> => {
     try {
       const models = await invoke('get_ollama_models', { endpoint: null }) as any[];
-      const hasGemma = models.some((m: any) => m.name === 'gemma3:1b');
-      console.log('🔍 Checked for gemma3:1b:', hasGemma);
+      const hasGemma = models.some((m: any) => m.name === RECOMMENDED_SUMMARY_MODEL);
+      console.log('🔍 Checked for', RECOMMENDED_SUMMARY_MODEL, ':', hasGemma);
       return hasGemma;
     } catch (error) {
       console.error('❌ Failed to check Ollama models:', error);
@@ -91,11 +92,11 @@ function MeetingDetailsContent() {
         return;
       }
 
-      // DB is empty - check if gemma3:1b exists as fallback
+      // DB is empty - check if the recommended model exists as fallback
       const hasGemma = await checkForGemmaModel();
 
       if (hasGemma) {
-        console.log('💾 DB empty, using gemma3:1b as initial default');
+        console.log('💾 DB empty, using', RECOMMENDED_SUMMARY_MODEL, 'as initial default');
 
         await invoke('api_save_model_config', {
           provider: 'ollama',
@@ -107,7 +108,7 @@ function MeetingDetailsContent() {
 
         setShouldAutoGenerate(true);
       } else {
-        console.log('⚠️ No model configured and gemma3:1b not found');
+        console.log('⚠️ No model configured and', RECOMMENDED_SUMMARY_MODEL, 'not found');
       }
     } catch (error) {
       console.error('❌ Failed to setup auto-generation:', error);
@@ -339,10 +340,10 @@ function MeetingDetailsContent() {
     return (
       <div className="flex items-center justify-center h-screen">
         <div className="text-center">
-          <p className="text-red-500 mb-4">{error}</p>
+          <p className="text-danger-ink mb-4">{error}</p>
           <button
             onClick={() => router.push('/')}
-            className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+            className="px-4 py-2 bg-brand text-brand-ink rounded hover:bg-brand-hover"
           >
             Go Back
           </button>
@@ -354,7 +355,7 @@ function MeetingDetailsContent() {
   // Show loading spinner while initial data loads
   if ((isLoading || isLoadingTranscripts) || !meetingDetails) {
     return <div className="flex items-center justify-center h-screen">
-      <LoaderIcon className="animate-spin size-6 " />
+      <LoaderIcon className="animate-spin size-6" />
     </div>;
   }
 

@@ -174,7 +174,7 @@ export function useModalState(transcriptModelConfig?: TranscriptModelProps): Use
         console.log('[useModalState] Whisper model download complete:', modelName);
 
         // Auto-close modal if the downloaded model matches the selected one
-        if (transcriptModelConfig?.provider === 'localWhisper' && transcriptModelConfig?.model === modelName) {
+        if (transcriptModelConfig?.provider === 'local' && transcriptModelConfig?.model === modelName) {
           toast.success('Model ready! Closing window...', { duration: 1500 });
           setTimeout(() => hideModal('modelSelector'), 1500);
         }

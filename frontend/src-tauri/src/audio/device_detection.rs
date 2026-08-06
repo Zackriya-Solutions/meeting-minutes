@@ -432,31 +432,57 @@ fn clamp_duration(duration: Duration, min: Duration, max: Duration) -> Duration 
 mod tests {
     use super::*;
 
+    // These target the individual detection layers rather than `detect()`.
+    // `detect()` asks Core Audio first, so a test naming a real device answers
+    // differently depending on what is plugged into the machine running it —
+    // `test_builtin_mic_detection` passed on a Mac with no device called
+    // "MacBook Pro Microphone" and failed on one that has it.
+
     #[test]
     fn test_airpods_detection() {
-        let kind = InputDeviceKind::detect("AirPods Pro", 0, 0);
-        assert_eq!(kind, InputDeviceKind::Bluetooth);
+        assert_eq!(
+            InputDeviceKind::detect_by_name("AirPods Pro"),
+            Some(InputDeviceKind::Bluetooth)
+        );
     }
 
     #[test]
     fn test_builtin_mic_detection() {
-        let kind = InputDeviceKind::detect("MacBook Pro Microphone", 0, 0);
-        // Should fall through to Unknown (no Bluetooth pattern, no buffer size)
-        assert_eq!(kind, InputDeviceKind::Unknown);
+        // Matches no Bluetooth or virtual pattern, so the name heuristic declines.
+        // On macOS the real classification happens a layer earlier: Core Audio
+        // reports BUILT_IN, which `detect_macos_native` maps to Wired.
+        assert_eq!(
+            InputDeviceKind::detect_by_name("MacBook Pro Microphone"),
+            None
+        );
     }
 
     #[test]
     fn test_bluetooth_by_buffer_size() {
         // 3840 frames at 48kHz = 80ms (Bluetooth-like)
-        let kind = InputDeviceKind::detect("Unknown Device", 3840, 48000);
-        assert_eq!(kind, InputDeviceKind::Bluetooth);
+        assert_eq!(
+            InputDeviceKind::detect_by_buffer_size(3840, 48000),
+            Some(InputDeviceKind::Bluetooth)
+        );
     }
 
     #[test]
     fn test_wired_by_buffer_size() {
         // 512 frames at 48kHz = 10.67ms (Wired-like)
-        let kind = InputDeviceKind::detect("Unknown Device", 512, 48000);
-        assert_eq!(kind, InputDeviceKind::Wired);
+        assert_eq!(
+            InputDeviceKind::detect_by_buffer_size(512, 48000),
+            Some(InputDeviceKind::Wired)
+        );
+    }
+
+    #[test]
+    fn test_unknown_device_without_buffer_size_is_unknown() {
+        // The full chain still has a conservative floor: no native match, no name
+        // pattern, no buffer size to reason from.
+        assert_eq!(
+            InputDeviceKind::detect("Some Nonexistent Device 9000", 0, 0),
+            InputDeviceKind::Unknown
+        );
     }
 
     #[test]

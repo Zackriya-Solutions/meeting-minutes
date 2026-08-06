@@ -1,25 +1,11 @@
 // audio/transcription/mod.rs
 //
-// Transcription module: Provider abstraction, engine management, and worker pool.
+// Live transcription. One transcribe.cpp stream per meeting; the provider trait,
+// engine enum, and per-family providers are gone along with the two engines they
+// existed to abstract over.
 
-pub mod provider;
-pub mod whisper_provider;
-pub mod parakeet_provider;
-pub mod engine;
-pub mod worker;
+pub mod stream_worker;
 
-// Re-export commonly used types
-pub use provider::{TranscriptionError, TranscriptionProvider, TranscriptResult};
-pub use whisper_provider::WhisperProvider;
-pub use parakeet_provider::ParakeetProvider;
-pub use engine::{
-    TranscriptionEngine,
-    validate_transcription_model_ready,
-    get_or_init_transcription_engine,
-    get_or_init_whisper
-};
-pub use worker::{
-    start_transcription_task,
-    reset_speech_detected_flag,
-    TranscriptUpdate
+pub use stream_worker::{
+    reset_speech_detected_flag, start_transcription_task, TranscriptPartial, TranscriptUpdate,
 };

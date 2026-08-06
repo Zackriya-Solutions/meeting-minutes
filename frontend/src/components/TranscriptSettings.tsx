@@ -5,14 +5,19 @@ import { Input } from './ui/input';
 import { Button } from './ui/button';
 import { Label } from './ui/label';
 import { Eye, EyeOff, Lock, Unlock } from 'lucide-react';
-import { ModelManager } from './WhisperModelManager';
-import { ParakeetModelManager } from './ParakeetModelManager';
+import TranscriptionModelManager from './TranscriptionModelManager';
 
 
 export interface TranscriptModelProps {
-    provider: 'localWhisper' | 'parakeet' | 'deepgram' | 'elevenLabs' | 'groq' | 'openai';
+    provider: 'local' | 'builtin-ai' | 'deepgram' | 'elevenLabs' | 'groq' | 'openai';
     model: string;
     apiKey?: string | null;
+}
+
+interface BuiltinTranscribeModel {
+    name: string;
+    size_mb: number;
+    description: string;
 }
 
 export interface TranscriptSettingsProps {
@@ -34,7 +39,7 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
     }, [transcriptModelConfig.provider]);
 
     useEffect(() => {
-        if (transcriptModelConfig.provider === 'localWhisper' || transcriptModelConfig.provider === 'parakeet') {
+        if (transcriptModelConfig.provider === 'local') {
             setApiKey(null);
         }
     }, [transcriptModelConfig.provider]);
@@ -51,8 +56,8 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
         }
     };
     const modelOptions = {
-        localWhisper: [], // Model selection handled by ModelManager component
-        parakeet: [], // Model selection handled by ParakeetModelManager component
+        local: [], // Model selection handled by TranscriptionModelManager
+        'builtin-ai': [], // Model selection handled by the Gemma 4 list below
         deepgram: ['nova-2-phonecall'],
         elevenLabs: ['eleven_multilingual_v2'],
         groq: ['llama-3.3-70b-versatile'],
@@ -67,31 +72,57 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
         }
     };
 
-    const handleWhisperModelSelect = (modelName: string) => {
-        // Always update config when model is selected, regardless of current provider
-        // This ensures the model is set when user switches back
+    const handleModelSelect = (modelName: string, provider: TranscriptModelProps['provider'] = 'local') => {
         setTranscriptModelConfig({
             ...transcriptModelConfig,
-            provider: 'localWhisper', // Ensure provider is set correctly
+            provider,
             model: modelName
         });
-        // Close modal after selection
         if (onModelSelect) {
             onModelSelect();
         }
     };
 
-    const handleParakeetModelSelect = (modelName: string) => {
-        // Always update config when model is selected, regardless of current provider
-        // This ensures the model is set when user switches back
-        setTranscriptModelConfig({
-            ...transcriptModelConfig,
-            provider: 'parakeet', // Ensure provider is set correctly
-            model: modelName
-        });
-        // Close modal after selection
-        if (onModelSelect) {
-            onModelSelect();
+    // Built-in audio transcription (Gemma 4), run by the bundled sidecar. The
+    // audio-capable models come from the Rust catalog so they have one definition,
+    // and download state reuses the existing built-in AI flow.
+    const [audioModels, setAudioModels] = useState<BuiltinTranscribeModel[]>([]);
+    const [downloadedModels, setDownloadedModels] = useState<string[]>([]);
+    const [downloading, setDownloading] = useState<string | null>(null);
+    const [audioError, setAudioError] = useState<string | null>(null);
+
+    const refreshAudioModels = async () => {
+        try {
+            const [catalog, installed] = await Promise.all([
+                invoke<BuiltinTranscribeModel[]>('transcribe_builtin_models'),
+                invoke<{ name: string; status: { type: string } }[]>('builtin_ai_list_models'),
+            ]);
+            setAudioModels(catalog);
+            setDownloadedModels(
+                installed.filter((m) => m.status.type === 'available').map((m) => m.name),
+            );
+            setAudioError(null);
+        } catch (err) {
+            setAudioError(String(err));
+        }
+    };
+
+    useEffect(() => {
+        if (uiProvider === 'builtin-ai') {
+            refreshAudioModels();
+        }
+    }, [uiProvider]);
+
+    const downloadAudioModel = async (modelName: string) => {
+        setDownloading(modelName);
+        setAudioError(null);
+        try {
+            await invoke('builtin_ai_download_model', { modelName });
+            await refreshAudioModels();
+        } catch (err) {
+            setAudioError(String(err));
+        } finally {
+            setDownloading(null);
         }
     };
 
@@ -99,11 +130,11 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
         <div>
             <div>
                 {/* <div className="flex justify-between items-center mb-4">
-                    <h3 className="text-lg font-semibold text-gray-900">Transcript Settings</h3>
+                    <h3 className="text-lg font-semibold text-ink">Transcript Settings</h3>
                 </div> */}
                 <div className="space-y-4 pb-6">
                     <div>
-                        <Label className="block text-sm font-medium text-gray-700 mb-1">
+                        <Label className="block text-sm font-medium text-ink mb-1">
                             Transcript Model
                         </Label>
                         <div className="flex space-x-2 mx-1">
@@ -112,17 +143,17 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                 onValueChange={(value) => {
                                     const provider = value as TranscriptModelProps['provider'];
                                     setUiProvider(provider);
-                                    if (provider !== 'localWhisper' && provider !== 'parakeet') {
+                                    if (provider !== 'local') {
                                         fetchApiKey(provider);
                                     }
                                 }}
                             >
-                                <SelectTrigger className='focus:ring-1 focus:ring-blue-500 focus:border-blue-500'>
+                                <SelectTrigger className='focus:ring-1 focus:ring-ring focus:border-info/40'>
                                     <SelectValue placeholder="Select provider" />
                                 </SelectTrigger>
                                 <SelectContent>
-                                    <SelectItem value="parakeet">⚡ Parakeet (Recommended - Real-time / Accurate)</SelectItem>
-                                    <SelectItem value="localWhisper">🏠 Local Whisper (High Accuracy)</SelectItem>
+                                    <SelectItem value="local">🏠 On-device (Recommended - Real-time)</SelectItem>
+                                    <SelectItem value="builtin-ai">✨ Built-in AI — Gemma 4 (audio LLM)</SelectItem>
                                     {/* <SelectItem value="deepgram">☁️ Deepgram (Backup)</SelectItem>
                                     <SelectItem value="elevenLabs">☁️ ElevenLabs</SelectItem>
                                     <SelectItem value="groq">☁️ Groq</SelectItem>
@@ -130,7 +161,7 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                 </SelectContent>
                             </Select>
 
-                            {uiProvider !== 'localWhisper' && uiProvider !== 'parakeet' && (
+                            {uiProvider !== 'local' && uiProvider !== 'builtin-ai' && (
                                 <Select
                                     value={transcriptModelConfig.model}
                                     onValueChange={(value) => {
@@ -138,7 +169,7 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                         setTranscriptModelConfig({ ...transcriptModelConfig, provider: uiProvider, model });
                                     }}
                                 >
-                                    <SelectTrigger className='focus:ring-1 focus:ring-blue-500 focus:border-blue-500'>
+                                    <SelectTrigger className='focus:ring-1 focus:ring-ring focus:border-info/40'>
                                         <SelectValue placeholder="Select model" />
                                     </SelectTrigger>
                                     <SelectContent>
@@ -152,36 +183,86 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                         </div>
                     </div>
 
-                    {uiProvider === 'localWhisper' && (
+                    {uiProvider === 'local' && (
                         <div className="mt-6">
-                            <ModelManager
-                                selectedModel={transcriptModelConfig.provider === 'localWhisper' ? transcriptModelConfig.model : undefined}
-                                onModelSelect={handleWhisperModelSelect}
+                            <TranscriptionModelManager
+                                selectedModel={transcriptModelConfig.provider === 'local' ? transcriptModelConfig.model : undefined}
+                                onModelSelect={handleModelSelect}
                                 autoSave={true}
                             />
                         </div>
                     )}
 
-                    {uiProvider === 'parakeet' && (
-                        <div className="mt-6">
-                            <ParakeetModelManager
-                                selectedModel={transcriptModelConfig.provider === 'parakeet' ? transcriptModelConfig.model : undefined}
-                                onModelSelect={handleParakeetModelSelect}
-                                autoSave={true}
-                            />
+                    {uiProvider === 'builtin-ai' && (
+                        <div className="mt-6 space-y-3">
+                            <p className="mx-1 text-xs text-ink-muted">
+                                Gemma 4 transcribes one sentence at a time rather than word by
+                                word, so text appears after each pause. It runs inside the app —
+                                nothing else to install — and the same model writes your summaries.
+                            </p>
+
+                            {audioError && (
+                                <div className="rounded-md bg-danger-soft p-3 text-sm text-danger-ink">
+                                    {audioError}
+                                </div>
+                            )}
+
+                            {audioModels.map((model) => {
+                                const installed = downloadedModels.includes(model.name);
+                                const selected =
+                                    transcriptModelConfig.provider === 'builtin-ai' &&
+                                    transcriptModelConfig.model === model.name;
+
+                                return (
+                                    <div
+                                        key={model.name}
+                                        className={`rounded-lg border p-4 ${selected ? 'border-info/40 bg-info-soft' : 'border-line'}`}
+                                    >
+                                        <div className="flex items-start justify-between gap-4">
+                                            <div className="min-w-0">
+                                                <span className="font-medium">{model.name}</span>
+                                                <p className="mt-1 text-sm text-ink-muted">{model.description}</p>
+                                                <p className="mt-1 text-xs text-ink-muted">
+                                                    {(model.size_mb / 1024).toFixed(1)} GB
+                                                </p>
+                                            </div>
+                                            <div className="flex shrink-0 items-center gap-2">
+                                                {installed && !selected && (
+                                                    <Button size="sm" onClick={() => handleModelSelect(model.name, 'builtin-ai')}>
+                                                        Use
+                                                    </Button>
+                                                )}
+                                                {selected && (
+                                                    <span className="text-sm font-medium text-info-ink">Selected</span>
+                                                )}
+                                                {!installed && (
+                                                    <Button
+                                                        size="sm"
+                                                        variant="outline"
+                                                        disabled={downloading !== null}
+                                                        onClick={() => downloadAudioModel(model.name)}
+                                                    >
+                                                        {downloading === model.name ? 'Downloading…' : 'Download'}
+                                                    </Button>
+                                                )}
+                                            </div>
+                                        </div>
+                                    </div>
+                                );
+                            })}
                         </div>
                     )}
 
 
                     {requiresApiKey && (
                         <div>
-                            <Label className="block text-sm font-medium text-gray-700 mb-1">
+                            <Label className="block text-sm font-medium text-ink mb-1">
                                 API Key
                             </Label>
                             <div className="relative mx-1">
                                 <Input
                                     type={showApiKey ? "text" : "password"}
-                                    className={`pr-24 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 ${isApiKeyLocked ? 'bg-gray-100 cursor-not-allowed' : ''
+                                    className={`pr-24 focus:ring-1 focus:ring-ring focus:border-info/40 ${isApiKeyLocked ? 'bg-sunken cursor-not-allowed' : ''
                                         }`}
                                     value={apiKey || ''}
                                     onChange={(e) => setApiKey(e.target.value)}
@@ -192,7 +273,7 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                 {isApiKeyLocked && (
                                     <div
                                         onClick={handleInputClick}
-                                        className="absolute inset-0 flex items-center justify-center bg-gray-100 bg-opacity-50 rounded-md cursor-not-allowed"
+                                        className="absolute inset-0 flex items-center justify-center bg-sunken bg-opacity-50 rounded-md cursor-not-allowed"
                                     />
                                 )}
                                 <div className="absolute inset-y-0 right-0 pr-1 flex items-center">
@@ -201,7 +282,7 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                         variant="ghost"
                                         size="icon"
                                         onClick={() => setIsApiKeyLocked(!isApiKeyLocked)}
-                                        className={`transition-colors duration-200 ${isLockButtonVibrating ? 'animate-vibrate text-red-500' : ''
+                                        className={`transition-colors duration-200 ${isLockButtonVibrating ? 'animate-vibrate text-danger-ink' : ''
                                             }`}
                                         title={isApiKeyLocked ? "Unlock to edit" : "Lock to prevent editing"}
                                     >

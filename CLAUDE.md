@@ -12,8 +12,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### Key Technology Stack
 - **Desktop App**: Tauri 2.x (Rust) + Next.js 14 + React 18
-- **Audio Processing**: Rust (cpal, whisper-rs, professional audio mixing)
-- **Transcription**: Whisper.cpp / whisper-rs and Parakeet paths in the Tauri app
+- **Audio Processing**: Rust (cpal, professional audio mixing)
+- **Transcription**: transcribe.cpp (GGUF on ggml) via the `transcribe-cpp` Rust bindings for ASR models, plus audio-capable LLMs (Gemma 4) through the bundled `llama-helper` sidecar (llama.cpp mtmd) — no external Ollama install
 - **App API Surface**: Tauri commands and events, not a separate FastAPI service
 - **LLM Integration**: Ollama (local), Claude, Groq, OpenRouter
 
@@ -65,7 +65,7 @@ The archived FastAPI service had unauthenticated, development-oriented CORS beha
 ┌─────────────────────────────────────────────────────────────────┐
 │                    Frontend (Tauri Desktop App)                  │
 │  ┌──────────────────┐  ┌─────────────────┐  ┌────────────────┐ │
-│  │   Next.js UI     │  │  Rust Backend   │  │ Whisper Engine │ │
+│  │   Next.js UI     │  │  Rust Backend   │  │transcribe.cpp  │ │
 │  │  (React/TS)      │←→│  (Audio + IPC)  │←→│  (Local STT)   │ │
 │  └──────────────────┘  └─────────────────┘  └────────────────┘ │
 │         ↑ Tauri Events           ↑ Audio Pipeline               │
@@ -88,13 +88,26 @@ Raw Audio (Mic + System)
               ↓                          ↓
     ┌─────────────────┐        ┌─────────────────────┐
     │ Recording Path  │        │ Transcription Path  │
-    │ (Pre-mixed)     │        │ (VAD-filtered)      │
+    │ (Pre-mixed)     │        │ (continuous 16kHz)  │
     └─────────────────┘        └─────────────────────┘
               ↓                          ↓
-    RecordingSaver.save()      WhisperEngine.transcribe()
+    RecordingSaver.save()      Stream::feed() -> committed text
 ```
 
-**Key Insight**: The pipeline performs **professional audio mixing** (RMS-based ducking, clipping prevention) for recording, while simultaneously applying **Voice Activity Detection (VAD)** to send only speech segments to Whisper for transcription.
+**Key Insight**: The pipeline performs **professional audio mixing** (RMS-based ducking, clipping prevention) for recording, and forwards the same mixed audio continuously (resampled to 16kHz) to a single long-lived transcription stream.
+
+**Live transcription has two paths, chosen at recording start** (`audio/transcription/stream_worker.rs`):
+
+1. **Streaming** — for streaming-native models. One `transcribe_cpp::Stream` stays open for the whole meeting. Its text splits into `committed` (append-only, never rewritten -> persisted as transcript rows via `transcript-update`) and `tentative` (volatile -> emitted as `transcript-partial`, never saved).
+2. **VAD + batch** — speech is segmented and each segment decoded whole. No `transcript-partial` events, and its latency floor is the segment length (`LIVE_MAX_SEGMENT_SAMPLES`, 8s). Two decoders share the loop, behind `enum Decoder`, since segmentation and backlog policy are identical:
+   - `Decoder::Local` — `Session::run()` for batch-only catalog families (whisper, canary, qwen3-asr, ...).
+   - `Decoder::AudioLlm` — one llama-helper sidecar request per segment for audio-capable LLMs (Gemma 4 E2B/E4B), selected by `transcript_settings.provider = 'builtin-ai'`. Reports no confidence: a chat completion has no token probabilities.
+
+Between 1 and 2, `Capabilities::supports_streaming` on the loaded model decides — read from GGUF metadata, so it cannot drift from what the model can do. The catalog's `streaming` field is display-only (it labels rows before download). The provider is checked first, because an audio LLM has no transcribe.cpp session at all.
+
+Path 2 caps its un-transcribed backlog at 30s and drops the oldest segments past it, so a model slower than real time falls behind by a bounded amount instead of growing for the whole meeting.
+
+**Audio LLM transcription runs in-process, not through Ollama.** `llama-helper` (the sidecar already shipped for summaries) is built with `llama-cpp-2`'s `mtmd` feature, so Gemma 4's audio conformer (`clip.audio.projector_type = gemma4a`) decodes locally. Audio crosses the sidecar's JSON-line protocol as base64 f32 little-endian PCM at 16 kHz. Audio-capable models are marked in `summary_engine::models` by carrying a `Projector` (weights + `mmproj-*-BF16.gguf`), which is also what makes them offerable for transcription — there is no separate flag to drift. BF16 projector specifically: quantized projectors degrade transcripts (llama.cpp#21421). Ollama remains a *summary* provider only.
 
 ### Audio Device Modularization (Recently Completed)
 
@@ -170,14 +183,14 @@ await listen<TranscriptUpdate>('transcript-update', (event) => {
 });
 ```
 
-### Whisper Model Management
+### Transcription Model Management
 
 **Model Storage Locations**:
 - **Development**: `frontend/models/`
 - **Production (macOS)**: `~/Library/Application Support/Meetily/models/`
 - **Production (Windows)**: `%APPDATA%\Meetily\models\`
 
-**Model Loading** (frontend/src-tauri/src/whisper_engine/whisper_engine.rs):
+**Model Loading** (frontend/src-tauri/src/transcribe_engine/engine.rs):
 ```rust
 pub async fn load_model(&self, model_name: &str) -> Result<()> {
     // Automatically detects GPU capabilities (Metal/CUDA/Vulkan)
@@ -345,14 +358,15 @@ $env:RUST_LOG="debug"; ./clean_run_windows.bat
 - Use `perf_debug!()` / `perf_trace!()` for hot-path logging (zero cost in release)
 - Batch audio metrics using `AudioMetricsBatcher` (pipeline.rs)
 - Pre-allocate buffers with `AudioBufferPool` (buffer_pool.rs)
-- VAD filtering reduces Whisper load by ~70% (only processes speech)
+- Streaming models are real-time-native; measured RTF ~0.06 on M1 Max (Metal)
 
-### Whisper Transcription
-- **Model Selection**: Balance accuracy vs speed
-  - Development: `base` or `small` (fast iteration)
-  - Production: `medium` or `large-v3` (best quality)
-- **GPU Acceleration**: 5-10x faster than CPU
-- **Parallel Processing**: Available in `whisper_engine/parallel_processor.rs` for batch workloads
+### Transcription
+- **Model Selection**: the catalog covers every family transcribe.cpp supports — ~86 rows across 16 families (see `TRANSCRIBE_MODEL_CATALOG` in config.rs). It is **generated**: edit `scripts/gen_model_catalog.py` and re-run it, never the array.
+  - Default: `nemotron-3.5-asr-streaming-0.6b-q8` (multilingual, 39 locales)
+  - Batch-only families are selectable for live recording too, via the VAD + batch path above
+  - Excluded on purpose: `diar_streaming_sortformer_4spk-v2.1` (no text output), `medasr` (gated upstream), `voxtral-small-24b-2507` (too large)
+  - Low-end machines: `moonshine-streaming-{small,tiny}` (English only)
+- **GPU Acceleration**: Metal on macOS by default; CUDA/Vulkan/ROCm via Cargo features
 
 ### Frontend Performance
 - React state updates batched via Sidebar context
@@ -368,7 +382,9 @@ $env:RUST_LOG="debug"; ./clean_run_windows.bat
    - Windows: WASAPI exclusive mode can conflict with other apps
    - System audio requires virtual device (BlackHole on macOS, WASAPI loopback on Windows)
 
-3. **Whisper Model Loading**: Models are loaded once and cached. Changing models requires app restart or manual unload/reload.
+3. **Model Loading**: Models are loaded once and cached. transcribe.cpp allows at most ONE in-flight compute per `Model` — a batch `run()` during an active stream fails with `Error::Busy`. This is why the VAD + batch live path decodes segments through a single serialized worker, and why `transcribe_batch` (import/retranscription) cannot run during a recording.
+
+   The sidecar has the same constraint for a different reason: one process, one loaded model. `SidecarManager::ensure_running` therefore **refuses to switch models while recording** — a summary on a different model mid-meeting would respawn the sidecar and kill the live transcription with it. A summary on the *same* model reuses the loaded weights, which is why `gemma4:e4b` is the default for both jobs.
 
 4. **No Separate Backend Dependency**: Meeting persistence, transcription, and LLM features are handled by the Tauri app. Do not reintroduce the archived FastAPI backend as a supported requirement.
 
@@ -405,5 +421,6 @@ $env:RUST_LOG="debug"; ./clean_run_windows.bat
 - [frontend/src/app/page.tsx](frontend/src/app/page.tsx) - Main recording interface
 - [frontend/src/components/Sidebar/SidebarProvider.tsx](frontend/src/components/Sidebar/SidebarProvider.tsx) - Global state management
 
-**Whisper Integration**:
-- [frontend/src-tauri/src/whisper_engine/whisper_engine.rs](frontend/src-tauri/src/whisper_engine/whisper_engine.rs) - Whisper model management and transcription
+**Transcription**:
+- [frontend/src-tauri/src/transcribe_engine/engine.rs](frontend/src-tauri/src/transcribe_engine/engine.rs) - Model management, download, batch transcription
+- [frontend/src-tauri/src/audio/transcription/stream_worker.rs](frontend/src-tauri/src/audio/transcription/stream_worker.rs) - Live streaming transcription

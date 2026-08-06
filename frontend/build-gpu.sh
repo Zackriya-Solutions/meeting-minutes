@@ -105,8 +105,10 @@ if [ ! -d "$HELPER_DIR" ]; then
 fi
 
 # Determine llama-helper features
-# Note: llama-cpp-2 does NOT support coreml, only metal/cuda/vulkan
+# Note: llama-cpp-2 does NOT support coreml, only metal/cuda/vulkan/rocm
 # So for macOS Apple Silicon (which returns 'coreml' for Whisper), use 'metal' for llama-helper
+# mtmd (audio/vision input) is not a feature here — it is always on, since the
+# audio path is how Gemma 4 transcribes.
 HELPER_FEATURES=""
 if [ -n "$TAURI_GPU_FEATURE" ]; then
     LLAMA_FEATURE="$TAURI_GPU_FEATURE"

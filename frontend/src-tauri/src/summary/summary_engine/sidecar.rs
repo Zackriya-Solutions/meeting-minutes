@@ -269,6 +269,24 @@ impl SidecarManager {
                 self.update_activity().await;
                 return Ok(());
             }
+
+            // One process, one loaded model. Switching means killing the sidecar,
+            // which during a recording would kill the live transcription with it —
+            // so a mid-recording summary on a different model is refused rather
+            // than silently costing the user their transcript.
+            if let Some(loaded) = current_model.as_ref() {
+                if crate::audio::recording_commands::is_recording_now() {
+                    return Err(anyhow!(
+                        "Cannot switch the built-in model to {} while recording: {} is in use \
+                         for live transcription. Stop the recording first.",
+                        model_path
+                            .file_name()
+                            .unwrap_or_default()
+                            .to_string_lossy(),
+                        loaded.file_name().unwrap_or_default().to_string_lossy()
+                    ));
+                }
+            }
         }
 
         // Need to spawn or restart

@@ -1,8 +1,8 @@
 import React from 'react';
 import { AlertTriangle, Mic, Speaker, RefreshCw } from 'lucide-react';
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { invoke } from '@tauri-apps/api/core';
 import { useIsLinux } from '@/hooks/usePlatform';
+import { Button } from '@/components/ui/button';
 
 interface PermissionWarningProps {
   hasMicrophone: boolean;
@@ -15,127 +15,107 @@ export function PermissionWarning({
   hasMicrophone,
   hasSystemAudio,
   onRecheck,
-  isRechecking = false
+  isRechecking = false,
 }: PermissionWarningProps) {
   const isLinux = useIsLinux();
 
-  // Don't show on Linux - permission handling is not needed
-  if (isLinux) {
-    return null;
-  }
+  // Linux needs no permission grants, and a full grant needs no warning.
+  if (isLinux || (hasMicrophone && hasSystemAudio)) return null;
 
-  // Don't show if both permissions are granted
-  if (hasMicrophone && hasSystemAudio) {
-    return null;
-  }
+  const isMacOS = typeof navigator !== 'undefined' && navigator.userAgent.includes('Mac');
 
-  const isMacOS = navigator.userAgent.includes('Mac');
-
-  const openMicrophoneSettings = async () => {
-    if (isMacOS) {
-      try {
-        await invoke('open_system_settings', { preferencePane: 'Privacy_Microphone' });
-      } catch (error) {
-        console.error('Failed to open microphone settings:', error);
-      }
+  const openPane = (preferencePane: string) => async () => {
+    try {
+      await invoke('open_system_settings', { preferencePane });
+    } catch (error) {
+      console.error(`Failed to open ${preferencePane}:`, error);
     }
   };
 
-  const openScreenRecordingSettings = async () => {
-    if (isMacOS) {
-      try {
-        await invoke('open_system_settings', { preferencePane: 'Privacy_ScreenCapture' });
-      } catch (error) {
-        console.error('Failed to open screen recording settings:', error);
-      }
-    }
-  };
+  // Missing mic blocks recording entirely; missing system audio only degrades
+  // it. Different severities deserve different weight.
+  const blocking = !hasMicrophone;
+
+  const title = blocking
+    ? hasSystemAudio
+      ? 'Microphone access needed'
+      : 'Audio access needed'
+    : 'System audio unavailable';
 
   return (
-    <div className="max-w-md mb-4 space-y-3">
-      {/* Combined Permission Warning - Show when either permission is missing */}
-      {(!hasMicrophone || !hasSystemAudio) && (
-        <Alert variant="destructive" className="border-amber-400 bg-amber-50">
-          <AlertTriangle className="h-5 w-5 text-amber-600" />
-          <AlertTitle className="text-amber-900 font-semibold">
-            <div className="flex items-center gap-2">
-              {!hasMicrophone && <Mic className="h-4 w-4" />}
-              {!hasSystemAudio && <Speaker className="h-4 w-4" />}
-              {!hasMicrophone && !hasSystemAudio ? 'Permissions Required' : !hasMicrophone ? 'Microphone Permission Required' : 'System Audio Permission Required'}
-            </div>
-          </AlertTitle>
-          {/* Action Buttons */}
-          <div className="mt-4 flex flex-wrap gap-2">
-            {isMacOS && !hasMicrophone && (
-              <button
-                onClick={openMicrophoneSettings}
-                className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-amber-600 hover:bg-amber-700 rounded-md transition-colors"
-              >
-                <Mic className="h-4 w-4" />
-                Open Microphone Settings
-              </button>
-            )}
-            {isMacOS && !hasSystemAudio && (
-              <button
-                onClick={openScreenRecordingSettings}
-                className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md transition-colors"
-              >
-                <Speaker className="h-4 w-4" />
-                Open Screen Recording Settings
-              </button>
-            )}
-            <button
-              onClick={onRecheck}
-              disabled={isRechecking}
-              className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-amber-900 bg-amber-100 hover:bg-amber-200 rounded-md transition-colors disabled:opacity-50"
-            >
-              <RefreshCw className={`h-4 w-4 ${isRechecking ? 'animate-spin' : ''}`} />
-              Recheck
-            </button>
-          </div>
-          <AlertDescription className="text-amber-800 mt-2">
-            {/* Microphone Warning */}
+    <div
+      role="alert"
+      className={
+        blocking
+          ? 'rounded-lg border border-danger/30 bg-danger-soft p-3.5'
+          : 'rounded-lg border border-warn/30 bg-warn-soft p-3.5'
+      }
+    >
+      <div className="flex gap-2.5">
+        <AlertTriangle
+          aria-hidden
+          className={`mt-px h-4 w-4 shrink-0 ${blocking ? 'text-danger-ink' : 'text-warn-ink'}`}
+        />
+        <div className="min-w-0 flex-1">
+          <p
+            className={`text-base font-semibold ${blocking ? 'text-danger-ink' : 'text-warn-ink'}`}
+          >
+            {title}
+          </p>
+
+          <div className="mt-1.5 space-y-2.5 text-sm leading-relaxed text-ink-muted">
             {!hasMicrophone && (
-              <>
-                <p className="mb-3">
-                  Meetily needs access to your microphone to record meetings. No microphone devices were detected.
+              <div>
+                <p>
+                  No microphone was detected, so recording cannot start. Check that
+                  it is connected, that Conversationaly has permission, and that no
+                  other app is holding it exclusively.
                 </p>
-                <div className="space-y-2 text-sm mb-4">
-                  <p className="font-medium">Please check:</p>
-                  <ul className="list-disc list-inside ml-2 space-y-1">
-                    <li>Your microphone is connected and powered on</li>
-                    <li>Microphone permission is granted in System Settings</li>
-                    <li>No other app is exclusively using the microphone</li>
-                  </ul>
-                </div>
-              </>
+              </div>
             )}
 
-            {/* System Audio Warning */}
             {!hasSystemAudio && (
-              <>
-                <p className="mb-3">
+              <div>
+                <p>
                   {hasMicrophone
-                    ? 'System audio capture is not available. You can still record with your microphone, but computer audio won\'t be captured.'
-                    : 'System audio capture is also not available.'}
+                    ? 'Your microphone works, but the other side of the call will not be captured.'
+                    : 'Computer audio is also unavailable.'}
                 </p>
                 {isMacOS && (
-                  <div className="space-y-2 text-sm mb-4">
-                    <p className="font-medium">To enable system audio on macOS:</p>
-                    <ul className="list-disc list-inside ml-2 space-y-1">
-                      <li>Install a virtual audio device (e.g., BlackHole 2ch)</li>
-                      <li>Grant Screen Recording permission to Meetily</li>
-                      <li>Configure your audio routing in Audio MIDI Setup</li>
-                    </ul>
-                  </div>
+                  <ul className="mt-1.5 list-inside list-disc space-y-0.5">
+                    <li>Install a virtual audio device such as BlackHole 2ch</li>
+                    <li>Grant Screen Recording permission to Conversationaly</li>
+                    <li>Route your output through it in Audio MIDI Setup</li>
+                  </ul>
                 )}
-              </>
+              </div>
             )}
+          </div>
 
-
-          </AlertDescription>
-        </Alert>
-      )}
+          <div className="mt-3 flex flex-wrap gap-1.5">
+            {isMacOS && !hasMicrophone && (
+              <Button size="sm" onClick={openPane('Privacy_Microphone')}>
+                <Mic aria-hidden />
+                Microphone settings
+              </Button>
+            )}
+            {isMacOS && !hasSystemAudio && (
+              <Button
+                size="sm"
+                variant={hasMicrophone ? 'outline' : 'default'}
+                onClick={openPane('Privacy_ScreenCapture')}
+              >
+                <Speaker aria-hidden />
+                Screen recording settings
+              </Button>
+            )}
+            <Button size="sm" variant="ghost" onClick={onRecheck} disabled={isRechecking}>
+              <RefreshCw className={isRechecking ? 'animate-spin' : undefined} aria-hidden />
+              {isRechecking ? 'Checking…' : 'Check again'}
+            </Button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

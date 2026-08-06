@@ -280,11 +280,11 @@ async fn check_can_record<R: Runtime>(app: &AppHandle<R>) -> bool {
         return true;
     }
 
-    // During onboarding, check if Parakeet transcription model is ready
-    match crate::parakeet_engine::commands::parakeet_has_available_models().await {
+    // During onboarding, check if a transcription model is ready
+    match crate::transcribe_engine::commands::transcribe_has_available_models().await {
         Ok(has_models) => has_models,
         Err(e) => {
-            log::warn!("Tray: Failed to check Parakeet models: {}, assuming not ready", e);
+            log::warn!("Tray: Failed to check transcription models: {}, assuming not ready", e);
             false
         }
     }

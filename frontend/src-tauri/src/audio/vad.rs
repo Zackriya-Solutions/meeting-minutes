@@ -112,51 +112,7 @@ impl ContinuousVadProcessor {
     /// Improved resampling from input sample rate to 16kHz with anti-aliasing
     /// Uses linear interpolation and basic low-pass filtering for better quality
     fn resample_to_16k(&self, samples: &[f32]) -> Result<Vec<f32>> {
-        if self.sample_rate == 16000 {
-            return Ok(samples.to_vec());
-        }
-
-        // Calculate downsampling ratio
-        let ratio = self.sample_rate as f64 / 16000.0;
-        let output_len = (samples.len() as f64 / ratio) as usize;
-        let mut resampled = Vec::with_capacity(output_len);
-
-        // Apply simple low-pass filter before downsampling to reduce aliasing
-        let cutoff_freq = 0.4; // Normalized frequency (0.4 * Nyquist)
-        let mut filtered_samples = Vec::with_capacity(samples.len());
-        
-        // Simple moving average filter (basic low-pass)
-        let filter_size = (self.sample_rate as f64 / (cutoff_freq * self.sample_rate as f64)) as usize;
-        let filter_size = std::cmp::max(1, std::cmp::min(filter_size, 5)); // Limit filter size
-        
-        for i in 0..samples.len() {
-            let start = if i >= filter_size { i - filter_size } else { 0 };
-            let end = std::cmp::min(i + filter_size + 1, samples.len());
-            let sum: f32 = samples[start..end].iter().sum();
-            filtered_samples.push(sum / (end - start) as f32);
-        }
-
-        // Linear interpolation downsampling
-        for i in 0..output_len {
-            let source_pos = i as f64 * ratio;
-            let source_index = source_pos as usize;
-            let fraction = source_pos - source_index as f64;
-            
-            if source_index + 1 < filtered_samples.len() {
-                // Linear interpolation
-                let sample1 = filtered_samples[source_index];
-                let sample2 = filtered_samples[source_index + 1];
-                let interpolated = sample1 + (sample2 - sample1) * fraction as f32;
-                resampled.push(interpolated);
-            } else if source_index < filtered_samples.len() {
-                resampled.push(filtered_samples[source_index]);
-            }
-        }
-
-        debug!("Resampled from {} samples ({}Hz) to {} samples (16kHz) with anti-aliasing",
-               samples.len(), self.sample_rate, resampled.len());
-
-        Ok(resampled)
+        Ok(resample_to_16k(samples, self.sample_rate))
     }
 
     /// Flush any remaining audio and return final speech segments
@@ -282,6 +238,52 @@ impl ContinuousVadProcessor {
         self.processed_samples += chunk.len();
         Ok(())
     }
+}
+
+/// Resample a buffer to 16kHz with basic anti-aliasing.
+///
+/// Lifted out of ContinuousVadProcessor unchanged so the live pipeline can feed
+/// the transcription stream directly instead of routing audio through VAD. It
+/// is stateless per call, which is how the VAD path always used it.
+pub fn resample_to_16k(samples: &[f32], sample_rate: u32) -> Vec<f32> {
+    if sample_rate == 16000 {
+        return samples.to_vec();
+    }
+
+    let ratio = sample_rate as f64 / 16000.0;
+    let output_len = (samples.len() as f64 / ratio) as usize;
+    let mut resampled = Vec::with_capacity(output_len);
+
+    // Simple moving-average low-pass before downsampling, to reduce aliasing.
+    // Note the window is effectively fixed at 2 regardless of sample rate; kept
+    // as-is because this is the exact filter the shipped VAD path used.
+    let cutoff_freq = 0.4;
+    let filter_size = (sample_rate as f64 / (cutoff_freq * sample_rate as f64)) as usize;
+    let filter_size = std::cmp::max(1, std::cmp::min(filter_size, 5));
+
+    let mut filtered_samples = Vec::with_capacity(samples.len());
+    for i in 0..samples.len() {
+        let start = i.saturating_sub(filter_size);
+        let end = std::cmp::min(i + filter_size + 1, samples.len());
+        let sum: f32 = samples[start..end].iter().sum();
+        filtered_samples.push(sum / (end - start) as f32);
+    }
+
+    for i in 0..output_len {
+        let source_pos = i as f64 * ratio;
+        let source_index = source_pos as usize;
+        let fraction = source_pos - source_index as f64;
+
+        if source_index + 1 < filtered_samples.len() {
+            let sample1 = filtered_samples[source_index];
+            let sample2 = filtered_samples[source_index + 1];
+            resampled.push(sample1 + (sample2 - sample1) * fraction as f32);
+        } else if source_index < filtered_samples.len() {
+            resampled.push(filtered_samples[source_index]);
+        }
+    }
+
+    resampled
 }
 
 /// Legacy function for backward compatibility - now uses the optimized approach

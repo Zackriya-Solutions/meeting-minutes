@@ -123,6 +123,22 @@ impl SamplingParams {
     }
 }
 
+/// Multimodal projector shipped alongside a model's weights.
+///
+/// llama.cpp keeps the audio/vision encoders in a separate GGUF from the text
+/// weights, so an audio-capable model is always two files. Its presence is what
+/// makes a model usable for transcription — there is no separate capability flag
+/// to drift out of sync with the files on disk.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Projector {
+    /// Projector filename on disk (e.g. "mmproj-gemma-4-E2B-it-BF16.gguf")
+    pub file: String,
+    /// Download URL for the projector
+    pub url: String,
+    /// Projector size in MiB, counted separately so progress can span both files
+    pub size_mb: u64,
+}
+
 /// Definition of a built-in AI model with all metadata
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelDef {
@@ -157,12 +173,73 @@ pub struct ModelDef {
 
     /// Short description for UI
     pub description: String,
+
+    /// Multimodal projector, when this model has one. `Some` means the model can
+    /// take audio input and is offered for transcription as well as summaries.
+    #[serde(default)]
+    pub mmproj: Option<Projector>,
+}
+
+impl ModelDef {
+    /// Whether this model accepts audio input (i.e. can transcribe).
+    pub fn is_audio(&self) -> bool {
+        self.mmproj.is_some()
+    }
+
+    /// Bytes the user has to download for this model: weights plus projector.
+    pub fn total_size_mb(&self) -> u64 {
+        self.size_mb + self.mmproj.as_ref().map_or(0, |p| p.size_mb)
+    }
 }
 
 /// Get all available built-in AI models
 /// Add new models here - the system will automatically detect and manage them
 pub fn get_available_models() -> Vec<ModelDef> {
     vec![
+        // Gemma 4 E4B - audio + text. One model serves transcription and summaries,
+        // which is why it leads the list: loading it once covers both jobs.
+        //
+        // BF16 projector on purpose. The Q8_0 projector is half the size, but the
+        // conformer's per-layer activations exceed their clamp thresholds unevenly
+        // once quantized, which degrades transcripts (llama.cpp#21421).
+        ModelDef {
+            name: "gemma4:e4b".to_string(),
+            display_name: "Gemma 4 E4B (Audio + Text)".to_string(),
+            gguf_file: "gemma-4-E4B-it-Q4_0.gguf".to_string(),
+            template: "gemma4".to_string(),
+            download_url: "https://huggingface.co/ggml-org/gemma-4-E4B-it-GGUF/resolve/main/gemma-4-E4B-it-Q4_0.gguf".to_string(),
+            size_mb: 4378,
+            // ponytail: 8192 rather than the 32768 the model supports. The sidecar
+            // builds a fresh context per request, so n_ctx is paid on every live
+            // audio segment. Raise it if summary chunking becomes the bottleneck.
+            context_size: 8192,
+            layer_count: 35,
+            sampling: SamplingParams::gemma3_instruct(vec!["<end_of_turn>".to_string()]),
+            description: "Transcribes audio and writes summaries. Best accuracy of the built-in models. Needs ~5.2GB of downloads.".to_string(),
+            mmproj: Some(Projector {
+                file: "mmproj-gemma-4-E4B-it-BF16.gguf".to_string(),
+                url: "https://huggingface.co/ggml-org/gemma-4-E4B-it-GGUF/resolve/main/mmproj-gemma-4-E4B-it-BF16.gguf".to_string(),
+                size_mb: 946,
+            }),
+        },
+        // Gemma 4 E2B - audio + text, smaller tier.
+        ModelDef {
+            name: "gemma4:e2b".to_string(),
+            display_name: "Gemma 4 E2B (Audio + Text)".to_string(),
+            gguf_file: "gemma-4-E2B-it-Q4_0.gguf".to_string(),
+            template: "gemma4".to_string(),
+            download_url: "https://huggingface.co/ggml-org/gemma-4-E2B-it-GGUF/resolve/main/gemma-4-E2B-it-Q4_0.gguf".to_string(),
+            size_mb: 2710,
+            context_size: 8192,
+            layer_count: 30,
+            sampling: SamplingParams::gemma3_instruct(vec!["<end_of_turn>".to_string()]),
+            description: "Transcribes audio and writes summaries on modest hardware. Needs ~3.6GB of downloads.".to_string(),
+            mmproj: Some(Projector {
+                file: "mmproj-gemma-4-E2B-it-BF16.gguf".to_string(),
+                url: "https://huggingface.co/ggml-org/gemma-4-E2B-it-GGUF/resolve/main/mmproj-gemma-4-E2B-it-BF16.gguf".to_string(),
+                size_mb: 941,
+            }),
+        },
         // Qwen 3.5 2B - Balanced tier
         ModelDef {
             name: "qwen3.5:2b".to_string(),
@@ -175,6 +252,7 @@ pub fn get_available_models() -> Vec<ModelDef> {
             layer_count: 24,
             sampling: SamplingParams::qwen35_summary(vec!["<|im_end|>".to_string()]),
             description: "Balanced Qwen 3.5 model for built-in summaries. Higher quality with modest local requirements.".to_string(),
+            mmproj: None,
         },
         // Qwen 3.5 4B - High quality tier
         ModelDef {
@@ -188,6 +266,7 @@ pub fn get_available_models() -> Vec<ModelDef> {
             layer_count: 32,
             sampling: SamplingParams::qwen35_summary(vec!["<|im_end|>".to_string()]),
             description: "High-quality Qwen 3.5 model for built-in summaries. Best local Qwen option in the current lineup.".to_string(),
+            mmproj: None,
         },
         // Gemma 3 4B - Legacy alternative retained for users who prefer Gemma output.
         ModelDef {
@@ -201,6 +280,7 @@ pub fn get_available_models() -> Vec<ModelDef> {
             layer_count: 35,
             sampling: SamplingParams::gemma3_instruct(vec!["<end_of_turn>".to_string()]),
             description: "Balanced model. Great quality/speed trade-off. Requires ~3.5GB RAM.".to_string(),
+            mmproj: None,
         },
         // Gemma 3 1B - Visible legacy tier retained for already-shipped users.
         ModelDef {
@@ -214,6 +294,7 @@ pub fn get_available_models() -> Vec<ModelDef> {
             layer_count: 26,
             sampling: SamplingParams::gemma3_instruct(vec!["<end_of_turn>".to_string()]),
             description: "Fastest model. Runs on any hardware with ~1GB RAM. Good for quick summaries.".to_string(),
+            mmproj: None,
         },
     ]
 }
@@ -245,6 +326,38 @@ pub fn get_model_path(app_data_dir: &PathBuf, model_name: &str) -> Result<PathBu
 /// Get the models directory path for built-in AI
 pub fn get_models_directory(app_data_dir: &PathBuf) -> PathBuf {
     app_data_dir.join("models").join("summary")
+}
+
+/// Resolve a model's projector path, if it has one.
+pub fn get_mmproj_path(app_data_dir: &PathBuf, model_name: &str) -> Result<Option<PathBuf>> {
+    let model = get_model_by_name(model_name)
+        .ok_or_else(|| anyhow!("Unknown model: {}", model_name))?;
+
+    Ok(model
+        .mmproj
+        .map(|p| get_models_directory(app_data_dir).join(p.file)))
+}
+
+/// Media marker mtmd substitutes with the encoded audio. Must appear exactly once
+/// in a prompt that carries audio, or `mtmd_tokenize` rejects it.
+pub const MEDIA_MARKER: &str = "<__media__>";
+
+/// Instruction for audio transcription, kept deliberately narrow.
+///
+/// An LLM asked to transcribe can decline, editorialize, or narrate its reasoning.
+/// Naming the output format is what stops it prefacing the transcript with "Sure,
+/// here is the transcript".
+const TRANSCRIBE_INSTRUCTION: &str = "Transcribe the speech in this audio verbatim. \
+     Output only the spoken words, with no commentary, labels, or explanation. \
+     If there is no intelligible speech, output nothing at all.";
+
+/// Build the transcription prompt for an audio-capable model.
+pub fn format_transcribe_prompt(template_name: &str) -> Result<String> {
+    format_prompt(
+        template_name,
+        TRANSCRIBE_INSTRUCTION,
+        &format!("{}\nTranscript:", MEDIA_MARKER),
+    )
 }
 
 // ============================================================================
@@ -300,7 +413,8 @@ pub fn format_prompt(
     user_prompt: &str,
 ) -> Result<String> {
     let template = match template_name {
-        "gemma3" => GEMMA3_TEMPLATE,
+        // Gemma 4 kept Gemma 3's turn format.
+        "gemma3" | "gemma4" => GEMMA3_TEMPLATE,
         "qwen3.5_nonthinking" => QWEN35_NONTHINKING_TEMPLATE,
         _ => return Err(anyhow!("Unknown template: {}", template_name)),
     };
@@ -330,6 +444,61 @@ pub const GENERATION_TIMEOUT_SECS: u64 = 900; // 15 minutes
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn transcribe_prompt_keeps_exactly_one_media_marker() {
+        // `format_prompt` escapes control markers in the user prompt. If
+        // `<__media__>` ever joined that list, mtmd would see zero markers for one
+        // bitmap and every segment would fail with BitmapCountMismatch.
+        for model in get_available_models().iter().filter(|m| m.is_audio()) {
+            let prompt = format_transcribe_prompt(&model.template).unwrap();
+            assert_eq!(
+                prompt.matches(MEDIA_MARKER).count(),
+                1,
+                "{} produced {:?}",
+                model.name,
+                prompt
+            );
+            assert!(prompt.contains("<start_of_turn>model"), "{}", model.name);
+        }
+    }
+
+    #[test]
+    fn audio_models_carry_a_projector_and_quote_both_downloads() {
+        let audio: Vec<_> = get_available_models()
+            .into_iter()
+            .filter(|m| m.is_audio())
+            .collect();
+        assert!(!audio.is_empty(), "no audio-capable model is registered");
+
+        for model in audio {
+            let projector = model.mmproj.as_ref().expect("is_audio implies a projector");
+            // BF16 on purpose: quantized projectors degrade transcripts.
+            assert!(
+                projector.file.contains("BF16"),
+                "{} uses a quantized projector ({})",
+                model.name,
+                projector.file
+            );
+            assert!(projector.url.ends_with(&projector.file));
+            // The quoted size has to cover both files or the progress bar lies.
+            assert_eq!(
+                model.total_size_mb(),
+                model.size_mb + projector.size_mb,
+                "{}",
+                model.name
+            );
+        }
+    }
+
+    #[test]
+    fn text_only_models_are_not_offered_for_transcription() {
+        for name in ["qwen3.5:2b", "qwen3.5:4b", "gemma3:4b", "gemma3:1b"] {
+            let model = get_model_by_name(name).expect(name);
+            assert!(!model.is_audio(), "{} must not claim audio support", name);
+            assert_eq!(model.total_size_mb(), model.size_mb);
+        }
+    }
 
     #[test]
     fn qwen35_models_are_registered_with_expected_metadata() {

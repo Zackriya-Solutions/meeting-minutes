@@ -1,25 +1,22 @@
 import { VirtualizedTranscriptView } from '@/components/VirtualizedTranscriptView';
 import { PermissionWarning } from '@/components/PermissionWarning';
 import { Button } from '@/components/ui/button';
-import { ButtonGroup } from '@/components/ui/button-group';
-import { Copy, GlobeIcon } from 'lucide-react';
+import { Copy, GlobeIcon, HardDriveDownload } from 'lucide-react';
 import { useTranscripts } from '@/contexts/TranscriptContext';
 import { useConfig } from '@/contexts/ConfigContext';
 import { useRecordingState } from '@/contexts/RecordingStateContext';
 import { usePermissionCheck } from '@/hooks/usePermissionCheck';
 import { ModalType } from '@/hooks/useModalState';
 import { useIsLinux } from '@/hooks/usePlatform';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useMemo } from 'react';
 
 /**
- * TranscriptPanel Component
- *
- * Displays transcript content with controls for copying and language settings.
- * Uses TranscriptContext, ConfigContext, and RecordingStateContext internally.
+ * The live capture surface. Header carries the machine facts (which model is
+ * decoding, that it is doing so locally) alongside the actions — see
+ * /PRODUCT.md principle 3, "make the local machine legible".
  */
-
 interface TranscriptPanelProps {
-  // indicates stop-processing state for transcripts; derived from backend statuses.
   isProcessingStop: boolean;
   isStopping: boolean;
   showModal: (name: ModalType, message?: string) => void;
@@ -28,93 +25,98 @@ interface TranscriptPanelProps {
 export function TranscriptPanel({
   isProcessingStop,
   isStopping,
-  showModal
+  showModal,
 }: TranscriptPanelProps) {
-  // Contexts
   const { transcripts, transcriptContainerRef, copyTranscript } = useTranscripts();
   const { transcriptModelConfig } = useConfig();
   const { isRecording, isPaused } = useRecordingState();
-  const { checkPermissions, isChecking, hasSystemAudio, hasMicrophone } = usePermissionCheck();
+  const { checkPermissions, isChecking, hasSystemAudio, hasMicrophone } =
+    usePermissionCheck();
   const isLinux = useIsLinux();
 
-  // Convert transcripts to segments for virtualized view
-  const segments = useMemo(() =>
-    transcripts.map(t => ({
-      id: t.id,
-      timestamp: t.audio_start_time ?? 0,
-      endTime: t.audio_end_time,
-      text: t.text,
-      confidence: t.confidence,
-    })),
+  const segments = useMemo(
+    () =>
+      transcripts.map((t) => ({
+        id: t.id,
+        timestamp: t.audio_start_time ?? 0,
+        endTime: t.audio_end_time,
+        text: t.text,
+        confidence: t.confidence,
+      })),
     [transcripts]
   );
 
-  return (
-    <div ref={transcriptContainerRef} className="w-full border-r border-gray-200 bg-white flex flex-col overflow-y-auto">
-      {/* Title area - Sticky header */}
-      <div className="sticky top-0 z-10 bg-white p-4 border-gray-200">
-        <div className="flex flex-col space-y-3">
-          <div className="flex  flex-col space-y-2">
-            <div className="flex justify-center  items-center space-x-2">
-              <ButtonGroup>
-                {transcripts?.length > 0 && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={copyTranscript}
-                    title="Copy Transcript"
-                  >
-                    <Copy />
-                    <span className='hidden md:inline'>
-                      Copy
-                    </span>
-                  </Button>
-                )}
-                {transcriptModelConfig.provider === "localWhisper" &&
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => showModal('languageSettings')}
-                    title="Language"
-                  >
-                    <GlobeIcon />
-                    <span className='hidden md:inline'>
-                      Language
-                    </span>
-                  </Button>
-                }
-              </ButtonGroup>
-            </div>
-          </div>
-        </div>
-      </div>
+  const isLocal = transcriptModelConfig.provider === 'local';
 
-      {/* Permission Warning - Not needed on Linux */}
+  return (
+    // Not a scroll container — VirtualizedTranscriptView owns scrolling, and a
+    // second one here fights the virtualizer's measurements.
+    <div ref={transcriptContainerRef} className="flex min-w-0 flex-1 flex-col overflow-hidden bg-canvas">
+      <header className="flex h-12 shrink-0 items-center gap-3 border-b border-line px-4">
+        {/* Which model is decoding, and where. */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="flex min-w-0 items-center gap-1.5 text-ink-muted">
+              {isLocal && (
+                <HardDriveDownload className="h-3.5 w-3.5 shrink-0" aria-hidden />
+              )}
+              <span className="readout truncate text-2xs">
+                {transcriptModelConfig.model || 'No model selected'}
+              </span>
+            </span>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">
+            {isLocal
+              ? 'Transcribing on this machine — no audio leaves it'
+              : `Transcribing via ${transcriptModelConfig.provider}`}
+          </TooltipContent>
+        </Tooltip>
+
+        <div className="ml-auto flex items-center gap-1">
+          {isLocal && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => showModal('languageSettings')}
+            >
+              <GlobeIcon aria-hidden />
+              <span className="hidden md:inline">Language</span>
+            </Button>
+          )}
+          {transcripts?.length > 0 && (
+            <Button variant="ghost" size="sm" onClick={copyTranscript}>
+              <Copy aria-hidden />
+              <span className="hidden md:inline">Copy</span>
+            </Button>
+          )}
+        </div>
+      </header>
+
       {!isRecording && !isChecking && !isLinux && (
-        <div className="flex justify-center px-4 pt-4">
-          <PermissionWarning
-            hasMicrophone={hasMicrophone}
-            hasSystemAudio={hasSystemAudio}
-            onRecheck={checkPermissions}
-            isRechecking={isChecking}
-          />
+        <div className="shrink-0 px-4 pt-4">
+          <div className="mx-auto max-w-measure">
+            <PermissionWarning
+              hasMicrophone={hasMicrophone}
+              hasSystemAudio={hasSystemAudio}
+              onRecheck={checkPermissions}
+              isRechecking={isChecking}
+            />
+          </div>
         </div>
       )}
 
-      {/* Transcript content */}
-      <div className="pb-20">
-        <div className="flex justify-center">
-          <div className="w-2/3 max-w-[750px]">
-            <VirtualizedTranscriptView
-              segments={segments}
-              isRecording={isRecording}
-              isPaused={isPaused}
-              isProcessing={isProcessingStop}
-              isStopping={isStopping}
-              enableStreaming={isRecording}
-              showConfidence={true}
-            />
-          </div>
+      {/* pb leaves room for the floating transport */}
+      <div className="min-h-0 flex-1 pb-24">
+        <div className="mx-auto h-full max-w-measure">
+          <VirtualizedTranscriptView
+            segments={segments}
+            isRecording={isRecording}
+            isPaused={isPaused}
+            isProcessing={isProcessingStop}
+            isStopping={isStopping}
+            enableStreaming={isRecording}
+            showConfidence={true}
+          />
         </div>
       </div>
     </div>

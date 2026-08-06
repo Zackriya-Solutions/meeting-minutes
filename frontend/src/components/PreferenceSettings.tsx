@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useRef } from "react"
 import { Switch } from "./ui/switch"
+import { Button } from "./ui/button"
 import { FolderOpen } from "lucide-react"
 import { invoke } from "@tauri-apps/api/core"
 import Analytics from "@/lib/analytics"
@@ -133,97 +134,66 @@ export function PreferenceSettings() {
     }
   };
 
-  // Show loading only if we're actually loading and don't have cached data
-  if (isLoadingPreferences && !notificationSettings && !storageLocations) {
-    return <div className="max-w-2xl mx-auto p-6">Loading Preferences...</div>
+  if (
+    (isLoadingPreferences && !notificationSettings && !storageLocations) ||
+    (notificationsEnabled === null && !isLoadingPreferences)
+  ) {
+    return (
+      <div className="space-y-6" role="status" aria-label="Loading preferences">
+        {[0, 1, 2].map((i) => (
+          <div key={i} className="space-y-2 border-b border-line pb-6">
+            <div className="skeleton h-4 w-32" />
+            <div className="skeleton h-3 w-72" />
+          </div>
+        ))}
+      </div>
+    )
   }
 
-  // Show loading if notificationsEnabled hasn't been determined yet
-  if (notificationsEnabled === null && !isLoadingPreferences) {
-    return <div className="max-w-2xl mx-auto p-6">Loading Preferences...</div>
-  }
-
-  // Ensure we have a boolean value for the Switch component
   const notificationsEnabledValue = notificationsEnabled ?? false;
 
+  // Sections separated by hairlines rather than stacked cards. Settings is a
+  // list of decisions, not a gallery — and a card inside a card is never right.
   return (
-    <div className="space-y-6">
-      {/* Notifications Section */}
-      <div className="bg-white rounded-lg border border-gray-200 p-6 shadow-sm">
-        <div className="flex items-center justify-between">
-          <div>
-            <h3 className="text-lg font-semibold text-gray-900 mb-2">Notifications</h3>
-            <p className="text-sm text-gray-600">Enable or disable notifications of start and end of meeting</p>
-          </div>
-          <Switch checked={notificationsEnabledValue} onCheckedChange={setNotificationsEnabled} />
-        </div>
-      </div>
-
-      {/* Data Storage Locations Section */}
-      <div className="bg-white rounded-lg border border-gray-200 p-6 shadow-sm">
-        <h3 className="text-lg font-semibold text-gray-900 mb-4">Data Storage Locations</h3>
-        <p className="text-sm text-gray-600 mb-6">
-          View and access where Meetily stores your data
-        </p>
-
-        <div className="space-y-4">
-          {/* Database Location */}
-          {/* <div className="p-4 border rounded-lg bg-gray-50">
-            <div className="font-medium mb-2">Database</div>
-            <div className="text-sm text-gray-600 mb-3 break-all font-mono text-xs">
-              {storageLocations?.database || 'Loading...'}
-            </div>
-            <button
-              onClick={() => handleOpenFolder('database')}
-              className="flex items-center gap-2 px-3 py-2 text-sm border border-gray-300 rounded-md hover:bg-gray-100 transition-colors"
-            >
-              <FolderOpen className="w-4 h-4" />
-              Open Folder
-            </button>
-          </div> */}
-
-          {/* Models Location */}
-          {/* <div className="p-4 border rounded-lg bg-gray-50">
-            <div className="font-medium mb-2">Whisper Models</div>
-            <div className="text-sm text-gray-600 mb-3 break-all font-mono text-xs">
-              {storageLocations?.models || 'Loading...'}
-            </div>
-            <button
-              onClick={() => handleOpenFolder('models')}
-              className="flex items-center gap-2 px-3 py-2 text-sm border border-gray-300 rounded-md hover:bg-gray-100 transition-colors"
-            >
-              <FolderOpen className="w-4 h-4" />
-              Open Folder
-            </button>
-          </div> */}
-
-          {/* Recordings Location */}
-          <div className="p-4 border rounded-lg bg-gray-50">
-            <div className="font-medium mb-2">Meeting Recordings</div>
-            <div className="text-sm text-gray-600 mb-3 break-all font-mono text-xs">
-              {storageLocations?.recordings || 'Loading...'}
-            </div>
-            <button
-              onClick={() => handleOpenFolder('recordings')}
-              className="flex items-center gap-2 px-3 py-2 text-sm border border-gray-300 rounded-md hover:bg-gray-100 transition-colors"
-            >
-              <FolderOpen className="w-4 h-4" />
-              Open Folder
-            </button>
-          </div>
-        </div>
-
-        <div className="mt-4 p-3 bg-blue-50 rounded-md">
-          <p className="text-xs text-blue-800">
-            <strong>Note:</strong> Database and models are stored together in your application data directory for unified management.
+    <div className="divide-y divide-line">
+      <section className="flex flex-wrap items-center justify-between gap-3 pb-6">
+        <div>
+          <h2 className="text-base font-medium text-ink">Notifications</h2>
+          <p className="mt-0.5 max-w-[54ch] text-sm text-ink-muted">
+            Show a system notification when a recording starts and stops.
           </p>
         </div>
-      </div>
+        <Switch
+          checked={notificationsEnabledValue}
+          onCheckedChange={setNotificationsEnabled}
+          aria-label="Recording notifications"
+        />
+      </section>
 
-      {/* Analytics Section */}
-      <div className="bg-white rounded-lg border border-gray-200 p-6 shadow-sm">
+      <section className="py-6">
+        <h2 className="text-base font-medium text-ink">Where your data lives</h2>
+        <p className="mt-0.5 max-w-[62ch] text-sm text-ink-muted">
+          Everything stays on this machine. Recordings, the transcript database,
+          and downloaded models are all in your application data directory.
+        </p>
+
+        <div className="mt-4 flex flex-wrap items-center gap-3">
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-medium text-ink">Meeting recordings</p>
+            <p className="readout mt-0.5 break-all text-2xs text-ink-muted">
+              {storageLocations?.recordings || '…'}
+            </p>
+          </div>
+          <Button variant="outline" size="sm" onClick={() => handleOpenFolder('recordings')}>
+            <FolderOpen aria-hidden />
+            Open folder
+          </Button>
+        </div>
+      </section>
+
+      <section className="pt-6">
         <AnalyticsConsentSwitch />
-      </div>
+      </section>
     </div>
   )
 }

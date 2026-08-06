@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
+use base64::Engine as _;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use std::sync::RwLock;
@@ -28,6 +29,10 @@ enum Request {
         max_tokens: Option<i32>,
         context_size: Option<u32>,
         model_path: Option<String>,
+        /// Projector path, sent only with audio.
+        mmproj_path: Option<String>,
+        /// 16 kHz mono PCM as base64 f32 little-endian bytes.
+        audio_b64: Option<String>,
         // Sampling parameters
         temperature: Option<f32>,
         top_k: Option<i32>,
@@ -157,6 +162,116 @@ pub async fn generate_with_builtin(
     // Apply model-specific chat template
     let formatted_prompt =
         models::format_prompt(&model_def.template, system_prompt, user_prompt)?;
+
+    // Prepare generation request with model-specific sampling parameters
+    let sampling = model_def.sampling.sanitize_for_llama_helper();
+    let request = Request::Generate {
+        prompt: formatted_prompt,
+        max_tokens: Some(models::DEFAULT_MAX_TOKENS),
+        context_size: Some(model_def.context_size),
+        model_path: Some(model_path.to_string_lossy().to_string()),
+        mmproj_path: None,
+        audio_b64: None,
+        temperature: Some(sampling.temperature),
+        top_k: Some(sampling.top_k),
+        top_p: Some(sampling.top_p),
+        presence_penalty: Some(sampling.presence_penalty),
+        frequency_penalty: Some(sampling.frequency_penalty),
+        repeat_penalty: Some(sampling.repeat_penalty),
+        penalty_last_n: Some(sampling.penalty_last_n),
+        stop_tokens: Some(sampling.stop_tokens),
+    };
+
+    send_to_sidecar(app_data_dir, &model_path, request, cancellation_token).await
+}
+
+/// Transcribe 16 kHz mono PCM through an audio-capable built-in model.
+///
+/// Same sidecar, same loaded weights as summaries — the only difference is that the
+/// prompt carries a media marker and the request carries the projector plus audio.
+///
+/// Greedy decoding is not a preference: the model's own sampling preset is
+/// temperature 1.0 / top-k 64, which invents words that were never spoken.
+pub async fn transcribe_with_builtin(
+    app_data_dir: &PathBuf,
+    model_name: &str,
+    samples: &[f32],
+) -> Result<String> {
+    let model_def = models::get_model_by_name(model_name)
+        .ok_or_else(|| anyhow!("Unknown model: {}", model_name))?;
+
+    let mmproj_path = models::get_mmproj_path(app_data_dir, model_name)?.ok_or_else(|| {
+        anyhow!(
+            "{} cannot transcribe: it has no audio projector",
+            model_name
+        )
+    })?;
+    if !mmproj_path.exists() {
+        return Err(anyhow!(
+            "audio projector is missing at {} — re-download {}",
+            mmproj_path.display(),
+            model_name
+        ));
+    }
+
+    let model_path = get_cached_model_path(app_data_dir, model_name)?;
+
+    let request = Request::Generate {
+        prompt: models::format_transcribe_prompt(&model_def.template)?,
+        // A transcript cannot be longer than the speech it came from. 8 s of dense
+        // speech is ~60 tokens; 512 leaves headroom without letting a looping model
+        // run for minutes on one segment.
+        max_tokens: Some(512),
+        context_size: Some(model_def.context_size),
+        model_path: Some(model_path.to_string_lossy().to_string()),
+        mmproj_path: Some(mmproj_path.to_string_lossy().to_string()),
+        audio_b64: Some(audio_to_b64(samples)),
+        temperature: Some(0.0),
+        top_k: None,
+        top_p: None,
+        presence_penalty: None,
+        frequency_penalty: None,
+        repeat_penalty: None,
+        penalty_last_n: None,
+        stop_tokens: Some(model_def.sampling.stop_tokens.clone()),
+    };
+
+    let text = send_to_sidecar(app_data_dir, &model_path, request, None).await?;
+    Ok(strip_thinking(&text).trim().to_string())
+}
+
+/// Encode f32 samples as base64 f32 little-endian PCM.
+///
+/// Raw bytes rather than a JSON number array: 8 s of 16 kHz audio is 128k samples,
+/// which is ~1.5 MB of ASCII digits to serialize and parse versus 683 KB of base64.
+fn audio_to_b64(samples: &[f32]) -> String {
+    let mut bytes = Vec::with_capacity(samples.len() * 4);
+    for s in samples {
+        bytes.extend_from_slice(&s.to_le_bytes());
+    }
+    base64::engine::general_purpose::STANDARD.encode(bytes)
+}
+
+/// Drop a leading thinking block.
+///
+/// Gemma 4 turns thinking on by default for audio. The prompt asks it not to, but a
+/// model under an unfamiliar acoustic input still occasionally emits one, and a
+/// transcript containing the model's deliberations is worse than a short one.
+fn strip_thinking(text: &str) -> &str {
+    match text.split_once("</think>") {
+        Some((_, after)) => after,
+        None => text,
+    }
+}
+
+/// Shared tail of every sidecar request: ensure the process is up with the right
+/// model, send, honour cancellation, and unwrap the response.
+async fn send_to_sidecar(
+    app_data_dir: &PathBuf,
+    model_path: &PathBuf,
+    request: Request,
+    cancellation_token: Option<&CancellationToken>,
+) -> Result<String> {
     // Get or initialize sidecar manager
     let manager = {
         let mut global_manager = SIDECAR_MANAGER.lock().await;
@@ -177,23 +292,6 @@ pub async fn generate_with_builtin(
             return Err(anyhow!("Generation cancelled during sidecar startup"));
         }
     }
-
-    // Prepare generation request with model-specific sampling parameters
-    let sampling = model_def.sampling.sanitize_for_llama_helper();
-    let request = Request::Generate {
-        prompt: formatted_prompt,
-        max_tokens: Some(models::DEFAULT_MAX_TOKENS),
-        context_size: Some(model_def.context_size),
-        model_path: Some(model_path.to_string_lossy().to_string()),
-        temperature: Some(sampling.temperature),
-        top_k: Some(sampling.top_k),
-        top_p: Some(sampling.top_p),
-        presence_penalty: Some(sampling.presence_penalty),
-        frequency_penalty: Some(sampling.frequency_penalty),
-        repeat_penalty: Some(sampling.repeat_penalty),
-        penalty_last_n: Some(sampling.penalty_last_n),
-        stop_tokens: Some(sampling.stop_tokens),
-    };
 
     let request_json = serde_json::to_string(&request)?;
 
@@ -309,6 +407,8 @@ mod tests {
             max_tokens: Some(512),
             context_size: Some(2048),
             model_path: Some("/path/to/model.gguf".to_string()),
+            mmproj_path: None,
+            audio_b64: None,
             temperature: Some(1.0),
             top_k: Some(64),
             top_p: Some(0.95),

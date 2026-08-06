@@ -6,7 +6,7 @@ import { listen } from '@tauri-apps/api/event';
 import type { PermissionStatus, OnboardingPermissions } from '@/types/onboarding';
 import { resolveOnboardingSummaryModelStatus } from '@/lib/onboarding-summary-model';
 
-const PARAKEET_MODEL = 'parakeet-tdt-0.6b-v3-int8';
+import { DEFAULT_TRANSCRIBE_MODEL } from '@/constants/modelDefaults';
 
 interface OnboardingStatus {
   version: string;
@@ -245,7 +245,7 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
       'parakeet-model-download-progress',
       (event) => {
         const { modelName, progress, downloaded_mb, total_mb, speed_mbps, status } = event.payload;
-        if (modelName === PARAKEET_MODEL) {
+        if (modelName === DEFAULT_TRANSCRIBE_MODEL) {
           setParakeetProgress(progress);
           setParakeetProgressInfo({
             percent: progress,
@@ -264,7 +264,7 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
       'parakeet-model-download-complete',
       (event) => {
         const { modelName } = event.payload;
-        if (modelName === PARAKEET_MODEL) {
+        if (modelName === DEFAULT_TRANSCRIBE_MODEL) {
           setParakeetDownloaded(true);
           setParakeetProgress(100);
         }
@@ -275,7 +275,7 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
       'parakeet-model-download-error',
       (event) => {
         const { modelName } = event.payload;
-        if (modelName === PARAKEET_MODEL) {
+        if (modelName === DEFAULT_TRANSCRIBE_MODEL) {
           console.error('Parakeet download error:', event.payload.error);
         }
       }
@@ -381,8 +381,8 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
 
     // Verify Parakeet model exists on disk
     try {
-      await invoke('parakeet_init');
-      parakeetDownloaded = await invoke<boolean>('parakeet_has_available_models');
+      await invoke('transcribe_init');
+      parakeetDownloaded = await invoke<boolean>('transcribe_has_available_models');
       console.log('[OnboardingContext] Parakeet verified on disk:', parakeetDownloaded);
     } catch (error) {
       console.warn('[OnboardingContext] Failed to verify Parakeet:', error);
@@ -531,7 +531,7 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
       // Start Parakeet download first (speech recognition - always required)
       if (shouldStartParakeet) {
         console.log('[OnboardingContext] Starting Parakeet download');
-        invoke('parakeet_download_model', { modelName: PARAKEET_MODEL })
+        invoke('transcribe_download_model', { modelName: DEFAULT_TRANSCRIBE_MODEL })
           .catch(err => console.error('[OnboardingContext] Parakeet download failed:', err));
       }
 
@@ -549,7 +549,7 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
   // Check if any models are currently downloading (for re-entry)
   const checkActiveDownloads = async () => {
     try {
-      const models = await invoke<any[]>('parakeet_get_available_models');
+      const models = await invoke<any[]>('transcribe_get_available_models');
       const isDownloading = models.some(m => m.status && (typeof m.status === 'object' ? 'Downloading' in m.status : m.status === 'Downloading'));
       
       if (isDownloading) {
@@ -567,7 +567,7 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
   const retryParakeetDownload = async () => {
     console.log('[OnboardingContext] Retrying Parakeet download');
     try {
-      await invoke('parakeet_retry_download', { modelName: PARAKEET_MODEL });
+      await invoke('transcribe_download_model', { modelName: DEFAULT_TRANSCRIBE_MODEL });
     } catch (error) {
       console.error('[OnboardingContext] Retry failed:', error);
       throw error;

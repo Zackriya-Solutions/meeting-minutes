@@ -1,49 +1,47 @@
 'use client';
 
-interface ConfidenceIndicatorProps {
-  confidence: number;
-  showIndicator?: boolean;
+import { cn } from '@/lib/utils';
+
+/** Above this the decode is trustworthy and the UI says nothing about it. */
+const QUIET_THRESHOLD = 0.8;
+
+function describe(conf: number) {
+  if (conf >= QUIET_THRESHOLD) return { label: 'High confidence', tone: 'brand' } as const;
+  if (conf >= 0.7) return { label: 'Good confidence', tone: 'brand' } as const;
+  if (conf >= 0.4) return { label: 'Uncertain', tone: 'warn' } as const;
+  return { label: 'Low confidence', tone: 'danger' } as const;
 }
 
-export const ConfidenceIndicator: React.FC<ConfidenceIndicatorProps> = ({
-  confidence,
-  showIndicator = true,
-}) => {
-  // Don't render if preference is disabled
-  if (!showIndicator) {
-    return null;
-  }
+/**
+ * Decode confidence, shown only when it is worth acting on. A confident
+ * transcript carries no marker at all — decorating every line with a green dot
+ * is noise, and noise is what makes the real warnings invisible.
+ *
+ * `always` forces the readout (used in tooltips, where the user asked).
+ */
+export const ConfidenceIndicator: React.FC<{
+  confidence: number;
+  showIndicator?: boolean;
+  always?: boolean;
+}> = ({ confidence, showIndicator = true, always = false }) => {
+  if (!showIndicator) return null;
+  if (!always && confidence >= QUIET_THRESHOLD) return null;
 
-  // Get color class based on confidence threshold
-  const getColorClass = (conf: number): string => {
-    if (conf >= 0.8) return 'bg-green-500'; // 80-100%: High confidence
-    if (conf >= 0.7) return 'bg-yellow-500'; // 70-79%: Good confidence
-    if (conf >= 0.4) return 'bg-orange-500'; // 40-79%: Medium confidence
-    return 'bg-red-500'; // Below 50%: Low confidence
-  };
-
-  // Get descriptive label for accessibility
-  const getConfidenceLabel = (conf: number): string => {
-    if (conf >= 0.8) return 'High confidence';
-    if (conf >= 0.7) return 'Good confidence';
-    if (conf >= 0.4) return 'Medium confidence';
-    return 'Low confidence';
-  };
-
-  const confidencePercent = (confidence * 100).toFixed(0);
-  const colorClass = getColorClass(confidence);
-  const label = getConfidenceLabel(confidence);
+  const { label, tone } = describe(confidence);
+  const percent = Math.round(confidence * 100);
 
   return (
-    <div
-      className="flex items-center gap-1"
-      title={`${confidencePercent}% confidence - ${label}`}
-      aria-label={`Transcription confidence: ${confidencePercent}%`}
+    <span
+      className={cn(
+        'inline-flex items-center gap-1 rounded-sm px-1 py-px align-middle',
+        tone === 'danger' && 'bg-danger-soft text-danger-ink',
+        tone === 'warn' && 'bg-warn-soft text-warn-ink',
+        tone === 'brand' && 'bg-brand-soft text-brand-soft-ink'
+      )}
+      title={`${label} — ${percent}%`}
+      aria-label={`Transcription confidence ${percent} percent, ${label}`}
     >
-      <div
-        className={`w-2 h-2 rounded-full ${colorClass} transition-colors duration-200`}
-        role="status"
-      />
-    </div>
+      <span className="readout text-2xs font-medium">{percent}%</span>
+    </span>
   );
 };

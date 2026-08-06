@@ -1,5 +1,7 @@
 import { useState, useCallback, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { getModelLabel } from '@/lib/transcribe';
+import { LOCAL_PROVIDER } from '@/constants/modelDefaults';
 
 export interface RawModelInfo {
   name: string;
@@ -8,7 +10,7 @@ export interface RawModelInfo {
 }
 
 export interface ModelOption {
-  provider: 'whisper' | 'parakeet';
+  provider: typeof LOCAL_PROVIDER;
   name: string;
   displayName: string;
   size_mb: number;
@@ -20,13 +22,10 @@ interface TranscriptModelConfig {
 }
 
 /**
- * Custom hook for fetching and managing transcription models (Whisper and Parakeet).
+ * Fetch downloaded transcription models for the import and retranscribe dialogs.
  *
- * This hook centralizes the model fetching logic that was previously duplicated
- * in ImportAudioDialog and RetranscribeDialog components.
- *
- * @param transcriptModelConfig - User's saved model configuration from context
- * @returns Object containing available models, selected model key, loading state, and fetch function
+ * Previously queried two engines and merged the results; there is one engine and
+ * one catalog now, so this is a single call.
  */
 export function useTranscriptionModels(transcriptModelConfig: TranscriptModelConfig | undefined) {
   const [availableModels, setAvailableModels] = useState<ModelOption[]>([]);
@@ -35,7 +34,6 @@ export function useTranscriptionModels(transcriptModelConfig: TranscriptModelCon
   // Track whether the user has manually changed the model selection
   const userSelectedRef = useRef(false);
 
-  // Wrap setSelectedModelKey to track user-initiated changes
   const setSelectedModelKeyWithTracking = useCallback((key: string) => {
     userSelectedRef.current = true;
     setSelectedModelKey(key);
@@ -43,69 +41,37 @@ export function useTranscriptionModels(transcriptModelConfig: TranscriptModelCon
 
   const fetchModels = useCallback(async () => {
     setLoadingModels(true);
-    const allModels: ModelOption[] = [];
+    let allModels: ModelOption[] = [];
 
-    // Fetch Whisper models
     try {
-      const whisperModels = await invoke<RawModelInfo[]>('whisper_get_available_models');
-      const availableWhisper = whisperModels
+      const models = await invoke<RawModelInfo[]>('transcribe_get_available_models');
+      allModels = models
         .filter((m) => m.status === 'Available')
         .map((m) => ({
-          provider: 'whisper' as const,
+          provider: LOCAL_PROVIDER,
           name: m.name,
-          displayName: `🏠 Whisper: ${m.name}`,
+          displayName: getModelLabel(m.name),
           size_mb: m.size_mb,
         }));
-      allModels.push(...availableWhisper);
     } catch (err) {
-      console.error('Failed to fetch Whisper models:', err);
-    }
-
-    // Fetch Parakeet models
-    try {
-      const parakeetModels = await invoke<RawModelInfo[]>('parakeet_get_available_models');
-      const availableParakeet = parakeetModels
-        .filter((m) => m.status === 'Available')
-        .map((m) => ({
-          provider: 'parakeet' as const,
-          name: m.name,
-          displayName: `⚡ Parakeet: ${m.name}`,
-          size_mb: m.size_mb,
-        }));
-      allModels.push(...availableParakeet);
-    } catch (err) {
-      console.error('Failed to fetch Parakeet models:', err);
+      console.error('Failed to fetch transcription models:', err);
     }
 
     setAvailableModels(allModels);
 
-    // Set default model based on user's saved configuration
-    const configuredProvider = transcriptModelConfig?.provider || '';
     const configuredModel = transcriptModelConfig?.model || '';
+    const configuredMatch = allModels.find((m) => m.name === configuredModel);
 
-    // Try to match the configured model
-    // Note: 'localWhisper' in config maps to 'whisper' provider in model list
-    const configuredMatch = allModels.find(
-      (m) =>
-        (configuredProvider === 'localWhisper' && m.provider === 'whisper' && m.name === configuredModel) ||
-        (configuredProvider === 'parakeet' && m.provider === 'parakeet' && m.name === configuredModel)
-    );
-
-    // Only set default model if user hasn't manually selected one
     if (!userSelectedRef.current) {
-      if (configuredMatch) {
-        // Use the configured model if available
-        setSelectedModelKey(`${configuredMatch.provider}:${configuredMatch.name}`);
-      } else if (allModels.length > 0) {
-        // Fall back to first available model
-        setSelectedModelKey(`${allModels[0].provider}:${allModels[0].name}`);
+      const pick = configuredMatch ?? allModels[0];
+      if (pick) {
+        setSelectedModelKey(`${pick.provider}:${pick.name}`);
       }
     }
 
     setLoadingModels(false);
   }, [transcriptModelConfig]);
 
-  // Reset user selection tracking (call when dialog opens fresh)
   const resetSelection = useCallback(() => {
     userSelectedRef.current = false;
   }, []);

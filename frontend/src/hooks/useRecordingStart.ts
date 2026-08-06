@@ -52,8 +52,8 @@ export function useRecordingStart(
   // Check if Parakeet transcription model is ready
   const checkParakeetReady = useCallback(async (): Promise<boolean> => {
     try {
-      await invoke('parakeet_init');
-      const hasModels = await invoke<boolean>('parakeet_has_available_models');
+      await invoke('transcribe_init');
+      const hasModels = await invoke<boolean>('transcribe_has_available_models');
       return hasModels;
     } catch (error) {
       console.error('Failed to check Parakeet status:', error);
@@ -64,7 +64,7 @@ export function useRecordingStart(
   // Check if any model is currently downloading
   const checkIfModelDownloading = useCallback(async (): Promise<boolean> => {
     try {
-      const models = await invoke<any[]>('parakeet_get_available_models');
+      const models = await invoke<any[]>('transcribe_get_available_models');
       const isDownloading = models.some(m =>
         m.status && (
           typeof m.status === 'object'

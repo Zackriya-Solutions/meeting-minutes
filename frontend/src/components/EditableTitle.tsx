@@ -1,6 +1,7 @@
 'use client';
 
 import { useRef, useEffect } from 'react';
+import { Pencil, Trash2 } from 'lucide-react';
 
 interface EditableTitleProps {
   title: string;
@@ -11,6 +12,10 @@ interface EditableTitleProps {
   onDelete?: () => void;
 }
 
+/**
+ * The meeting title as a document heading. Serif, because on the review
+ * surface this is the top of a document rather than a UI label.
+ */
 export const EditableTitle: React.FC<EditableTitleProps> = ({
   title,
   isEditing,
@@ -21,13 +26,6 @@ export const EditableTitle: React.FC<EditableTitleProps> = ({
 }) => {
   const titleInputRef = useRef<HTMLTextAreaElement>(null);
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') {
-      onFinishEditing();
-    }
-  };
-
-  // Auto-resize textarea height based on content
   useEffect(() => {
     if (titleInputRef.current && isEditing) {
       titleInputRef.current.style.height = 'auto';
@@ -35,75 +33,60 @@ export const EditableTitle: React.FC<EditableTitleProps> = ({
     }
   }, [title, isEditing]);
 
-  return isEditing ? (
-    <div className="flex-1">
+  if (isEditing) {
+    return (
       <textarea
         ref={titleInputRef}
         value={title}
         onChange={(e) => onChange(e.target.value)}
         onBlur={onFinishEditing}
         onKeyDown={(e) => {
-          // Allow Enter for new line only with Shift key
           if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
             onFinishEditing();
           }
+          if (e.key === 'Escape') onFinishEditing();
         }}
-        className="text-2xl font-bold bg-gray-50 border border-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500 rounded px-3 py-1 w-full resize-none overflow-hidden"
-        style={{ minWidth: '300px', minHeight: '40px' }}
-        autoFocus
         rows={1}
+        aria-label="Meeting title"
+        className="w-full resize-none overflow-hidden rounded-md border border-line-strong bg-canvas px-2 py-1 font-serif text-2xl font-semibold text-ink focus:border-brand"
+        autoFocus
       />
-    </div>
-  ) : (
-    <div className="group flex items-center space-x-2 flex-1">
+    );
+  }
+
+  return (
+    <div className="group flex min-w-0 items-start gap-1">
       <h1
-        className="text-2xl font-bold cursor-pointer hover:bg-gray-50 rounded px-1 flex-1 whitespace-pre-wrap"
         onClick={onStartEditing}
+        role="button"
+        tabIndex={0}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            onStartEditing();
+          }
+        }}
+        title="Click to rename"
+        className="min-w-0 flex-1 cursor-text text-balance rounded-md px-2 py-1 font-serif text-2xl font-semibold text-ink transition-colors duration-fast hover:bg-ink/[0.04]"
       >
-        {title}
+        {title || 'Untitled meeting'}
       </h1>
-      <div className="flex space-x-1">
-        <button 
+      <div className="flex shrink-0 items-center gap-0.5 pt-1.5 opacity-0 transition-opacity duration-fast group-hover:opacity-100 group-focus-within:opacity-100">
+        <button
           onClick={onStartEditing}
-          className="opacity-0 group-hover:opacity-100 transition-opacity duration-200 p-1 hover:bg-gray-100 rounded"
-          title="Edit section title"
+          aria-label="Rename meeting"
+          className="flex h-7 w-7 items-center justify-center rounded-md text-ink-faint transition-colors duration-fast hover:bg-ink/5 hover:text-ink"
         >
-          <svg 
-            xmlns="http://www.w3.org/2000/svg" 
-            width="16" 
-            height="16" 
-            viewBox="0 0 24 24" 
-            fill="none" 
-            stroke="currentColor" 
-            strokeWidth="2" 
-            strokeLinecap="round" 
-            strokeLinejoin="round"
-          >
-            <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
-          </svg>
+          <Pencil className="h-3.5 w-3.5" />
         </button>
         {onDelete && (
-          <button 
+          <button
             onClick={onDelete}
-            className="opacity-0 group-hover:opacity-100 transition-opacity duration-200 p-1 hover:bg-gray-100 rounded text-red-600"
-            title="Delete section"
+            aria-label="Delete meeting"
+            className="flex h-7 w-7 items-center justify-center rounded-md text-ink-faint transition-colors duration-fast hover:bg-danger-soft hover:text-danger-ink"
           >
-            <svg 
-              xmlns="http://www.w3.org/2000/svg" 
-              width="16" 
-              height="16" 
-              viewBox="0 0 24 24" 
-              fill="none" 
-              stroke="currentColor" 
-              strokeWidth="2" 
-              strokeLinecap="round" 
-              strokeLinejoin="round"
-            >
-              <path d="M3 6h18" />
-              <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
-              <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
-            </svg>
+            <Trash2 className="h-3.5 w-3.5" />
           </button>
         )}
       </div>

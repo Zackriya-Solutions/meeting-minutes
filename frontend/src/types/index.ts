@@ -25,7 +25,11 @@ export interface TranscriptUpdate {
   sequence_id: number;
   chunk_start_time: number; // Legacy field
   is_partial: boolean;
-  confidence: number;
+  /**
+   * Absent when the decoder reports no token probabilities (the Ollama
+   * provider). ConfidenceIndicator keys off undefined and does not render.
+   */
+  confidence?: number;
   // NEW: Recording-relative timestamps for playback sync
   audio_start_time: number; // Seconds from recording start
   audio_end_time: number;   // Seconds from recording start
