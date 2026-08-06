@@ -217,15 +217,22 @@ pub async fn onboarding_should_run<R: Runtime>(
         }
     }
 
-    let pool = state.db_manager.pool();
-    // The example meeting is seeded BY onboarding, so it must not count as prior use.
-    let real_meetings = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM meetings WHERE id != ?")
+    Ok(!has_real_meetings(state.db_manager.pool()).await)
+}
+
+/// Whether the database holds a meeting the user made, as opposed to the seeded example.
+///
+/// This is the rule that decides whether an install predating the saved-status era gets walked
+/// through setup, so it must not count the example meeting (onboarding creates it) and must
+/// fail safe: an unreadable database is treated as "there is real work here", because showing
+/// setup over a working install is the worse mistake.
+async fn has_real_meetings(pool: &sqlx::SqlitePool) -> bool {
+    sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM meetings WHERE id != ?")
         .bind(crate::demo_meeting::DEMO_MEETING_ID)
         .fetch_one(pool)
         .await
-        .unwrap_or(0);
-
-    Ok(real_meetings == 0)
+        .map(|count| count > 0)
+        .unwrap_or(true)
 }
 
 /// Finish onboarding: persist the chosen providers, then seed the example meeting.
@@ -334,5 +341,44 @@ mod tests {
         assert_eq!(normalize_model("deepseek-chat"), DEFAULT_MODEL);
         assert_eq!(normalize_model("qwen3.5:2b"), DEFAULT_MODEL);
         assert_eq!(normalize_model(""), DEFAULT_MODEL);
+    }
+
+    /// The example meeting is created BY onboarding, so it must never be the reason onboarding
+    /// is skipped — and one real meeting must be enough to leave a working install alone.
+    #[tokio::test]
+    async fn only_meetings_the_user_made_count_as_prior_use() {
+        use sqlx::sqlite::SqlitePoolOptions;
+
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+
+        assert!(!has_real_meetings(&pool).await, "a fresh install has none");
+
+        let insert = |id: &'static str| {
+            let pool = pool.clone();
+            async move {
+                sqlx::query(
+                    "INSERT INTO meetings(id, title, created_at, updated_at) \
+                     VALUES(?, 'x', datetime('now'), datetime('now'))",
+                )
+                .bind(id)
+                .execute(&pool)
+                .await
+                .unwrap();
+            }
+        };
+
+        insert(crate::demo_meeting::DEMO_MEETING_ID).await;
+        assert!(
+            !has_real_meetings(&pool).await,
+            "the seeded example is not prior use"
+        );
+
+        insert("meeting-real").await;
+        assert!(has_real_meetings(&pool).await, "a real meeting is");
     }
 }

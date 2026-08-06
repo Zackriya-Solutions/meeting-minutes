@@ -11,8 +11,9 @@
 //! meeting score — are computed by the pipeline's own deterministic code over the seeded
 //! transcript, and the HTML comes from the pipeline's own renderer.
 //!
-//! Seeding happens once. The marker in `app_settings_kv` is written after a successful
-//! seed, so deleting the example is permanent: it never comes back on the next launch.
+//! Seeding happens once: the marker in `app_settings_kv` is committed in the same transaction
+//! as the data, so deleting the example is permanent — it never comes back on the next launch,
+//! and an interrupted seed can never leave data behind without a record of it.
 
 use serde_json::json;
 use sqlx::SqlitePool;
@@ -119,22 +120,19 @@ pub async fn seed<R: Runtime>(
         log::warn!("[demo] example report not created: {error}");
     }
 
-    sqlx::query(
-        "INSERT OR REPLACE INTO app_settings_kv (key, value, updated_at) \
-         VALUES (?, 'true', datetime('now'))",
-    )
-    .bind(MARKER_KEY)
-    .execute(pool)
-    .await
-    .map_err(|e| format!("не удалось отметить пример как созданный: {e}"))?;
-
     log::info!("[demo] seeded the example meeting {DEMO_MEETING_ID}");
     Ok(Some(DEMO_MEETING_ID.to_string()))
 }
 
-/// The database half: meeting, speakers, transcript, summary. Returns the meeting's date for
-/// the report header. Separate from [`seed`] so it can be tested against a migrated schema
-/// without a Tauri app handle.
+/// The database half: meeting, speakers, transcript, summary, and the marker. Returns the
+/// meeting's date for the report header. Separate from [`seed`] so it can be tested against a
+/// migrated schema without a Tauri app handle.
+///
+/// Everything here is one transaction, including the "already seeded" marker: a crash must not
+/// be able to leave the example half-inserted with no record that it was, which would make the
+/// next completion re-insert over deterministic ids. For the same reason the previous example
+/// (if any) is removed first — seeding always starts from a clean slate rather than assuming
+/// one.
 async fn seed_meeting(pool: &SqlitePool) -> Result<String, String> {
     let now = chrono::Utc::now();
     let started = now - chrono::Duration::minutes(20);
@@ -144,16 +142,52 @@ async fn seed_meeting(pool: &SqlitePool) -> Result<String, String> {
         .await
         .map_err(|e| format!("не удалось открыть транзакцию для примера встречи: {e}"))?;
 
-    sqlx::query(
-        "INSERT OR REPLACE INTO meetings (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)",
+    // Note the previous example's participants before its replies disappear: speaker profiles
+    // carry no meeting link of their own, so once the cascade has run there is no way to tell
+    // them from a real person's profile. They cannot be deleted yet — the replies still
+    // reference them, and `transcripts.speaker_id` has no ON DELETE clause.
+    let previous_speakers: Vec<i64> = sqlx::query_scalar(
+        "SELECT DISTINCT speaker_id FROM transcripts \
+         WHERE meeting_id = ? AND speaker_id IS NOT NULL",
     )
     .bind(DEMO_MEETING_ID)
-    .bind(TITLE)
-    .bind(started)
-    .bind(now)
-    .execute(&mut *tx)
+    .fetch_all(&mut *tx)
     .await
-    .map_err(|e| format!("не удалось создать пример встречи: {e}"))?;
+    .map_err(|e| format!("не удалось прочитать участников прежнего примера: {e}"))?;
+
+    // Transcripts and the summary go with the meeting (ON DELETE CASCADE); reports do not.
+    sqlx::query("DELETE FROM analytics_reports WHERE meeting_id = ?")
+        .bind(DEMO_MEETING_ID)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| format!("не удалось убрать отчёт прежнего примера: {e}"))?;
+    sqlx::query("DELETE FROM meetings WHERE id = ?")
+        .bind(DEMO_MEETING_ID)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| format!("не удалось убрать прежний пример: {e}"))?;
+
+    // Now unreferenced — but only drop a profile no other meeting speaks through, so a voice
+    // the user has since renamed and reused is never collateral damage.
+    for speaker_id in previous_speakers {
+        sqlx::query(
+            "DELETE FROM speakers WHERE id = ? \
+             AND NOT EXISTS (SELECT 1 FROM transcripts WHERE speaker_id = speakers.id)",
+        )
+        .bind(speaker_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| format!("не удалось убрать участника прежнего примера: {e}"))?;
+    }
+
+    sqlx::query("INSERT INTO meetings (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)")
+        .bind(DEMO_MEETING_ID)
+        .bind(TITLE)
+        .bind(started)
+        .bind(now)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| format!("не удалось создать пример встречи: {e}"))?;
 
     // Confirmed speakers: the example shows named people, not "Спикер 1". No voice
     // embedding is stored — these names must never take part in matching a real voice.
@@ -209,6 +243,15 @@ async fn seed_meeting(pool: &SqlitePool) -> Result<String, String> {
     .execute(&mut *tx)
     .await
     .map_err(|e| format!("не удалось сохранить итоги примера: {e}"))?;
+
+    sqlx::query(
+        "INSERT OR REPLACE INTO app_settings_kv (key, value, updated_at) \
+         VALUES (?, 'true', datetime('now'))",
+    )
+    .bind(MARKER_KEY)
+    .execute(&mut *tx)
+    .await
+    .map_err(|e| format!("не удалось отметить пример как созданный: {e}"))?;
 
     tx.commit()
         .await
@@ -736,6 +779,104 @@ mod tests {
             timeline.markers.len() >= 7,
             "decisions, commitments and the disagreement all mark the feed"
         );
+    }
+
+    /// A crash between inserting the example and recording that it exists used to leave the
+    /// next attempt inserting over deterministic ids: `transcript-example-000` would collide,
+    /// the report id would collide with an orphaned row, and each attempt would create three
+    /// more speaker profiles. Seeding must therefore be repeatable — and after any repeat the
+    /// example must exist exactly once.
+    #[tokio::test]
+    async fn seeding_twice_leaves_exactly_one_example() {
+        let pool = migrated_pool().await;
+
+        seed_meeting(&pool).await.expect("first seed");
+        // Stand in for the crash window: the data is committed, the marker is gone.
+        sqlx::query("DELETE FROM app_settings_kv WHERE key = ?")
+            .bind(MARKER_KEY)
+            .execute(&pool)
+            .await
+            .unwrap();
+        // A stale report row survives a deleted meeting (no cascade), so it has to be cleared
+        // too or the second seed's fixed report id collides.
+        sqlx::query(
+            "INSERT INTO analytics_reports(id, meeting_id, status, artifacts) \
+             VALUES('report-example-meeting-example-memento', ?, 'completed', '{}')",
+        )
+        .bind(DEMO_MEETING_ID)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        seed_meeting(&pool).await.expect("second seed");
+
+        let meetings: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM meetings WHERE id = ?")
+            .bind(DEMO_MEETING_ID)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let replies: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM transcripts WHERE meeting_id = ?")
+                .bind(DEMO_MEETING_ID)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        let speakers: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM speakers")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let summaries: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM summary_processes WHERE meeting_id = ?")
+                .bind(DEMO_MEETING_ID)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        let reports: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM analytics_reports WHERE meeting_id = ?")
+                .bind(DEMO_MEETING_ID)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        let marker: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM app_settings_kv WHERE key = ?")
+            .bind(MARKER_KEY)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+
+        assert_eq!(meetings, 1);
+        assert_eq!(replies, REPLIES.len() as i64, "no duplicated replies");
+        assert_eq!(
+            speakers,
+            SPEAKER_NAMES.len() as i64,
+            "no extra speaker profiles per attempt"
+        );
+        assert_eq!(summaries, 1);
+        assert_eq!(
+            reports, 0,
+            "the stale report row is cleared, not duplicated"
+        );
+        assert_eq!(marker, 1, "the marker is committed with the data");
+    }
+
+    /// A real person keeps their profile when the example is re-seeded: only the speakers the
+    /// example's own replies point at are removed.
+    #[tokio::test]
+    async fn reseeding_does_not_touch_a_real_speaker() {
+        let pool = migrated_pool().await;
+        sqlx::query("INSERT INTO speakers(display_name, is_confirmed) VALUES('Аня', 1)")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        seed_meeting(&pool).await.expect("first seed");
+        seed_meeting(&pool).await.expect("second seed");
+
+        let anya: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM speakers WHERE display_name = 'Аня'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(anya, 2, "the real Аня survives alongside the example's");
     }
 
     #[test]
