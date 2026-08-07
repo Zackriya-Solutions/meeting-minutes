@@ -36,6 +36,34 @@ pub struct CustomTranscriptionConfig {
     /// Requested transcription delay in milliseconds (protocol-specific, optional).
     #[serde(rename = "delayMs")]
     pub delay_ms: Option<u32>,
+    /// Longest stretch of audio, in seconds, to feed to a single server session
+    /// before rolling over to a fresh one.
+    ///
+    /// A realtime ASR server holds the whole session in one bounded context; once
+    /// that fills, the session stops producing transcripts for the rest of the
+    /// recording. Rolling over on a schedule keeps a multi-hour meeting inside
+    /// whatever the backend can actually take. `None` uses
+    /// [`DEFAULT_MAX_SESSION_SECONDS`]; `Some(0)` disables rollover entirely (one
+    /// session for the whole recording — the pre-0.4 behaviour).
+    #[serde(rename = "maxSessionSeconds", default)]
+    pub max_session_seconds: Option<u32>,
+}
+
+/// Rollover interval used when the user hasn't set one and the endpoint didn't
+/// announce a context size. Conservative on purpose: it comfortably fits the
+/// 8k-token context typical of a self-hosted Voxtral-Mini deployment, which in
+/// practice dies somewhere past the 8-minute mark.
+pub const DEFAULT_MAX_SESSION_SECONDS: u32 = 300;
+
+impl CustomTranscriptionConfig {
+    /// Seconds of audio per server session, or `None` when rollover is disabled.
+    pub fn session_limit_seconds(&self) -> Option<u32> {
+        match self.max_session_seconds {
+            Some(0) => None,
+            Some(secs) => Some(secs),
+            None => Some(DEFAULT_MAX_SESSION_SECONDS),
+        }
+    }
 }
 
 fn default_streaming_protocol() -> String {
@@ -64,3 +92,4 @@ pub use streaming_provider::{
     StreamingTranscriptionProvider,
 };
 pub use streaming_worker::run_streaming_session;
+pub use voxtral_realtime::{detect_session_limit, DetectedSessionLimit};

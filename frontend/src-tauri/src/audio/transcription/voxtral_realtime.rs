@@ -51,6 +51,13 @@ use log::{info, warn};
 
 /// Raw PCM16 bytes per `input_audio_buffer.append` frame (~128 ms @ 16 kHz).
 const FRAME_BYTES: usize = 4096;
+/// Sample rate the provider is fed at, used to turn the configured session limit
+/// into a sample budget. Set by the streaming worker's resampler.
+const SAMPLE_RATE: u64 = 16_000;
+/// How long a planned rollover waits for the outgoing session's final transcript.
+/// Deliberately short: live audio is buffering the whole time, and whatever the
+/// old session already transcribed is emitted regardless.
+const ROLLOVER_FINISH_SECS: u64 = 5;
 /// How long to wait for the terminal `transcription.done` after end-of-audio
 /// before giving up, so a stalled server can't hang teardown forever.
 const FINISH_TIMEOUT_SECS: u64 = 30;
@@ -153,20 +160,27 @@ async fn run_session(
 ) {
     let mut current = stream;
     let mut reconnects_used: u32 = 0;
+    // Audio budget for one server session. Exceeding whatever the backend can hold
+    // is silent — it simply stops transcribing — so the client bounds it instead.
+    let limit_samples = config
+        .session_limit_seconds()
+        .map(|secs| secs as u64 * SAMPLE_RATE);
 
     loop {
         let (mut write, mut read) = current.split();
         let mut cumulative = String::new();
         let mut pending: Vec<u8> = Vec::new();
+        let mut samples_sent: u64 = 0;
 
         // Streaming phase: forward audio and surface segments until the audio
-        // channel closes (clean end-of-recording), the session is cancelled, or
-        // the socket drops.
+        // channel closes (clean end-of-recording), the session hits its audio
+        // budget, it is cancelled, or the socket drops.
         let phase = loop {
             tokio::select! {
                 _ = cancel.cancelled() => break Phase::Cancelled,
                 pcm = audio_rx.recv() => match pcm {
                     Some(s) => {
+                        samples_sent += s.len() as u64;
                         append_pcm16(&mut pending, &s);
                         if let Err(e) = flush_frames(&mut write, &mut pending, false).await {
                             // A failed send means the socket is gone, not that the
@@ -174,12 +188,20 @@ async fn run_session(
                             warn!("Voxtral realtime: send failed ({e}); connection considered dropped");
                             break Phase::Dropped;
                         }
+                        if limit_samples.is_some_and(|limit| samples_sent >= limit) {
+                            break Phase::LimitReached;
+                        }
                     }
                     None => break Phase::EndOfAudio, // audio_tx dropped → end of recording
                 },
                 msg = read.next() => match apply(msg, &events, &mut cumulative) {
                     Flow::Continue | Flow::Terminal => {}
-                    Flow::Closed => break Phase::Dropped,
+                    // A mid-stream server error usually means this session is
+                    // finished even though the socket is still open (a full context
+                    // is the common cause). Ignoring it is how a recording ends up
+                    // silently untranscribed from that point on, so treat it like a
+                    // drop and start a fresh session.
+                    Flow::Failed | Flow::Closed => break Phase::Dropped,
                 },
             }
         };
@@ -199,7 +221,7 @@ async fn run_session(
                 match tokio::time::timeout(deadline, read.next()).await {
                     Ok(msg) => match apply(msg, &events, &mut cumulative) {
                         Flow::Continue => {}
-                        Flow::Terminal | Flow::Closed => break,
+                        Flow::Terminal | Flow::Failed | Flow::Closed => break,
                     },
                     Err(_) => {
                         let _ = events.send(StreamTranscriptEvent::Error {
@@ -212,10 +234,74 @@ async fn run_session(
             }
         }
 
+        if let Phase::LimitReached = phase {
+            // Close the outgoing session the same way end-of-recording does, so the
+            // server transcribes the audio it is still holding instead of dropping
+            // it, then take its final transcript. Audio recorded during this
+            // handover keeps queueing in `audio_rx` (unbounded) and is sent to the
+            // replacement session — a rollover costs latency, never words.
+            let _ = flush_frames(&mut write, &mut pending, true).await;
+            let _ =
+                send_json_split(&mut write, &ClientEvent::Commit { final_flag: Some(true) }).await;
+
+            let deadline = tokio::time::Duration::from_secs(ROLLOVER_FINISH_SECS);
+            loop {
+                match tokio::time::timeout(deadline, read.next()).await {
+                    Ok(msg) => match apply(msg, &events, &mut cumulative) {
+                        Flow::Continue => {}
+                        Flow::Terminal | Flow::Failed | Flow::Closed => break,
+                    },
+                    // A server that won't finalize can't be allowed to stall the
+                    // handover; the replacement session is opened regardless.
+                    Err(_) => break,
+                }
+            }
+        }
+
         let _ = write.close().await;
 
         match phase {
             Phase::EndOfAudio | Phase::Cancelled => break,
+            Phase::LimitReached => {
+                // Close out this session's transcript. The replacement server starts
+                // counting from zero, so the worker must stop treating its offset
+                // into the old cumulative text as valid — a `Final` says exactly
+                // that. (`apply` already emitted one if `transcription.done` came
+                // back in time, leaving `cumulative` empty.)
+                if !cumulative.trim().is_empty() {
+                    let _ = events.send(StreamTranscriptEvent::Final {
+                        text: std::mem::take(&mut cumulative),
+                        confidence: None,
+                    });
+                }
+                match connect_and_handshake(&config).await {
+                    Ok(stream) => {
+                        info!(
+                            "Voxtral realtime: rolled over to a fresh session after {}s of audio",
+                            samples_sent / SAMPLE_RATE
+                        );
+                        // The endpoint just proved it is healthy, so earlier drops
+                        // shouldn't count against a meeting that may run for hours.
+                        reconnects_used = 0;
+                        current = stream;
+                    }
+                    // The rollover was planned, but the server didn't answer — that
+                    // is an outage like any other, so hand it to the retry path.
+                    Err(e) => {
+                        warn!("Voxtral realtime: rollover connect failed: {e}");
+                        match reconnect(&config, &events, &cancel, &mut reconnects_used).await {
+                            Some(stream) => {
+                                // Backoff means minutes of audio may have queued;
+                                // sending it all would leave the live transcript
+                                // permanently trailing the speaker.
+                                while audio_rx.try_recv().is_ok() {}
+                                current = stream;
+                            }
+                            None => break,
+                        }
+                    }
+                }
+            }
             Phase::Dropped => {
                 // A drop is often noticed on a failed *send*, which can win the
                 // select! race against a *read* whose transcript frames already
@@ -227,7 +313,7 @@ async fn run_session(
                     match tokio::time::timeout(drain, read.next()).await {
                         Ok(Some(msg)) => match apply(Some(msg), &events, &mut cumulative) {
                             Flow::Continue | Flow::Terminal => {}
-                            Flow::Closed => break,
+                            Flow::Failed | Flow::Closed => break,
                         },
                         // Timed out, or the stream is exhausted — nothing left.
                         _ => break,
@@ -263,6 +349,9 @@ async fn run_session(
 enum Phase {
     /// `audio_tx` was dropped — clean end of recording, finalize the transcript.
     EndOfAudio,
+    /// The session used up its audio budget — finalize it and continue the
+    /// recording on a fresh session.
+    LimitReached,
     /// The session was hard-cancelled; leave without finalizing.
     Cancelled,
     /// The socket closed or failed mid-recording — recoverable via reconnect.
@@ -321,7 +410,12 @@ async fn reconnect(
 /// What a handled inbound message means for the read loop.
 enum Flow {
     Continue,
+    /// The server finished an utterance (`transcription.done`); the session itself
+    /// is still usable.
     Terminal,
+    /// The server reported an error on this session. The socket may well still be
+    /// open, but the session should be considered spent and replaced.
+    Failed,
     Closed,
 }
 
@@ -383,7 +477,7 @@ fn apply(
         }
         Ok(ServerEvent::Error { error }) => {
             let _ = events.send(StreamTranscriptEvent::Error { message: error, fatal: false });
-            Flow::Terminal
+            Flow::Failed
         }
         Ok(ServerEvent::SessionCreated) | Ok(ServerEvent::Other) => Flow::Continue,
         // Tolerate an unparseable shape rather than tearing the session down.
@@ -450,6 +544,133 @@ fn normalize_realtime_url(endpoint: &str) -> String {
         url = format!("{}/v1/realtime", url.trim_end_matches('/'));
     }
     url
+}
+
+// === Endpoint capability probe =============================================
+
+/// Voxtral's audio encoder emits one token per 80 ms frame, so a second of audio
+/// costs 12.5 context tokens.
+const AUDIO_TOKENS_PER_SEC: f32 = 12.5;
+/// The transcript the model writes shares that same context. Roughly 2.5 words a
+/// second of natural speech, a little over a token per word.
+const TEXT_TOKENS_PER_SEC: f32 = 3.5;
+/// Fraction of the context a session is allowed to fill. The token rates above
+/// are estimates, and the cost of stopping short is one extra rollover — the cost
+/// of overshooting is a session that stops transcribing.
+const CONTEXT_HEADROOM: f32 = 0.85;
+
+/// What an endpoint reports about how much audio one session can hold.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct DetectedSessionLimit {
+    /// Context window the server reports for the model, in tokens; `None` when the
+    /// endpoint doesn't announce one.
+    pub max_model_len: Option<u32>,
+    /// Session length derived from that context, in seconds.
+    pub recommended_seconds: Option<u32>,
+    /// Plain-language account of what was found, for the settings UI.
+    pub detail: String,
+}
+
+/// Ask the endpoint how big its context is and turn that into a session length.
+///
+/// vLLM (and several other OpenAI-compatible servers) publish `max_model_len` per
+/// model on `GET /v1/models`. Servers that don't are not an error: the caller
+/// falls back to a value the user sets by hand, since only they know what their
+/// backend can take.
+pub async fn detect_session_limit(
+    config: &CustomTranscriptionConfig,
+) -> Result<DetectedSessionLimit, TranscriptionError> {
+    let url = models_url(&config.endpoint);
+    let mut request = reqwest::Client::new()
+        .get(&url)
+        .timeout(std::time::Duration::from_secs(TEST_TIMEOUT_SECS));
+    if let Some(key) = config.api_key.as_deref().filter(|k| !k.trim().is_empty()) {
+        request = request.bearer_auth(key);
+    }
+
+    let response = request
+        .send()
+        .await
+        .map_err(|e| TranscriptionError::EngineFailed(format!("GET {url}: {e}")))?;
+    if !response.status().is_success() {
+        return Err(TranscriptionError::EngineFailed(format!(
+            "GET {url} returned {}",
+            response.status()
+        )));
+    }
+    let body: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|e| TranscriptionError::EngineFailed(format!("GET {url}: {e}")))?;
+
+    Ok(match context_length_for_model(&body, &config.model) {
+        Some(tokens) => {
+            let seconds = seconds_for_context(tokens);
+            DetectedSessionLimit {
+                max_model_len: Some(tokens),
+                recommended_seconds: Some(seconds),
+                detail: format!(
+                    "The endpoint reports a {tokens}-token context for this model, \
+                     which holds about {seconds}s of audio plus its transcript."
+                ),
+            }
+        }
+        None => DetectedSessionLimit {
+            max_model_len: None,
+            recommended_seconds: None,
+            detail: format!(
+                "Reached {url}, but it doesn't announce a context size. \
+                 Set the session length by hand to match your backend."
+            ),
+        },
+    })
+}
+
+/// Derive the `/v1/models` URL from the configured realtime endpoint: back to
+/// http(s), and `…/v1/realtime` → `…/v1/models` (falling back to the host root for
+/// endpoints with some other path layout).
+fn models_url(endpoint: &str) -> String {
+    let mut url = endpoint.trim().trim_end_matches('/').to_string();
+    if let Some(rest) = url.strip_prefix("wss://") {
+        url = format!("https://{rest}");
+    } else if let Some(rest) = url.strip_prefix("ws://") {
+        url = format!("http://{rest}");
+    }
+    if let Some(base) = url.strip_suffix("/v1/realtime") {
+        return format!("{base}/v1/models");
+    }
+    // No recognizable realtime path — assume the API lives at the host root.
+    let (scheme, rest) = url.split_once("://").unwrap_or(("http", url.as_str()));
+    let authority = rest.split('/').next().unwrap_or(rest);
+    format!("{scheme}://{authority}/v1/models")
+}
+
+/// Pull the context length out of an OpenAI-style `/v1/models` payload, preferring
+/// the entry matching `model`. Key names differ between servers, so several are
+/// accepted.
+fn context_length_for_model(body: &serde_json::Value, model: &str) -> Option<u32> {
+    const KEYS: [&str; 3] = ["max_model_len", "max_context_length", "context_length"];
+    let entries = body.get("data").and_then(|d| d.as_array())?;
+    let context_of = |entry: &serde_json::Value| -> Option<u32> {
+        KEYS.iter()
+            .find_map(|k| entry.get(k).and_then(|v| v.as_u64()))
+            .filter(|v| *v > 0)
+            .map(|v| v.min(u32::MAX as u64) as u32)
+    };
+    entries
+        .iter()
+        .find(|e| e.get("id").and_then(|i| i.as_str()) == Some(model))
+        .and_then(context_of)
+        // A server hosting one model under a different id is still telling us
+        // something useful; fall back to whatever entry announces a context.
+        .or_else(|| entries.iter().find_map(context_of))
+}
+
+/// Seconds of audio that fit in a context window of `max_model_len` tokens.
+fn seconds_for_context(max_model_len: u32) -> u32 {
+    let usable = max_model_len as f32 * CONTEXT_HEADROOM;
+    let seconds = usable / (AUDIO_TOKENS_PER_SEC + TEXT_TOKENS_PER_SEC);
+    (seconds as u32).clamp(60, 3600)
 }
 
 // === Wire types ============================================================
@@ -673,14 +894,7 @@ mod tests {
             saw_final_commit
         });
 
-        let config = CustomTranscriptionConfig {
-            endpoint: format!("ws://{addr}/v1/realtime"),
-            api_key: None,
-            model: "m".to_string(),
-            protocol: "voxtral-realtime".to_string(),
-            delay_ms: None,
-        };
-        let provider = VoxtralRealtimeProvider::new(config);
+        let provider = VoxtralRealtimeProvider::new(test_config(addr));
         let (tx, mut rx) = mpsc::unbounded_channel::<StreamTranscriptEvent>();
         let session = provider.start_session(None, tx).await.unwrap();
         session.audio_tx.send(vec![0.1f32; 1600]).unwrap();
@@ -714,6 +928,9 @@ mod tests {
             model: "m".to_string(),
             protocol: "voxtral-realtime".to_string(),
             delay_ms: None,
+            // Far beyond anything these tests feed, so only the rollover test
+            // exercises the limit.
+            max_session_seconds: None,
         }
     }
 
@@ -897,5 +1114,194 @@ mod tests {
         // The events channel closes once the worker exits — no zombie session.
         assert!(rx.recv().await.is_none(), "worker should exit after giving up");
         server.abort();
+    }
+
+    /// A long meeting must outlive whatever one server session can hold: at the
+    /// configured audio budget the provider finalizes the session and continues on
+    /// a fresh one, without the user seeing an error.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn rolls_over_to_a_fresh_session_at_the_audio_limit() {
+        use tokio::net::TcpListener;
+
+        let tcp = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = tcp.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            // Session 1 ends when the client finalizes it at the audio limit.
+            let (sock, _) = tcp.accept().await.unwrap();
+            let mut ws = tokio_tungstenite::accept_async(sock).await.unwrap();
+            await_handshake(&mut ws).await;
+            let mut sessions = 0;
+            while let Some(Ok(msg)) = ws.next().await {
+                if let Message::Text(t) = msg {
+                    if t.as_str().contains(r#""final":true"#) {
+                        sessions += 1;
+                        ws.send(Message::Text(
+                            r#"{"type":"transcription.done","text":"first session"}"#.into(),
+                        ))
+                        .await
+                        .unwrap();
+                        break;
+                    }
+                }
+            }
+
+            // Session 2: the rollover. It runs to the end of the recording.
+            let (sock, _) = tcp.accept().await.unwrap();
+            let mut ws = tokio_tungstenite::accept_async(sock).await.unwrap();
+            await_handshake(&mut ws).await;
+            while let Some(Ok(msg)) = ws.next().await {
+                if let Message::Text(t) = msg {
+                    if t.as_str().contains(r#""final":true"#) {
+                        sessions += 1;
+                        ws.send(Message::Text(
+                            r#"{"type":"transcription.done","text":"second session"}"#.into(),
+                        ))
+                        .await
+                        .unwrap();
+                        break;
+                    }
+                }
+            }
+            sessions
+        });
+
+        // One second of audio per session, fed in 100 ms pushes.
+        let mut config = test_config(addr);
+        config.max_session_seconds = Some(1);
+        let provider = VoxtralRealtimeProvider::new(config);
+        let (tx, mut rx) = mpsc::unbounded_channel::<StreamTranscriptEvent>();
+        let session = provider.start_session(None, tx).await.unwrap();
+
+        let stop = Arc::new(AtomicBool::new(false));
+        let pump_stop = stop.clone();
+        let audio_tx = session.audio_tx;
+        let pump = tokio::spawn(async move {
+            while !pump_stop.load(Ordering::Relaxed) {
+                if audio_tx.send(vec![0.1f32; 1600]).is_err() {
+                    break;
+                }
+                tokio::time::sleep(tokio::time::Duration::from_millis(5)).await;
+            }
+            drop(audio_tx); // end of recording → final commit on session 2
+        });
+
+        let mut finals = Vec::new();
+        let mut warnings = Vec::new();
+        while let Some(ev) = rx.recv().await {
+            match ev {
+                StreamTranscriptEvent::Partial { .. } => {}
+                StreamTranscriptEvent::Final { text, .. } => {
+                    finals.push(text);
+                    // The first session closed; end the recording so the second one
+                    // finalizes too and we can assert both landed.
+                    stop.store(true, Ordering::Relaxed);
+                    if finals.len() == 2 {
+                        break;
+                    }
+                }
+                StreamTranscriptEvent::Error { message, .. } => warnings.push(message),
+            }
+        }
+        let _ = pump.await;
+
+        assert_eq!(server.await.unwrap(), 2, "both sessions must be finalized");
+        assert_eq!(
+            finals,
+            vec!["first session".to_string(), "second session".to_string()],
+            "transcription continues across the rollover"
+        );
+        assert!(
+            !warnings.iter().any(|w| w.contains("reconnecting")),
+            "a planned rollover is not a connection failure: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn session_limit_defaults_and_can_be_disabled() {
+        let mut config = CustomTranscriptionConfig {
+            endpoint: "ws://host".into(),
+            api_key: None,
+            model: "m".into(),
+            protocol: "voxtral-realtime".into(),
+            delay_ms: None,
+            max_session_seconds: None,
+        };
+        // Unset → the conservative default, so long meetings survive out of the box.
+        assert_eq!(
+            config.session_limit_seconds(),
+            Some(crate::audio::transcription::DEFAULT_MAX_SESSION_SECONDS)
+        );
+        config.max_session_seconds = Some(900);
+        assert_eq!(config.session_limit_seconds(), Some(900));
+        // 0 is the escape hatch: one session for the whole recording.
+        config.max_session_seconds = Some(0);
+        assert_eq!(config.session_limit_seconds(), None);
+    }
+
+    #[test]
+    fn config_without_the_limit_field_still_deserializes() {
+        // Configs saved before this setting existed must keep loading.
+        let stored = r#"{"endpoint":"ws://host","apiKey":null,"model":"m","protocol":"voxtral-realtime","delayMs":null}"#;
+        let config: CustomTranscriptionConfig = serde_json::from_str(stored).unwrap();
+        assert_eq!(config.max_session_seconds, None);
+        assert_eq!(
+            config.session_limit_seconds(),
+            Some(crate::audio::transcription::DEFAULT_MAX_SESSION_SECONDS)
+        );
+    }
+
+    #[test]
+    fn models_url_derivation() {
+        assert_eq!(
+            models_url("wss://asr.example.com/v1/realtime"),
+            "https://asr.example.com/v1/models"
+        );
+        assert_eq!(
+            models_url("ws://localhost:8000/v1/realtime"),
+            "http://localhost:8000/v1/models"
+        );
+        // Host-only endpoints (the realtime path is implied) and trailing slashes.
+        assert_eq!(models_url("ws://localhost:8000/"), "http://localhost:8000/v1/models");
+        assert_eq!(
+            models_url("https://asr.example.com"),
+            "https://asr.example.com/v1/models"
+        );
+        // An unusual path layout falls back to the host root rather than guessing.
+        assert_eq!(models_url("ws://host/custom/socket"), "http://host/v1/models");
+    }
+
+    #[test]
+    fn context_length_prefers_the_requested_model() {
+        let body = serde_json::json!({
+            "object": "list",
+            "data": [
+                { "id": "other", "max_model_len": 32768 },
+                { "id": "wanted", "max_model_len": 8192 },
+            ]
+        });
+        assert_eq!(context_length_for_model(&body, "wanted"), Some(8192));
+        // Unknown id → fall back to whatever the server does announce.
+        assert_eq!(context_length_for_model(&body, "missing"), Some(32768));
+    }
+
+    #[test]
+    fn context_length_absent_is_not_an_error() {
+        let body = serde_json::json!({ "data": [{ "id": "m", "object": "model" }] });
+        assert_eq!(context_length_for_model(&body, "m"), None);
+        // Alternate spellings used by non-vLLM servers.
+        let alt = serde_json::json!({ "data": [{ "id": "m", "context_length": 4096 }] });
+        assert_eq!(context_length_for_model(&alt, "m"), Some(4096));
+    }
+
+    #[test]
+    fn seconds_for_context_leaves_headroom() {
+        // 8192 tokens: ~655s of audio alone, less once the transcript and headroom
+        // are accounted for — and safely under the ~8 min where such a server dies.
+        let secs = seconds_for_context(8192);
+        assert!((400..=500).contains(&secs), "unexpected: {secs}");
+        assert!(seconds_for_context(32768) > seconds_for_context(8192));
+        // Absurd values stay in a usable band.
+        assert_eq!(seconds_for_context(128), 60);
+        assert_eq!(seconds_for_context(10_000_000), 3600);
     }
 }

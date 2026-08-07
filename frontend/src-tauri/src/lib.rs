@@ -646,6 +646,7 @@ pub fn run() {
             api::api_get_custom_transcription_config,
             api::api_save_custom_transcription_config,
             api::api_test_custom_transcription_connection,
+            api::api_detect_custom_transcription_limits,
             api::api_delete_meeting,
             api::api_get_meeting,
             api::api_get_meeting_metadata,
