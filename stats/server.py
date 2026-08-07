@@ -976,7 +976,7 @@ MACHINE_EVENT_NAMES: tuple[str, ...] = (
 # Разрыв, после которого следующее человеческое событие открывает новую
 # сессию (веб-стандарт 30 минут; фрейм Цева — интервалы между user msg,
 # «сессия это когда человек касается ноута»).
-SESSION_GAP_SECONDS = 30 * 60
+SESSION_GAP_SECONDS = 5 * 60
 
 
 def _canonical_cards(now: float, retention: dict | None = None) -> list[dict]:
