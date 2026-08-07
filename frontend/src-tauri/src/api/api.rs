@@ -1,8 +1,6 @@
 use log::{debug as log_debug, error as log_error, info as log_info, warn as log_warn};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use tauri::{AppHandle, Runtime};
-use tauri_plugin_store::StoreExt;
 
 use crate::{
     database::{
@@ -44,26 +42,6 @@ pub struct TranscriptSearchResult {
     #[serde(rename = "matchContext")]
     pub match_context: String,
     pub timestamp: String,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct ProfileRequest {
-    pub email: String,
-    pub license_key: String,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct SaveProfileRequest {
-    pub id: String,
-    pub email: String,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct UpdateProfileRequest {
-    pub email: String,
-    pub license_key: String,
-    pub company: String,
-    pub position: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -190,130 +168,10 @@ pub struct TranscriptSegment {
     pub duration: Option<f64>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Profile {
-    pub id: String,
-    pub name: Option<String>,
-    pub email: String,
-    pub license_key: String,
-    pub company: Option<String>,
-    pub position: Option<String>,
-    pub created_at: String,
-    pub updated_at: String,
-    pub is_licensed: bool,
-}
-
-// Helper function to get auth token from store (optional)
-#[allow(dead_code)]
-async fn get_auth_token<R: Runtime>(app: &AppHandle<R>) -> Option<String> {
-    let store = match app.store("store.json") {
-        Ok(store) => store,
-        Err(_) => return None,
-    };
-
-    match store.get("authToken") {
-        Some(token) => {
-            if let Some(token_str) = token.as_str() {
-                let truncated = token_str.chars().take(20).collect::<String>();
-                log_info!("Found auth token: {}", truncated);
-                Some(token_str.to_string())
-            } else {
-                log_warn!("Auth token is not a string");
-                None
-            }
-        }
-        None => {
-            log_warn!("No auth token found in store");
-            None
-        }
-    }
-}
-
 // Helper function to get server address - now hardcoded
 async fn get_server_address<R: Runtime>(_app: &AppHandle<R>) -> Result<String, String> {
     log_info!("Using hardcoded server URL: {}", APP_SERVER_URL);
     Ok(APP_SERVER_URL.to_string())
-}
-
-// Generic API call function with optional authentication
-async fn make_api_request<R: Runtime, T: for<'de> Deserialize<'de>>(
-    app: &AppHandle<R>,
-    endpoint: &str,
-    method: &str,
-    body: Option<&str>,
-    additional_headers: Option<HashMap<String, String>>,
-    auth_token: Option<String>, // Pass auth token from frontend
-) -> Result<T, String> {
-    let client = reqwest::Client::new();
-    let server_url = get_server_address(app).await?;
-
-    let url = format!("{}{}", server_url, endpoint);
-    log_info!("Making {} request to: {}", method, url);
-
-    let mut request = match method.to_uppercase().as_str() {
-        "GET" => client.get(&url),
-        "POST" => client.post(&url),
-        "PUT" => client.put(&url),
-        "DELETE" => client.delete(&url),
-        _ => return Err(format!("Unsupported HTTP method: {}", method)),
-    };
-
-    // Add authorization header if auth token is provided
-    if let Some(token) = auth_token {
-        log_info!("Adding authorization header");
-        request = request.header("Authorization", format!("Bearer {}", token));
-    } else {
-        log_warn!("No auth token provided, making unauthenticated request");
-    }
-
-    request = request.header("Content-Type", "application/json");
-
-    // Add additional headers if provided
-    if let Some(headers) = additional_headers {
-        for (key, value) in headers {
-            request = request.header(&key, &value);
-        }
-    }
-
-    // Add body if provided
-    if let Some(body_str) = body {
-        request = request.body(body_str.to_string());
-    }
-
-    let response = request.send().await.map_err(|e| {
-        let error_msg = format!("Request failed: {}", e);
-        log_error!("{}", error_msg);
-        error_msg
-    })?;
-
-    let status = response.status();
-    log_info!("Response status: {}", status);
-
-    if !status.is_success() {
-        let error_text = response
-            .text()
-            .await
-            .unwrap_or_else(|_| "Unknown error".to_string());
-        let error_msg = format!("HTTP {}: {}", status, error_text);
-        log_error!("{}", error_msg);
-        return Err(error_msg);
-    }
-
-    let response_text = response.text().await.map_err(|e| {
-        let error_msg = format!("Failed to read response: {}", e);
-        log_error!("{}", error_msg);
-        error_msg
-    })?;
-
-    // Safely truncate response for logging, respecting UTF-8 character boundaries
-    let truncated = response_text.chars().take(200).collect::<String>();
-    log_info!("Response body: {}", truncated);
-
-    serde_json::from_str(&response_text).map_err(|e| {
-        let error_msg = format!("Failed to parse JSON: {}", e);
-        log_error!("{}", error_msg);
-        error_msg
-    })
 }
 
 // API Commands for Tauri
@@ -380,87 +238,6 @@ pub async fn api_search_transcripts<R: Runtime>(
             Err(format!("Failed to search transcripts: {}", e))
         }
     }
-}
-
-#[tauri::command]
-pub async fn api_get_profile<R: Runtime>(
-    app: AppHandle<R>,
-    email: String,
-    license_key: String,
-    auth_token: Option<String>,
-) -> Result<Profile, String> {
-    log_info!(
-        "api_get_profile called for email: {}, auth_token: {}",
-        email,
-        auth_token.is_some()
-    );
-
-    let profile_request = ProfileRequest { email, license_key };
-    let body = serde_json::to_string(&profile_request).map_err(|e| e.to_string())?;
-
-    make_api_request::<R, Profile>(&app, "/get-profile", "POST", Some(&body), None, auth_token)
-        .await
-}
-
-#[tauri::command]
-pub async fn api_save_profile<R: Runtime>(
-    app: AppHandle<R>,
-    id: String,
-    email: String,
-    auth_token: Option<String>,
-) -> Result<serde_json::Value, String> {
-    log_info!(
-        "api_save_profile called for email: {}, auth_token: {}",
-        email,
-        auth_token.is_some()
-    );
-
-    let save_request = SaveProfileRequest { id, email };
-    let body = serde_json::to_string(&save_request).map_err(|e| e.to_string())?;
-
-    make_api_request::<R, serde_json::Value>(
-        &app,
-        "/save-profile",
-        "POST",
-        Some(&body),
-        None,
-        auth_token,
-    )
-    .await
-}
-
-#[tauri::command]
-pub async fn api_update_profile<R: Runtime>(
-    app: AppHandle<R>,
-    email: String,
-    license_key: String,
-    company: String,
-    position: String,
-    auth_token: Option<String>,
-) -> Result<serde_json::Value, String> {
-    log_info!(
-        "api_update_profile called for email: {}, auth_token: {}",
-        email,
-        auth_token.is_some()
-    );
-
-    let update_request = UpdateProfileRequest {
-        email,
-        license_key,
-        company,
-        position,
-    };
-    let body = serde_json::to_string(&update_request).map_err(|e| e.to_string())?;
-
-    make_api_request::<R, serde_json::Value>(
-        &app,
-        "/update-profile",
-        "POST",
-        Some(&body),
-        None,
-        auth_token,
-    )
-    .await
 }
 
 #[tauri::command]
