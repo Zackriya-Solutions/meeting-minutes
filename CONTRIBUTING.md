@@ -15,11 +15,11 @@ Thank you for your interest in contributing to Conversationaly! This document pr
 1. Fork the repository
 2. Clone your fork:
    ```bash
-   git clone https://github.com/YOUR_USERNAME/meeting-minutes.git
+   git clone https://github.com/YOUR_USERNAME/conversationaly.git
    ```
 3. Add the original repository as upstream:
    ```bash
-   git remote add upstream https://github.com/Zackriya-Solutions/meeting-minutes.git
+   git remote add upstream https://github.com/bykof/conversationaly.git
    ```
 4. Create a new branch from `devtest`:
    ```bash

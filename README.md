@@ -2,17 +2,12 @@
     <h1>
         Privacy-First AI Meeting Assistant
     </h1>
-    <a href="https://trendshift.io/repositories/21958" target="_blank"><img src="https://trendshift.io/api/badge/repositories/21958" alt="Zackriya-Solutions%2Fmeetily | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/></a>
-    <br>
-    <br>
-    <a href="https://github.com/Zackriya-Solutions/meeting-minutes/releases/"><img src="https://img.shields.io/badge/Pre_Release-Link-brightgreen" alt="Pre-Release"></a>
-    <a href="https://github.com/Zackriya-Solutions/meeting-minutes/releases"><img alt="GitHub Repo stars" src="https://img.shields.io/github/stars/zackriya-solutions/meeting-minutes?style=flat">
-</a>
- <a href="https://github.com/Zackriya-Solutions/meeting-minutes/releases"> <img alt="GitHub Downloads (all assets, all releases)" src="https://img.shields.io/github/downloads/zackriya-solutions/meeting-minutes/total?style=plastic"> </a>
-    <a href="https://github.com/Zackriya-Solutions/meeting-minutes/releases"><img src="https://img.shields.io/badge/License-MIT-blue" alt="License"></a>
-    <a href="https://github.com/Zackriya-Solutions/meeting-minutes/releases"><img src="https://img.shields.io/badge/Supported_OS-macOS,_Windows-white" alt="Supported OS"></a>
-    <a href="https://github.com/Zackriya-Solutions/meeting-minutes/releases"><img alt="GitHub Tag" src="https://img.shields.io/github/v/tag/zackriya-solutions/meeting-minutes?include_prereleases&color=yellow">
-</a>
+    <a href="https://github.com/bykof/conversationaly/releases/"><img src="https://img.shields.io/badge/Pre_Release-Link-brightgreen" alt="Pre-Release"></a>
+    <a href="https://github.com/bykof/conversationaly/releases"><img alt="GitHub Repo stars" src="https://img.shields.io/github/stars/bykof/conversationaly?style=flat"></a>
+    <a href="https://github.com/bykof/conversationaly/releases"><img alt="GitHub Downloads (all assets, all releases)" src="https://img.shields.io/github/downloads/bykof/conversationaly/total?style=plastic"></a>
+    <a href="https://github.com/bykof/conversationaly/releases"><img src="https://img.shields.io/badge/License-MIT-blue" alt="License"></a>
+    <a href="https://github.com/bykof/conversationaly/releases"><img src="https://img.shields.io/badge/Supported_OS-macOS,_Windows-white" alt="Supported OS"></a>
+    <a href="https://github.com/bykof/conversationaly/releases"><img alt="GitHub Tag" src="https://img.shields.io/github/v/tag/bykof/conversationaly?include_prereleases&color=yellow"></a>
     <br>
     <h3>
     <br>
@@ -101,12 +96,12 @@ Whether you're a defense consultant, enterprise executive, legal professional, o
 
 ### 🪟 **Windows**
 
-1. Download the latest `x64-setup.exe` from [Releases](https://github.com/Zackriya-Solutions/meeting-minutes/releases/latest)
+1. Download the latest `x64-setup.exe` from [Releases](https://github.com/bykof/conversationaly/releases/latest)
 2. Run the installer
 
 ### 🍎 **macOS**
 
-1. Download `meetily_0.4.0_aarch64.dmg` from [Releases](https://github.com/Zackriya-Solutions/meeting-minutes/releases/latest)
+1. Download `conversationaly_0.4.0_aarch64.dmg` from [Releases](https://github.com/bykof/conversationaly/releases/latest)
 2. Open the downloaded `.dmg` file
 3. Drag **Conversationaly** to your Applications folder
 4. Open **Conversationaly** from Applications folder
@@ -121,8 +116,8 @@ Build from source following our detailed guides:
 **Quick start:**
 
 ```bash
-git clone https://github.com/Zackriya-Solutions/meeting-minutes
-cd meeting-minutes/frontend
+git clone https://github.com/bykof/conversationaly
+cd conversationaly/frontend
 pnpm install
 ./build-gpu.sh
 ```
@@ -232,4 +227,4 @@ MIT License - Feel free to use this project for your own purposes.
 
 ## Star History
 
-[![Star History Chart](https://api.star-history.com/chart?repos=Zackriya-Solutions/meetily&type=date&legend=top-left)](https://www.star-history.com/?repos=Zackriya-Solutions%2Fmeetily&type=date&legend=bottom-right)
+[![Star History Chart](https://api.star-history.com/chart?repos=bykof/conversationaly&type=date&legend=top-left)](https://www.star-history.com/?repos=bykof%2Fconversationaly&type=date&legend=bottom-right)
