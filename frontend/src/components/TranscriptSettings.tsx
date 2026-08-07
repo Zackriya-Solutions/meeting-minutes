@@ -48,6 +48,9 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
     const [showStreamingApiKey, setShowStreamingApiKey] = useState<boolean>(false);
     const [isTestingStreaming, setIsTestingStreaming] = useState<boolean>(false);
     const [isSavingStreaming, setIsSavingStreaming] = useState<boolean>(false);
+    // Seconds of audio per server session. Empty = use the backend default.
+    const [streamingMaxSeconds, setStreamingMaxSeconds] = useState<string>('');
+    const [isDetectingLimits, setIsDetectingLimits] = useState<boolean>(false);
 
     // Load the saved streaming config when the streaming provider is selected.
     useEffect(() => {
@@ -59,6 +62,11 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                 setStreamingEndpoint(cfg.endpoint || '');
                 setStreamingModel(cfg.model || '');
                 setStreamingApiKey(cfg.apiKey || '');
+                setStreamingMaxSeconds(
+                    cfg.maxSessionSeconds === null || cfg.maxSessionSeconds === undefined
+                        ? ''
+                        : String(cfg.maxSessionSeconds)
+                );
             })
             .catch((err) => console.error('Failed to load streaming transcription config:', err));
         return () => { cancelled = true; };
@@ -96,9 +104,57 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
         }
     };
 
+    /**
+     * Ask the endpoint how big its context is and turn that into a session length.
+     * Servers that don't announce one aren't an error — the user fills it in.
+     */
+    const detectEndpointLimits = async () => {
+        if (!streamingEndpoint.trim() || !streamingModel.trim()) {
+            toast.error('Please enter the endpoint URL and model name first');
+            return;
+        }
+        setIsDetectingLimits(true);
+        try {
+            const limits = await configService.detectCustomTranscriptionLimits(
+                streamingEndpoint.trim(),
+                streamingModel.trim(),
+                streamingApiKey.trim() || null,
+            );
+            if (limits.recommended_seconds !== null) {
+                setStreamingMaxSeconds(String(limits.recommended_seconds));
+                toast.success(limits.detail);
+            } else {
+                toast.info(limits.detail);
+            }
+        } catch (err) {
+            toast.error(err instanceof Error ? err.message : String(err));
+        } finally {
+            setIsDetectingLimits(false);
+        }
+    };
+
+    /**
+     * The session length as the backend wants it: `null` for "use the default",
+     * or `undefined` when what's in the box isn't a usable number.
+     */
+    const parseMaxSessionSeconds = (): number | null | undefined => {
+        const raw = streamingMaxSeconds.trim();
+        if (!raw) return null;
+        const seconds = Number(raw);
+        if (!Number.isInteger(seconds) || seconds < 0) return undefined;
+        // 0 means "never split"; anything shorter than half a minute isn't a session.
+        if (seconds > 0 && seconds < 30) return undefined;
+        return seconds;
+    };
+
     const saveStreamingConfig = async () => {
         if (!streamingEndpoint.trim() || !streamingModel.trim()) {
             toast.error('Please enter the endpoint URL and model name first');
+            return;
+        }
+        const maxSessionSeconds = parseMaxSessionSeconds();
+        if (maxSessionSeconds === undefined) {
+            toast.error('Max session length must be a whole number of seconds — at least 30, or 0 to never split');
             return;
         }
         setIsSavingStreaming(true);
@@ -109,6 +165,7 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                 apiKey: streamingApiKey.trim() || null,
                 protocol: 'voxtral-realtime',
                 delayMs: null,
+                maxSessionSeconds,
             });
             // Saving also activates the streaming provider on the backend; mirror
             // that into the app config so the rest of the UI stays in sync.
@@ -320,12 +377,47 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                 </div>
                             </div>
 
+                            <div>
+                                <Label className="block text-sm font-medium text-gray-700 mb-1">
+                                    Max session length <span className="text-gray-400 font-normal">(seconds)</span>
+                                </Label>
+                                <div className="flex gap-2">
+                                    <Input
+                                        type="number"
+                                        min={0}
+                                        step={30}
+                                        className="focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                                        value={streamingMaxSeconds}
+                                        onChange={(e) => setStreamingMaxSeconds(e.target.value)}
+                                        placeholder="300 (default)"
+                                    />
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        onClick={detectEndpointLimits}
+                                        disabled={isDetectingLimits || isSavingStreaming || isTestingStreaming}
+                                        className="shrink-0"
+                                    >
+                                        {isDetectingLimits && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                                        Detect
+                                    </Button>
+                                </div>
+                                <p className="text-xs text-gray-400 mt-1">
+                                    A realtime server holds the whole session in one context window;
+                                    once it fills, transcription stops for the rest of the meeting.
+                                    Audio is therefore sent in batches of this length, each on a fresh
+                                    session, so long meetings keep transcribing. <b>Detect</b> reads the
+                                    context size from the endpoint if it publishes one — otherwise set
+                                    what your backend can take. Use 0 to never split.
+                                </p>
+                            </div>
+
                             <div className="flex gap-2 pt-1">
                                 <Button
                                     type="button"
                                     variant="outline"
                                     onClick={testStreamingConnection}
-                                    disabled={isTestingStreaming || isSavingStreaming}
+                                    disabled={isTestingStreaming || isSavingStreaming || isDetectingLimits}
                                 >
                                     {isTestingStreaming && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
                                     Test Connection
@@ -333,7 +425,7 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                 <Button
                                     type="button"
                                     onClick={saveStreamingConfig}
-                                    disabled={isSavingStreaming || isTestingStreaming}
+                                    disabled={isSavingStreaming || isTestingStreaming || isDetectingLimits}
                                 >
                                     {isSavingStreaming && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
                                     Save

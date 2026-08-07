@@ -57,6 +57,24 @@ export interface CustomTranscriptionConfig {
   protocol: string;
   /** Optional requested transcription delay (ms); protocol-specific, may be ignored. */
   delayMs: number | null;
+  /**
+   * Seconds of audio per server session before the client rolls over to a fresh
+   * one. `null` uses the backend default (300s), `0` disables rollover.
+   */
+  maxSessionSeconds: number | null;
+}
+
+/**
+ * What a realtime endpoint reports about how much audio one session can hold.
+ * Mirrors the backend `DetectedSessionLimit` (serialized snake_case).
+ */
+export interface DetectedSessionLimit {
+  /** Context window in tokens, or null when the endpoint announces none. */
+  max_model_len: number | null;
+  /** Session length derived from that context, in seconds. */
+  recommended_seconds: number | null;
+  /** Plain-language account of what was found. */
+  detail: string;
 }
 
 /**
@@ -154,6 +172,26 @@ export class ConfigService {
       apiKey: config.apiKey,
       protocol: config.protocol,
       delayMs: config.delayMs,
+      maxSessionSeconds: config.maxSessionSeconds,
+    });
+  }
+
+  /**
+   * Ask the endpoint how much audio it can hold in one session (OpenAI-style
+   * `/v1/models` context size). Resolves with `recommended_seconds: null` when the
+   * server announces nothing — that is an answer, not a failure.
+   */
+  async detectCustomTranscriptionLimits(
+    endpoint: string,
+    model: string,
+    apiKey: string | null,
+    protocol: string = 'voxtral-realtime'
+  ): Promise<DetectedSessionLimit> {
+    return invoke<DetectedSessionLimit>('api_detect_custom_transcription_limits', {
+      endpoint,
+      model,
+      apiKey,
+      protocol,
     });
   }
 
