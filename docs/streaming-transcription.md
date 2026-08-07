@@ -27,6 +27,7 @@ Settings → **Transcription** → provider **Custom Realtime (WebSocket)**:
 | **Endpoint** | `ws://host:port`, `wss://…`, or a full path. A bare host gets `/v1/realtime` appended; `http(s)://` is rewritten to `ws(s)://`. |
 | **Model** | Model id the server should load, e.g. `voxtral-mini-transcribe-realtime-2602`. Validated server-side — a wrong name fails the connection test. |
 | **API key** | Optional. Sent as `Authorization: Bearer …`. Leave empty for a server with no auth. |
+| **Max session length** | Seconds of audio per server session before rolling over to a fresh one. Blank uses the 300 s default; **Detect** reads it from the endpoint; `0` never rolls over. See [Long meetings](#long-meetings-and-session-rollover). |
 
 **Test Connection** opens the socket and performs the handshake (which validates
 the model) before you commit the settings, so a typo surfaces here rather than at
@@ -59,12 +60,50 @@ transcript when it completes. Everything is emitted on the same `transcript-upda
 event the local providers use, so transcript history, persistence, reload
 recovery, and summarization all work unchanged.
 
+**On a long meeting** the session is rolled over periodically so the server's
+context can't fill — see [Long meetings](#long-meetings-and-session-rollover).
+
 **If the connection drops mid-recording**, the provider closes out the text it
 had, reconnects with backoff (3 attempts), and carries on. Audio from the outage
 window is discarded rather than replayed, so the live transcript doesn't fall
 permanently behind. If all attempts fail you get an explicit error — transcription
 stops for the rest of that recording, but **the recording itself keeps going**, so
 the audio can be transcribed afterwards.
+
+## Long meetings and session rollover
+
+A realtime server holds an entire session in **one bounded context window** —
+both the audio it has ingested and the transcript it has written. A meeting long
+enough to fill that window doesn't produce an error; the session simply stops
+emitting transcripts, and the rest of the meeting goes untranscribed.
+
+Meetily avoids this by giving each server session a fixed budget of audio. When
+the budget is spent, the session is finalized and the recording continues on a
+fresh one. The rollover is invisible in the transcript: the outgoing session's
+final text lands before the new session takes over, so a three-hour meeting reads
+the same as a three-minute one.
+
+**Max session length** controls that budget:
+
+- **Blank** — use the default of 300 seconds. Deliberately conservative: it fits
+  comfortably inside the 8k-token context of a typical self-hosted Voxtral-Mini
+  deployment, which in practice stops transcribing somewhere past 8 minutes.
+- **Detect** — read `max_model_len` from the endpoint's `/v1/models` and derive a
+  session length from it, keeping 15% headroom. vLLM and several other
+  OpenAI-compatible servers publish this; ones that don't aren't an error, you
+  just set the value yourself.
+- **A number** — seconds, at least 30.
+- **`0`** — never roll over. One session for the entire recording. Only sensible
+  if your backend's context genuinely covers your longest meeting.
+
+The estimate behind Detect assumes Voxtral's encoder rate of one token per 80 ms
+of audio (12.5 tokens/second), plus roughly 3.5 tokens/second for the transcript
+the model writes. A different model with a different encoder rate will need the
+value set by hand.
+
+Rollover is independent of reconnection: rolling over is *planned* and keeps the
+transcript intact, whereas a reconnect is a *reaction* to a socket that died and
+discards the audio from the outage window.
 
 ## The wire contract
 
@@ -114,3 +153,5 @@ get wrong and cost real debugging time:
 | Test Connection fails with a 502 | Endpoint reachable but the ASR backend is still booting. |
 | Recording starts, transcript stays empty | Server accepted audio but never sent a delta — usually a dialect mismatch, not a Meetily bug. Check the server log. |
 | "Reconnecting" warnings during a meeting | Server restarted or the network blipped; transcription resumes on its own. |
+| Transcript stops partway through a long meeting and never resumes | The server's context filled. Lower **Max session length**, or press **Detect** to fit it to the endpoint. |
+| Detect reports no limit | The endpoint doesn't publish `max_model_len`. Set the value by hand from what you know of the backend. |
