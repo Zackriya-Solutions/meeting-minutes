@@ -154,11 +154,19 @@ pub async fn get_device_and_config(
 
                 #[cfg(target_os = "linux")]
                 {
-                    // For Linux, we use PulseAudio monitor sources for system audio
+                    // For Linux, we use PulseAudio monitor sources for system audio.
+                    // Device enumeration (see devices/platform/linux.rs) decorates
+                    // monitor device names with a " (System Audio)" suffix for display;
+                    // strip it back off before matching against the raw cpal device name.
+                    let raw_name = audio_device
+                        .name
+                        .trim_end_matches(" (System Audio)")
+                        .to_string();
+
                     if let Ok(pulse_host) = cpal::host_from_id(cpal::HostId::Alsa) {
                         for device in pulse_host.input_devices()? {
                             if let Ok(name) = device.name() {
-                                if name == audio_device.name {
+                                if name == raw_name {
                                     let default_config = device
                                         .default_input_config()
                                         .map_err(|e| anyhow!("Failed to get default input config: {}", e))?;
