@@ -348,7 +348,7 @@ pub async fn api_process_transcript<R: Runtime>(
 
     let pool = state.db_manager.pool().clone();
     let final_prompt = custom_prompt.unwrap_or_else(|| "".to_string());
-    let final_template_id = template_id.unwrap_or_else(|| "daily_standup".to_string());
+    let final_template_id = template_id.unwrap_or_else(|| "standard_meeting".to_string());
 
     // Normalise empty / whitespace-only to None so "" and null behave identically
     let summary_language = summary_language.and_then(|s| {

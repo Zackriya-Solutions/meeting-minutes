@@ -25,6 +25,13 @@ export interface ModelDownloadCompletePayload {
   modelName: string;
 }
 
+/** Payload of `transcript-partial` — mirrors TranscriptPartial in Rust. */
+export interface TranscriptPartial {
+  text: string;
+  /** Monotonic stream revision, so a late event can be discarded. */
+  revision: number;
+}
+
 /**
  * Transcript Service
  * Singleton service for managing transcription operations and transcript history
@@ -55,6 +62,31 @@ export class TranscriptService {
    */
   async onTranscriptUpdate(callback: (update: TranscriptUpdate) => void): Promise<UnlistenFn> {
     return listen<TranscriptUpdate>('transcript-update', (event) => {
+      callback(event.payload);
+    });
+  }
+
+  /**
+   * Listen for volatile live text from a streaming model.
+   *
+   * Deliberately separate from transcript-update: this text is not committed
+   * and is never persisted. Rust sends an empty text at stream end to clear it.
+   * @returns Promise that resolves to unlisten function
+   */
+  async onTranscriptPartial(
+    callback: (partial: TranscriptPartial) => void
+  ): Promise<UnlistenFn> {
+    return listen<TranscriptPartial>('transcript-partial', (event) => {
+      callback(event.payload);
+    });
+  }
+
+  /**
+   * Listen for a non-fatal transcription warning (slow model, failed segment).
+   * @returns Promise that resolves to unlisten function
+   */
+  async onTranscriptionWarning(callback: (message: string) => void): Promise<UnlistenFn> {
+    return listen<string>('transcription-warning', (event) => {
       callback(event.payload);
     });
   }
@@ -101,16 +133,6 @@ export class TranscriptService {
     });
   }
 
-  /**
-   * Listen for Parakeet model download complete event
-   * @param callback - Function to call when Parakeet model download completes
-   * @returns Promise that resolves to unlisten function
-   */
-  async onParakeetModelDownloadComplete(callback: (modelName: string) => void): Promise<UnlistenFn> {
-    return listen<ModelDownloadCompletePayload>('parakeet-model-download-complete', (event) => {
-      callback(event.payload.modelName);
-    });
-  }
 }
 
 // Export singleton instance

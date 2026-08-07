@@ -11,6 +11,8 @@ import { indexedDBService } from '@/services/indexedDBService';
 interface TranscriptContextType {
   transcripts: Transcript[];
   transcriptsRef: MutableRefObject<Transcript[]>
+  /** Volatile tail from a streaming model. Rendered, never saved. */
+  partialText: string;
   addTranscript: (update: TranscriptUpdate) => void;
   copyTranscript: () => void;
   flushBuffer: () => void;
@@ -26,6 +28,7 @@ const TranscriptContext = createContext<TranscriptContextType | undefined>(undef
 
 export function TranscriptProvider({ children }: { children: ReactNode }) {
   const [transcripts, setTranscripts] = useState<Transcript[]>([]);
+  const [partialText, setPartialText] = useState('');
   const [meetingTitle, setMeetingTitle] = useState('+ New Call');
   const [currentMeetingId, setCurrentMeetingId] = useState<string | null>(null);
 
@@ -176,6 +179,52 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
       }
     };
   }, [currentMeetingId]);
+
+  // Volatile live text from a streaming model. Separate from the buffering
+  // effect below on purpose: partials are never ordered, deduped or persisted,
+  // and the empty string Rust sends at stream end is the clear signal.
+  //
+  // ponytail: the payload's `revision` is ignored — every partial is emitted
+  // from one blocking thread, so they arrive in order. Guard on it if
+  // out-of-order flicker ever shows up.
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+
+    transcriptService
+      .onTranscriptPartial(({ text }) => setPartialText(text))
+      .then((fn) => {
+        if (cancelled) fn();
+        else unlisten = fn;
+      })
+      .catch((error) => console.error('Failed to listen for transcript-partial:', error));
+
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, []);
+
+  // The live decoder's own complaints — a model running slower than speech, or a
+  // segment that failed to decode. Rust rate-limits these to once per recording;
+  // without a listener they were emitted into nothing.
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+
+    transcriptService
+      .onTranscriptionWarning((message) => toast.warning(message))
+      .then((fn) => {
+        if (cancelled) fn();
+        else unlisten = fn;
+      })
+      .catch((error) => console.error('Failed to listen for transcription-warning:', error));
+
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, []);
 
   // Main transcript buffering logic with sequence_id ordering
   useEffect(() => {
@@ -483,6 +532,8 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
   // Clear transcripts (used when starting new recording)
   const clearTranscripts = useCallback(() => {
     setTranscripts([]);
+    // Covers the stream dying without emitting its own clear.
+    setPartialText('');
     // Don't clear currentMeetingId here - it will be set by recording-started event
   }, []);
 
@@ -512,6 +563,7 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
   const value: TranscriptContextType = {
     transcripts,
     transcriptsRef,
+    partialText,
     addTranscript,
     copyTranscript,
     flushBuffer,

@@ -1,10 +1,10 @@
-# Meetily Build Script with Code Signing
+# Conversationaly Build Script with Code Signing
 # Loads signing credentials from .env file or environment variables
 # Then calls build-gpu.bat to execute the build
 
 Write-Host ""
 Write-Host "========================================"
-Write-Host "   Meetily GPU Build (Signed)"
+Write-Host "   Conversationaly GPU Build (Signed)"
 Write-Host "========================================"
 Write-Host ""
 
@@ -29,14 +29,14 @@ if (-not $env:TAURI_SIGNING_PRIVATE_KEY) {
     Write-Host "     cp .env.example .env" -ForegroundColor Gray
     Write-Host ""
     Write-Host "  2. Extract your signing key:" -ForegroundColor White
-    Write-Host "     Get-Content .tauri\meetily.key -Raw" -ForegroundColor Gray
+    Write-Host "     Get-Content .tauri\conversationaly.key -Raw" -ForegroundColor Gray
     Write-Host ""
     Write-Host "  3. Add to .env file:" -ForegroundColor White
     Write-Host "     TAURI_SIGNING_PRIVATE_KEY=<your-key-content>" -ForegroundColor Gray
     Write-Host "     TAURI_SIGNING_PRIVATE_KEY_PASSWORD=<your-password>" -ForegroundColor Gray
     Write-Host ""
     Write-Host "Method 2: Set environment variables directly (CI/CD)" -ForegroundColor Cyan
-    Write-Host "     `$env:TAURI_SIGNING_PRIVATE_KEY = Get-Content .tauri\meetily.key -Raw" -ForegroundColor Gray
+    Write-Host "     `$env:TAURI_SIGNING_PRIVATE_KEY = Get-Content .tauri\conversationaly.key -Raw" -ForegroundColor Gray
     Write-Host "     `$env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = 'your-password'" -ForegroundColor Gray
     Write-Host ""
     exit 1

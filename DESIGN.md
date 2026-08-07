@@ -130,7 +130,23 @@ genuinely floats (popover, dialog, the recording transport). Two shadow tokens,
 
 ## Layout
 
-- Sidebar rail: 256px expanded / 56px collapsed, `--panel`, hairline right border.
+- Sidebar rail: 256px expanded / 56px collapsed, `--panel`, hairline right
+  border. Expanded on launch — the meeting list is the app's content, not an
+  optional drawer.
+- **One rail axis.** `--rail-gutter` (8px, exposed to Tailwind as `px-gutter`)
+  insets every zone, and every row pads by it again, so each row's content box
+  starts at 2×gutter: the brand mark, the Home icon, the search icon, the
+  section label and every meeting title land on one vertical line. A row that
+  carries an icon puts its label at 2×gutter + icon + gap. Hardcoded `px-2` /
+  `px-3` / `px-5` in the rail is a bug — the four competing insets they
+  produced are what made the rail read as assembled rather than drawn.
+- **The rail has five zones, in rank order:** identity · capture · find ·
+  views + meetings *(the only scrolling zone)* · utilities. The primary action
+  never sits below a scrolling list, and the capture zone holds its height
+  across every route and state — changing route must not shuffle the rail out
+  from under the pointer. Where a page owns the capture control itself (Home,
+  via the transport), the zone reports capture state rather than shipping a
+  second control for the same thing.
 - Content max measure 68ch for prose; toolbars and tables run full width.
 - Responsive behavior is **structural** (collapse the rail, stack the two-pane
   meeting view below 1100px), never fluid type.
@@ -146,6 +162,11 @@ Motion reports state and nothing else — a level changing, a status advancing, 
 segment arriving, a panel collapsing. There is no page-load choreography: the
 current `motion.div` fade-and-rise on every route mount is removed. It makes a
 tool the user opens forty times a day feel slow.
+
+The rail collapse is instant. Animating the rail width and the content column's
+margin re-ran layout on every frame for 260ms, and the thing being re-laid-out
+is a virtualized transcript that can hold thousands of rows. Motion may report
+state; it may not make reporting state cost a relayout.
 
 `prefers-reduced-motion: reduce` → all durations collapse to 1ms except opacity
 crossfades, and the audio level meter stops animating and renders a static
@@ -168,6 +189,35 @@ Semantic scale only. No arbitrary values.
 - Loading is a skeleton in content areas; a spinner only inside a button or on a
   control smaller than 32px.
 - Empty states teach the next action and name it as a button.
+- **Two selection languages, never one.** *Chrome* selection — the route you
+  are on, the tab you are in — is a filled surface: `--brand-soft` with
+  `--brand-soft-ink` for a rail row, a 2px `--brand` underline for a tab strip.
+  *Item* selection — an open meeting, the chosen model, the active audio
+  backend, a selected summary block — is a **brand border, never a fill**: a
+  2px `--brand` edge in the gutter for a list row, a `--brand` hairline for a
+  card, and the status word ("Selected", "Active") set in `--brand`. Selection
+  is always brand. `--info` is for local-model and device *readouts*; using it
+  for selection made every selected card read as a status callout.
+- A control in the collapsed rail must do what its label says. Expanding the
+  rail is not "search" — if the label says search, the click also lands the
+  cursor in the field.
+- **Highlight is not selection.** The keyboard/pointer highlight inside a menu,
+  select, or command list is neutral (`--ink` at 5%). Brand marks the *chosen*
+  item — the check on a `SelectItem`, the border on a card. A primitive that
+  paints its highlight brand makes every hover look like a commitment.
+- **Fields are wells.** Input, textarea and the select trigger share one
+  treatment: `--sunken` fill, `--border-strong` outline, `--brand` border on
+  focus, and the app's one global `:focus-visible` ring on top. A primitive must
+  never set `outline-none` to install a ring of its own.
+- **Tooltips are not brand.** A tooltip is neither identity, primary action, nor
+  selection: `--elevated` with a hairline and `--shadow-pop`.
+- **Two tab voices.** `segmented` is the in-panel switch (sunken track, active
+  option raised to `--elevated`); `underline` is the page-level view switcher (a
+  hairline under the strip, typography carrying state). The `underline` variant
+  draws no indicator — the caller owns it, so Settings keeps its spring.
+- Floating surfaces (menu, popover, select, tooltip, command) are `--elevated` +
+  hairline + `--shadow-pop`, and they **fade only**. Zoom and slide on an opening
+  menu is choreography, not state.
 - Focus ring: `2px` `--ring` with a `2px` `--bg` offset, on `:focus-visible` only.
 - Recording state is never communicated by color alone — the live indicator is a
   filled dot **plus** the word "Recording" **plus** an elapsed mono timer.

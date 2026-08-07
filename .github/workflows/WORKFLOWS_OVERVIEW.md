@@ -104,7 +104,7 @@ This document provides a quick overview of all available CI/CD workflows in this
 - All platforms in parallel
 - Uses reusable `build.yml` workflow
 - 30-day artifact retention
-- Artifacts prefixed with `meetily-test-`
+- Artifacts prefixed with `conversationaly-test-`
 
 **Triggers:**
 - Manual dispatch only
@@ -263,13 +263,13 @@ Standalone (don't use build.yml):
 ## Artifact Naming Convention
 
 ```
-meetily-{workflow}-{platform}-{target}-{version}
+conversationaly-{workflow}-{platform}-{target}-{version}
 ```
 
 **Examples:**
-- `meetily-devtest-macOS-aarch64-apple-darwin-0.1.3`
-- `meetily-test-windows-x86_64-pc-windows-msvc-0.1.3`
-- `meetily-macos-aarch64-release-0.1.3`
+- `conversationaly-devtest-macOS-aarch64-apple-darwin-0.1.3`
+- `conversationaly-test-windows-x86_64-pc-windows-msvc-0.1.3`
+- `conversationaly-macos-aarch64-release-0.1.3`
 
 ---
 

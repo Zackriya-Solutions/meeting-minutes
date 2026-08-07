@@ -17,12 +17,16 @@ Time-boxed daily updates template designed for engineering/product teams.
 
 ### 2. `standard_meeting.json`
 General-purpose meeting notes template focusing on key outcomes and actions.
+Also the default when no template is selected.
 
 **Sections:**
 - Summary
 - Key Decisions
 - Action Items
 - Discussion Highlights
+
+### 3. `retrospective.json`
+Sprint/project retrospective template.
 
 ## Template Structure
 
@@ -45,13 +49,16 @@ Each template JSON file follows this schema:
 
 ## Custom Templates
 
-Users can add custom templates to the application data directory:
+Templates are managed in the app under **Settings → Summary → Summary Templates**,
+which writes JSON into the application data directory:
 
-- **macOS**: `~/Library/Application Support/Meetily/templates/`
-- **Windows**: `%APPDATA%\Meetily\templates\`
-- **Linux**: `~/.config/Meetily/templates/`
+- **macOS**: `~/Library/Application Support/Conversationaly/templates/`
+- **Windows**: `%APPDATA%\Conversationaly\templates\`
+- **Linux**: `~/.config/Conversationaly/templates/`
 
-Custom templates override built-in templates with the same filename.
+Custom templates override the templates in this directory when the filename matches,
+which is how editing a shipped template works — and deleting the custom copy is what
+"Reset to default" does. Dropping JSON files in there by hand still works.
 
 ## Template Fields
 
@@ -77,10 +84,12 @@ use crate::summary::templates;
 // Get a specific template
 let template = templates::get_template("daily_standup")?;
 
-// List available templates
+// List available templates (id, name, description)
 let available = templates::list_templates();
 
-// Validate custom template JSON
-let custom_json = std::fs::read_to_string("custom.json")?;
-let validated = templates::validate_template(&custom_json)?;
+// Create or overwrite a user template; None generates the id from the name
+let id = templates::save_template(None, &template)?;
+
+// Remove a user template, or reset a shipped one to its bundled version
+templates::delete_template("my_notes")?;
 ```

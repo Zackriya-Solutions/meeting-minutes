@@ -35,12 +35,12 @@ pub(crate) use perf_trace;
 // Re-export async logging macros for external use (removed due to macro conflicts)
 
 // Declare audio module
-pub mod analytics;
 pub mod api;
 pub mod audio;
 pub mod config;
 pub mod console_utils;
 pub mod database;
+pub mod migrate;
 pub mod notifications;
 pub mod ollama;
 pub mod onboarding;
@@ -276,7 +276,6 @@ async fn is_audio_level_monitoring() -> bool {
     audio::simple_level_monitor::is_monitoring()
 }
 
-// Analytics commands are now handled by analytics::commands module
 
 // Transcription commands are handled by transcribe_engine::commands
 
@@ -416,6 +415,9 @@ pub fn run() {
         .manage(audio::init_system_audio_state())
         .manage(summary::summary_engine::ModelManagerState(Arc::new(tokio::sync::Mutex::new(None))))
         .setup(|_app| {
+            // Before anything reads the data dirs.
+            migrate::migrate_legacy_data_dirs(_app.handle());
+
             log::info!("Application setup complete");
 
             // Initialize system tray
@@ -519,31 +521,6 @@ pub fn run() {
             get_transcription_status,
             read_audio_file,
             save_transcript,
-            analytics::commands::init_analytics,
-            analytics::commands::disable_analytics,
-            analytics::commands::track_event,
-            analytics::commands::identify_user,
-            analytics::commands::track_meeting_started,
-            analytics::commands::track_recording_started,
-            analytics::commands::track_recording_stopped,
-            analytics::commands::track_meeting_deleted,
-            analytics::commands::track_settings_changed,
-            analytics::commands::track_feature_used,
-            analytics::commands::is_analytics_enabled,
-            analytics::commands::start_analytics_session,
-            analytics::commands::end_analytics_session,
-            analytics::commands::track_daily_active_user,
-            analytics::commands::track_user_first_launch,
-            analytics::commands::is_analytics_session_active,
-            analytics::commands::track_summary_generation_started,
-            analytics::commands::track_summary_generation_completed,
-            analytics::commands::track_summary_regenerated,
-            analytics::commands::track_model_changed,
-            analytics::commands::track_custom_prompt_used,
-            analytics::commands::track_meeting_ended,
-            analytics::commands::track_analytics_enabled,
-            analytics::commands::track_analytics_disabled,
-            analytics::commands::track_analytics_transparency_viewed,
             transcribe_engine::commands::transcribe_init,
             transcribe_engine::commands::transcribe_get_available_models,
             transcribe_engine::commands::transcribe_load_model,
@@ -634,7 +611,8 @@ pub fn run() {
             // Template commands
             summary::template_commands::api_list_templates,
             summary::template_commands::api_get_template_details,
-            summary::template_commands::api_validate_template,
+            summary::template_commands::api_save_template,
+            summary::template_commands::api_delete_template,
             // Built-in AI commands
             summary::summary_engine::commands::builtin_ai_list_models,
             summary::summary_engine::commands::builtin_ai_get_model_info,

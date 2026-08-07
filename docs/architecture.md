@@ -1,6 +1,6 @@
 # System Architecture
 
-Meetily is a self-contained desktop application built with [Tauri](https://tauri.app/). It combines a Rust-based backend with a Next.js frontend into a single, efficient, and cross-platform application.
+Conversationaly is a self-contained desktop application built with [Tauri](https://tauri.app/). It combines a Rust-based backend with a Next.js frontend into a single, efficient, and cross-platform application.
 
 ## High-Level Architecture Diagram
 

@@ -31,9 +31,9 @@
 //! # Custom Templates
 //!
 //! Users can add custom templates to:
-//! - macOS: `~/Library/Application Support/Meetily/templates/`
-//! - Windows: `%APPDATA%\Meetily\templates\`
-//! - Linux: `~/.config/Meetily/templates/`
+//! - macOS: `~/Library/Application Support/Conversationaly/templates/`
+//! - Windows: `%APPDATA%\Conversationaly\templates\`
+//! - Linux: `~/.config/Conversationaly/templates/`
 //!
 //! Custom templates must follow the JSON schema defined in `types::Template`.
 
@@ -43,8 +43,8 @@ mod types;
 
 // Re-export public API
 pub use loader::{
-    get_template, list_template_ids, list_templates, set_bundled_templates_dir,
-    validate_and_parse_template,
+    delete_template, get_template, is_builtin, list_template_ids, list_templates, save_template,
+    set_bundled_templates_dir,
 };
 pub use types::{Template, TemplateSection};
 

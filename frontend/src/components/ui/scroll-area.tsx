@@ -40,7 +40,9 @@ const ScrollBar = React.forwardRef<
     )}
     {...props}
   >
-    <ScrollAreaPrimitive.ScrollAreaThumb className="relative flex-1 rounded-full bg-border" />
+    {/* Matches the .scrollbar-slim thumb in globals.css so native and Radix
+        scrollbars read as the same object. */}
+    <ScrollAreaPrimitive.ScrollAreaThumb className="relative flex-1 rounded-full bg-ink/20" />
   </ScrollAreaPrimitive.ScrollAreaScrollbar>
 ))
 ScrollBar.displayName = ScrollAreaPrimitive.ScrollAreaScrollbar.displayName

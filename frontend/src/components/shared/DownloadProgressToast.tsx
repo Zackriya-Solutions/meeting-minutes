@@ -228,15 +228,15 @@ export function useDownloadProgressToast() {
       total_mb?: number;
       speed_mbps?: number;
       status?: string;
-    }>('parakeet-model-download-progress', (event) => {
+    }>('model-download-progress', (event) => {
       const { modelName, progress, downloaded_mb, total_mb, speed_mbps, status } = event.payload;
 
       const downloadData: DownloadProgress = {
         modelName,
-        displayName: 'Transcription Model (Parakeet)',
+        displayName: 'Transcription Model',
         progress,
         downloadedMb: downloaded_mb ?? 0,
-        totalMb: total_mb ?? 670,
+        totalMb: total_mb ?? 716,
         speedMbps: speed_mbps ?? 0,
         status: status === 'cancelled'
           ? 'cancelled'
@@ -255,15 +255,15 @@ export function useDownloadProgressToast() {
     });
 
     const unlistenComplete = listen<{ modelName: string }>(
-      'parakeet-model-download-complete',
+      'model-download-complete',
       (event) => {
         const { modelName } = event.payload;
         const downloadData: DownloadProgress = {
           modelName,
-          displayName: 'Transcription Model (Parakeet)',
+          displayName: 'Transcription Model',
           progress: 100,
-          downloadedMb: 670,
-          totalMb: 670,
+          downloadedMb: 716,
+          totalMb: 716,
           speedMbps: 0,
           status: 'completed',
         };
@@ -274,15 +274,15 @@ export function useDownloadProgressToast() {
     );
 
     const unlistenError = listen<{ modelName: string; error: string }>(
-      'parakeet-model-download-error',
+      'model-download-error',
       (event) => {
         const { modelName, error } = event.payload;
         const downloadData: DownloadProgress = {
           modelName,
-          displayName: 'Transcription Model (Parakeet)',
+          displayName: 'Transcription Model',
           progress: 0,
           downloadedMb: 0,
-          totalMb: 670,
+          totalMb: 716,
           speedMbps: 0,
           status: 'error',
           error: categorizeError(error),

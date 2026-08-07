@@ -76,10 +76,12 @@ const Logo = React.forwardRef<HTMLButtonElement, LogoProps>(
           className={cn(
             'group flex items-center rounded-md text-ink transition-colors duration-fast',
             'hover:bg-ink/5 active:bg-ink/10',
-            isCollapsed ? 'h-9 w-9 justify-center' : 'h-9 w-full gap-2 px-2'
+            // Same hit box and same left axis as every other rail row: the mark
+            // sits at 2×--rail-gutter and the wordmark where a route label does.
+            isCollapsed ? 'h-8 w-8 justify-center' : 'h-8 w-full gap-2 px-gutter'
           )}
         >
-          <Mark live={live} className="h-5 w-5 shrink-0 text-brand" />
+          <Mark live={live} className="h-4 w-4 shrink-0 text-brand" />
           {!isCollapsed && <Wordmark className="text-base" />}
           <VisuallyHidden>About Conversationaly</VisuallyHidden>
         </button>

@@ -242,7 +242,7 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
       speed_mbps?: number;
       status?: string;
     }>(
-      'parakeet-model-download-progress',
+      'model-download-progress',
       (event) => {
         const { modelName, progress, downloaded_mb, total_mb, speed_mbps, status } = event.payload;
         if (modelName === DEFAULT_TRANSCRIBE_MODEL) {
@@ -261,7 +261,7 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
     );
 
     const unlistenComplete = listen<{ modelName: string }>(
-      'parakeet-model-download-complete',
+      'model-download-complete',
       (event) => {
         const { modelName } = event.payload;
         if (modelName === DEFAULT_TRANSCRIBE_MODEL) {
@@ -272,7 +272,7 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
     );
 
     const unlistenError = listen<{ modelName: string; error: string }>(
-      'parakeet-model-download-error',
+      'model-download-error',
       (event) => {
         const { modelName } = event.payload;
         if (modelName === DEFAULT_TRANSCRIBE_MODEL) {

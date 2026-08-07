@@ -13,19 +13,17 @@ interface OnboardingSummaryModelStatus {
  * Ollama model recommended for summarization.
  *
  * Mirrors DEFAULT_SUMMARY_MODEL in src-tauri/src/config.rs. Deliberately the same
- * tag the Gemma 4 transcription provider uses, so pulling it once serves both.
+ * tag the Gemma 4 transcription provider uses, so pulling it once serves both —
+ * the smaller E2B tier, which is what onboarding downloads.
  * Replaces `gemma3:1b`, which was hardcoded as a literal in four files.
  */
-export const RECOMMENDED_SUMMARY_MODEL = 'gemma4:e4b';
+export const RECOMMENDED_SUMMARY_MODEL = 'gemma4:e2b';
 
+// Weights + audio projector, since both files download. Keep in sync with
+// `size_mb` + `mmproj.size_mb` in summary_engine/models.rs.
 const SUMMARY_MODEL_SIZES_MB: Record<string, number> = {
-  'qwen3.5:2b': 1221,
-  'qwen3.5:4b': 2614,
-  // Kept so a user who already pulled a Gemma 3 still sees a size for it.
-  'gemma3:1b': 1019,
-  'gemma3:4b': 2374,
-  'gemma4:e2b': 1500,
-  'gemma4:e4b': 4400,
+  'gemma4:e2b': 3651,
+  'gemma4:e4b': 5324,
 };
 
 export function resolveOnboardingSummaryModelStatus({

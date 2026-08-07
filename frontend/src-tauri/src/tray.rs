@@ -23,7 +23,7 @@ pub fn create_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
 
     TrayIconBuilder::with_id("main-tray")
         .menu(&menu)
-        .tooltip("Meetily")
+        .tooltip("Conversationaly")
         .icon(app.default_window_icon().unwrap().clone())
         .on_menu_event(|app, event| handle_menu_event(app, event.id.as_ref()))
         .build(app)?;
@@ -90,7 +90,7 @@ fn toggle_recording_handler<R: Runtime>(app: &AppHandle<R>) {
                     log::info!("Tray toggle: Recording stopped successfully");
 
                     // Trigger frontend post-processing via event (works from any page)
-                    // (SQLite save, navigation, analytics)
+                    // (SQLite save, navigation)
                     if let Err(e) = app_clone.emit("recording-stop-complete", true) {
                         log::error!("Tray toggle: Failed to emit recording-stop-complete event: {}", e);
                     }
@@ -186,7 +186,7 @@ fn stop_recording_handler<R: Runtime>(app: &AppHandle<R>) {
                 log::info!("Tray: Recording stopped successfully");
 
                 // Trigger frontend post-processing via event (works from any page)
-                // (SQLite save, navigation, analytics)
+                // (SQLite save, navigation)
                 if let Err(e) = app_clone.emit("recording-stop-complete", true) {
                     log::error!("Tray: Failed to emit recording-stop-complete event: {}", e);
                 }

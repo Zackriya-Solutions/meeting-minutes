@@ -1,6 +1,6 @@
 # Contributing to Meeting Minutes Updates
 
-Thank you for your interest in contributing to Meetily! This document provides guidelines and instructions for contributing to this project.
+Thank you for your interest in contributing to Conversationaly! This document provides guidelines and instructions for contributing to this project.
 
 ## Development Workflow
 

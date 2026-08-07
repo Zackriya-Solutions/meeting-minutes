@@ -10,7 +10,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import {
+  MODEL_SORT_LABELS,
   ModelInfo,
+  ModelSort,
   TranscribeAPI,
   downloadProgress,
   formatFileSize,
@@ -18,13 +20,20 @@ import {
   getModelLabel,
   getModelUseTag,
   isDownloading,
+  sortModels,
 } from '@/lib/transcribe';
 import { Button } from '@/components/ui/button';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 
 interface Props {
   selectedModel?: string;
   onModelSelect?: (modelName: string) => void;
-  autoSave?: boolean;
 }
 
 export default function TranscriptionModelManager({ selectedModel, onModelSelect }: Props) {
@@ -33,6 +42,7 @@ export default function TranscriptionModelManager({ selectedModel, onModelSelect
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [showAll, setShowAll] = useState(false);
+  const [sort, setSort] = useState<ModelSort>('catalog');
 
   const refresh = useCallback(async () => {
     try {
@@ -102,11 +112,13 @@ export default function TranscriptionModelManager({ selectedModel, onModelSelect
     const downloading = isDownloading(model.status);
     const selected = selectedModel === model.name;
 
+    // Selection is a brand border, never a filled surface — the fill is what
+    // made a selected card read as a status callout. See /DESIGN.md.
     return (
       <div
         key={model.name}
         className={`rounded-lg border p-4 transition-colors ${
-          selected ? 'border-info/40 bg-info-soft' : 'border-line'
+          selected ? 'border-brand' : 'border-line'
         }`}
       >
         <div className="flex items-start justify-between gap-4">
@@ -117,7 +129,7 @@ export default function TranscriptionModelManager({ selectedModel, onModelSelect
               <span
                 className={`rounded-full px-2 py-0.5 text-xs ${
                   model.streaming
-                    ? 'bg-brand-soft text-brand'
+                    ? 'bg-brand-soft text-brand-soft-ink'
                     : 'bg-warn-soft text-warn-ink'
                 }`}
               >
@@ -125,9 +137,24 @@ export default function TranscriptionModelManager({ selectedModel, onModelSelect
               </span>
             </div>
             <p className="mt-1 text-sm text-ink-muted">{model.description}</p>
-            <p className="mt-1 text-xs text-ink-muted">
-              {model.languages} · {formatFileSize(model.size_mb)} · {model.speed}
-            </p>
+            <dl className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-ink-muted">
+              <div className="flex gap-1">
+                <dt>Quality</dt>
+                <dd className="font-medium text-ink">{model.accuracy}</dd>
+              </div>
+              <div className="flex gap-1">
+                <dt>Speed</dt>
+                <dd className="font-medium text-ink">{model.speed}</dd>
+              </div>
+              <div className="flex gap-1">
+                <dt>Download</dt>
+                <dd className="readout text-ink">{formatFileSize(model.size_mb)}</dd>
+              </div>
+              <div className="flex gap-1">
+                <dt className="sr-only">Languages</dt>
+                <dd>{model.languages}</dd>
+              </div>
+            </dl>
           </div>
 
           <div className="flex shrink-0 items-center gap-2">
@@ -137,7 +164,7 @@ export default function TranscriptionModelManager({ selectedModel, onModelSelect
               </Button>
             )}
             {available && selected && (
-              <span className="text-sm font-medium text-info-ink">Selected</span>
+              <span className="text-sm font-medium text-brand">Selected</span>
             )}
             {!available && !downloading && (
               <Button
@@ -183,7 +210,7 @@ export default function TranscriptionModelManager({ selectedModel, onModelSelect
   // without expanding the whole catalog.
   const isPinned = (m: ModelInfo) =>
     m.recommended || m.name === selectedModel || m.status === 'Available';
-  const pinned = models.filter(isPinned);
+  const pinned = sortModels(models.filter(isPinned), sort);
   const rest = models.filter((m) => !isPinned(m));
 
   // Insertion order is the catalog's order, which is live-capable first.
@@ -199,6 +226,29 @@ export default function TranscriptionModelManager({ selectedModel, onModelSelect
       {error && (
         <div className="rounded-md bg-danger-soft p-3 text-sm text-danger-ink">{error}</div>
       )}
+
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <p className="max-w-[52ch] text-xs text-ink-muted">
+          Quality is a tier from each model&apos;s published error rate, and speed is
+          estimated from its size. Both are catalog estimates — reliable for picking
+          a tier, not for ranking two models against each other.
+        </p>
+        <div className="flex shrink-0 items-center gap-2">
+          <span className="text-sm text-ink-muted">Sort by</span>
+          <Select value={sort} onValueChange={(v) => setSort(v as ModelSort)}>
+            <SelectTrigger className="h-8 w-40" aria-label="Sort models by">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {Object.entries(MODEL_SORT_LABELS).map(([value, label]) => (
+                <SelectItem key={value} value={value}>
+                  {label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
 
       {pinned.map(card)}
 
@@ -220,7 +270,7 @@ export default function TranscriptionModelManager({ selectedModel, onModelSelect
                   <h4 className="text-xs font-semibold uppercase tracking-wide text-ink-muted">
                     {family}
                   </h4>
-                  {group.map(card)}
+                  {sortModels(group, sort).map(card)}
                 </div>
               ))}
             </div>

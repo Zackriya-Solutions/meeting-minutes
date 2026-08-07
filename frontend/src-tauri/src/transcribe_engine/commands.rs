@@ -144,10 +144,17 @@ pub async fn transcribe_download_model<R: Runtime>(
 
     let app_for_progress = app_handle.clone();
     let name_for_progress = model_name.clone();
-    let progress_callback = Box::new(move |progress: u8| {
+    let progress_callback = Box::new(move |p: crate::transcribe_engine::engine::DownloadProgress| {
         let _ = app_for_progress.emit(
             "model-download-progress",
-            serde_json::json!({ "modelName": name_for_progress, "progress": progress }),
+            serde_json::json!({
+                "modelName": name_for_progress,
+                "progress": p.percent,
+                "downloaded_mb": p.downloaded_mb,
+                "total_mb": p.total_mb,
+                "speed_mbps": p.speed_mbps,
+                "status": if p.percent >= 100 { "completed" } else { "downloading" },
+            }),
         );
     });
 
@@ -254,28 +261,20 @@ pub async fn transcribe_validate_model_ready<R: Runtime>(
         .await
         .map_err(|e| format!("Failed to discover models: {}", e))?;
 
+    // No substituting another downloaded model: decode behaviour is a property
+    // of the model, not the app. Swapping a streaming model for a batch-only one
+    // silently turns live transcription into per-utterance batches while the UI
+    // still names the model the user picked. Say what is missing instead.
     let target = models
         .iter()
         .find(|m| m.name == configured && matches!(m.status, ModelStatus::Available))
-        .or_else(|| {
-            models
-                .iter()
-                .find(|m| matches!(m.status, ModelStatus::Available))
-        })
         .ok_or_else(|| {
             format!(
-                "Model '{}' is not downloaded. Download it from settings first.",
+                "Transcription model '{}' is not downloaded yet. \
+                 Download it in Settings, then start recording.",
                 configured
             )
         })?;
-
-    if target.name != configured {
-        log::warn!(
-            "Configured model '{}' unavailable, falling back to '{}'",
-            configured,
-            target.name
-        );
-    }
 
     engine
         .load_model(&target.name)

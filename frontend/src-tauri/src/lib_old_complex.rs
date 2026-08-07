@@ -1469,7 +1469,7 @@ async fn start_recording<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
     log_info!("🎯 Recording started successfully with {} devices", devices.len());
     
     let _ = app.notification().builder()
-        .title("Meetily")
+        .title("Conversationaly")
         .body("Recording has started. Please inform others in the meeting.")
         .show();
     
@@ -1739,7 +1739,7 @@ async fn stop_recording<R: Runtime>(app: AppHandle<R>, args: RecordingArgs) -> R
     }
 
     // Send a system notification indicating recording has stopped
-    let _ = app.notification().builder().title("Meetily").body("Recording stopped").show();
+    let _ = app.notification().builder().title("Conversationaly").body("Recording stopped").show();
     
     Ok(())
 }

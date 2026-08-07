@@ -55,6 +55,19 @@ export class ConfigService {
   }
 
   /**
+   * Persist the transcript model selection so it survives a restart.
+   * Without this the choice lived only in React state and every launch fell
+   * back to the onboarding default.
+   */
+  async saveTranscriptConfig(config: TranscriptModelProps): Promise<void> {
+    await invoke('api_save_transcript_config', {
+      provider: config.provider,
+      model: config.model,
+      apiKey: config.apiKey ?? null,
+    });
+  }
+
+  /**
    * Get saved summary model configuration
    * @returns Promise with { provider, model, whisperModel }
    */

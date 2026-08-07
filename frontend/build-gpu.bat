@@ -1,5 +1,5 @@
 @echo off
-REM Meetily GPU-Accelerated Build Script for Windows
+REM Conversationaly GPU-Accelerated Build Script for Windows
 REM Automatically detects and builds with optimal GPU features
 REM Based on the existing build.bat with GPU detection enhancements
 
@@ -23,7 +23,7 @@ if "%~1" == "help" (
 
 echo.
 echo ========================================
-echo   Meetily GPU-Accelerated Build
+echo   Conversationaly GPU-Accelerated Build
 echo ========================================
 echo.
 
@@ -79,7 +79,7 @@ set "RUST_ENV_LIB=%LIB%"
 set "RUST_ENV_INCLUDE=%INCLUDE%"
 
 echo.
-echo 📦 Building Meetily...
+echo 📦 Building Conversationaly...
 echo.
 
 REM Find package.json location
@@ -214,7 +214,7 @@ exit /b 0
 :_print_help
 echo.
 echo ========================================
-echo   Meetily GPU Build Script - Help
+echo   Conversationaly GPU Build Script - Help
 echo ========================================
 echo.
 echo USAGE:
@@ -228,7 +228,7 @@ echo   /?        Show this help message
 echo.
 echo DESCRIPTION:
 echo   This script automatically detects your GPU and builds
-echo   Meetily with optimal hardware acceleration features:
+echo   Conversationaly with optimal hardware acceleration features:
 echo.
 echo   - NVIDIA GPU    : Builds with CUDA acceleration
 echo   - AMD/Intel GPU : Builds with Vulkan acceleration

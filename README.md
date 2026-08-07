@@ -1,6 +1,6 @@
 <div align="center" style="border-bottom: none">
     <h1>
-        <img src="docs/Meetily-6.png" style="border-radius: 10px;" />
+        <img src="docs/Conversationaly-6.png" style="border-radius: 10px;" />
         <br>
         Privacy-First AI Meeting Assistant
     </h1>
@@ -35,7 +35,7 @@ A privacy-first AI meeting assistant that captures, transcribes, and summarizes 
 </p>
 
 <p align="center">
-    <img src="docs/meetily_demo.gif" width="650" alt="Meetily Demo" />
+    <img src="docs/conversationaly_demo.gif" width="650" alt="Conversationaly Demo" />
     <br>
     <a href="https://youtu.be/6FnhSC_eSz8">View full Demo Video</a>
 </p>
@@ -52,7 +52,7 @@ A privacy-first AI meeting assistant that captures, transcribes, and summarizes 
 <summary>Table of Contents</summary>
 
 - [Introduction](#introduction)
-- [Why Meetily?](#why-meetily)
+- [Why Conversationaly?](#why-conversationaly)
 - [Features](#features)
 - [Installation](#installation)
 - [Key Features in Action](#key-features-in-action)
@@ -66,9 +66,9 @@ A privacy-first AI meeting assistant that captures, transcribes, and summarizes 
 
 ## Introduction
 
-Meetily is a privacy-first AI meeting assistant that runs entirely on your local machine. It captures your meetings, transcribes them in real-time, and generates summaries, all without sending any data to the cloud. This makes it the perfect solution for professionals and enterprises who need to maintain complete control over their sensitive information.
+Conversationaly is a privacy-first AI meeting assistant that runs entirely on your local machine. It captures your meetings, transcribes them in real-time, and generates summaries, all without sending any data to the cloud. This makes it the perfect solution for professionals and enterprises who need to maintain complete control over their sensitive information.
 
-## Why Meetily?
+## Why Conversationaly?
 
 While there are many meeting transcription tools available, this solution stands out by offering:
 
@@ -88,7 +88,7 @@ Meeting AI tools create significant privacy and compliance risks across all sect
 
 Whether you're a defense consultant, enterprise executive, legal professional, or healthcare provider, your sensitive discussions shouldn't live on servers you don't control. Cloud meeting tools promise convenience but deliver privacy nightmares with unclear data storage practices and potential unauthorized access.
 
-**Meetily solves this:** Complete data sovereignty on your infrastructure, zero vendor lock-in, and full control over your sensitive conversations.
+**Conversationaly solves this:** Complete data sovereignty on your infrastructure, zero vendor lock-in, and full control over your sensitive conversations.
 
 </details>
 
@@ -98,7 +98,7 @@ Whether you're a defense consultant, enterprise executive, legal professional, o
 - **Real-time Transcription:** Get a live transcript of your meeting as it happens.
 - **AI-Powered Summaries:** Generate summaries of your meetings using powerful language models.
 - **Multi-Platform:** Works on macOS, Windows, and Linux.
-- **Open Source:** Meetily is open source and free to use.
+- **Open Source:** Conversationaly is open source and free to use.
 - **Flexible AI Provider Support:** Choose from Ollama (local), Claude, Groq, OpenRouter, or use your own OpenAI-compatible endpoint.
 
 ## Installation
@@ -112,8 +112,8 @@ Whether you're a defense consultant, enterprise executive, legal professional, o
 
 1. Download `meetily_0.4.0_aarch64.dmg` from [Releases](https://github.com/Zackriya-Solutions/meeting-minutes/releases/latest)
 2. Open the downloaded `.dmg` file
-3. Drag **Meetily** to your Applications folder
-4. Open **Meetily** from Applications folder
+3. Drag **Conversationaly** to your Applications folder
+4. Open **Conversationaly** from Applications folder
 
 ### 🐧 **Linux**
 
@@ -138,7 +138,7 @@ pnpm install
 Transcribe meetings entirely on your device using **Whisper** or **Parakeet** models. No cloud required.
 
 <p align="center">
-    <img src="docs/home.png" width="650" style="border-radius: 10px;" alt="Meetily Demo" />
+    <img src="docs/home.png" width="650" style="border-radius: 10px;" alt="Conversationaly Demo" />
 </p>
 
 ### 📥 Import & Enhance `Beta`
@@ -148,7 +148,7 @@ Import existing audio files to generate transcripts, or enhance to re-transcribe
 > Contributed by [Jeremi Joslin](https://github.com/jeremi), improved by [Vishnu P S](https://github.com/p-s-vishnu) and [Mohammed Safvan](https://github.com/mohammedsafvan)
 
 <p align="center">
-    <img src="docs/meetily-export.gif" width="650" style="border-radius: 10px;" alt="Import and Enhance" />
+    <img src="docs/conversationaly-export.gif" width="650" style="border-radius: 10px;" alt="Import and Enhance" />
 </p>
 
 ### 🤖 AI-Powered Summaries
@@ -198,13 +198,13 @@ Automatically enabled at build time - no configuration needed.
 
 ## System Architecture
 
-Meetily is a single, self-contained application built with [Tauri](https://tauri.app/). It uses a Rust-based backend to handle all the core logic, and a Next.js frontend for the user interface.
+Conversationaly is a single, self-contained application built with [Tauri](https://tauri.app/). It uses a Rust-based backend to handle all the core logic, and a Next.js frontend for the user interface.
 
 For more details, see the [Architecture documentation](docs/architecture.md).
 
 ## For Developers
 
-If you want to contribute to Meetily or build it from source, you'll need to have Rust and Node.js installed. For detailed build instructions, please see the [Building from Source guide](docs/BUILDING.md).
+If you want to contribute to Conversationaly or build it from source, you'll need to have Rust and Node.js installed. For detailed build instructions, please see the [Building from Source guide](docs/BUILDING.md).
 
 ## Meetily Pro
 

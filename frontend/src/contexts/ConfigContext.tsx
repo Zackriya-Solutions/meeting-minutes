@@ -5,7 +5,6 @@ import { TranscriptModelProps } from '@/components/TranscriptSettings';
 import { SelectedDevices } from '@/components/DeviceSelection';
 import { configService, ModelConfig } from '@/services/configService';
 import { invoke } from '@tauri-apps/api/core';
-import Analytics from '@/lib/analytics';
 import { BetaFeatures, BetaFeatureKey, loadBetaFeatures, saveBetaFeatures } from '@/types/betaFeatures';
 
 export interface OllamaModel {
@@ -389,18 +388,11 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
-  // Toggle beta feature with localStorage persistence and analytics
+  // Toggle beta feature with localStorage persistence
   const toggleBetaFeature = useCallback((featureKey: BetaFeatureKey, enabled: boolean) => {
     setBetaFeatures(prev => {
       const updated = { ...prev, [featureKey]: enabled };
       saveBetaFeatures(updated);
-
-      // Track analytics with specific feature
-      Analytics.track('beta_feature_toggled', {
-        feature: featureKey,
-        enabled: enabled.toString(),
-      }).catch(err => console.error('Failed to track beta feature toggle:', err));
-
       return updated;
     });
   }, []);

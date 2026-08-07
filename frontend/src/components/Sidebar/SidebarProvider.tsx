@@ -2,7 +2,6 @@
 
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
-import Analytics from '@/lib/analytics';
 import { invoke } from '@tauri-apps/api/core';
 import { useRecordingState } from '@/contexts/RecordingStateContext';
 
@@ -66,7 +65,11 @@ export const useSidebar = () => {
 
 export function SidebarProvider({ children }: { children: React.ReactNode }) {
   const [currentMeeting, setCurrentMeeting] = useState<CurrentMeeting | null>({ id: 'intro-call', title: '+ New Call' });
-  const [isCollapsed, setIsCollapsed] = useState(true);
+  // Expanded on launch: collapsed hides the meeting list entirely, and the
+  // meetings are the app's content. The choice is not persisted — a collapse
+  // is a per-session gesture, and reading it back before paint would need the
+  // same inline-script treatment the theme gets.
+  const [isCollapsed, setIsCollapsed] = useState(false);
   const [meetings, setMeetings] = useState<CurrentMeeting[]>([]);
   const [sidebarItems, setSidebarItems] = useState<SidebarItem[]>([]);
   const [isMeetingActive, setIsMeetingActive] = useState(false);
@@ -92,11 +95,9 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
           title: meeting.title
         }));
         setMeetings(transformedMeetings);
-        Analytics.trackBackendConnection(true);
       } catch (error) {
         console.error('Error fetching meetings:', error);
         setMeetings([]);
-        Analytics.trackBackendConnection(false, error instanceof Error ? error.message : 'Unknown error');
       }
     }
   }, [serverAddress]);
@@ -157,8 +158,6 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
         router.push('/');
       }
 
-      // Track recording initiation from sidebar
-      Analytics.trackButtonClick('start_recording', 'sidebar');
     }
     // The actual recording start/stop is handled in the Home component
   };

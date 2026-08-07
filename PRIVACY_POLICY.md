@@ -1,10 +1,10 @@
-# Meetily Privacy Policy
+# Conversationaly Privacy Policy
 
 *Last updated: [Current Date]*
 
 ## Our Privacy-First Commitment
 
-Meetily is built on the principle that your meeting data should remain private and under your control. This privacy policy explains how we handle data in our open-source meeting assistant.
+Conversationaly is built on the principle that your meeting data should remain private and under your control. This privacy policy explains how we handle data in our open-source meeting assistant.
 
 ## Data Processing Philosophy
 
@@ -23,7 +23,7 @@ Meetily is built on the principle that your meeting data should remain private a
 ## Usage Analytics
 
 ### What We Collect
-Usage analytics is optional and off by default. When you choose to enable it, Meetily collects minimal, anonymized usage data:
+Usage analytics is optional and off by default. When you choose to enable it, Conversationaly collects minimal, anonymized usage data:
 
 **Application Usage:**
 - Feature usage patterns (which tools you use most)
@@ -124,4 +124,4 @@ As an open-source project under MIT license, you can:
 
 ---
 
-*This privacy policy applies to Meetily v0.0.5 and later versions. For enterprise deployments, additional privacy controls may be available.*
+*This privacy policy applies to Conversationaly v0.0.5 and later versions. For enterprise deployments, additional privacy controls may be available.*

@@ -81,7 +81,9 @@ export default function SettingsPage() {
       <div className="scrollbar-slim flex-1 overflow-y-auto">
         <div className="mx-auto max-w-5xl px-8 pb-16">
           <Tabs value={activeTab} onValueChange={setActiveTab}>
-            <TabsList className="relative h-auto w-full justify-start gap-0 rounded-none border-b border-line bg-transparent p-0">
+            {/* The strip's shape lives in the `underline` Tabs variant, which
+                deliberately draws no indicator — the spring below owns it. */}
+            <TabsList variant="underline">
               {TABS.map((tab, index) => {
                 const Icon = tab.icon;
                 return (
@@ -89,7 +91,6 @@ export default function SettingsPage() {
                     key={tab.value}
                     value={tab.value}
                     ref={el => { tabRefs.current[index] = el }}
-                    className="relative z-10 flex items-center gap-2 rounded-none border-0 bg-transparent px-3.5 py-3 text-base text-ink-muted transition-colors duration-fast hover:text-ink data-[state=active]:bg-transparent data-[state=active]:font-medium data-[state=active]:text-ink data-[state=active]:shadow-none"
                   >
                     <Icon className="h-4 w-4" aria-hidden />
                     {tab.label}

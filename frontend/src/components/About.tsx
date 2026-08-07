@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { getVersion } from '@tauri-apps/api/app';
-import AnalyticsConsentSwitch from './AnalyticsConsentSwitch';
 import { UpdateDialog } from './UpdateDialog';
 import { updateService, UpdateInfo } from '@/services/updateService';
 import { Button } from './ui/button';
@@ -85,10 +84,6 @@ export function About() {
         {updateInfo?.available && (
           <span className="text-sm text-brand">v{updateInfo.version} available</span>
         )}
-      </div>
-
-      <div className="mt-5 border-t border-line pt-3">
-        <AnalyticsConsentSwitch />
       </div>
 
       {/* Upstream attribution. Conversationaly is a fork of Meetily; the credit

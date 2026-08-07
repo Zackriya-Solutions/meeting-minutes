@@ -128,7 +128,7 @@ fn get_cached_model_path(app_data_dir: &PathBuf, model_name: &str) -> Result<Pat
 ///
 /// # Arguments
 /// * `app_data_dir` - Application data directory (for model resolution)
-/// * `model_name` - Model name (e.g., "gemma3:1b")
+/// * `model_name` - Model name (e.g., "gemma4:e4b")
 /// * `system_prompt` - System instructions for the model
 /// * `user_prompt` - User message/task
 /// * `cancellation_token` - Optional token for cancellation

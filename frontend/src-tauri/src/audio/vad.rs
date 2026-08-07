@@ -23,10 +23,21 @@ pub struct ContinuousVadProcessor {
     current_speech: Vec<f32>,
     in_speech: bool,
     processed_samples: usize,
-    speech_start_sample: usize,
+    /// Set once this utterance has been cut short by [`MAX_UTTERANCE_SAMPLES`].
+    /// The VAD's own SpeechEnd carries the *whole* utterance, so after a cut only
+    /// the tail we accumulated since is new text.
+    mid_utterance_cut: bool,
     // State tracking for smart logging
     last_logged_state: bool,
 }
+
+/// Longest unbroken speech that can accumulate before a segment is cut anyway.
+///
+/// A segment normally closes on silence (`redemption_time`), which means a
+/// speaker who never pauses produces nothing at all: the live batch path decodes
+/// whole segments, so the transcript would stay empty until they stopped talking
+/// and then arrive in one lump — most of it discarded by the backlog cap.
+const MAX_UTTERANCE_SAMPLES: usize = crate::audio::common::LIVE_MAX_SEGMENT_SAMPLES;
 
 impl ContinuousVadProcessor {
     pub fn new(input_sample_rate: u32, redemption_time_ms: u32) -> Result<Self> {
@@ -76,7 +87,7 @@ impl ContinuousVadProcessor {
             current_speech: Vec::new(),
             in_speech: false,
             processed_samples: 0,
-            speech_start_sample: 0,
+            mid_utterance_cut: false,
             // Initialize state tracking
             last_logged_state: false,
         })
@@ -137,24 +148,10 @@ impl ContinuousVadProcessor {
         }
 
         // Force end any ongoing speech
-        if self.in_speech && !self.current_speech.is_empty() {
-            // processed_samples and speech_start_sample always count 16kHz samples (post-resampling)
-            let start_ms = (self.speech_start_sample as f64 / 16000.0) * 1000.0;
-            let end_ms = (self.processed_samples as f64 / 16000.0) * 1000.0;
-
-            debug!("VAD flush: Force-ending speech - start={}ms, end={}ms, duration={}ms, samples={}",
-                  start_ms, end_ms, end_ms - start_ms, self.current_speech.len());
-
-            let segment = SpeechSegment {
-                samples: self.current_speech.clone(),
-                start_timestamp_ms: start_ms,
-                end_timestamp_ms: end_ms,
-                confidence: 0.8, // Estimated confidence for forced end
-            };
-
-            self.speech_segments.push_back(segment);
-            self.current_speech.clear();
+        if self.in_speech {
+            self.cut_current_speech(0.8); // estimated confidence for a forced end
             self.in_speech = false;
+            self.mid_utterance_cut = false;
         }
 
         // Extract all remaining segments
@@ -192,8 +189,6 @@ impl ContinuousVadProcessor {
                         self.last_logged_state = true;
                     }
                     self.in_speech = true;
-                    // Use 16000 (VAD processing rate) since processed_samples counts 16kHz samples
-                    self.speech_start_sample = self.processed_samples + (timestamp_ms * 16000 / 1000);
                     self.current_speech.clear();
                 }
                 VadTransition::SpeechEnd { start_timestamp_ms, end_timestamp_ms, samples } => {
@@ -204,28 +199,36 @@ impl ContinuousVadProcessor {
                     }
                     self.in_speech = false;
 
-                    // Use samples from VAD transition if available, otherwise use accumulated samples
-                    let speech_samples = if !samples.is_empty() {
-                        samples
+                    if self.mid_utterance_cut {
+                        // The head of this utterance already went out as forced
+                        // cuts, and `samples` is the whole utterance — emitting it
+                        // would transcribe the same speech twice.
+                        self.mid_utterance_cut = false;
+                        self.cut_current_speech(0.9);
                     } else {
-                        self.current_speech.clone()
-                    };
-
-                    if !speech_samples.is_empty() {
-                        let segment = SpeechSegment {
-                            samples: speech_samples,
-                            start_timestamp_ms: start_timestamp_ms as f64,
-                            end_timestamp_ms: end_timestamp_ms as f64,
-                            confidence: 0.9, // VAD confidence
+                        // Use samples from VAD transition if available, otherwise use accumulated samples
+                        let speech_samples = if !samples.is_empty() {
+                            samples
+                        } else {
+                            self.current_speech.clone()
                         };
 
-                        info!("VAD: Completed speech segment: {:.1}ms duration, {} samples",
-                              end_timestamp_ms - start_timestamp_ms, segment.samples.len());
+                        if !speech_samples.is_empty() {
+                            let segment = SpeechSegment {
+                                samples: speech_samples,
+                                start_timestamp_ms: start_timestamp_ms as f64,
+                                end_timestamp_ms: end_timestamp_ms as f64,
+                                confidence: 0.9, // VAD confidence
+                            };
 
-                        self.speech_segments.push_back(segment);
+                            info!("VAD: Completed speech segment: {:.1}ms duration, {} samples",
+                                  end_timestamp_ms - start_timestamp_ms, segment.samples.len());
+
+                            self.speech_segments.push_back(segment);
+                        }
+
+                        self.current_speech.clear();
                     }
-
-                    self.current_speech.clear();
                 }
             }
         }
@@ -236,7 +239,44 @@ impl ContinuousVadProcessor {
         }
 
         self.processed_samples += chunk.len();
+
+        if self.in_speech && self.current_speech.len() >= MAX_UTTERANCE_SAMPLES {
+            self.mid_utterance_cut = true;
+            self.cut_current_speech(0.8); // forced cut, not a VAD-confirmed end
+        }
+
         Ok(())
+    }
+
+    /// Close a segment on the speech accumulated so far without ending the
+    /// utterance. Timestamps come from our own sample counter because the VAD has
+    /// not reported an end for this speech yet.
+    ///
+    /// ponytail: the head of a cut utterance comes from chunks accumulated since
+    /// SpeechStart, so it misses the VAD's `pre_speech_pad`. Buffer a ~300ms
+    /// pre-roll here if first words start coming back clipped.
+    fn cut_current_speech(&mut self, confidence: f32) {
+        if self.current_speech.is_empty() {
+            return;
+        }
+        let end_ms = (self.processed_samples as f64 / 16000.0) * 1000.0;
+        let start_ms = ((self.processed_samples.saturating_sub(self.current_speech.len())) as f64
+            / 16000.0)
+            * 1000.0;
+
+        info!(
+            "VAD: Cut speech segment at {:.1}ms ({} samples, {:.1}s)",
+            end_ms,
+            self.current_speech.len(),
+            self.current_speech.len() as f64 / 16000.0
+        );
+
+        self.speech_segments.push_back(SpeechSegment {
+            samples: std::mem::take(&mut self.current_speech),
+            start_timestamp_ms: start_ms,
+            end_timestamp_ms: end_ms,
+            confidence,
+        });
     }
 }
 
@@ -446,6 +486,45 @@ mod tests {
         }
 
         samples
+    }
+
+    /// Regression: a segment only ever closed on VAD-detected silence, so a
+    /// speaker who never pauses produced nothing at all until they stopped.
+    /// Live transcription showed an empty screen for the whole utterance, and the
+    /// backlog cap then discarded most of it when it arrived in one lump.
+    ///
+    /// Driven through the state directly: what needs testing is the cut policy,
+    /// not whether Silero classifies a synthesized tone as speech.
+    #[test]
+    fn unbroken_speech_is_cut_before_the_vad_reports_an_end() {
+        let mut vad = ContinuousVadProcessor::new(16000, 2000).expect("VAD");
+        vad.in_speech = true; // mid-utterance, no SpeechEnd coming
+
+        let mut segments = Vec::new();
+        let secs = 30;
+        for _ in 0..secs * 10 {
+            // 100ms of quiet audio per iteration, as the pipeline feeds it. Silero
+            // reports no transition on it, which is exactly the stuck-in-speech case.
+            segments.extend(vad.process_audio(&vec![0.0f32; 1600]).expect("process"));
+        }
+
+        assert!(
+            !segments.is_empty(),
+            "{secs}s of unbroken speech produced no segment before flush"
+        );
+        let longest = segments.iter().map(|s| s.samples.len()).max().unwrap();
+        assert!(
+            longest <= MAX_UTTERANCE_SAMPLES + 1600,
+            "segment of {longest} samples ignores the {MAX_UTTERANCE_SAMPLES}-sample cut"
+        );
+        // Cuts must partition the audio, not overlap it: re-decoding speech that
+        // already went out is how the transcript ends up saying things twice.
+        let emitted: usize = segments
+            .iter()
+            .chain(vad.flush().expect("flush").iter())
+            .map(|s| s.samples.len())
+            .sum();
+        assert_eq!(emitted, secs * 16000, "emitted audio should equal audio fed");
     }
 
     #[test]

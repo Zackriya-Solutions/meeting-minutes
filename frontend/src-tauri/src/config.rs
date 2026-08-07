@@ -18,10 +18,14 @@ pub const BUILTIN_TRANSCRIPT_PROVIDER: &str = "builtin-ai";
 ///
 /// Deliberately the same tag as `DEFAULT_SUMMARY_MODEL`: one download, one model
 /// resident in memory, both jobs.
-pub const DEFAULT_BUILTIN_TRANSCRIBE_MODEL: &str = "gemma4:e4b";
+pub const DEFAULT_BUILTIN_TRANSCRIBE_MODEL: &str = "gemma4:e2b";
 
-/// Recommended model for summarization.
-pub const DEFAULT_SUMMARY_MODEL: &str = "gemma4:e4b";
+/// Recommended model for summarization, and the one onboarding downloads.
+///
+/// The smaller Gemma 4 tier: ~3.6 GiB instead of ~5.3 GiB and it runs on 8 GB
+/// machines, so first launch works everywhere. E4B stays one click away in
+/// Model Settings for anyone who wants the better summaries.
+pub const DEFAULT_SUMMARY_MODEL: &str = "gemma4:e2b";
 
 /// True when this transcript provider runs through the built-in sidecar rather
 /// than a local GGUF through transcribe.cpp.

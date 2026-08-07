@@ -41,7 +41,7 @@ export function DownloadProgressStep() {
     status: parakeetDownloaded ? 'completed' : 'waiting',
     progress: parakeetDownloaded ? 100 : 0,
     downloadedMb: 0,
-    totalMb: 670,
+    totalMb: 716,
     speedMbps: 0,
   });
 
@@ -202,7 +202,7 @@ export function DownloadProgressStep() {
       total_mb?: number;
       speed_mbps?: number;
       status?: string;
-    }>('parakeet-model-download-progress', (event) => {
+    }>('model-download-progress', (event) => {
       const { modelName, progress, downloaded_mb, total_mb, speed_mbps, status } = event.payload;
       if (modelName === DEFAULT_TRANSCRIBE_MODEL) {
         setParakeetState((prev) => ({
@@ -221,7 +221,7 @@ export function DownloadProgressStep() {
     });
 
     const unlistenComplete = listen<{ modelName: string }>(
-      'parakeet-model-download-complete',
+      'model-download-complete',
       (event) => {
         if (event.payload.modelName === DEFAULT_TRANSCRIBE_MODEL) {
           setParakeetState((prev) => ({ ...prev, status: 'completed', progress: 100 }));
@@ -231,7 +231,7 @@ export function DownloadProgressStep() {
     );
 
     const unlistenError = listen<{ modelName: string; error: string }>(
-      'parakeet-model-download-error',
+      'model-download-error',
       (event) => {
         if (event.payload.modelName === DEFAULT_TRANSCRIBE_MODEL) {
           setParakeetState((prev) => ({
@@ -485,7 +485,7 @@ export function DownloadProgressStep() {
             'Transcription Engine',
             <Mic className="w-5 h-5 text-ink-muted" />,
             parakeetState,
-            '~670 MB'
+            '~716 MB'
           )}
 
           {renderDownloadCard(

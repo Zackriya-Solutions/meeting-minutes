@@ -135,7 +135,7 @@ impl CoreAudioCapture {
                 cf::Boolean::value_true().as_type_ref(),
                 cf::Boolean::value_false(),
                 cf::Boolean::value_true(),
-                cf::str!(c"meetily-audio-tap").as_type_ref(),
+                cf::str!(c"conversationaly-audio-tap").as_type_ref(),
                 &output_uid,
                 &cf::Uuid::new().to_cf_string(),
                 // REMOVED: sub_device array (was causing echo)

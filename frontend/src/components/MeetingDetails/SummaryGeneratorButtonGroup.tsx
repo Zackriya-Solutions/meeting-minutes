@@ -17,7 +17,6 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Sparkles, Settings, Loader2, FileText, Check, Square } from 'lucide-react';
-import Analytics from '@/lib/analytics';
 import { invoke } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
 import { useState, useEffect, useRef, ReactNode } from 'react';
@@ -251,7 +250,6 @@ export function SummaryGeneratorButtonGroup({
           size="sm"
           className="text-danger-ink hover:bg-danger-soft xl:px-4"
           onClick={() => {
-            Analytics.trackButtonClick('stop_summary_generation', 'meeting_details');
             onStopGeneration();
           }}
           title="Stop summary generation"
@@ -265,7 +263,6 @@ export function SummaryGeneratorButtonGroup({
           size="sm"
           className="xl:px-4"
           onClick={() => {
-            Analytics.trackButtonClick('generate_summary', 'meeting_details');
             checkOllamaModelsAndGenerate();
           }}
           disabled={isCheckingModels || isModelConfigLoading}

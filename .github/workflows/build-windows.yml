@@ -692,7 +692,7 @@ jobs:
         if: ${{ github.event.inputs.upload-artifacts == 'true' }}
         uses: actions/upload-artifact@v4
         with:
-          name: meetily-windows-x64-${{ steps.build-profile.outputs.profile }}-${{ steps.get-version.outputs.version }}
+          name: conversationaly-windows-x64-${{ steps.build-profile.outputs.profile }}-${{ steps.get-version.outputs.version }}
           path: |
             target/x86_64-pc-windows-msvc/${{ steps.build-profile.outputs.profile }}/bundle/msi/*.msi
             target/x86_64-pc-windows-msvc/${{ steps.build-profile.outputs.profile }}/bundle/msi/*.msi.sig

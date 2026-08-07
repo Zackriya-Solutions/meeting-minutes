@@ -1,3 +1,8 @@
+/* Hallmark · genre: modern-minimal · macrostructure: Workbench
+ * nav: N3 side-rail · design-system: DESIGN.md · designed-as-app
+ * Token values are owned by DESIGN.md, not by a Hallmark theme.
+ */
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -76,6 +81,11 @@
     --measure: 68ch;
     --rail-w: 16rem;
     --rail-w-collapsed: 3.5rem;
+    /* One left axis for the rail. Every zone insets by the gutter and every
+       row pads by it again, so icons land on a single vertical line at
+       2×gutter and labels at 2×gutter + icon + gap. Available as `px-gutter`.
+       Changing this moves the whole rail together — that is the point. */
+    --rail-gutter: 0.5rem;
     /* Live width of the sidebar rail. Sidebar writes this; the recording
        transport and overlays read it instead of duplicating the math. */
     --rail: var(--rail-w);

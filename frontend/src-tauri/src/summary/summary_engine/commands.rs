@@ -8,37 +8,20 @@ use tokio::sync::Mutex;
 
 use super::model_manager::{DownloadProgress, ModelInfo, ModelManager};
 
-const QWEN35_4B_RECOMMENDED_RAM_GB: u64 = 14;
-
 pub(crate) fn summary_model_priority(model_name: &str) -> u8 {
     match model_name {
-        "qwen3.5:4b" => 4,
-        "qwen3.5:2b" => 3,
-        "gemma3:4b" => 2,
-        "gemma3:1b" => 1,
+        "gemma4:e4b" => 2,
+        "gemma4:e2b" => 1,
         _ => 0,
     }
 }
 
-pub(crate) fn recommend_summary_model(_is_macos: bool, system_ram_gb: u64) -> &'static str {
-    if system_ram_gb >= QWEN35_4B_RECOMMENDED_RAM_GB {
-        "qwen3.5:4b"
-    } else {
-        "qwen3.5:2b"
-    }
-}
-
+// ponytail: everyone gets the small tier. Was a RAM check that handed >=16GB
+// machines E4B, but that made first launch a 5.3 GiB download for half the users
+// and split the "which model do I have" story in two. Bring the tiering back if
+// summary quality complaints show up.
 pub(crate) fn get_recommended_summary_model_for_current_system() -> Result<&'static str, String> {
-    let system_ram_gb = get_system_ram_gb()?;
-    let is_macos = cfg!(target_os = "macos");
-
-    log::info!(
-        "System RAM detected: {} GB, Platform: {}",
-        system_ram_gb,
-        if is_macos { "macOS" } else { "other" }
-    );
-
-    Ok(recommend_summary_model(is_macos, system_ram_gb))
+    Ok(crate::config::DEFAULT_SUMMARY_MODEL)
 }
 
 // ============================================================================
@@ -382,10 +365,7 @@ pub async fn init_model_manager_at_startup<R: Runtime>(
 }
 
 
-/// Get recommended summary model based on platform and system RAM.
-/// macOS → qwen3.5:4b
-/// non-macOS + <8GB RAM → qwen3.5:2b
-/// non-macOS + >=8GB RAM → qwen3.5:4b
+/// Get the recommended summary model — the small Gemma 4 tier, for every system.
 #[tauri::command]
 pub async fn builtin_ai_get_recommended_model() -> Result<String, String> {
     let recommended = get_recommended_summary_model_for_current_system()?;
@@ -394,39 +374,33 @@ pub async fn builtin_ai_get_recommended_model() -> Result<String, String> {
     Ok(recommended.to_string())
 }
 
-/// Get total system RAM in gigabytes
-fn get_system_ram_gb() -> Result<u64, String> {
-    use sysinfo::System;
-
-    let mut sys = System::new_all();
-    sys.refresh_memory();
-
-    let total_memory_bytes = sys.total_memory();
-    let total_memory_gb = total_memory_bytes / (1024 * 1024 * 1024);
-
-    Ok(total_memory_gb)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn recommended_summary_model_uses_qwen2b_below_effective_16gb_floor() {
-        assert_eq!(recommend_summary_model(true, 13), "qwen3.5:2b");
-        assert_eq!(recommend_summary_model(false, 13), "qwen3.5:2b");
+    fn recommended_summary_model_is_the_small_gemma4_tier() {
+        assert_eq!(
+            get_recommended_summary_model_for_current_system().unwrap(),
+            "gemma4:e2b"
+        );
     }
 
     #[test]
-    fn recommended_summary_model_uses_qwen4b_at_effective_16gb_floor() {
-        assert_eq!(recommend_summary_model(true, 14), "qwen3.5:4b");
-        assert_eq!(recommend_summary_model(false, 14), "qwen3.5:4b");
-    }
+    fn recommendation_and_priorities_only_name_offered_models() {
+        use crate::summary::summary_engine::models::get_model_by_name;
 
-    #[test]
-    fn available_summary_model_priority_prefers_qwen_over_gemma() {
-        assert!(summary_model_priority("qwen3.5:4b") > summary_model_priority("qwen3.5:2b"));
-        assert!(summary_model_priority("qwen3.5:2b") > summary_model_priority("gemma3:4b"));
-        assert!(summary_model_priority("gemma3:4b") > summary_model_priority("gemma3:1b"));
+        // The onboarding download, the sidecar's builtin-transcribe default and the
+        // stale-model fallback all have to name a model that actually exists.
+        for name in [
+            get_recommended_summary_model_for_current_system().unwrap(),
+            crate::config::DEFAULT_SUMMARY_MODEL,
+            crate::config::DEFAULT_BUILTIN_TRANSCRIBE_MODEL,
+        ] {
+            assert!(get_model_by_name(name).is_some(), "{} is not offered", name);
+            assert!(summary_model_priority(name) > 0, "{} has no priority", name);
+        }
+        assert!(summary_model_priority("gemma4:e4b") > summary_model_priority("gemma4:e2b"));
+        assert_eq!(summary_model_priority("qwen3.5:4b"), 0);
     }
 }

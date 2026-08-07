@@ -472,7 +472,7 @@ jobs:
         if: github.event.inputs.upload-artifacts == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: meetily-devtest-${{ matrix.platform-name }}-${{ matrix.target }}-${{ steps.get-version.outputs.version }}
+          name: conversationaly-devtest-${{ matrix.platform-name }}-${{ matrix.target }}-${{ steps.get-version.outputs.version }}
           path: |
             target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
             target/aarch64-apple-darwin/release/bundle/macos/*.app

@@ -6,6 +6,7 @@ import { Button } from './ui/button';
 import { Label } from './ui/label';
 import { Eye, EyeOff, Lock, Unlock } from 'lucide-react';
 import TranscriptionModelManager from './TranscriptionModelManager';
+import { configService } from '@/services/configService';
 
 
 export interface TranscriptModelProps {
@@ -72,12 +73,17 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
         }
     };
 
-    const handleModelSelect = (modelName: string, provider: TranscriptModelProps['provider'] = 'local') => {
-        setTranscriptModelConfig({
-            ...transcriptModelConfig,
-            provider,
-            model: modelName
-        });
+    // The one choke point every reachable transcript-model selection routes
+    // through (local catalog + built-in audio LLM), so the write to the database
+    // belongs here rather than in each card.
+    const handleModelSelect = async (modelName: string, provider: TranscriptModelProps['provider'] = 'local') => {
+        const next = { ...transcriptModelConfig, provider, model: modelName };
+        setTranscriptModelConfig(next);
+        try {
+            await configService.saveTranscriptConfig(next);
+        } catch (err) {
+            console.error('Failed to persist transcript model selection:', err);
+        }
         if (onModelSelect) {
             onModelSelect();
         }
@@ -188,7 +194,6 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                             <TranscriptionModelManager
                                 selectedModel={transcriptModelConfig.provider === 'local' ? transcriptModelConfig.model : undefined}
                                 onModelSelect={handleModelSelect}
-                                autoSave={true}
                             />
                         </div>
                     )}
@@ -216,7 +221,7 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                 return (
                                     <div
                                         key={model.name}
-                                        className={`rounded-lg border p-4 ${selected ? 'border-info/40 bg-info-soft' : 'border-line'}`}
+                                        className={`rounded-lg border p-4 ${selected ? 'border-brand' : 'border-line'}`}
                                     >
                                         <div className="flex items-start justify-between gap-4">
                                             <div className="min-w-0">
@@ -233,7 +238,7 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                                     </Button>
                                                 )}
                                                 {selected && (
-                                                    <span className="text-sm font-medium text-info-ink">Selected</span>
+                                                    <span className="text-sm font-medium text-brand">Selected</span>
                                                 )}
                                                 {!installed && (
                                                     <Button

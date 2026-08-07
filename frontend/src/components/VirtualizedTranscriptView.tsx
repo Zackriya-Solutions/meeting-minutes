@@ -24,6 +24,8 @@ export interface VirtualizedTranscriptViewProps {
     isStopping?: boolean;
     /** Enable streaming effect for latest segment */
     enableStreaming?: boolean;
+    /** Uncommitted live text from a streaming model; shown dimmed below the segments */
+    partialText?: string;
     /** Show confidence indicators */
     showConfidence?: boolean;
     /** Completely disable auto-scroll behavior (for meeting details page) */
@@ -137,6 +139,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
     isProcessing = false,
     isStopping = false,
     enableStreaming = false,
+    partialText = '',
     showConfidence = true,
     disableAutoScroll = false,
     hasMore = false,
@@ -243,6 +246,26 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
     // Use simple rendering for small lists, virtualization for large lists
     const useVirtualization = segments.length >= VIRTUALIZATION_THRESHOLD;
 
+    // What sits below the last committed segment while recording: the streaming
+    // decoder's uncommitted tail if it has one, otherwise the Listening pulse.
+    // Outside the virtualizer — this text is rewritten several times a second
+    // and re-measuring a virtual row on every keystroke-sized change thrashes.
+    const liveTail =
+        !isStopping && isRecording && !isPaused && !isProcessing ? (
+            partialText ? (
+                <div className="mt-2 flex items-baseline gap-3 py-1.5 pl-[4.25rem] animate-fade-in">
+                    <p className="min-w-0 flex-1 text-md leading-relaxed text-ink-muted">
+                        {partialText}
+                    </p>
+                </div>
+            ) : segments.length > 0 ? (
+                <div className="mt-4 flex items-center gap-2 pl-[4.25rem] animate-fade-in">
+                    <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-danger animate-live" />
+                    <span className="text-sm text-ink-muted">Listening</span>
+                </div>
+            ) : null
+        ) : null;
+
     return (
         <div ref={scrollRef} className="scrollbar-slim flex h-full flex-col overflow-y-auto px-4 py-2">
             {/* Recording Status Bar - Sticky at top, always visible when recording */}
@@ -254,7 +277,9 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
 
             {/* Content - add padding when recording to prevent overlap */}
             <div className={isRecording ? 'pt-2' : ''}>
-            {segments.length === 0 ? (
+            {/* A partial with no committed segments yet is still text on screen —
+                showing "Listening" underneath it would contradict itself. */}
+            {segments.length === 0 && !partialText ? (
                 // Empty states teach the next action rather than saying "nothing here".
                 <div className="flex min-h-[55vh] flex-col items-center justify-center px-6 text-center animate-fade-in">
                     {isRecording ? (
@@ -344,13 +369,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                         </div>
                     )}
 
-                    {/* Listening indicator when recording */}
-                    {!isStopping && isRecording && !isPaused && !isProcessing && segments.length > 0 && (
-                        <div className="mt-4 flex items-center gap-2 pl-[4.25rem] animate-fade-in">
-                            <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-danger animate-live" />
-                            <span className="text-sm text-ink-muted">Listening</span>
-                        </div>
-                    )}
+                    {liveTail}
                 </>
             ) : (
                 // Simple rendering for small lists (better animations)
@@ -388,13 +407,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                         </div>
                     )}
 
-                    {/* Listening indicator when recording */}
-                    {!isStopping && isRecording && !isPaused && !isProcessing && segments.length > 0 && (
-                        <div className="mt-4 flex items-center gap-2 pl-[4.25rem] animate-fade-in">
-                            <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-danger animate-live" />
-                            <span className="text-sm text-ink-muted">Listening</span>
-                        </div>
-                    )}
+                    {liveTail}
                 </>
             )}
             </div>

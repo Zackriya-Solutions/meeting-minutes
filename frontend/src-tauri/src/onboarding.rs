@@ -20,7 +20,7 @@ pub struct OnboardingStatus {
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct ModelStatus {
     pub parakeet: String,  // "downloaded" | "not_downloaded" | "downloading"
-    pub summary: String,   // Generic field for summary model (Qwen 3.5 or legacy Gemma variants)
+    pub summary: String,   // Generic field for summary model (Gemma 4 variants)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub selected_summary_model: Option<String>,
 }

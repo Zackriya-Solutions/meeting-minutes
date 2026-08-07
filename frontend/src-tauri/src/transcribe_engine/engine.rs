@@ -28,6 +28,9 @@ use crate::config::{
     transcribe_model, DEFAULT_TRANSCRIBE_MODEL, TRANSCRIBE_MODEL_BASE_URL,
     TRANSCRIBE_MODEL_CATALOG,
 };
+// Same shape the summary-model download already reports; the UI renders both
+// with the same MB/speed widgets, so there is one struct, not two.
+pub use crate::summary::summary_engine::model_manager::DownloadProgress;
 
 /// Mirrors the shape the frontend model manager already consumes, so the UI
 /// keeps its existing status handling.
@@ -110,7 +113,7 @@ impl TranscribeEngine {
                     dirs::data_dir()
                         .or_else(dirs::home_dir)
                         .ok_or_else(|| anyhow!("Could not find system data directory"))?
-                        .join("Meetily")
+                        .join("Conversationaly")
                         .join("models")
                 }
             }
@@ -311,7 +314,7 @@ impl TranscribeEngine {
     pub async fn download_model(
         &self,
         model_name: &str,
-        progress_callback: Option<Box<dyn Fn(u8) + Send>>,
+        progress_callback: Option<Box<dyn Fn(DownloadProgress) + Send>>,
     ) -> Result<()> {
         let entry = transcribe_model(model_name)
             .ok_or_else(|| anyhow!("Unknown model: {}", model_name))?;
@@ -349,7 +352,7 @@ impl TranscribeEngine {
         model_name: &str,
         repo: &str,
         filename: &str,
-        progress_callback: Option<Box<dyn Fn(u8) + Send>>,
+        progress_callback: Option<Box<dyn Fn(DownloadProgress) + Send>>,
     ) -> Result<()> {
         let url = format!(
             "{}/{}/resolve/main/{}",
@@ -380,9 +383,11 @@ impl TranscribeEngine {
         let mut stream = response.bytes_stream();
         let mut downloaded = 0u64;
         let mut last_reported = 0u8;
+        let mut last_report_time = std::time::Instant::now();
+        let mut bytes_since_report = 0u64;
 
         if let Some(ref cb) = progress_callback {
-            cb(0);
+            cb(DownloadProgress::new(0, total_size, 0.0));
         }
 
         while let Some(chunk) = stream.next().await {
@@ -394,15 +399,27 @@ impl TranscribeEngine {
             let chunk = chunk.map_err(|e| anyhow!("Failed to read chunk: {}", e))?;
             file.write_all(&chunk).await?;
             downloaded += chunk.len() as u64;
+            bytes_since_report += chunk.len() as u64;
 
             if total_size > 0 {
                 let progress = ((downloaded as f64 / total_size as f64) * 100.0) as u8;
-                if progress > last_reported {
+                let elapsed = last_report_time.elapsed();
+                // Percent alone ticks once per ~7 MB on a 716 MB model, which
+                // leaves the speed readout stale; the 500 ms floor keeps it live.
+                if progress > last_reported || elapsed.as_millis() >= 500 {
+                    let speed_mbps = if elapsed.as_secs_f64() > 0.0 {
+                        (bytes_since_report as f64 / 1048576.0) / elapsed.as_secs_f64()
+                    } else {
+                        0.0
+                    };
                     last_reported = progress;
+                    last_report_time = std::time::Instant::now();
+                    bytes_since_report = 0;
+
                     self.set_status(model_name, ModelStatus::Downloading { progress })
                         .await;
                     if let Some(ref cb) = progress_callback {
-                        cb(progress);
+                        cb(DownloadProgress::new(downloaded, total_size, speed_mbps));
                     }
                 }
             }

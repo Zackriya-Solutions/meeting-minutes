@@ -22,7 +22,7 @@ const PORT = 8080;
 const LATEST_JSON_PATH = path.join(__dirname, '..', 'latest.json');
 
 console.log('=========================================');
-console.log('  Meetily Update Testing Server');
+console.log('  Conversationaly Update Testing Server');
 console.log('=========================================\n');
 
 // Check if latest.json exists

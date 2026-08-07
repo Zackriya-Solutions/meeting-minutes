@@ -136,7 +136,7 @@ export function SettingsModals({
                       {models.map((model) => (
                         <div
                           key={model.id}
-                          className={`bg-elevated p-4 rounded-lg shadow cursor-pointer transition-colors ${modelConfig.model === model.name ? 'ring-2 ring-ring bg-info-soft' : 'hover:bg-sunken'
+                          className={`bg-elevated p-4 rounded-lg border cursor-pointer transition-colors ${modelConfig.model === model.name ? 'border-brand' : 'border-line hover:bg-sunken'
                             }`}
                           onClick={() => setModelConfig((prev: ModelConfig) => ({ ...prev, model: model.name }))}
                         >

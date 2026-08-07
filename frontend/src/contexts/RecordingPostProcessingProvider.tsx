@@ -14,7 +14,7 @@ import { useRecordingStop } from '@/hooks/useRecordingStop';
  * - Main UI stop button
  *
  * It listens for the 'recording-stop-complete' event from Rust backend
- * and triggers the full post-processing flow (save to database, navigate, analytics)
+ * and triggers the full post-processing flow (save to database, navigate)
  * regardless of which page the user is currently on.
  */
 export function RecordingPostProcessingProvider({ children }: { children: React.ReactNode }) {

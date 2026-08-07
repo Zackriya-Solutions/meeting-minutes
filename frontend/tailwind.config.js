@@ -153,6 +153,7 @@ module.exports = {
 
       spacing: {
         rail: 'var(--rail)',
+        gutter: 'var(--rail-gutter)',
       },
 
       keyframes: {

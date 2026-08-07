@@ -75,7 +75,7 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               tag_name: `v${{ steps.get-version.outputs.version }}`,
-              name: `Meetily v${{ steps.get-version.outputs.version }}`,
+              name: `Conversationaly v${{ steps.get-version.outputs.version }}`,
               draft: true,
               prerelease: false,
               generate_release_notes: true
@@ -106,7 +106,7 @@ jobs:
       target: ${{ matrix.target }}
       build-args: ${{ matrix.args }}
       sign-binaries: true
-      asset-prefix: "meetily"
+      asset-prefix: "conversationaly"
       upload-artifacts: false  # tauri-action uploads directly to release
       release-id: ${{ needs.create-release.outputs.release-id }}
     secrets: inherit

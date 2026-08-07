@@ -307,7 +307,7 @@ jobs:
         if: ${{ github.event.inputs.upload-artifacts == 'true' }}
         uses: actions/upload-artifact@v4
         with:
-          name: meetily-linux-${{ github.event.inputs.ubuntu-version || 'ubuntu-22.04' }}-x64-${{ steps.build-profile.outputs.profile }}-${{ steps.get-version.outputs.version }}
+          name: conversationaly-linux-${{ github.event.inputs.ubuntu-version || 'ubuntu-22.04' }}-x64-${{ steps.build-profile.outputs.profile }}-${{ steps.get-version.outputs.version }}
           path: |
             target/x86_64-unknown-linux-gnu/${{ steps.build-profile.outputs.profile }}/bundle/deb/*.deb
             target/x86_64-unknown-linux-gnu/${{ steps.build-profile.outputs.profile }}/bundle/appimage/*.AppImage

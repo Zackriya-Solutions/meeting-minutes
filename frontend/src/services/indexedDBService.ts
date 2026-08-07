@@ -31,7 +31,10 @@ export interface StoredTranscript {
 
 class IndexedDBService {
   private db: IDBDatabase | null = null;
-  private readonly DB_NAME = 'MeetilyRecoveryDB';
+  // ponytail: renamed without migrating MeetilyRecoveryDB. It only holds
+  // transcripts between a crash and the next successful save, so the worst case
+  // is one unrecovered session for a user who crashed right before upgrading.
+  private readonly DB_NAME = 'ConversationalyRecoveryDB';
   private readonly DB_VERSION = 1;
   private initPromise: Promise<void> | null = null;
 

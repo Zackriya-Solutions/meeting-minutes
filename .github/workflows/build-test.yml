@@ -29,7 +29,7 @@ jobs:
       target: ${{ matrix.target }}
       build-args: ${{ matrix.args }}
       sign-binaries: true
-      asset-prefix: "meetily-test"
+      asset-prefix: "conversationaly-test"
       upload-artifacts: true
       is-debug-build: ${{ contains(matrix.args, '--debug') }}
     secrets: inherit

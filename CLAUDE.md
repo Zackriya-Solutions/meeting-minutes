@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**Meetily** is a privacy-first AI meeting assistant that captures, transcribes, and summarizes meetings entirely on local infrastructure. The supported application is the Tauri desktop app with a Rust core.
+**Conversationaly** is a privacy-first AI meeting assistant that captures, transcribes, and summarizes meetings entirely on local infrastructure. The supported application is the Tauri desktop app with a Rust core.
 
 1. **Frontend**: Tauri-based desktop application (Rust + Next.js + TypeScript)
 2. **Rust Backend**: Tauri commands, audio capture, transcription, storage, and summarization orchestration
@@ -187,8 +187,8 @@ await listen<TranscriptUpdate>('transcript-update', (event) => {
 
 **Model Storage Locations**:
 - **Development**: `frontend/models/`
-- **Production (macOS)**: `~/Library/Application Support/Meetily/models/`
-- **Production (Windows)**: `%APPDATA%\Meetily\models\`
+- **Production (macOS)**: `~/Library/Application Support/Conversationaly/models/`
+- **Production (Windows)**: `%APPDATA%\Conversationaly\models\`
 
 **Model Loading** (frontend/src-tauri/src/transcribe_engine/engine.rs):
 ```rust
@@ -384,7 +384,7 @@ $env:RUST_LOG="debug"; ./clean_run_windows.bat
 
 3. **Model Loading**: Models are loaded once and cached. transcribe.cpp allows at most ONE in-flight compute per `Model` — a batch `run()` during an active stream fails with `Error::Busy`. This is why the VAD + batch live path decodes segments through a single serialized worker, and why `transcribe_batch` (import/retranscription) cannot run during a recording.
 
-   The sidecar has the same constraint for a different reason: one process, one loaded model. `SidecarManager::ensure_running` therefore **refuses to switch models while recording** — a summary on a different model mid-meeting would respawn the sidecar and kill the live transcription with it. A summary on the *same* model reuses the loaded weights, which is why `gemma4:e4b` is the default for both jobs.
+   The sidecar has the same constraint for a different reason: one process, one loaded model. `SidecarManager::ensure_running` therefore **refuses to switch models while recording** — a summary on a different model mid-meeting would respawn the sidecar and kill the live transcription with it. A summary on the *same* model reuses the loaded weights, which is why `gemma4:e2b` — the smaller tier, and what onboarding downloads — is the default for both jobs.
 
 4. **No Separate Backend Dependency**: Meeting persistence, transcription, and LLM features are handled by the Tauri app. Do not reintroduce the archived FastAPI backend as a supported requirement.
 

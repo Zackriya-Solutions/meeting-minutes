@@ -1,7 +1,7 @@
-use crate::summary::templates;
+use crate::summary::templates::{self, Template};
 use serde::{Deserialize, Serialize};
 use tauri::Runtime;
-use tracing::{info, warn};
+use tracing::info;
 
 /// Template metadata for UI display
 #[derive(Debug, Serialize, Deserialize)]
@@ -14,22 +14,9 @@ pub struct TemplateInfo {
 
     /// Brief description of the template's purpose
     pub description: String,
-}
 
-/// Detailed template structure for preview/debugging
-#[derive(Debug, Serialize, Deserialize)]
-pub struct TemplateDetails {
-    /// Template identifier
-    pub id: String,
-
-    /// Display name
-    pub name: String,
-
-    /// Description
-    pub description: String,
-
-    /// List of section titles in order
-    pub sections: Vec<String>,
+    /// True if the app ships this template, so deleting it resets rather than removes
+    pub builtin: bool,
 }
 
 /// Lists all available templates
@@ -50,6 +37,7 @@ pub async fn api_list_templates<R: Runtime>(
     let template_infos: Vec<TemplateInfo> = templates
         .into_iter()
         .map(|(id, name, description)| TemplateInfo {
+            builtin: templates::is_builtin(&id),
             id,
             name,
             description,
@@ -61,107 +49,56 @@ pub async fn api_list_templates<R: Runtime>(
     Ok(template_infos)
 }
 
-/// Gets detailed information about a specific template
+/// Gets the full body of a template, for the editor and for previews
 ///
 /// # Arguments
 /// * `template_id` - Template identifier (e.g., "daily_standup")
 ///
 /// # Returns
-/// TemplateDetails with full template structure
+/// The template with every section field the editor needs
 #[tauri::command]
 pub async fn api_get_template_details<R: Runtime>(
     _app: tauri::AppHandle<R>,
     template_id: String,
-) -> Result<TemplateDetails, String> {
+) -> Result<Template, String> {
     info!("api_get_template_details called for template_id: {}", template_id);
 
-    let template = templates::get_template(&template_id)?;
-
-    let section_titles: Vec<String> = template
-        .sections
-        .iter()
-        .map(|section| section.title.clone())
-        .collect();
-
-    let details = TemplateDetails {
-        id: template_id,
-        name: template.name,
-        description: template.description,
-        sections: section_titles,
-    };
-
-    info!("Retrieved template details for '{}'", details.name);
-
-    Ok(details)
+    templates::get_template(&template_id)
 }
 
-/// Validates a custom template JSON string
+/// Creates or overwrites a user template
 ///
-/// Useful for template editor UI or validation before saving custom templates
+/// Writes to the user's custom templates directory, which takes precedence over
+/// the templates shipped with the app. Saving under a shipped id therefore
+/// overrides it; `api_delete_template` undoes that.
 ///
 /// # Arguments
-/// * `template_json` - Raw JSON string of the template
+/// * `template_id` - Existing id to overwrite, or `None` to create a new template
+/// * `template` - Template body; validated before anything is written
 ///
 /// # Returns
-/// Ok(template_name) if valid, Err(error_message) if invalid
+/// The id the template was saved under
 #[tauri::command]
-pub async fn api_validate_template<R: Runtime>(
+pub async fn api_save_template<R: Runtime>(
     _app: tauri::AppHandle<R>,
-    template_json: String,
+    template_id: Option<String>,
+    template: Template,
 ) -> Result<String, String> {
-    info!("api_validate_template called");
+    info!("api_save_template called for template_id: {:?}", template_id);
 
-    match templates::validate_and_parse_template(&template_json) {
-        Ok(template) => {
-            info!("Template '{}' validated successfully", template.name);
-            Ok(template.name)
-        }
-        Err(e) => {
-            warn!("Template validation failed: {}", e);
-            Err(e)
-        }
-    }
+    templates::save_template(template_id.as_deref(), &template)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+/// Deletes a user template
+///
+/// For a shipped template this resets it to the bundled version; for a
+/// user-created one it removes it entirely.
+#[tauri::command]
+pub async fn api_delete_template<R: Runtime>(
+    _app: tauri::AppHandle<R>,
+    template_id: String,
+) -> Result<(), String> {
+    info!("api_delete_template called for template_id: {}", template_id);
 
-    #[tokio::test]
-    async fn test_list_templates() {
-        // This test requires the templates to be embedded/available
-        // In a real test environment, you might want to mock the templates module
-
-        // For now, just verify the function compiles and runs
-        // You can expand this with more specific assertions
-    }
-
-    #[tokio::test]
-    async fn test_validate_template_valid() {
-        let valid_json = r#"
-        {
-            "name": "Test Template",
-            "description": "A test template",
-            "sections": [
-                {
-                    "title": "Summary",
-                    "instruction": "Provide a summary",
-                    "format": "paragraph"
-                }
-            ]
-        }"#;
-
-        // Mock app handle would be needed for actual testing
-        // For now, test the validation logic directly
-        let result = templates::validate_and_parse_template(valid_json);
-        assert!(result.is_ok());
-    }
-
-    #[tokio::test]
-    async fn test_validate_template_invalid() {
-        let invalid_json = "invalid json";
-
-        let result = templates::validate_and_parse_template(invalid_json);
-        assert!(result.is_err());
-    }
+    templates::delete_template(&template_id)
 }

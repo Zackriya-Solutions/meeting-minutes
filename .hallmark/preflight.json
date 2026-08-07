@@ -1,0 +1,24 @@
+{
+  "date": "2026-08-06",
+  "design_md": "DESIGN.md (project root — system-managed; overrides catalog/custom theme picks)",
+  "framework": "Next.js 14 app router inside Tauri 2",
+  "fonts": "IBM Plex Sans/Serif/Mono via next/font/google (frontend/src/app/layout.tsx:4)",
+  "palette": "OKLCH bare components in frontend/src/app/globals.css :root, mapped through tailwind.config.js as oklch(var(--x) / <alpha-value>)",
+  "motion": "framer-motion 11 installed; route-mount choreography removed per DESIGN.md",
+  "spacing": "Tailwind 4pt scale plus --rail, --rail-gutter, --measure tokens",
+  "z_index": "semantic scale only (--z-dropdown .. --z-tooltip)",
+  "drift": "0 of 117 tsx files use a hardcoded Tailwind palette color",
+  "preserved": [
+    "theme token values",
+    "typography scale",
+    "spacing scale",
+    "motion tokens",
+    "z-index scale",
+    "button vocabulary"
+  ],
+  "introduced": [
+    "--rail-gutter axis token",
+    "five ranked rail zones",
+    "chrome-vs-item selection languages"
+  ]
+}

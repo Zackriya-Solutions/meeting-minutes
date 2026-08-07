@@ -2,7 +2,7 @@
 
 ## Important Information for Recording Review
 
-When **reviewing recordings** in Meetily, we recommend using **computer speakers** or **wired headphones** rather than Bluetooth headphones for accurate playback.
+When **reviewing recordings** in Conversationaly, we recommend using **computer speakers** or **wired headphones** rather than Bluetooth headphones for accurate playback.
 
 ---
 
@@ -25,7 +25,7 @@ Recordings may sound **distorted, sped up, or have clarity issues** when played 
 
 ### Why This Happens
 
-1. **Meetily records at 48kHz** (professional audio standard)
+1. **Conversationaly records at 48kHz** (professional audio standard)
 2. **Bluetooth headphones use various sample rates**: 8kHz, 16kHz, 24kHz, 44.1kHz, or 48kHz
 3. **macOS resamples audio** when sending 48kHz content to Bluetooth devices
 4. **Resampling can fail** if macOS:
@@ -68,7 +68,7 @@ The rate depends on:
 - ✅ **Recording** (microphone input) - We handle sample rate conversion correctly
 - ✅ **Live monitoring** during recording - macOS handles real-time audio
 - ✅ **General computer use** - Normal audio playback
-- ❌ **Reviewing Meetily recordings** - Use wired/speakers instead
+- ❌ **Reviewing Conversationaly recordings** - Use wired/speakers instead
 
 ---
 
@@ -100,9 +100,9 @@ To confirm your recording is actually fine:
 
 ## Why We Don't "Fix" This
 
-### This is Not a Meetily Bug
+### This is Not a Conversationaly Bug
 
-The issue is in **macOS's Bluetooth audio stack**, not in Meetily's recording engine.
+The issue is in **macOS's Bluetooth audio stack**, not in Conversationaly's recording engine.
 
 **Evidence:**
 - Recordings play perfectly on computer speakers
@@ -187,7 +187,7 @@ From [Apple Technical Note TN2321](https://developer.apple.com/library/archive/t
 ## FAQ
 
 ### Q: Will this be fixed in a future update?
-**A**: This is a macOS/Bluetooth limitation, not a Meetily bug. We've correctly recorded at 48kHz.
+**A**: This is a macOS/Bluetooth limitation, not a Conversationaly bug. We've correctly recorded at 48kHz.
 
 ### Q: Why not record at 16kHz if that's what Bluetooth uses?
 **A**: Because:
@@ -197,7 +197,7 @@ From [Apple Technical Note TN2321](https://developer.apple.com/library/archive/t
 4. Recording at 16kHz would degrade quality for 95% of users
 
 ### Q: Can you detect my Bluetooth device and warn me?
-**A**: Yes! Meetily now shows a warning when Bluetooth headphones are active during playback.
+**A**: Yes! Conversationaly now shows a warning when Bluetooth headphones are active during playback.
 
 ### Q: Does this affect recording quality?
 **A**: **No**. Recording quality is perfect. Only **playback** through Bluetooth has issues.
@@ -231,4 +231,4 @@ From [Apple Technical Note TN2321](https://developer.apple.com/library/archive/t
 ---
 
 **Last Updated**: October 10, 2025
-**Applies To**: Meetily v0.0.5+ on macOS
+**Applies To**: Conversationaly v0.0.5+ on macOS

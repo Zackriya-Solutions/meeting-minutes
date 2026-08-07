@@ -221,7 +221,7 @@ export const BlockComponent: React.FC<BlockProps> = ({
   return (
     <div 
       className={`group relative min-h-[24px] flex items-start rounded transition-all duration-150 ease-in-out
-        ${isSelected ? 'bg-info-soft ring-1 ring-ring shadow-sm' : 'hover:bg-sunken'}`}
+        ${isSelected ? 'bg-brand-soft ring-1 ring-brand/40' : 'hover:bg-sunken'}`}
       onMouseDown={onMouseDown}
       onMouseEnter={onMouseEnter}
       onMouseUp={onMouseUp}

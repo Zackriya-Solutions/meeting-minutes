@@ -1,8 +1,8 @@
 {
     "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-    "productName": "meetily",
+    "productName": "conversationaly",
     "version": "0.4.0",
-    "identifier": "com.meetily.ai",
+    "identifier": "com.conversationaly.ai",
     "build": {
         "frontendDist": "../out",
         "devUrl": "http://localhost:3118",

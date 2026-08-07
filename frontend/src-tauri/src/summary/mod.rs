@@ -62,10 +62,11 @@ pub use commands::{
 
 // Re-export template commands
 pub use template_commands::{
-    __cmd__api_get_template_details, __cmd__api_list_templates, __cmd__api_validate_template,
+    __cmd__api_delete_template, __cmd__api_get_template_details, __cmd__api_list_templates,
+    __cmd__api_save_template, __tauri_command_name_api_delete_template,
     __tauri_command_name_api_get_template_details, __tauri_command_name_api_list_templates,
-    __tauri_command_name_api_validate_template,
-    api_get_template_details, api_list_templates, api_validate_template,
+    __tauri_command_name_api_save_template,
+    api_delete_template, api_get_template_details, api_list_templates, api_save_template,
 };
 
 // Re-export commonly used items

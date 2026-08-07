@@ -27,7 +27,7 @@ export function TranscriptPanel({
   isStopping,
   showModal,
 }: TranscriptPanelProps) {
-  const { transcripts, transcriptContainerRef, copyTranscript } = useTranscripts();
+  const { transcripts, partialText, transcriptContainerRef, copyTranscript } = useTranscripts();
   const { transcriptModelConfig } = useConfig();
   const { isRecording, isPaused } = useRecordingState();
   const { checkPermissions, isChecking, hasSystemAudio, hasMicrophone } =
@@ -115,6 +115,7 @@ export function TranscriptPanel({
             isProcessing={isProcessingStop}
             isStopping={isStopping}
             enableStreaming={isRecording}
+            partialText={partialText}
             showConfidence={true}
           />
         </div>

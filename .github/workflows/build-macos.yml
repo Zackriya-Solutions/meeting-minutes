@@ -242,7 +242,7 @@ jobs:
         if: ${{ github.event.inputs.upload-artifacts == 'true' }}
         uses: actions/upload-artifact@v4
         with:
-          name: meetily-macos-aarch64-${{ steps.build-profile.outputs.profile }}-${{ steps.get-version.outputs.version }}
+          name: conversationaly-macos-aarch64-${{ steps.build-profile.outputs.profile }}-${{ steps.get-version.outputs.version }}
           path: |
             target/aarch64-apple-darwin/${{ steps.build-profile.outputs.profile }}/bundle/dmg/*.dmg
             target/aarch64-apple-darwin/${{ steps.build-profile.outputs.profile }}/bundle/macos/*.app

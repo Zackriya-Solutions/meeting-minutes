@@ -441,7 +441,7 @@ show_log_exit_options() {
     
     # Check if services are actually running
     local services_running=false
-    if docker ps --format "{{.Names}}" | grep -q "whisper-server\|meetily-backend"; then
+    if docker ps --format "{{.Names}}" | grep -q "whisper-server\|conversationaly-backend"; then
         services_running=true
         echo "Services are still running in the background."
     else
@@ -466,7 +466,7 @@ show_log_exit_options() {
     while true; do
         # Check if services are running to determine valid options
         local services_running=false
-        if docker ps --format "{{.Names}}" | grep -q "whisper-server\|meetily-backend"; then
+        if docker ps --format "{{.Names}}" | grep -q "whisper-server\|conversationaly-backend"; then
             services_running=true
             read -p "$(echo -e "${YELLOW}Choose option (1-5): ${NC}")" choice
         else
@@ -833,7 +833,7 @@ get_database_info() {
 # Function to find existing databases
 find_existing_databases() {
     local found_dbs=()
-    local default_db_path="/opt/homebrew/Cellar/meetily-backend/0.0.4/backend/meeting_minutes.db"
+    local default_db_path="/opt/homebrew/Cellar/conversationaly-backend/0.0.4/backend/meeting_minutes.db"
     
     # Check default location
     if check_database "$default_db_path"; then
@@ -842,9 +842,9 @@ find_existing_databases() {
     
     # Check other common locations
     local common_paths=(
-        "/opt/homebrew/Cellar/meetily-backend/*/backend/meeting_minutes.db"
-        "$HOME/.meetily/meeting_minutes.db"
-        "$HOME/Documents/meetily/meeting_minutes.db"
+        "/opt/homebrew/Cellar/conversationaly-backend/*/backend/meeting_minutes.db"
+        "$HOME/.conversationaly/meeting_minutes.db"
+        "$HOME/Documents/conversationaly/meeting_minutes.db"
         "$HOME/Desktop/meeting_minutes.db"
         "./meeting_minutes.db"
         "$SCRIPT_DIR/data/meeting_minutes.db"
@@ -1385,7 +1385,7 @@ start_server() {
         whisper_image_exists=true
     fi
     
-    if docker images --format "{{.Repository}}:{{.Tag}}" | grep -q "meetily-backend:"; then
+    if docker images --format "{{.Repository}}:{{.Tag}}" | grep -q "conversationaly-backend:"; then
         app_image_exists=true
     fi
     
@@ -1643,7 +1643,7 @@ show_logs() {
             log_cmd+=("whisper-server")
             ;;
         "app"|"backend")
-            log_cmd+=("meetily-backend")
+            log_cmd+=("conversationaly-backend")
             ;;
         "")
             # Show logs from both services
@@ -1692,9 +1692,9 @@ show_status() {
         fi
     fi
     
-    if docker ps --format "{{.Names}}" | grep -q "meetily-backend"; then
+    if docker ps --format "{{.Names}}" | grep -q "conversationaly-backend"; then
         app_running=true
-        local app_port=$(docker port meetily-backend 5167/tcp 2>/dev/null | cut -d: -f2)
+        local app_port=$(docker port conversationaly-backend 5167/tcp 2>/dev/null | cut -d: -f2)
         if [ -n "$app_port" ]; then
             log_info "Meeting App: http://localhost:$app_port"
             # Test connectivity
@@ -1738,7 +1738,7 @@ open_shell() {
             container_name="whisper-server"
             ;;
         "app"|"backend")
-            container_name="meetily-backend"
+            container_name="conversationaly-backend"
             ;;
         *)
             container_name="$service"

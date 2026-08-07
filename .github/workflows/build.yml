@@ -19,7 +19,7 @@ on:
       asset-prefix:
         required: false
         type: string
-        default: "meetily"
+        default: "conversationaly"
       asset-name-pattern:
         required: false
         type: string

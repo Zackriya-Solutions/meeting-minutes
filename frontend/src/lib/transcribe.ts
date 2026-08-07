@@ -67,6 +67,48 @@ export function getModelUseTag(model: Pick<ModelInfo, 'streaming'>): string {
   return model.streaming ? 'Live, as you speak' : 'Live, per sentence';
 }
 
+/**
+ * Ordering for the picker's sort control. Higher is better.
+ *
+ * Both scales are the three/four buckets the Rust catalog generator emits, not
+ * measurements: accuracy is a WER bucket that is not comparable across families
+ * (a Russian set vs. LibriSpeech), and speed is derived from file size. Good
+ * enough to order a list, not to claim model A beats model B.
+ */
+const ACCURACY_RANK: Record<ModelAccuracy, number> = { High: 3, Good: 2, Decent: 1 };
+const SPEED_RANK: Record<ProcessingSpeed, number> = {
+  'Very Fast': 4,
+  Fast: 3,
+  Medium: 2,
+  Slow: 1,
+};
+
+export type ModelSort = 'catalog' | 'quality' | 'speed' | 'size';
+
+export const MODEL_SORT_LABELS: Record<ModelSort, string> = {
+  catalog: 'Recommended',
+  quality: 'Quality',
+  speed: 'Speed',
+  size: 'Smallest first',
+};
+
+type SortableModel = Pick<ModelInfo, 'accuracy' | 'speed' | 'size_mb'>;
+
+/**
+ * Sorts a copy. `catalog` is the Rust catalog's own order (live-capable first),
+ * and because Array.sort is stable it is also the tiebreak for every other mode —
+ * so equally-ranked rows never shuffle between renders.
+ */
+export function sortModels<T extends SortableModel>(models: T[], sort: ModelSort): T[] {
+  if (sort === 'catalog') return models;
+  const compare: Record<Exclude<ModelSort, 'catalog'>, (a: T, b: T) => number> = {
+    quality: (a, b) => ACCURACY_RANK[b.accuracy] - ACCURACY_RANK[a.accuracy],
+    speed: (a, b) => SPEED_RANK[b.speed] - SPEED_RANK[a.speed],
+    size: (a, b) => a.size_mb - b.size_mb,
+  };
+  return [...models].sort(compare[sort]);
+}
+
 export function getModelIcon(accuracy: ModelAccuracy): string {
   switch (accuracy) {
     case 'High':

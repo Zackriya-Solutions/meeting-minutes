@@ -6,7 +6,6 @@ import Sidebar from '@/components/Sidebar'
 import { SidebarProvider, useSidebar } from '@/components/Sidebar/SidebarProvider'
 import MainContent from '@/components/MainContent'
 import { THEME_INIT_SCRIPT } from '@/lib/theme'
-import AnalyticsProvider from '@/components/AnalyticsProvider'
 import { toast } from 'sonner'
 import "sonner/dist/styles.css"
 import { AppToaster } from '@/components/AppToaster'
@@ -280,45 +279,43 @@ export default function RootLayout({
       <body className={`${fontVars} font-sans`}>
         {/* Resolves the theme before first paint — no flash of the wrong one. */}
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
-        <AnalyticsProvider>
-          <RecordingStateProvider>
-            <TranscriptProvider>
-              <ConfigProvider>
-                <OllamaDownloadProvider>
-                  <OnboardingProvider>
-                    <UpdateCheckProvider>
-                      <SidebarProvider>
-                        <TooltipProvider>
-                          <RecordingPostProcessingProvider>
-                            <ImportDialogProvider onOpen={handleOpenImportDialog}>
-                              {/* Download progress toast provider - listens for background downloads */}
-                              <DownloadProgressToastProvider />
+        <RecordingStateProvider>
+          <TranscriptProvider>
+            <ConfigProvider>
+              <OllamaDownloadProvider>
+                <OnboardingProvider>
+                  <UpdateCheckProvider>
+                    <SidebarProvider>
+                      <TooltipProvider>
+                        <RecordingPostProcessingProvider>
+                          <ImportDialogProvider onOpen={handleOpenImportDialog}>
+                            {/* Download progress toast provider - listens for background downloads */}
+                            <DownloadProgressToastProvider />
 
-                              {/* Show onboarding or main app */}
-                              {showOnboarding ? (
-                                <OnboardingFlow onComplete={handleOnboardingComplete} />
-                              ) : (
-                                <AppShell>{children}</AppShell>
-                              )}
-                              {/* Import audio overlay and dialog */}
-                              <ImportDropOverlay visible={showDropOverlay} />
-                              <ConditionalImportDialog
-                                showImportDialog={showImportDialog}
-                                handleImportDialogClose={handleImportDialogClose}
-                                importFilePath={importFilePath}
-                              />
-                            </ImportDialogProvider>
-                          </RecordingPostProcessingProvider>
-                        </TooltipProvider>
-                      </SidebarProvider>
-                    </UpdateCheckProvider>
-                  </OnboardingProvider>
+                            {/* Show onboarding or main app */}
+                            {showOnboarding ? (
+                              <OnboardingFlow onComplete={handleOnboardingComplete} />
+                            ) : (
+                              <AppShell>{children}</AppShell>
+                            )}
+                            {/* Import audio overlay and dialog */}
+                            <ImportDropOverlay visible={showDropOverlay} />
+                            <ConditionalImportDialog
+                              showImportDialog={showImportDialog}
+                              handleImportDialogClose={handleImportDialogClose}
+                              importFilePath={importFilePath}
+                            />
+                          </ImportDialogProvider>
+                        </RecordingPostProcessingProvider>
+                      </TooltipProvider>
+                    </SidebarProvider>
+                  </UpdateCheckProvider>
+                </OnboardingProvider>
 
-                </OllamaDownloadProvider>
-              </ConfigProvider>
-            </TranscriptProvider>
-          </RecordingStateProvider>
-        </AnalyticsProvider>
+              </OllamaDownloadProvider>
+            </ConfigProvider>
+          </TranscriptProvider>
+        </RecordingStateProvider>
 
         <AppToaster />
       </body>
