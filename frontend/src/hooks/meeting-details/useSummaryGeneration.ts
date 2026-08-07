@@ -11,6 +11,7 @@ import {
   detectAndCacheSummaryLanguage,
   readMeetingSummaryLanguage,
   readCachedDetectedSummaryLanguage,
+  readPinnedSummaryLanguageDefault,
 } from '@/lib/summary-language-preferences';
 
 async function resolveSummaryLanguage(
@@ -26,6 +27,10 @@ async function resolveSummaryLanguage(
       description: 'Using Auto for this generation.',
     });
   }
+
+  // Global default from Settings takes precedence over auto-detection.
+  const pinned = readPinnedSummaryLanguageDefault();
+  if (pinned) return pinned;
 
   try {
     const cachedDetected = await readCachedDetectedSummaryLanguage(meetingId);
