@@ -1,7 +1,5 @@
 <div align="center" style="border-bottom: none">
     <h1>
-        <img src="docs/Conversationaly-6.png" style="border-radius: 10px;" />
-        <br>
         Privacy-First AI Meeting Assistant
     </h1>
     <a href="https://trendshift.io/repositories/21958" target="_blank"><img src="https://trendshift.io/api/badge/repositories/21958" alt="Zackriya-Solutions%2Fmeetily | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/></a>
@@ -35,8 +33,6 @@ A privacy-first AI meeting assistant that captures, transcribes, and summarizes 
 </p>
 
 <p align="center">
-    <img src="docs/conversationaly_demo.gif" width="650" alt="Conversationaly Demo" />
-    <br>
     <a href="https://youtu.be/6FnhSC_eSz8">View full Demo Video</a>
 </p>
 
@@ -137,55 +133,27 @@ pnpm install
 
 Transcribe meetings entirely on your device using **Whisper** or **Parakeet** models. No cloud required.
 
-<p align="center">
-    <img src="docs/home.png" width="650" style="border-radius: 10px;" alt="Conversationaly Demo" />
-</p>
-
 ### 📥 Import & Enhance `Beta`
 
 Import existing audio files to generate transcripts, or enhance to re-transcribe any recorded meeting with a different model or language, all processed locally.
 
 > Contributed by [Jeremi Joslin](https://github.com/jeremi), improved by [Vishnu P S](https://github.com/p-s-vishnu) and [Mohammed Safvan](https://github.com/mohammedsafvan)
 
-<p align="center">
-    <img src="docs/conversationaly-export.gif" width="650" style="border-radius: 10px;" alt="Import and Enhance" />
-</p>
-
 ### 🤖 AI-Powered Summaries
 
 Generate meeting summaries with your choice of AI provider. **Ollama** (local) is recommended, with support for Claude, Groq, OpenRouter, and OpenAI.
-
-<p align="center">
-    <img src="docs/summary.png" width="650" style="border-radius: 10px;" alt="Summary generation" />
-</p>
-
-<p align="center">
-    <img src="docs/editor1.png" width="650" style="border-radius: 10px;" alt="Editor Summary generation" />
-</p>
 
 ### 🔒 Privacy-First Design
 
 All data stays on your machine. Transcription models, recordings, and transcripts are stored locally.
 
-<p align="center">
-    <img src="docs/settings.png" width="650" style="border-radius: 10px;" alt="Local Transcription and storage" />
-</p>
-
 ### 🌐 Custom OpenAI Endpoint Support
 
 Use your own OpenAI-compatible endpoint for AI summaries. Perfect for organizations with custom AI infrastructure or preferred providers.
 
-<p align="center">
-    <img src="docs/custom.png" width="650" style="border-radius: 10px;" alt="Custom OpenAI Endpoint Configuration" />
-</p>
-
 ### 🎙️ Professional Audio Mixing
 
 Capture microphone and system audio simultaneously with intelligent ducking and clipping prevention.
-
-<p align="center">
-    <img src="docs/audio.png" width="650" style="border-radius: 10px;" alt="Device selection" />
-</p>
 
 ### ⚡ GPU Acceleration
 
@@ -207,10 +175,6 @@ For more details, see the [Architecture documentation](docs/architecture.md).
 If you want to contribute to Conversationaly or build it from source, you'll need to have Rust and Node.js installed. For detailed build instructions, please see the [Building from Source guide](docs/BUILDING.md).
 
 ## Meetily Pro
-
-<p align="center">
-    <img src="docs/pv2.1.png" width="650" style="border-radius: 10px;" alt="Upcoming version" />
-</p>
 
 **Meetily PRO** is a professional-grade solution with enhanced accuracy and advanced features for serious users and teams. Built on a different codebase with superior transcription models and enterprise-ready capabilities.
 
