@@ -73,9 +73,34 @@ export function usePermissionCheck() {
     }
   };
 
-  // Check permissions on mount
+  // Check permissions on mount.
+  //
+  // Retry while no microphone shows up: right after launch CoreAudio can still
+  // report zero input devices (the app is also spawning the sidecar and warming
+  // the DB at that moment). The result gates the whole recording transport in
+  // page.tsx, so a single failed probe used to hide the Start recording button
+  // until the user manually reloaded the window.
+  //
+  // ponytail: fixed 1s backoff, 5 tries. If a machine is still reporting no mic
+  // after 5s that's a real missing-mic state — PermissionWarning's Recheck
+  // button covers it from there.
   useEffect(() => {
-    checkPermissions();
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout>;
+    let attempts = 0;
+
+    const probe = async () => {
+      const { hasMicrophone } = await checkPermissions();
+      if (!hasMicrophone && !cancelled && ++attempts < 5) {
+        timer = setTimeout(probe, 1000);
+      }
+    };
+    probe();
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
   }, []);
 
   return {
