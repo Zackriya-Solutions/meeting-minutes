@@ -11,6 +11,7 @@ use std::sync::{
     Arc, Mutex,
 };
 use tauri::{AppHandle, Emitter, Manager, Runtime};
+use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
 use super::{
@@ -59,6 +60,71 @@ pub struct TranscriptionStatus {
     pub chunks_in_queue: usize,
     pub is_processing: bool,
     pub last_activity_ms: u64,
+}
+
+// ============================================================================
+// TRANSCRIPTION ROUTING (chunk vs streaming)
+// ============================================================================
+
+/// Resolve the active streaming transcription provider, if the configured
+/// transcript provider is a custom streaming (websocket) endpoint. Returns
+/// `None` for the standard local (Whisper/Parakeet) chunk providers.
+async fn resolve_streaming_provider<R: Runtime>(
+    app: &AppHandle<R>,
+) -> Option<Arc<dyn transcription::StreamingTranscriptionProvider>> {
+    let config = crate::api::api::api_get_transcript_config(app.clone(), app.clone().state(), None)
+        .await
+        .ok()
+        .flatten()?;
+
+    if config.provider != transcription::CUSTOM_STREAMING_PROVIDER {
+        return None;
+    }
+
+    let custom =
+        crate::api::api::api_get_custom_transcription_config(app.clone(), app.clone().state(), None)
+            .await
+            .ok()
+            .flatten()?;
+
+    match transcription::build_streaming_provider(custom) {
+        Ok(provider) => Some(provider),
+        Err(e) => {
+            warn!("Failed to build streaming transcription provider: {}", e);
+            None
+        }
+    }
+}
+
+/// Spawn the transcription workers and store the handle in `TRANSCRIPTION_TASK`.
+///
+/// When a streaming provider is active it drives the continuous tap; the VAD
+/// chunk channel is drained (not transcribed) so the pipeline's unbounded sender
+/// cannot accumulate for the whole recording. Otherwise the standard parallel
+/// chunk worker runs as before.
+fn spawn_transcription<R: Runtime>(
+    app: &AppHandle<R>,
+    transcription_receiver: mpsc::UnboundedReceiver<crate::audio::AudioChunk>,
+    streaming: Option<(
+        Arc<dyn transcription::StreamingTranscriptionProvider>,
+        mpsc::UnboundedReceiver<crate::audio::AudioChunk>,
+    )>,
+) {
+    let handle = match streaming {
+        Some((provider, streaming_receiver)) => {
+            info!(
+                "🌊 Streaming transcription active via '{}' — VAD chunk path disabled",
+                provider.provider_name()
+            );
+            // The pipeline still produces VAD chunks; drain + discard them.
+            let mut chunk_rx = transcription_receiver;
+            tokio::spawn(async move { while chunk_rx.recv().await.is_some() {} });
+            transcription::run_streaming_session(app.clone(), streaming_receiver, provider)
+        }
+        None => transcription::start_transcription_task(app.clone(), transcription_receiver),
+    };
+    let mut global_task = TRANSCRIPTION_TASK.lock().unwrap();
+    *global_task = Some(handle);
 }
 
 // ============================================================================
@@ -232,9 +298,19 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
         let _ = app_for_error.emit("recording-error", error.user_message());
     });
 
+    // Resolve a streaming transcription provider (if configured) and create the
+    // continuous pre-VAD tap it will consume.
+    let streaming_provider = resolve_streaming_provider(&app).await;
+    let (streaming_sender, streaming_receiver) = if streaming_provider.is_some() {
+        let (tx, rx) = mpsc::unbounded_channel::<crate::audio::AudioChunk>();
+        (Some(tx), Some(rx))
+    } else {
+        (None, None)
+    };
+
     // Start recording with resolved devices (replaces start_recording_with_defaults_and_auto_save call)
     let transcription_receiver = manager
-        .start_recording(microphone_device, system_device, auto_save)
+        .start_recording(microphone_device, system_device, auto_save, streaming_sender)
         .await
         .map_err(|e| format!("Failed to start recording: {}", e))?;
 
@@ -250,12 +326,8 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
     drop(engine_lifecycle_guard);
     reset_speech_detected_flag(); // Reset for new recording session
 
-    // Start optimized parallel transcription task and store handle
-    let task_handle = transcription::start_transcription_task(app.clone(), transcription_receiver);
-    {
-        let mut global_task = TRANSCRIPTION_TASK.lock().unwrap();
-        *global_task = Some(task_handle);
-    }
+    // Start transcription: streaming provider (if configured) or the parallel chunk worker.
+    spawn_transcription(&app, transcription_receiver, streaming_provider.zip(streaming_receiver));
 
     // CRITICAL: Listen for transcript-update events and save to recording manager
     // This enables transcript history persistence for page reload sync
@@ -403,9 +475,19 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
         let _ = app_for_error.emit("recording-error", error.user_message());
     });
 
+    // Resolve a streaming transcription provider (if configured) and create the
+    // continuous pre-VAD tap it will consume.
+    let streaming_provider = resolve_streaming_provider(&app).await;
+    let (streaming_sender, streaming_receiver) = if streaming_provider.is_some() {
+        let (tx, rx) = mpsc::unbounded_channel::<crate::audio::AudioChunk>();
+        (Some(tx), Some(rx))
+    } else {
+        (None, None)
+    };
+
     // Start recording with specified devices and auto_save setting
     let transcription_receiver = manager
-        .start_recording(mic_device, system_device, auto_save)
+        .start_recording(mic_device, system_device, auto_save, streaming_sender)
         .await
         .map_err(|e| format!("Failed to start recording: {}", e))?;
 
@@ -421,12 +503,8 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
     drop(engine_lifecycle_guard);
     reset_speech_detected_flag(); // Reset for new recording session
 
-    // Start optimized parallel transcription task and store handle
-    let task_handle = transcription::start_transcription_task(app.clone(), transcription_receiver);
-    {
-        let mut global_task = TRANSCRIPTION_TASK.lock().unwrap();
-        *global_task = Some(task_handle);
-    }
+    // Start transcription: streaming provider (if configured) or the parallel chunk worker.
+    spawn_transcription(&app, transcription_receiver, streaming_provider.zip(streaming_receiver));
 
     // CRITICAL: Listen for transcript-update events and save to recording manager
     // This enables transcript history persistence for page reload sync

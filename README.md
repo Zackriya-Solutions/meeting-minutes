@@ -100,6 +100,7 @@ Whether you're a defense consultant, enterprise executive, legal professional, o
 - **Multi-Platform:** Works on macOS, Windows, and Linux.
 - **Open Source:** Meetily is open source and free to use.
 - **Flexible AI Provider Support:** Choose from Ollama (local), Claude, Groq, OpenRouter, or use your own OpenAI-compatible endpoint.
+- **Self-Hosted Streaming Transcription (optional):** Point Meetily at your own realtime ASR websocket instead of the built-in engine — see [Streaming Transcription](docs/streaming-transcription.md).
 
 ## Installation
 

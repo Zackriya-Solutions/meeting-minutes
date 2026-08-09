@@ -1,3 +1,4 @@
+use crate::audio::transcription::{CustomTranscriptionConfig, CUSTOM_STREAMING_PROVIDER};
 use crate::database::models::{Setting, TranscriptSetting};
 use crate::summary::CustomOpenAIConfig;
 use sqlx::SqlitePool;
@@ -180,6 +181,8 @@ impl SettingsRepository {
         let api_key_column = match provider {
             "localWhisper" => "whisperApiKey",
             "parakeet" => return Ok(()), // Parakeet doesn't need an API key, return early
+            // Custom streaming stores its key inside the JSON config, not a column
+            p if p == CUSTOM_STREAMING_PROVIDER => return Ok(()),
             "deepgram" => "deepgramApiKey",
             "elevenLabs" => "elevenLabsApiKey",
             "groq" => "groqApiKey",
@@ -212,6 +215,8 @@ impl SettingsRepository {
         let api_key_column = match provider {
             "localWhisper" => "whisperApiKey",
             "parakeet" => return Ok(None), // Parakeet doesn't need an API key
+            // Custom streaming stores its key inside the JSON config, not a column
+            p if p == CUSTOM_STREAMING_PROVIDER => return Ok(None),
             "deepgram" => "deepgramApiKey",
             "elevenLabs" => "elevenLabsApiKey",
             "groq" => "groqApiKey",
@@ -338,6 +343,84 @@ impl SettingsRepository {
                 customOpenAIConfig = excluded.customOpenAIConfig
             "#,
         )
+        .bind(&config.model)
+        .bind(config_json)
+        .execute(pool)
+        .await?;
+
+        Ok(())
+    }
+
+    // ===== CUSTOM STREAMING TRANSCRIPTION CONFIG METHODS =====
+
+    /// Gets the custom streaming transcription configuration from JSON
+    ///
+    /// # Returns
+    /// * `Ok(Some(CustomTranscriptionConfig))` - Config exists and is valid JSON
+    /// * `Ok(None)` - No config stored
+    /// * `Err(sqlx::Error)` - Database error
+    pub async fn get_custom_transcription_config(
+        pool: &SqlitePool,
+    ) -> std::result::Result<Option<CustomTranscriptionConfig>, sqlx::Error> {
+        use sqlx::Row;
+
+        let row = sqlx::query(
+            r#"
+            SELECT customTranscriptionConfig
+            FROM transcript_settings
+            WHERE id = '1'
+            LIMIT 1
+            "#,
+        )
+        .fetch_optional(pool)
+        .await?;
+
+        match row {
+            Some(record) => {
+                let config_json: Option<String> = record.get("customTranscriptionConfig");
+
+                if let Some(json) = config_json {
+                    let config: CustomTranscriptionConfig =
+                        serde_json::from_str(&json).map_err(|e| {
+                            sqlx::Error::Protocol(
+                                format!("Invalid JSON in customTranscriptionConfig: {}", e).into(),
+                            )
+                        })?;
+
+                    Ok(Some(config))
+                } else {
+                    Ok(None)
+                }
+            }
+            None => Ok(None),
+        }
+    }
+
+    /// Saves the custom streaming transcription configuration as JSON.
+    ///
+    /// Also sets `provider` to the custom-streaming identifier and mirrors the model,
+    /// so the active transcript config selects this provider.
+    pub async fn save_custom_transcription_config(
+        pool: &SqlitePool,
+        config: &CustomTranscriptionConfig,
+    ) -> std::result::Result<(), sqlx::Error> {
+        let config_json = serde_json::to_string(config).map_err(|e| {
+            sqlx::Error::Protocol(
+                format!("Failed to serialize transcription config to JSON: {}", e).into(),
+            )
+        })?;
+
+        sqlx::query(
+            r#"
+            INSERT INTO transcript_settings (id, provider, model, customTranscriptionConfig)
+            VALUES ('1', $1, $2, $3)
+            ON CONFLICT(id) DO UPDATE SET
+                provider = excluded.provider,
+                model = excluded.model,
+                customTranscriptionConfig = excluded.customTranscriptionConfig
+            "#,
+        )
+        .bind(CUSTOM_STREAMING_PROVIDER)
         .bind(&config.model)
         .bind(config_json)
         .execute(pool)

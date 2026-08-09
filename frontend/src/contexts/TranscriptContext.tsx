@@ -7,6 +7,7 @@ import { useRecordingState } from './RecordingStateContext';
 import { transcriptService } from '@/services/transcriptService';
 import { recordingService } from '@/services/recordingService';
 import { indexedDBService } from '@/services/indexedDBService';
+import { mergeTranscripts } from '@/lib/transcript-merge';
 
 interface TranscriptContextType {
   transcripts: Transcript[];
@@ -243,33 +244,10 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
       const allNewTranscripts = [...sortedTranscripts, ...sortedRecentTranscripts, ...sortedStaleTranscripts, ...sortedForceFlushTranscripts];
 
       if (allNewTranscripts.length > 0) {
-        setTranscripts(prev => {
-          // Create a set of existing sequence_ids for deduplication
-          const existingSequenceIds = new Set(prev.map(t => t.sequence_id).filter(id => id !== undefined));
-
-          // Filter out any new transcripts that already exist
-          const uniqueNewTranscripts = allNewTranscripts.filter(transcript =>
-            transcript.sequence_id !== undefined && !existingSequenceIds.has(transcript.sequence_id)
-          );
-
-          // Only combine if we have unique new transcripts
-          if (uniqueNewTranscripts.length === 0) {
-            console.log('No unique transcripts to add - all were duplicates');
-            return prev; // No new unique transcripts to add
-          }
-
-          console.log(`Adding ${uniqueNewTranscripts.length} unique transcripts out of ${allNewTranscripts.length} received`);
-
-          // Merge with existing transcripts, maintaining chronological order
-          const combined = [...prev, ...uniqueNewTranscripts];
-
-          // Sort by chunk_start_time first, then by sequence_id
-          return combined.sort((a, b) => {
-            const chunkTimeDiff = (a.chunk_start_time || 0) - (b.chunk_start_time || 0);
-            if (chunkTimeDiff !== 0) return chunkTimeDiff;
-            return (a.sequence_id || 0) - (b.sequence_id || 0);
-          });
-        });
+        // Upsert by sequence_id rather than discarding repeats: a streaming
+        // provider refines a segment in place under a stable id. See
+        // `mergeTranscripts` — for Whisper/Parakeet this only ever appends.
+        setTranscripts(prev => mergeTranscripts(prev, allNewTranscripts));
 
         // Log the processing summary
         const logMessage = forceFlush
@@ -296,11 +274,12 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
             buffer_size_before: transcriptBuffer.size
           });
 
-          // Check for duplicate sequence_id before processing
-          if (transcriptBuffer.has(update.sequence_id)) {
-            console.log('🚫 MAIN LISTENER: Duplicate sequence_id, skipping buffer:', update.sequence_id);
-            return;
-          }
+          // NOTE: repeated sequence_ids are NOT dropped here. A streaming provider
+          // refines a segment in place (a live partial growing word-by-word, then
+          // finalizing) by re-sending the same id with newer text; the buffer
+          // entry below is overwritten so the latest text wins, and the state
+          // merge upserts by id. Whisper/Parakeet always use fresh ids, so this is
+          // a no-op for them.
 
           // Create transcript for buffer with NEW timestamp fields
           const newTranscript: Transcript = {
@@ -321,19 +300,27 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
           transcriptBuffer.set(update.sequence_id, newTranscript);
           console.log(`✅ MAIN LISTENER: Buffered transcript with sequence_id ${update.sequence_id}. Buffer size: ${transcriptBuffer.size}, Last processed: ${lastProcessedSequence}`);
 
-          // Save to IndexedDB (non-blocking)
-          if (currentMeetingId) {
+          // Save settled segments to IndexedDB for reload-recovery (non-blocking).
+          // Skip live partials — only the finalized text needs to be recoverable,
+          // and streaming emits many partial updates per segment.
+          if (currentMeetingId && !update.is_partial) {
             indexedDBService.saveTranscript(currentMeetingId, update)
               .catch(err => console.warn('IndexedDB save failed:', err));
           }
 
-          // Clear any existing timer and set a new one
-          if (processingTimer) {
-            clearTimeout(processingTimer);
+          // THROTTLE (not debounce): schedule a flush only if none is pending.
+          // A streaming provider emits partials in rapid bursts; a debounce that
+          // reset the timer on every update would never fire until speech paused,
+          // so the live segment would appear frozen on its first word and only
+          // update at sentence gaps. Throttling flushes the buffer at a steady
+          // ~10ms cadence while updates keep arriving. (Whisper's infrequent chunk
+          // updates behave the same either way.)
+          if (!processingTimer) {
+            processingTimer = setTimeout(() => {
+              processingTimer = undefined;
+              processBufferedTranscripts();
+            }, 10);
           }
-
-          // Process buffer with minimal delay for immediate UI updates (serial workers = sequential order)
-          processingTimer = setTimeout(processBufferedTranscripts, 10);
         });
         console.log('✅ MAIN transcript listener setup complete');
       } catch (error) {

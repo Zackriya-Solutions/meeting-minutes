@@ -714,6 +714,176 @@ pub async fn api_get_transcript_api_key<R: Runtime>(
 }
 
 #[tauri::command]
+pub async fn api_get_custom_transcription_config<R: Runtime>(
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    _auth_token: Option<String>,
+) -> Result<Option<crate::audio::transcription::CustomTranscriptionConfig>, String> {
+    log_info!("api_get_custom_transcription_config called (native)");
+    match SettingsRepository::get_custom_transcription_config(state.db_manager.pool()).await {
+        Ok(config) => Ok(config),
+        Err(e) => {
+            log_error!("Failed to get custom transcription config: {}", e);
+            Err(e.to_string())
+        }
+    }
+}
+
+#[tauri::command]
+pub async fn api_save_custom_transcription_config<R: Runtime>(
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    endpoint: String,
+    model: String,
+    api_key: Option<String>,
+    protocol: Option<String>,
+    delay_ms: Option<u32>,
+    max_session_seconds: Option<u32>,
+    _auth_token: Option<String>,
+) -> Result<serde_json::Value, String> {
+    log_info!("api_save_custom_transcription_config called (native)");
+
+    let endpoint = endpoint.trim().to_string();
+    if endpoint.is_empty() {
+        return Err("Endpoint URL cannot be empty".to_string());
+    }
+    if !(endpoint.starts_with("ws://")
+        || endpoint.starts_with("wss://")
+        || endpoint.starts_with("http://")
+        || endpoint.starts_with("https://"))
+    {
+        return Err("Endpoint must start with ws://, wss://, http:// or https://".to_string());
+    }
+    if model.trim().is_empty() {
+        return Err("Model cannot be empty".to_string());
+    }
+    // 0 is meaningful (never roll over); anything positive must be long enough to
+    // be worth a session.
+    if matches!(max_session_seconds, Some(secs) if secs > 0 && secs < 30) {
+        return Err("Max session length must be at least 30 seconds (or 0 to disable)".to_string());
+    }
+
+    let config = crate::audio::transcription::CustomTranscriptionConfig {
+        endpoint,
+        api_key: api_key.filter(|k| !k.is_empty()),
+        model: model.trim().to_string(),
+        protocol: protocol.unwrap_or_else(|| "voxtral-realtime".to_string()),
+        delay_ms,
+        max_session_seconds,
+    };
+
+    match SettingsRepository::save_custom_transcription_config(state.db_manager.pool(), &config)
+        .await
+    {
+        Ok(()) => {
+            log_info!("Successfully saved custom transcription configuration.");
+            Ok(serde_json::json!({ "status": "success", "message": "Custom transcription configuration saved successfully" }))
+        }
+        Err(e) => {
+            log_error!("Failed to save custom transcription config: {}", e);
+            Err(e.to_string())
+        }
+    }
+}
+
+#[tauri::command]
+pub async fn api_test_custom_transcription_connection<R: Runtime>(
+    _app: AppHandle<R>,
+    endpoint: String,
+    model: String,
+    api_key: Option<String>,
+    protocol: Option<String>,
+    delay_ms: Option<u32>,
+) -> Result<serde_json::Value, String> {
+    log_info!(
+        "api_test_custom_transcription_connection called: endpoint='{}', model='{}'",
+        &endpoint,
+        &model
+    );
+
+    let endpoint = endpoint.trim().to_string();
+    if !(endpoint.starts_with("ws://")
+        || endpoint.starts_with("wss://")
+        || endpoint.starts_with("http://")
+        || endpoint.starts_with("https://"))
+    {
+        return Err("Endpoint must start with ws://, wss://, http:// or https://".to_string());
+    }
+    if model.trim().is_empty() {
+        return Err("Model cannot be empty".to_string());
+    }
+
+    let config = crate::audio::transcription::CustomTranscriptionConfig {
+        endpoint,
+        api_key: api_key.filter(|k| !k.trim().is_empty()),
+        model: model.trim().to_string(),
+        protocol: protocol.unwrap_or_else(|| "voxtral-realtime".to_string()),
+        delay_ms,
+        max_session_seconds: None,
+    };
+
+    let provider = crate::audio::transcription::build_streaming_provider(config)
+        .map_err(|e| e.to_string())?;
+
+    match provider.test_connection().await {
+        Ok(()) => {
+            log_info!("Custom transcription connection test succeeded.");
+            Ok(serde_json::json!({
+                "status": "success",
+                "message": "Connected to the realtime transcription endpoint successfully"
+            }))
+        }
+        Err(e) => {
+            log_error!("Custom transcription connection test failed: {}", e);
+            Err(format!("Connection test failed: {}", e))
+        }
+    }
+}
+
+/// Ask a realtime transcription endpoint how much audio it can hold in one
+/// session, so the settings UI can propose a session length instead of making the
+/// user guess. Servers that announce nothing are reported as such, not as an error.
+#[tauri::command]
+pub async fn api_detect_custom_transcription_limits<R: Runtime>(
+    _app: AppHandle<R>,
+    endpoint: String,
+    model: String,
+    api_key: Option<String>,
+    protocol: Option<String>,
+) -> Result<crate::audio::transcription::DetectedSessionLimit, String> {
+    log_info!(
+        "api_detect_custom_transcription_limits called: endpoint='{}', model='{}'",
+        &endpoint,
+        &model
+    );
+
+    let endpoint = endpoint.trim().to_string();
+    if !(endpoint.starts_with("ws://")
+        || endpoint.starts_with("wss://")
+        || endpoint.starts_with("http://")
+        || endpoint.starts_with("https://"))
+    {
+        return Err("Endpoint must start with ws://, wss://, http:// or https://".to_string());
+    }
+    if model.trim().is_empty() {
+        return Err("Model cannot be empty".to_string());
+    }
+
+    let config = crate::audio::transcription::CustomTranscriptionConfig {
+        endpoint,
+        api_key: api_key.filter(|k| !k.trim().is_empty()),
+        model: model.trim().to_string(),
+        protocol: protocol.unwrap_or_else(|| "voxtral-realtime".to_string()),
+        delay_ms: None,
+        max_session_seconds: None,
+    };
+
+    crate::audio::transcription::detect_session_limit(&config)
+        .await
+        .map_err(|e| format!("Could not read the endpoint's limits: {}", e))
+}
+
+#[tauri::command]
 pub async fn api_delete_api_key<R: Runtime>(
     _app: AppHandle<R>,
     state: tauri::State<'_, AppState>,

@@ -135,6 +135,36 @@ pub async fn validate_transcription_model_ready<R: Runtime>(app: &AppHandle<R>) 
                 }
             }
         }
+        p if p == super::CUSTOM_STREAMING_PROVIDER => {
+            info!("🔍 Validating custom streaming transcription endpoint...");
+            let custom = crate::api::api::api_get_custom_transcription_config(
+                app.clone(),
+                app.clone().state(),
+                None,
+            )
+            .await
+            .map_err(|e| format!("Failed to load streaming transcription config: {}", e))?
+            .ok_or_else(|| {
+                "No custom streaming transcription endpoint is configured. Please set one in the transcription settings.".to_string()
+            })?;
+
+            let provider = super::build_streaming_provider(custom)
+                .map_err(|e| format!("Invalid streaming transcription config: {}", e))?;
+
+            match provider.test_connection().await {
+                Ok(()) => {
+                    info!("✅ Streaming transcription endpoint reachable");
+                    Ok(())
+                }
+                Err(e) => {
+                    warn!("❌ Streaming transcription endpoint validation failed: {}", e);
+                    Err(format!(
+                        "Could not reach the realtime transcription endpoint: {}",
+                        e
+                    ))
+                }
+            }
+        }
         other => {
             warn!("❌ Unsupported transcription provider for local recording: {}", other);
             Err(format!(
