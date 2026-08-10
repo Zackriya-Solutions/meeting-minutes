@@ -1,0 +1,415 @@
+.window {
+  --type-bg: hsl(var(--background));
+  --type-text: #000000;
+  --type-subtitle: #8e8e93;
+  --type-button: var(--accent-orange);
+  --type-button-text: #ffffff;
+  --type-section: #ffffff;
+  --type-canvas: hsl(var(--background));
+  --type-separator: rgb(60 60 67 / 18%);
+  --type-fill: rgb(116 116 128 / 12%);
+
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  overflow: hidden;
+  background: var(--type-bg);
+  color: var(--type-text);
+  color-scheme: light;
+  font-family: var(--ui-font-interface);
+  font-feature-settings: "kern" 1, "liga" 1;
+  -webkit-font-smoothing: antialiased;
+  letter-spacing: 0;
+  text-rendering: geometricPrecision;
+  user-select: none;
+}
+
+:global(.dark) .window {
+  --type-bg: var(--elevation-1);
+  --type-text: #ffffff;
+  --type-subtitle: #98989e;
+  --type-button: var(--accent-orange);
+  --type-button-text: #ffffff;
+  --type-section: #1c1c1e;
+  --type-canvas: var(--elevation-1);
+  --type-separator: rgb(84 84 88 / 65%);
+  --type-fill: rgb(255 255 255 / 10%);
+  color-scheme: dark;
+}
+
+.content {
+  --type-content-width: 500px;
+
+  position: relative;
+  display: flex;
+  width: 600px;
+  height: 676px;
+  max-width: 100vw;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--type-bg);
+}
+
+.content[data-fit-content='true'] {
+  height: 374px;
+  min-height: 0;
+  padding: 64px 0;
+}
+
+.content[data-fit-content='true'] .startView {
+  padding: 0 0 40px;
+}
+
+.content[data-fit-content='true'] .sectionList {
+  flex: none;
+  padding: 0;
+}
+
+.content[data-fit-content='true'] .buttonRow {
+  padding-top: 48px;
+}
+
+.content[data-step='3'] .startView {
+  padding: 0;
+}
+
+.content[data-step='3'] .buttonRow {
+  padding: 40px 0 0;
+}
+
+.content[data-step='3'] {
+  justify-content: center;
+  padding: 64px 0;
+}
+
+.content[data-step='3'] .stepTransition {
+  flex: none;
+  justify-content: center;
+}
+
+.stepTransition {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 150ms ease;
+}
+
+.stepTransition[data-visible='true'] {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.content:has(.exitCover) {
+  animation: onboarding-content-out 150ms ease forwards;
+  will-change: opacity;
+}
+
+.exitCover {
+  display: none;
+}
+
+.gateCover {
+  position: fixed;
+  inset: 0;
+  background: hsl(var(--background));
+}
+
+:global(.dark) .gateCover {
+  background: var(--elevation-1);
+}
+
+.productRevealCover {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  pointer-events: none;
+  background: hsl(var(--background));
+  animation: onboarding-product-cover-out 150ms ease forwards;
+  will-change: opacity;
+}
+
+:global(.dark) .productRevealCover {
+  background: var(--elevation-1);
+}
+
+@keyframes onboarding-content-out {
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes onboarding-product-cover-out {
+  from {
+    opacity: 1;
+  }
+
+  to {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stepTransition {
+    transition-duration: 0ms;
+  }
+
+  .content:has(.exitCover) {
+    animation-duration: 0ms;
+  }
+
+  .productRevealCover {
+    animation-duration: 0ms;
+  }
+}
+
+.logoHeader {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 72px 40px 0;
+}
+
+.wordmark {
+  width: 112px;
+  height: auto;
+}
+
+.startView {
+  display: flex;
+  width: var(--type-content-width);
+  max-width: calc(100% - 32px);
+  align-self: center;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 36px 0 24px;
+  color: var(--type-text);
+  text-align: center;
+}
+
+.title {
+  max-width: 100%;
+  font-family: var(--ui-font-display);
+  font-size: 32px;
+  font-weight: 600;
+  letter-spacing: var(--ui-title-32-letter-spacing);
+  line-height: 34.2px;
+}
+
+.description {
+  max-width: 100%;
+  color: var(--type-subtitle);
+  font-size: 17px;
+  font-weight: 400;
+  line-height: 22px;
+}
+
+.sectionList {
+  display: flex;
+  width: var(--type-content-width);
+  max-width: calc(100% - 32px);
+  align-self: center;
+  flex: 1;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 24px;
+  padding: 16px 0;
+  background: var(--type-canvas);
+}
+
+.sectionCard {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 26px;
+  background: var(--type-section);
+}
+
+.sectionCard[data-surface='primary-5'] {
+  background: var(--primary-5);
+}
+
+.cell {
+  --tappable-highlight: var(--type-fill);
+  display: flex;
+  width: 100%;
+  min-height: 58px;
+  padding: 0 0 0 12px;
+  border: 0;
+  background: transparent;
+  color: var(--type-text);
+  cursor: default;
+  font: inherit;
+  text-align: start;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.cell[data-actionable='true'] {
+  cursor: pointer;
+}
+
+.cell[data-actionable='true']:active {
+  background: var(--tappable-highlight);
+}
+
+.cell:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--type-button) 60%, transparent);
+  outline-offset: -2px;
+}
+
+.cellStart {
+  display: flex;
+  align-items: center;
+  padding: 7px 16px 7px 0;
+}
+
+.cellBody,
+.cellEnd {
+  border-bottom: 0.33px solid var(--type-separator);
+}
+
+.cell:last-child .cellBody,
+.cell:last-child .cellEnd {
+  border-bottom: 0;
+}
+
+.cellBody {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  justify-content: center;
+  padding: 9px 12px 9px 0;
+}
+
+.cellEnd {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  justify-content: center;
+  padding: 0 16px 0 8px;
+  color: var(--type-subtitle);
+  white-space: nowrap;
+}
+
+.cellTitle {
+  overflow: hidden;
+  color: var(--type-text);
+  font-size: 17px;
+  font-weight: 500;
+  line-height: 22px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cellDescription {
+  overflow: hidden;
+  margin-top: 2px;
+  color: var(--type-subtitle);
+  font-size: 15px;
+  font-weight: 400;
+  line-height: 20px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.avatar {
+  display: flex;
+  width: 40px;
+  height: 40px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  color: #ffffff;
+}
+
+.avatar svg {
+  display: block;
+  width: 24px;
+  height: 25px;
+}
+
+.avatar :global(.deslop-material-symbol) {
+  color: #ffffff !important;
+}
+
+.picker {
+  display: flex;
+  min-width: 30px;
+  height: 30px;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  padding: 0 12px;
+  border-radius: 16px;
+  background: var(--type-fill);
+  color: var(--type-text);
+  font-size: 15px;
+  line-height: 20px;
+}
+
+.picker[data-icon-only='true'] {
+  width: 30px;
+  min-width: 30px;
+  padding: 0;
+  border-radius: 50%;
+}
+
+.buttonRow {
+  --accent-green: var(--accent-orange);
+  /* WebKit can leave GlassBorder's masked compositor layer behind after the
+     native onboarding window resizes. Keep the primitive button and shine,
+     but make that decorative one-pixel layer transparent in this flow. */
+  --glass-border-color: transparent;
+  --primary-30: var(--deslop-primary-30);
+
+  display: flex;
+  width: var(--type-content-width);
+  max-width: calc(100% - 32px);
+  align-self: center;
+  flex-shrink: 0;
+  justify-content: center;
+  padding: 8px 0 32px;
+  background: var(--type-bg);
+}
+
+.secondaryAction {
+  display: block;
+  margin: -6px auto 20px;
+  border: 0;
+  background: transparent;
+  color: var(--type-subtitle);
+  cursor: pointer;
+  font: inherit;
+  font-size: 15px;
+  line-height: 20px;
+}
+
+.progress {
+  height: 4px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--type-fill);
+}
+
+.progressBar {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--type-button);
+  transition: width 300ms ease;
+}
+
+.error {
+  color: #ff3b30;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .progressBar {
+    transition: none;
+  }
+}

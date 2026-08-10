@@ -11,6 +11,7 @@
         "start": "next start -p 3118",
         "storybook": "storybook dev -p 6006",
         "build-storybook": "storybook build",
+        "showcase:dev": "next dev -H 127.0.0.1 -p 3119",
         "tauri": "tauri",
         "tauri:dev": "node scripts/tauri-auto.js dev",
         "tauri:build": "node scripts/tauri-auto.js build",

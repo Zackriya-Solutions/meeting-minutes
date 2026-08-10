@@ -32,3 +32,7 @@ unprefixed `--primary` name in Memento.
 `mini-app/components/{Markdown,Table,Text,Skeleton}` are unmodified source files
 from Deslop Mini Apps. Memento scopes the source `--primary` token to the safe
 `--deslop-primary` adapter alias at the integration boundary.
+
+`mini-app/components/Button/RegularButton`, its `GlassBorder`, `MotionProvider`,
+and `hooks/DeviceProvider` are vendored from Deslop Mini Apps revision
+`9927f52a58160e21467879105797cafda2f20c19`.

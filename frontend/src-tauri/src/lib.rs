@@ -75,6 +75,7 @@ pub mod tray;
 pub mod utils;
 pub mod vector;
 pub mod whisper_engine;
+pub mod window_motion;
 
 use audio::{list_audio_devices, trigger_audio_permission, AudioDevice};
 use log::{error as log_error, info as log_info};
@@ -1097,6 +1098,7 @@ pub fn run() {
             onboarding::reset_onboarding_status_cmd,
             onboarding::onboarding_should_run,
             onboarding::complete_onboarding,
+            window_motion::animate_main_window,
             // System settings commands
             #[cfg(target_os = "macos")]
             utils::open_system_settings,

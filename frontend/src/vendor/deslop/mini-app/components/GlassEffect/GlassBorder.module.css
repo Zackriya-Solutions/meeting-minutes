@@ -1,0 +1,32 @@
+.glassBorder {
+  content: "";
+  position: absolute;
+  inset: 0;
+  padding: 1px;
+  border-radius: inherit;
+  mix-blend-mode: overlay;
+  z-index: 2;
+  pointer-events: none;
+  -webkit-mask-image: linear-gradient(var(--black) 0 0), linear-gradient(var(--black) 0 0);
+  mask-image: linear-gradient(var(--black) 0 0), linear-gradient(var(--black) 0 0);
+  -webkit-mask-position: 0 0, 0 0;
+  mask-position: 0 0, 0 0;
+  -webkit-mask-size: auto, auto;
+  mask-size: auto, auto;
+  -webkit-mask-repeat: repeat, repeat;
+  mask-repeat: repeat, repeat;
+  -webkit-mask-clip: content-box, border-box;
+  mask-clip: content-box, border-box;
+  -webkit-mask-origin: content-box, border-box;
+  mask-origin: content-box, border-box;
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  -webkit-mask-source-type: auto, auto;
+  mask-mode: match-source, match-source;
+  background: linear-gradient(8deg, transparent 0%, var(--glass-border-color, var(--primary-90)) 35%, var(--glass-border-color, var(--primary-90)) 65%, transparent 100%);
+}
+
+.glassBorder.muted {
+  mix-blend-mode: normal;
+  background: linear-gradient(8deg, transparent 0%, var(--primary-20) 35%, var(--primary-20) 65%, transparent 100%);
+}

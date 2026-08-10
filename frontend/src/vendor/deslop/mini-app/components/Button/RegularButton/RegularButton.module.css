@@ -1,0 +1,99 @@
+.button {
+  position: relative;
+  width: fit-content;
+  text-align: center;
+  overflow: hidden;
+  isolation: isolate;
+}
+
+.button.filled {
+  background-color: var(--accent-green);
+  color: var(--black);
+}
+
+.button.tinted {
+  background-color: var(--primary-10);
+  color: var(--primary);
+}
+
+.button.plain {
+  background-color: var(--surface);
+  color: var(--primary);
+}
+
+.button.outlined {
+  color: var(--primary);
+}
+
+.button.gray {
+  background-color: var(--primary-10);
+  color: var(--primary);
+}
+
+.button.disabled {
+  background-color: var(--primary-10);
+  color: var(--primary-30);
+}
+
+.button.skeleton {
+  --skeleton-inset-bottom: 0px;
+
+  background-color: transparent;
+  color: transparent;
+  cursor: default;
+}
+
+.button[data-fill="true"] {
+  width: 100%;
+}
+
+.button[data-shine="true"] {
+  clip-path: inset(0 round var(--button-radius));
+}
+
+.button[data-shine="true"]::before {
+  content: "";
+  will-change: transform;
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 150%;
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    var(--white) 26%,
+    transparent 50%
+  );
+  mix-blend-mode: soft-light;
+  animation: wave 3s cubic-bezier(0.4, 0, 0.6, 1) 1s infinite backwards;
+  pointer-events: none;
+}
+
+:global([data-mini-app].apple) .button {
+  --button-radius: var(--ui-radius-25);
+
+  padding: var(--ui-space-14) var(--ui-layout-content-inset);
+  border-radius: var(--button-radius);
+}
+
+:global([data-mini-app].material) .button {
+  --button-radius: 28px;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 48px;
+  padding: var(--ui-space-12) var(--ui-space-24);
+  border-radius: var(--button-radius);
+}
+
+@keyframes wave {
+  0% {
+    transform: translateX(-100%);
+  }
+
+  50%, 100% {
+    transform: translateX(100%);
+  }
+}

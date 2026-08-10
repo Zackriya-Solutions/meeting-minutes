@@ -1,0 +1,2370 @@
+{
+  "title": "Memento UI",
+  "scope": {
+    "id": "memento",
+    "environment": "dev+production"
+  },
+  "preview": {
+    "adapter": "next-app-router",
+    "isolation": "iframe",
+    "entry": "src/app/showcase-preview/page.tsx"
+  },
+  "groups": [
+    {
+      "id": "foundations",
+      "title": "Foundations",
+      "items": [
+        {
+          "id": "design-tokens",
+          "title": "Токены и бренд",
+          "source": "src/showcase/foundations/DesignTokens.showcase.tsx",
+          "kind": "foundation"
+        }
+      ]
+    },
+    {
+      "id": "primitives",
+      "title": "Primitives",
+      "items": [
+        {
+          "id": "ui-accordion",
+          "title": "ui/accordion",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/ui/accordion.tsx",
+          "kind": "primitive",
+          "states": [
+            "default"
+          ],
+          "boundaries": []
+        },
+        {
+          "id": "ui-alert-dialog",
+          "title": "ui/alert-dialog",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/ui/alert-dialog.tsx",
+          "kind": "primitive",
+          "states": [
+            "default"
+          ],
+          "boundaries": []
+        },
+        {
+          "id": "ui-alert",
+          "title": "ui/alert",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/ui/alert.tsx",
+          "kind": "primitive",
+          "states": [
+            "default"
+          ],
+          "boundaries": []
+        },
+        {
+          "id": "ui-badge",
+          "title": "ui/badge",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/ui/badge.tsx",
+          "kind": "primitive",
+          "states": [
+            "default"
+          ],
+          "boundaries": []
+        },
+        {
+          "id": "ui-bubble",
+          "title": "ui/bubble",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/ui/bubble.tsx",
+          "kind": "primitive",
+          "states": [
+            "default"
+          ],
+          "boundaries": []
+        },
+        {
+          "id": "ui-button-group",
+          "title": "ui/button-group",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/ui/button-group.tsx",
+          "kind": "primitive",
+          "states": [
+            "default"
+          ],
+          "boundaries": []
+        },
+        {
+          "id": "ui-button",
+          "title": "ui/button",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/ui/button.tsx",
+          "kind": "primitive",
+          "states": [
+            "default"
+          ],
+          "boundaries": []
+        },
+        {
+          "id": "ui-card",
+          "title": "ui/card",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/ui/card.tsx",
+          "kind": "primitive",
+          "states": [
+            "default"
+          ],
+          "boundaries": []
+        },
+        {
+          "id": "ui-checkbox",
+          "title": "ui/checkbox",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/ui/checkbox.tsx",
+          "kind": "primitive",
+          "states": [
+            "default"
+          ],
+          "boundaries": []
+        },
+        {
+          "id": "ui-command",
+          "title": "ui/command",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/ui/command.tsx",
+          "kind": "primitive",
+          "states": [
+            "default"
+          ],
+          "boundaries": []
+        },
+        {
+          "id": "ui-context-menu",
+          "title": "ui/context-menu",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/ui/context-menu.tsx",
+          "kind": "primitive",
+          "states": [
+            "default"
+          ],
+          "boundaries": []
+        },
+        {
+          "id": "ui-dialog",
+          "title": "ui/dialog",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/ui/dialog.tsx",
+          "kind": "primitive",
+          "states": [
+            "default"
+          ],
+          "boundaries": []
+        },
+        {
+          "id": "ui-drawer",
+          "title": "ui/drawer",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/ui/drawer.tsx",
+          "kind": "primitive",
+          "states": [
+            "default"
+          ],
+          "boundaries": []
+        },
+        {
+          "id": "ui-dropdown-menu",
+          "title": "ui/dropdown-menu",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/ui/dropdown-menu.tsx",
+          "kind": "primitive",
+          "states": [
+            "default"
+          ],
+          "boundaries": []
+        },
+        {
+          "id": "ui-dropdown",
+          "title": "ui/dropdown",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/ui/dropdown.tsx",
+          "kind": "primitive",
+          "states": [
+            "default"
+          ],
+          "boundaries": []
+        },
+        {
+          "id": "ui-fluid-badge",
+          "title": "ui/fluid-badge",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/ui/fluid-badge.tsx",
+          "kind": "primitive",
+          "states": [
+            "default"
+          ],
+          "boundaries": []
+        },
+        {
+          "id": "ui-fluid-button",
+          "title": "ui/fluid-button",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/ui/fluid-button.tsx",
+          "kind": "primitive",
+          "states": [
+            "default"
+          ],
+          "boundaries": []
+        },
+        {
+          "id": "ui-fluid-dialog",
+          "title": "ui/fluid-dialog",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/ui/fluid-dialog.tsx",
+          "kind": "primitive",
+          "states": [
+            "default"
+          ],
+          "boundaries": []
+        },
+        {
+          "id": "ui-fluid-input-group",
+          "title": "ui/fluid-input-group",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/ui/fluid-input-group.tsx",
+          "kind": "primitive",
+          "states": [
+            "default"
+          ],
+          "boundaries": []
+        },
+        {
+          "id": "ui-fluid-input",
+          "title": "ui/fluid-input",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/ui/fluid-input.tsx",
+          "kind": "primitive",
+          "states": [
+            "default"
+          ],
+          "boundaries": []
+        },
+        {
+          "id": "ui-fluid-radio-group",
+          "title": "ui/fluid-radio-group",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/ui/fluid-radio-group.tsx",
+          "kind": "primitive",
+          "states": [
+            "default"
+          ],
+          "boundaries": []
+        },
+        {
+          "id": "ui-fluid-select",
+          "title": "ui/fluid-select",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/ui/fluid-select.tsx",
+          "kind": "primitive",
+          "states": [
+            "default"
+          ],
+          "boundaries": []
+        },
+        {
+          "id": "ui-fluid-spinner",
+          "title": "ui/fluid-spinner",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/ui/fluid-spinner.tsx",
+          "kind": "primitive",
+          "states": [
+            "default"
+          ],
+          "boundaries": []
+        },
+        {
+          "id": "ui-fluid-tabs",
+          "title": "ui/fluid-tabs",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/ui/fluid-tabs.tsx",
+          "kind": "primitive",
+          "states": [
+            "default"
+          ],
+          "boundaries": []
+        },
+        {
+          "id": "ui-form",
+          "title": "ui/form",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/ui/form.tsx",
+          "kind": "primitive",
+          "states": [
+            "default"
+          ],
+          "boundaries": []
+        },
+        {
+          "id": "ui-input-group",
+          "title": "ui/input-group",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/ui/input-group.tsx",
+          "kind": "primitive",
+          "states": [
+            "default"
+          ],
+          "boundaries": []
+        },
+        {
+          "id": "ui-input",
+          "title": "ui/input",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/ui/input.tsx",
+          "kind": "primitive",
+          "states": [
+            "default"
+          ],
+          "boundaries": []
+        },
+        {
+          "id": "ui-label",
+          "title": "ui/label",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/ui/label.tsx",
+          "kind": "primitive",
+          "states": [
+            "default"
+          ],
+          "boundaries": []
+        },
+        {
+          "id": "ui-live-waveform",
+          "title": "ui/live-waveform",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/ui/live-waveform.tsx",
+          "kind": "primitive",
+          "states": [
+            "default"
+          ],
+          "boundaries": []
+        },
+        {
+          "id": "ui-menu-item",
+          "title": "ui/menu-item",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/ui/menu-item.tsx",
+          "kind": "primitive",
+          "states": [
+            "default"
+          ],
+          "boundaries": []
+        },
+        {
+          "id": "ui-message-scroller",
+          "title": "ui/message-scroller",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/ui/message-scroller.tsx",
+          "kind": "primitive",
+          "states": [
+            "default"
+          ],
+          "boundaries": []
+        },
+        {
+          "id": "ui-message",
+          "title": "ui/message",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/ui/message.tsx",
+          "kind": "primitive",
+          "states": [
+            "default"
+          ],
+          "boundaries": []
+        },
+        {
+          "id": "ui-popover",
+          "title": "ui/popover",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/ui/popover.tsx",
+          "kind": "primitive",
+          "states": [
+            "default"
+          ],
+          "boundaries": []
+        },
+        {
+          "id": "ui-progress",
+          "title": "ui/progress",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/ui/progress.tsx",
+          "kind": "primitive",
+          "states": [
+            "default"
+          ],
+          "boundaries": []
+        },
+        {
+          "id": "ui-prompt-input",
+          "title": "ui/prompt-input",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/ui/prompt-input.tsx",
+          "kind": "primitive",
+          "states": [
+            "default"
+          ],
+          "boundaries": []
+        },
+        {
+          "id": "ui-radio-group",
+          "title": "ui/radio-group",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/ui/radio-group.tsx",
+          "kind": "primitive",
+          "states": [
+            "default"
+          ],
+          "boundaries": []
+        },
+        {
+          "id": "ui-scroll-area",
+          "title": "ui/scroll-area",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/ui/scroll-area.tsx",
+          "kind": "primitive",
+          "states": [
+            "default"
+          ],
+          "boundaries": []
+        },
+        {
+          "id": "ui-select",
+          "title": "ui/select",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/ui/select.tsx",
+          "kind": "primitive",
+          "states": [
+            "default"
+          ],
+          "boundaries": []
+        },
+        {
+          "id": "ui-separator",
+          "title": "ui/separator",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/ui/separator.tsx",
+          "kind": "primitive",
+          "states": [
+            "default"
+          ],
+          "boundaries": []
+        },
+        {
+          "id": "ui-sheet",
+          "title": "ui/sheet",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/ui/sheet.tsx",
+          "kind": "primitive",
+          "states": [
+            "default"
+          ],
+          "boundaries": []
+        },
+        {
+          "id": "ui-sidebar",
+          "title": "ui/sidebar",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/ui/sidebar.tsx",
+          "kind": "primitive",
+          "states": [
+            "default"
+          ],
+          "boundaries": []
+        },
+        {
+          "id": "ui-siri-wave-4",
+          "title": "ui/siri-wave-4",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/ui/siri-wave-4.tsx",
+          "kind": "primitive",
+          "states": [
+            "default"
+          ],
+          "boundaries": []
+        },
+        {
+          "id": "ui-skeleton",
+          "title": "ui/skeleton",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/ui/skeleton.tsx",
+          "kind": "primitive",
+          "states": [
+            "default"
+          ],
+          "boundaries": []
+        },
+        {
+          "id": "ui-sonner",
+          "title": "ui/sonner",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/ui/sonner.tsx",
+          "kind": "primitive",
+          "states": [
+            "default"
+          ],
+          "boundaries": []
+        },
+        {
+          "id": "ui-switch",
+          "title": "ui/switch",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/ui/switch.tsx",
+          "kind": "primitive",
+          "states": [
+            "default"
+          ],
+          "boundaries": []
+        },
+        {
+          "id": "ui-table",
+          "title": "ui/table",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/ui/table.tsx",
+          "kind": "primitive",
+          "states": [
+            "default"
+          ],
+          "boundaries": []
+        },
+        {
+          "id": "ui-tabs",
+          "title": "ui/tabs",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/ui/tabs.tsx",
+          "kind": "primitive",
+          "states": [
+            "default"
+          ],
+          "boundaries": []
+        },
+        {
+          "id": "ui-textarea",
+          "title": "ui/textarea",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/ui/textarea.tsx",
+          "kind": "primitive",
+          "states": [
+            "default"
+          ],
+          "boundaries": []
+        },
+        {
+          "id": "ui-tooltip",
+          "title": "ui/tooltip",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/ui/tooltip.tsx",
+          "kind": "primitive",
+          "states": [
+            "default"
+          ],
+          "boundaries": []
+        },
+        {
+          "id": "ui-visually-hidden",
+          "title": "ui/visually-hidden",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/ui/visually-hidden.tsx",
+          "kind": "primitive",
+          "states": [
+            "default"
+          ],
+          "boundaries": []
+        }
+      ]
+    },
+    {
+      "id": "deslop",
+      "title": "Deslop",
+      "items": [
+        {
+          "id": "src-vendor-deslop-mini-app-components-markdown",
+          "title": "src/vendor/deslop/mini-app/components/Markdown",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/vendor/deslop/mini-app/components/Markdown/index.js",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "src-vendor-deslop-mini-app-components-skeleton",
+          "title": "src/vendor/deslop/mini-app/components/Skeleton",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/vendor/deslop/mini-app/components/Skeleton/index.js",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "src-vendor-deslop-mini-app-components-table",
+          "title": "src/vendor/deslop/mini-app/components/Table",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/vendor/deslop/mini-app/components/Table/index.js",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "src-vendor-deslop-mini-app-components-text",
+          "title": "src/vendor/deslop/mini-app/components/Text",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/vendor/deslop/mini-app/components/Text/index.js",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "product",
+      "title": "Product",
+      "items": [
+        {
+          "id": "aisummary-block",
+          "title": "AISummary/Block",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/AISummary/Block.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "aisummary-block-note-summary-view",
+          "title": "AISummary/BlockNoteSummaryView",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/AISummary/BlockNoteSummaryView.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "aisummary-section",
+          "title": "AISummary/Section",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/AISummary/Section.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "aisummary",
+          "title": "AISummary",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/AISummary/index.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "app-sidebar",
+          "title": "AppSidebar",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/AppSidebar.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "audio-backend-selector",
+          "title": "AudioBackendSelector",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/AudioBackendSelector.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "audio-level-meter",
+          "title": "AudioLevelMeter",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/AudioLevelMeter.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "auto-meeting-detection",
+          "title": "AutoMeetingDetection",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/AutoMeetingDetection.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "block-note-editor-basic-block-note-test",
+          "title": "BlockNoteEditor/BasicBlockNoteTest",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/BlockNoteEditor/BasicBlockNoteTest.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "block-note-editor-editor",
+          "title": "BlockNoteEditor/Editor",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/BlockNoteEditor/Editor.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "bluetooth-playback-warning",
+          "title": "BluetoothPlaybackWarning",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/BluetoothPlaybackWarning.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "chunk-progress-display",
+          "title": "ChunkProgressDisplay",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/ChunkProgressDisplay.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "compliance-notification",
+          "title": "ComplianceNotification",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/ComplianceNotification.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "confidence-indicator",
+          "title": "ConfidenceIndicator",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/ConfidenceIndicator.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "console-toggle",
+          "title": "ConsoleToggle",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/ConsoleToggle.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "custom-dialog",
+          "title": "CustomDialog",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/CustomDialog.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "database-import-homebrew-database-detector",
+          "title": "DatabaseImport/HomebrewDatabaseDetector",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/DatabaseImport/HomebrewDatabaseDetector.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "database-import-legacy-database-import",
+          "title": "DatabaseImport/LegacyDatabaseImport",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/DatabaseImport/LegacyDatabaseImport.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "editable-title",
+          "title": "EditableTitle",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/EditableTitle.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "empty-state-summary",
+          "title": "EmptyStateSummary",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/EmptyStateSummary.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "global-recording-pill",
+          "title": "GlobalRecordingPill",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/GlobalRecordingPill.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "import-audio-import-audio-dialog",
+          "title": "ImportAudio/ImportAudioDialog",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/ImportAudio/ImportAudioDialog.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "import-audio-import-drop-overlay",
+          "title": "ImportAudio/ImportDropOverlay",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/ImportAudio/ImportDropOverlay.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "info",
+          "title": "Info",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/Info.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "knowledge-readiness-card",
+          "title": "KnowledgeReadinessCard",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/KnowledgeReadinessCard.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "logo",
+          "title": "Logo",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/Logo.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "main-content",
+          "title": "MainContent",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/MainContent/index.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "main-nav",
+          "title": "MainNav",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/MainNav/index.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "managed-defaults-migration-dialog",
+          "title": "ManagedDefaultsMigrationDialog",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/ManagedDefaultsMigrationDialog.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "meeting-detection-banner",
+          "title": "MeetingDetectionBanner",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/MeetingDetectionBanner.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "message-toast",
+          "title": "MessageToast",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/MessageToast.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "permission-warning",
+          "title": "PermissionWarning",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/PermissionWarning.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "recording-controls",
+          "title": "RecordingControls",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/RecordingControls.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "recording-status-bar",
+          "title": "RecordingStatusBar",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/RecordingStatusBar.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "setting-tabs",
+          "title": "SettingTabs",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/SettingTabs.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "sidebar-sidebar-provider",
+          "title": "Sidebar/SidebarProvider",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/Sidebar/SidebarProvider.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "transcript-recovery-transcript-recovery",
+          "title": "TranscriptRecovery/TranscriptRecovery",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/TranscriptRecovery/TranscriptRecovery.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "transcript-view",
+          "title": "TranscriptView",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/TranscriptView.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "upcoming-meetings",
+          "title": "UpcomingMeetings",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/UpcomingMeetings.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "update-check-provider",
+          "title": "UpdateCheckProvider",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/UpdateCheckProvider.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "update-dialog",
+          "title": "UpdateDialog",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/UpdateDialog.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "update-notification",
+          "title": "UpdateNotification",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/UpdateNotification.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "virtualized-transcript-view",
+          "title": "VirtualizedTranscriptView",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/VirtualizedTranscriptView.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "chat-chat-markdown",
+          "title": "chat/ChatMarkdown",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/chat/ChatMarkdown.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "chat-message-bubble",
+          "title": "chat/MessageBubble",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/chat/MessageBubble.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "deslop-icons",
+          "title": "deslop-icons",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/deslop-icons.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "memento-icon",
+          "title": "memento/Icon",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/memento/Icon.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "memento-record-overlay",
+          "title": "memento/RecordOverlay",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/memento/RecordOverlay.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "memento-wordmark",
+          "title": "memento/Wordmark",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/memento/Wordmark.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "molecules-form-components-form-input-item",
+          "title": "molecules/form-components/form-input-item",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/molecules/form-components/form-input-item.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "molecules-form-components-form-input-switch",
+          "title": "molecules/form-components/form-input-switch",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/molecules/form-components/form-input-switch.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "molecules-form-components-form-select-item",
+          "title": "molecules/form-components/form-select-item",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/molecules/form-components/form-select-item.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "shared-download-progress-toast",
+          "title": "shared/DownloadProgressToast",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/shared/DownloadProgressToast.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "meetings",
+      "title": "Meetings",
+      "items": [
+        {
+          "id": "meeting-conversation-analytics-report-button",
+          "title": "MeetingConversation/AnalyticsReportButton",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/MeetingConversation/AnalyticsReportButton.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "meeting-conversation-analytics-report-dialog",
+          "title": "MeetingConversation/AnalyticsReportDialog",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/MeetingConversation/AnalyticsReportDialog.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "meeting-conversation-meeting-composer",
+          "title": "MeetingConversation/MeetingComposer",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/MeetingConversation/MeetingComposer.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "meeting-conversation-meeting-conversation",
+          "title": "MeetingConversation/MeetingConversation",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/MeetingConversation/MeetingConversation.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "meeting-conversation-meeting-overflow-menu",
+          "title": "MeetingConversation/MeetingOverflowMenu",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/MeetingConversation/MeetingOverflowMenu.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "meeting-conversation-summary-message",
+          "title": "MeetingConversation/SummaryMessage",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/MeetingConversation/SummaryMessage.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "meeting-conversation-transcript-card",
+          "title": "MeetingConversation/TranscriptCard",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/MeetingConversation/TranscriptCard.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "meeting-conversation-transcript-search-dialog",
+          "title": "MeetingConversation/TranscriptSearchDialog",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/MeetingConversation/TranscriptSearchDialog.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "meeting-conversation-analytics-analytics-build-prompt",
+          "title": "MeetingConversation/analytics/AnalyticsBuildPrompt",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/MeetingConversation/analytics/AnalyticsBuildPrompt.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "meeting-conversation-analytics-meeting-dynamics-panel",
+          "title": "MeetingConversation/analytics/MeetingDynamicsPanel",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/MeetingConversation/analytics/MeetingDynamicsPanel.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "meeting-conversation-analytics-meeting-numbers-panel",
+          "title": "MeetingConversation/analytics/MeetingNumbersPanel",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/MeetingConversation/analytics/MeetingNumbersPanel.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "meeting-conversation-analytics-meeting-score-sections",
+          "title": "MeetingConversation/analytics/MeetingScoreSections",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/MeetingConversation/analytics/MeetingScoreSections.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "meeting-conversation-analytics-meeting-timeline-panel",
+          "title": "MeetingConversation/analytics/MeetingTimelinePanel",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/MeetingConversation/analytics/MeetingTimelinePanel.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "meeting-conversation-analytics-primitives",
+          "title": "MeetingConversation/analytics/primitives",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/MeetingConversation/analytics/primitives.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "meeting-details-delete-meeting-button",
+          "title": "MeetingDetails/DeleteMeetingButton",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/MeetingDetails/DeleteMeetingButton.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "meeting-details-detect-speakers-button",
+          "title": "MeetingDetails/DetectSpeakersButton",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/MeetingDetails/DetectSpeakersButton.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "meeting-details-interview-workflow-panel",
+          "title": "MeetingDetails/InterviewWorkflowPanel",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/MeetingDetails/InterviewWorkflowPanel.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "meeting-details-learning-review-panel",
+          "title": "MeetingDetails/LearningReviewPanel",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/MeetingDetails/LearningReviewPanel.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "meeting-details-meeting-audio-player",
+          "title": "MeetingDetails/MeetingAudioPlayer",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/MeetingDetails/MeetingAudioPlayer.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "meeting-details-meeting-content-window-notice",
+          "title": "MeetingDetails/MeetingContentWindowNotice",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/MeetingDetails/MeetingContentWindowNotice.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "meeting-details-one-on-one-workflow-panel",
+          "title": "MeetingDetails/OneOnOneWorkflowPanel",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/MeetingDetails/OneOnOneWorkflowPanel.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "meeting-details-retranscribe-dialog",
+          "title": "MeetingDetails/RetranscribeDialog",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/MeetingDetails/RetranscribeDialog.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "meeting-details-speaker-name-candidates-button",
+          "title": "MeetingDetails/SpeakerNameCandidatesButton",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/MeetingDetails/SpeakerNameCandidatesButton.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "meeting-details-speaker-rename-dialog",
+          "title": "MeetingDetails/SpeakerRenameDialog",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/MeetingDetails/SpeakerRenameDialog.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "meeting-details-standup-workflow-panel",
+          "title": "MeetingDetails/StandupWorkflowPanel",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/MeetingDetails/StandupWorkflowPanel.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "meeting-details-summary-generator-button-group",
+          "title": "MeetingDetails/SummaryGeneratorButtonGroup",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/MeetingDetails/SummaryGeneratorButtonGroup.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "meeting-details-summary-panel",
+          "title": "MeetingDetails/SummaryPanel",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/MeetingDetails/SummaryPanel.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "meeting-details-summary-updater-button-group",
+          "title": "MeetingDetails/SummaryUpdaterButtonGroup",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/MeetingDetails/SummaryUpdaterButtonGroup.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "meeting-details-transcript-button-group",
+          "title": "MeetingDetails/TranscriptButtonGroup",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/MeetingDetails/TranscriptButtonGroup.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "meeting-details-transcript-panel",
+          "title": "MeetingDetails/TranscriptPanel",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/MeetingDetails/TranscriptPanel.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "settings",
+      "title": "Settings",
+      "items": [
+        {
+          "id": "about",
+          "title": "About",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/About.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "analytics-consent-switch",
+          "title": "AnalyticsConsentSwitch",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/AnalyticsConsentSwitch.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "analytics-data-modal",
+          "title": "AnalyticsDataModal",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/AnalyticsDataModal.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "analytics-provider",
+          "title": "AnalyticsProvider",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/AnalyticsProvider.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "beta-settings",
+          "title": "BetaSettings",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/BetaSettings.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "built-in-model-manager",
+          "title": "BuiltInModelManager",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/BuiltInModelManager.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "calendar-settings",
+          "title": "CalendarSettings",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/CalendarSettings.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "confirmation-model-confirmation-modal",
+          "title": "ConfirmationModel/confirmation-modal",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/ConfirmationModel/confirmation-modal.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "device-selection",
+          "title": "DeviceSelection",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/DeviceSelection.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "diarization-model-manager",
+          "title": "DiarizationModelManager",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/DiarizationModelManager.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "embedding-model-settings",
+          "title": "EmbeddingModelSettings",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/EmbeddingModelSettings.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "gigaam-model-manager",
+          "title": "GigaamModelManager",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/GigaamModelManager.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "global-settings-button",
+          "title": "GlobalSettingsButton",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/GlobalSettingsButton.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "language-picker-popover",
+          "title": "LanguagePickerPopover",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/LanguagePickerPopover.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "language-selection",
+          "title": "LanguageSelection",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/LanguageSelection.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "model-download-progress",
+          "title": "ModelDownloadProgress",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/ModelDownloadProgress.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "model-settings-modal",
+          "title": "ModelSettingsModal",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/ModelSettingsModal.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "parakeet-model-manager",
+          "title": "ParakeetModelManager",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/ParakeetModelManager.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "preference-settings",
+          "title": "PreferenceSettings",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/PreferenceSettings.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "privacy-settings",
+          "title": "PrivacySettings",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/PrivacySettings.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "recording-settings",
+          "title": "RecordingSettings",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/RecordingSettings.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "summary-language-settings",
+          "title": "SummaryLanguageSettings",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/SummaryLanguageSettings.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "transcript-settings",
+          "title": "TranscriptSettings",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/TranscriptSettings.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "whisper-model-manager",
+          "title": "WhisperModelManager",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/WhisperModelManager.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "onboarding",
+      "title": "Onboarding",
+      "items": [
+        {
+          "id": "onboarding-onboarding-container",
+          "title": "onboarding/OnboardingContainer",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/onboarding/OnboardingContainer.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "onboarding-onboarding-flow",
+          "title": "onboarding/OnboardingFlow",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/onboarding/OnboardingFlow.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "onboarding-onboarding-gate",
+          "title": "onboarding/OnboardingGate",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/onboarding/OnboardingGate.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "onboarding-shared-permission-row",
+          "title": "onboarding/shared/PermissionRow",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/onboarding/shared/PermissionRow.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "onboarding-shared-progress-indicator",
+          "title": "onboarding/shared/ProgressIndicator",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/onboarding/shared/ProgressIndicator.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "onboarding-shared-status-indicator",
+          "title": "onboarding/shared/StatusIndicator",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/onboarding/shared/StatusIndicator.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "onboarding-steps-model-setup-step",
+          "title": "onboarding/steps/ModelSetupStep",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/onboarding/steps/ModelSetupStep.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "onboarding-steps-permissions-step",
+          "title": "onboarding/steps/PermissionsStep",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/onboarding/steps/PermissionsStep.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        },
+        {
+          "id": "onboarding-steps-welcome-step",
+          "title": "onboarding/steps/WelcomeStep",
+          "source": "src/showcase/AllComponents.showcase.tsx",
+          "productionRoot": "src/components/onboarding/steps/WelcomeStep.tsx",
+          "kind": "product",
+          "states": [
+            "default"
+          ],
+          "boundaries": [
+            "tauri-ipc",
+            "product-context"
+          ]
+        }
+      ]
+    }
+  ],
+  "exclusions": [
+    {
+      "source": "src/components/AudioPlayer.tsx",
+      "reason": "Общий для dev и production barrel/provider без отдельного визуального React-root."
+    },
+    {
+      "source": "src/components/AutoMeetingDetection.stories.tsx",
+      "reason": "Dev-only история существующего Storybook не входит в production bundle."
+    },
+    {
+      "source": "src/components/ImportAudio/index.ts",
+      "reason": "Общий для dev и production barrel/provider без отдельного визуального React-root."
+    },
+    {
+      "source": "src/components/TranscriptRecovery/index.ts",
+      "reason": "Общий для dev и production barrel/provider без отдельного визуального React-root."
+    },
+    {
+      "source": "src/components/UpcomingMeetings.stories.tsx",
+      "reason": "Dev-only история существующего Storybook не входит в production bundle."
+    },
+    {
+      "source": "src/components/onboarding/index.ts",
+      "reason": "Общий для dev и production barrel/provider без отдельного визуального React-root."
+    },
+    {
+      "source": "src/components/onboarding/shared/index.ts",
+      "reason": "Общий для dev и production barrel/provider без отдельного визуального React-root."
+    },
+    {
+      "source": "src/components/onboarding/steps/index.ts",
+      "reason": "Общий для dev и production barrel/provider без отдельного визуального React-root."
+    },
+    {
+      "source": "src/components/onboarding/useFinishOnboarding.ts",
+      "reason": "Общий для dev и production barrel/provider без отдельного визуального React-root."
+    },
+    {
+      "source": "src/vendor/deslop/primitives/colors.d.ts",
+      "reason": "Невизуальный модуль токенов или генератор иконок; представлен на foundation-странице."
+    },
+    {
+      "source": "src/vendor/deslop/primitives/colors.js",
+      "reason": "Невизуальный модуль токенов или генератор иконок; представлен на foundation-странице."
+    },
+    {
+      "source": "src/vendor/deslop/primitives/index.d.ts",
+      "reason": "Невизуальный модуль токенов или генератор иконок; представлен на foundation-странице."
+    },
+    {
+      "source": "src/vendor/deslop/primitives/index.js",
+      "reason": "Невизуальный модуль токенов или генератор иконок; представлен на foundation-странице."
+    },
+    {
+      "source": "src/vendor/deslop/primitives/layout.d.ts",
+      "reason": "Невизуальный модуль токенов или генератор иконок; представлен на foundation-странице."
+    },
+    {
+      "source": "src/vendor/deslop/primitives/layout.js",
+      "reason": "Невизуальный модуль токенов или генератор иконок; представлен на foundation-странице."
+    },
+    {
+      "source": "src/vendor/deslop/primitives/material-symbols-react.d.ts",
+      "reason": "Невизуальный модуль токенов или генератор иконок; представлен на foundation-странице."
+    },
+    {
+      "source": "src/vendor/deslop/primitives/material-symbols-react.js",
+      "reason": "Невизуальный модуль токенов или генератор иконок; представлен на foundation-странице."
+    },
+    {
+      "source": "src/vendor/deslop/primitives/tokens.d.ts",
+      "reason": "Невизуальный модуль токенов или генератор иконок; представлен на foundation-странице."
+    },
+    {
+      "source": "src/vendor/deslop/primitives/tokens.js",
+      "reason": "Невизуальный модуль токенов или генератор иконок; представлен на foundation-странице."
+    }
+  ]
+}

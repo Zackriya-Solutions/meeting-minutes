@@ -33,6 +33,7 @@ import { ManagedDefaultsMigrationDialog } from '@/components/ManagedDefaultsMigr
 import { AutoMeetingDetection } from '@/components/AutoMeetingDetection'
 import { ThemeProvider, useTheme } from 'next-themes'
 import { GlobalRecordingPill } from '@/components/GlobalRecordingPill'
+import { usePathname } from 'next/navigation'
 
 function NativeWindowThemeSync() {
   const { resolvedTheme } = useTheme()
@@ -132,6 +133,25 @@ function ConditionalImportDialog({
 // export { metadata } from './metadata'
 
 export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode
+}) {
+  const pathname = usePathname()
+  const isShowcase = pathname === '/showcase' || pathname === '/showcase-preview'
+
+  if (isShowcase) {
+    return (
+      <html lang="ru" suppressHydrationWarning>
+        <body>{children}</body>
+      </html>
+    )
+  }
+
+  return <ProductRuntime>{children}</ProductRuntime>
+}
+
+function ProductRuntime({
   children,
 }: {
   children: React.ReactNode

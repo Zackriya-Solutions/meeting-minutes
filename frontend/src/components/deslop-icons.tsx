@@ -5,6 +5,7 @@ import type { MaterialSymbolName } from '@/vendor/deslop/material-symbols-react'
 export interface DeslopIconProps extends Omit<HTMLAttributes<HTMLSpanElement>, 'children' | 'color'> {
   size?: number | string;
   color?: string;
+  weight?: number | string;
   strokeWidth?: number | string;
   absoluteStrokeWidth?: boolean;
   fill?: boolean | number | string;
@@ -22,6 +23,7 @@ function createIcon(symbol: MaterialSymbolName, displayName: string): LucideIcon
     {
       size,
       color,
+      weight: requestedWeight,
       strokeWidth,
       absoluteStrokeWidth: _absoluteStrokeWidth,
       fill,
@@ -33,9 +35,12 @@ function createIcon(symbol: MaterialSymbolName, displayName: string): LucideIcon
     ref,
   ) {
     const numericStroke = Number(strokeWidth);
-    const weight = Number.isFinite(numericStroke)
-      ? Math.min(700, Math.max(100, Math.round(100 + numericStroke * 150)))
-      : 400;
+    const numericWeight = Number(requestedWeight);
+    const weight = Number.isFinite(numericWeight)
+      ? Math.min(700, Math.max(100, numericWeight))
+      : Number.isFinite(numericStroke)
+        ? Math.min(700, Math.max(100, Math.round(100 + numericStroke * 150)))
+        : 400;
     const filled = fill === true || fill === 1;
 
     return (
@@ -99,6 +104,7 @@ export const BadgeAlert = createIcon('warning', 'BadgeAlert');
 export const BrainCircuit = createIcon('analytics', 'BrainCircuit');
 export const Calendar = createIcon('calendar_month', 'Calendar');
 export const CalendarDays = Calendar;
+export const Checklist = createIcon('checklist' as MaterialSymbolName, 'Checklist');
 export const Check = createIcon('check', 'Check');
 export const CheckCircle = createIcon('check_circle', 'CheckCircle');
 export const CheckCircle2 = CheckCircle;
