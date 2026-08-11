@@ -49,7 +49,7 @@ export const BETA_FEATURE_NAMES: Record<keyof BetaFeatures, string> = {
  */
 export const BETA_FEATURE_DESCRIPTIONS: Record<keyof BetaFeatures, string> = {
   importAndRetranscribe: 'Import audio files to transcribe or retranscribe existing meetings with different language settings.',
-  noisyAudioDenoising: 'Use local DPDFNet2 to recover speech missed in noisy imports. Telephone audio prefers the enhanced path; regular audio keeps raw speech primary. The selected model downloads on first use.',
+  noisyAudioDenoising: 'Use local DPDFNet2 to recover speech missed in noisy imports. Enabling this allows a one-time internet download of the selected model (about 10 MB) from Hugging Face; audio processing remains local.',
 };
 
 /**

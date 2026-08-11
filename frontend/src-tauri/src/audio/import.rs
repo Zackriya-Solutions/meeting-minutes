@@ -320,6 +320,8 @@ fn merge_primary_and_gap_candidates(
                 .floor() as usize;
             let start_offset = start_offset.min(sample_count);
             let end_offset = end_offset.min(sample_count);
+            // A remaining gap shorter than one sample cannot carry recoverable audio;
+            // dropping that sub-sample interval also guarantees no duplicated sample.
             if start_offset >= end_offset {
                 continue;
             }
