@@ -13,7 +13,6 @@ use ort::value::TensorRef;
 use realfft::{num_complex::Complex32, ComplexToReal, RealFftPlanner, RealToComplex};
 use sha2::{Digest, Sha256};
 use std::collections::VecDeque;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tauri::{AppHandle, Manager, Runtime};
@@ -98,8 +97,12 @@ pub async fn ensure_model<R: Runtime>(
         .parent()
         .ok_or_else(|| anyhow!("DPDFNet model path has no parent"))?;
     std::fs::create_dir_all(parent)?;
-    let temporary = destination.with_extension("onnx.part");
-    let _ = std::fs::remove_file(&temporary);
+    // A unique file prevents concurrent imports or app processes from truncating
+    // one another's partial download. `persist` below publishes only verified bytes.
+    let mut temporary = tempfile::Builder::new()
+        .prefix(profile.cache_filename)
+        .suffix(".part")
+        .tempfile_in(parent)?;
 
     // Pin the tested export rather than following a mutable `main` URL.
     let url = format!(
@@ -126,27 +129,30 @@ pub async fn ensure_model<R: Runtime>(
         }
     }
 
-    let mut file = std::fs::File::create(&temporary)?;
     let mut downloaded = 0_u64;
     let mut stream = response.bytes_stream();
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.map_err(|error| anyhow!("DPDFNet2 download interrupted: {error}"))?;
-        file.write_all(&chunk)?;
+        std::io::Write::write_all(&mut temporary, &chunk)?;
         downloaded = downloaded.saturating_add(chunk.len() as u64);
     }
-    file.flush()?;
-    drop(file);
+    std::io::Write::flush(&mut temporary)?;
 
-    if downloaded != profile.size || !valid_model(&temporary, profile) {
-        let _ = std::fs::remove_file(&temporary);
+    if downloaded != profile.size || !valid_model(temporary.path(), profile) {
         return Err(anyhow!(
             "Downloaded DPDFNet2 model failed integrity verification"
         ));
     }
-    if destination.exists() {
-        std::fs::remove_file(&destination)?;
+    if valid_model(&destination, profile) {
+        return Ok(destination);
     }
-    std::fs::rename(&temporary, &destination)?;
+    temporary.persist(&destination).map_err(|error| {
+        anyhow!(
+            "Could not publish verified DPDFNet2 model {}: {}",
+            destination.display(),
+            error.error
+        )
+    })?;
     Ok(destination)
 }
 

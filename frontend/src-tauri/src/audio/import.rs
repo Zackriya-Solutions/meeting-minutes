@@ -853,6 +853,8 @@ pub(crate) fn extract_duration_from_metadata(path: &Path) -> Result<f64> {
 /// memory bounded regardless of recording length.
 fn extract_duration_with_ffmpeg(path: &Path) -> Result<f64> {
     const PROBE_SAMPLE_RATE: u64 = 8_000;
+    const MAX_PROBE_DURATION_SECONDS: u64 = 24 * 60 * 60;
+    const MAX_PROBE_BYTES: u64 = PROBE_SAMPLE_RATE * 2 * MAX_PROBE_DURATION_SECONDS;
     let ffmpeg = find_ffmpeg_path().ok_or_else(|| anyhow!("FFmpeg is not available"))?;
     let mut child = Command::new(ffmpeg)
         .args(["-nostdin", "-v", "error"])
@@ -882,11 +884,25 @@ fn extract_duration_with_ffmpeg(path: &Path) -> Result<f64> {
     let mut bytes = 0_u64;
     let mut buffer = [0_u8; 64 * 1024];
     loop {
+        if IMPORT_CANCELLED.load(Ordering::SeqCst) {
+            let _ = child.kill();
+            let _ = child.wait();
+            let _ = stderr_reader.join();
+            return Err(anyhow!("Import cancelled"));
+        }
         let read = stdout.read(&mut buffer)?;
         if read == 0 {
             break;
         }
         bytes = bytes.saturating_add(read as u64);
+        if bytes > MAX_PROBE_BYTES {
+            let _ = child.kill();
+            let _ = child.wait();
+            let _ = stderr_reader.join();
+            return Err(anyhow!(
+                "FFmpeg audio probe exceeded the 24-hour import limit"
+            ));
+        }
     }
     let status = child.wait()?;
     let details = stderr_reader.join().unwrap_or_default();
