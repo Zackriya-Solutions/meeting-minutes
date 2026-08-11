@@ -6,6 +6,8 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use sqlx::{FromRow, SqlitePool};
 use std::collections::{HashMap, HashSet};
+#[cfg(not(test))]
+use std::time::{Duration, Instant};
 
 use crate::state::AppState;
 
@@ -453,8 +455,12 @@ const REJECTION_SALT_SERVICE: &str = "meetily.speaker-names";
 #[cfg(not(test))]
 const REJECTION_SALT_ACCOUNT: &str = "rejection-salt-v1";
 #[cfg(not(test))]
-static REJECTION_SALT_CACHE: tokio::sync::OnceCell<Result<String, String>> =
-    tokio::sync::OnceCell::const_new();
+static REJECTION_SALT_CACHE: tokio::sync::OnceCell<String> = tokio::sync::OnceCell::const_new();
+#[cfg(not(test))]
+static REJECTION_SALT_ATTEMPT: Lazy<tokio::sync::Mutex<Option<(Instant, String)>>> =
+    Lazy::new(|| tokio::sync::Mutex::new(None));
+#[cfg(not(test))]
+const REJECTION_SALT_RETRY_COOLDOWN: Duration = Duration::from_secs(30);
 
 #[cfg(not(test))]
 async fn rejection_salt_from_vault(pool: &SqlitePool) -> Result<String, String> {
@@ -511,12 +517,36 @@ async fn rejection_salt_from_vault(pool: &SqlitePool) -> Result<String, String> 
 
 #[cfg(not(test))]
 async fn rejection_salt(pool: &SqlitePool) -> Result<String, String> {
-    // Archive scans can touch hundreds of meetings. One Keychain read is enough;
-    // cache a denial too so it cannot create one password prompt per meeting.
-    REJECTION_SALT_CACHE
-        .get_or_init(|| rejection_salt_from_vault(pool))
-        .await
-        .clone()
+    if let Some(value) = REJECTION_SALT_CACHE.get() {
+        return Ok(value.clone());
+    }
+
+    // Serialize the OS dialog and apply only a short failure cooldown. Successful
+    // retrieval is process-cached, while a transient denial can recover without restart.
+    let mut failure = REJECTION_SALT_ATTEMPT.lock().await;
+    if let Some(value) = REJECTION_SALT_CACHE.get() {
+        return Ok(value.clone());
+    }
+    if let Some((retry_after, message)) = failure.as_ref() {
+        if Instant::now() < *retry_after {
+            return Err(message.clone());
+        }
+    }
+
+    match rejection_salt_from_vault(pool).await {
+        Ok(value) => {
+            let _ = REJECTION_SALT_CACHE.set(value.clone());
+            *failure = None;
+            Ok(value)
+        }
+        Err(error) => {
+            *failure = Some((
+                Instant::now() + REJECTION_SALT_RETRY_COOLDOWN,
+                error.clone(),
+            ));
+            Err(error)
+        }
+    }
 }
 
 #[cfg(test)]

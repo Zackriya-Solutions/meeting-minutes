@@ -12,11 +12,26 @@ pub const PRIMARY_GATEWAY: &str = "https://gw.multitool.works";
 pub const FALLBACK_GATEWAY: &str = "https://gw2.multitool.works";
 pub const PRIMARY_DEEPSEEK_BASE_URL: &str = "https://gw.multitool.works/deepseek/v1";
 const SERVICE: &str = "meetily.gateway";
-static DEVICE_ID_CACHE: OnceCell<Result<String, String>> = OnceCell::new();
+static DEVICE_ID_CACHE: OnceCell<String> = OnceCell::new();
+static DEVICE_ID_ATTEMPT: Lazy<std::sync::Mutex<Option<RetryFailure>>> =
+    Lazy::new(|| std::sync::Mutex::new(None));
 static INSTALL_TOKEN_CACHE: Lazy<tokio::sync::RwLock<Option<CachedInstallToken>>> =
     Lazy::new(|| tokio::sync::RwLock::new(None));
 static INSTALL_TOKEN_LOCK: Lazy<tokio::sync::Mutex<()>> = Lazy::new(|| tokio::sync::Mutex::new(()));
 const INSTALL_TOKEN_CACHE_TTL: Duration = Duration::from_secs(5 * 60);
+const CREDENTIAL_RETRY_COOLDOWN: Duration = Duration::from_secs(30);
+
+#[derive(Clone)]
+struct RetryFailure {
+    message: String,
+    retry_after: Instant,
+}
+
+impl RetryFailure {
+    fn active_message(&self) -> Option<String> {
+        (Instant::now() < self.retry_after).then(|| self.message.clone())
+    }
+}
 
 #[derive(Clone)]
 struct CachedInstallToken {
@@ -98,10 +113,37 @@ fn device_id_from_vault() -> Result<String, String> {
 }
 
 pub(crate) fn device_id() -> Result<String, String> {
-    // Keychain authorization is process-wide user interaction. Cache both success
-    // and denial so concurrent frontend consumers cannot open a stack of identical
-    // macOS password dialogs. A fresh launch may retry after permissions are fixed.
-    DEVICE_ID_CACHE.get_or_init(device_id_from_vault).clone()
+    if let Some(value) = DEVICE_ID_CACHE.get() {
+        return Ok(value.clone());
+    }
+
+    // Serialize the OS dialog and briefly suppress duplicate consumers after a denial.
+    // Unlike the success value, a failure is not permanent: unlocking the vault or fixing
+    // its ACL can recover in the same app process after the short cooldown.
+    let mut failure = DEVICE_ID_ATTEMPT
+        .lock()
+        .map_err(|_| "credential retry state is unavailable".to_string())?;
+    if let Some(value) = DEVICE_ID_CACHE.get() {
+        return Ok(value.clone());
+    }
+    if let Some(message) = failure.as_ref().and_then(RetryFailure::active_message) {
+        return Err(message);
+    }
+
+    match device_id_from_vault() {
+        Ok(value) => {
+            let _ = DEVICE_ID_CACHE.set(value.clone());
+            *failure = None;
+            Ok(value)
+        }
+        Err(error) => {
+            *failure = Some(RetryFailure {
+                message: error.clone(),
+                retry_after: Instant::now() + CREDENTIAL_RETRY_COOLDOWN,
+            });
+            Err(error)
+        }
+    }
 }
 
 pub(crate) async fn device_id_async() -> Result<String, String> {
@@ -482,5 +524,20 @@ mod tests {
             validated_at: Instant::now() - INSTALL_TOKEN_CACHE_TTL,
         };
         assert_eq!(expired.fresh_value(), None);
+    }
+
+    #[test]
+    fn credential_failures_have_a_bounded_retry_cooldown() {
+        let active = RetryFailure {
+            message: "denied".to_string(),
+            retry_after: Instant::now() + CREDENTIAL_RETRY_COOLDOWN,
+        };
+        assert_eq!(active.active_message().as_deref(), Some("denied"));
+
+        let expired = RetryFailure {
+            message: "transient".to_string(),
+            retry_after: Instant::now() - Duration::from_millis(1),
+        };
+        assert_eq!(expired.active_message(), None);
     }
 }
