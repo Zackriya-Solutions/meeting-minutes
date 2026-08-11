@@ -591,6 +591,7 @@ pub fn run() {
                                 batch_language,
                                 batch_model,
                                 batch_provider,
+                                false,
                                 batch_report,
                             )
                             .await
