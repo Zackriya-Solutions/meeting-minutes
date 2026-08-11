@@ -20,8 +20,10 @@ pub async fn init_analytics() -> Result<(), String> {
 }
 
 #[command]
-pub fn get_analytics_device_id() -> Result<String, String> {
-    crate::gateway_identity::device_id()
+pub async fn get_analytics_device_id() -> Result<String, String> {
+    // Native credential stores are synchronous and may wait for an OS authorization
+    // dialog. Never make that wait on Tauri's command/UI thread.
+    crate::gateway_identity::device_id_async().await
 }
 
 #[command]
