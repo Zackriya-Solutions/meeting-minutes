@@ -277,27 +277,61 @@ where
     Ok((segments, duration_seconds))
 }
 
-/// Keep every primary candidate and add fallback candidates that do not substantially
-/// overlap one. This protects recall without transcribing the same interval twice.
+/// Keep every primary candidate and add only the non-overlapping portions of fallback
+/// candidates. This protects recall without transcribing the same interval twice.
 fn merge_primary_and_gap_candidates(
     mut primary: Vec<SpeechSegment>,
     fallback: Vec<SpeechSegment>,
 ) -> Vec<SpeechSegment> {
     for candidate in fallback {
-        let candidate_duration =
-            (candidate.end_timestamp_ms - candidate.start_timestamp_ms).max(1.0);
-        let duplicate = primary.iter().any(|existing| {
-            let overlap_start = candidate
-                .start_timestamp_ms
-                .max(existing.start_timestamp_ms);
-            let overlap_end = candidate.end_timestamp_ms.min(existing.end_timestamp_ms);
-            let overlap = (overlap_end - overlap_start).max(0.0);
-            let existing_duration =
-                (existing.end_timestamp_ms - existing.start_timestamp_ms).max(1.0);
-            overlap >= candidate_duration.min(existing_duration) * 0.5
-        });
-        if !duplicate {
-            primary.push(candidate);
+        let duration_ms = candidate.end_timestamp_ms - candidate.start_timestamp_ms;
+        if duration_ms <= 0.0 || candidate.samples.is_empty() {
+            continue;
+        }
+
+        let mut gaps = vec![(candidate.start_timestamp_ms, candidate.end_timestamp_ms)];
+        for existing in &primary {
+            let mut next = Vec::with_capacity(gaps.len() + 1);
+            for (start, end) in gaps {
+                if existing.end_timestamp_ms <= start || existing.start_timestamp_ms >= end {
+                    next.push((start, end));
+                    continue;
+                }
+                if existing.start_timestamp_ms > start {
+                    next.push((start, existing.start_timestamp_ms.min(end)));
+                }
+                if existing.end_timestamp_ms < end {
+                    next.push((existing.end_timestamp_ms.max(start), end));
+                }
+            }
+            gaps = next;
+            if gaps.is_empty() {
+                break;
+            }
+        }
+
+        let sample_count = candidate.samples.len();
+        for (start, end) in gaps {
+            let start_offset = ((start - candidate.start_timestamp_ms) / duration_ms
+                * sample_count as f64)
+                .ceil() as usize;
+            let end_offset = ((end - candidate.start_timestamp_ms) / duration_ms
+                * sample_count as f64)
+                .floor() as usize;
+            let start_offset = start_offset.min(sample_count);
+            let end_offset = end_offset.min(sample_count);
+            if start_offset >= end_offset {
+                continue;
+            }
+            let milliseconds_per_sample = duration_ms / sample_count as f64;
+            primary.push(SpeechSegment {
+                samples: candidate.samples[start_offset..end_offset].to_vec(),
+                start_timestamp_ms: candidate.start_timestamp_ms
+                    + start_offset as f64 * milliseconds_per_sample,
+                end_timestamp_ms: candidate.start_timestamp_ms
+                    + end_offset as f64 * milliseconds_per_sample,
+                confidence: candidate.confidence,
+            });
         }
     }
     primary.sort_by(|left, right| {
@@ -3081,7 +3115,7 @@ mod tests {
     fn fallback_vad_candidates_only_fill_primary_gaps() {
         fn segment(start: f64, end: f64) -> SpeechSegment {
             SpeechSegment {
-                samples: vec![0.0; 16],
+                samples: vec![0.0; (end - start) as usize],
                 start_timestamp_ms: start,
                 end_timestamp_ms: end,
                 confidence: 0.8,
@@ -3094,6 +3128,31 @@ mod tests {
         assert_eq!(merged.len(), 2);
         assert_eq!(merged[0].start_timestamp_ms, 1_000.0);
         assert_eq!(merged[1].start_timestamp_ms, 5_000.0);
+    }
+
+    #[test]
+    fn partially_overlapping_fallback_is_trimmed_to_the_gap() {
+        fn segment(start: f64, end: f64) -> SpeechSegment {
+            SpeechSegment {
+                samples: (start as usize..end as usize)
+                    .map(|sample| sample as f32)
+                    .collect(),
+                start_timestamp_ms: start,
+                end_timestamp_ms: end,
+                confidence: 0.8,
+            }
+        }
+
+        let merged = merge_primary_and_gap_candidates(
+            vec![segment(1_000.0, 2_000.0)],
+            vec![segment(1_500.0, 2_500.0)],
+        );
+
+        assert_eq!(merged.len(), 2);
+        assert_eq!(merged[1].start_timestamp_ms, 2_000.0);
+        assert_eq!(merged[1].end_timestamp_ms, 2_500.0);
+        assert_eq!(merged[1].samples.first(), Some(&2_000.0));
+        assert_eq!(merged[1].samples.last(), Some(&2_499.0));
     }
 
     #[test]

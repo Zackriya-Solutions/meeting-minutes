@@ -26,18 +26,24 @@ const MODEL_REVISION: &str = "dd6818d00f50c836fed43a6243ebe49116de5964";
 
 #[derive(Clone, Copy)]
 struct ModelProfile {
-    filename: &'static str,
+    cache_filename: &'static str,
+    source_filename: &'static str,
     size: u64,
     sha256: &'static str,
 }
 
 const NARROWBAND_MODEL: ModelProfile = ModelProfile {
-    filename: "dpdfnet2_8khz.onnx",
+    cache_filename: "dpdfnet2_8khz.onnx",
+    source_filename: "dpdfnet2_8khz.onnx",
     size: 10_188_357,
     sha256: "6218f1dbd6e4bac5768c63b7d899fe7b84b3788f2a35c4e246d4ab0946165c5d",
 };
 const WIDEBAND_MODEL: ModelProfile = ModelProfile {
-    filename: "dpdfnet2_16khz.onnx",
+    // The pinned upstream export is named `dpdfnet2.onnx`. Give it an explicit
+    // bandwidth-qualified cache name so the 8 and 16 kHz profiles cannot collide.
+    // Size and SHA-256 below were computed from these exact immutable-revision bytes.
+    cache_filename: "dpdfnet2_16khz.onnx",
+    source_filename: "dpdfnet2.onnx",
     size: 10_178_747,
     sha256: "4f0ee28935b4a32abecc717d745416976565834d839601acf43031094b4dc94c",
 };
@@ -57,7 +63,7 @@ fn model_path<R: Runtime>(app: &AppHandle<R>, profile: ModelProfile) -> Result<P
         .map_err(|error| anyhow!("Could not resolve app data directory: {error}"))?
         .join("models")
         .join("dpdfnet")
-        .join(profile.filename))
+        .join(profile.cache_filename))
 }
 
 fn sha256_file(path: &Path) -> Result<String> {
@@ -98,11 +104,7 @@ pub async fn ensure_model<R: Runtime>(
     // Pin the tested export rather than following a mutable `main` URL.
     let url = format!(
         "https://huggingface.co/Ceva-IP/DPDFNet/resolve/{MODEL_REVISION}/onnx/{}",
-        if source_sample_rate <= 12_000 {
-            "dpdfnet2_8khz.onnx"
-        } else {
-            "dpdfnet2.onnx"
-        }
+        profile.source_filename
     );
     let response = reqwest::Client::new()
         .get(url)
@@ -417,6 +419,9 @@ mod tests {
             assert_eq!(profile.sha256.len(), 64);
             assert!(profile.size > 10_000_000);
         }
+        assert_eq!(NARROWBAND_MODEL.source_filename, "dpdfnet2_8khz.onnx");
+        assert_eq!(WIDEBAND_MODEL.source_filename, "dpdfnet2.onnx");
+        assert_eq!(WIDEBAND_MODEL.cache_filename, "dpdfnet2_16khz.onnx");
     }
 
     #[test]
