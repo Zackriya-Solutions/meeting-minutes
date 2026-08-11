@@ -2,7 +2,7 @@
 
 import { Button } from '@/components/ui/button';
 import { ButtonGroup } from '@/components/ui/button-group';
-import { Copy, Save, Loader2, Search, FolderOpen } from 'lucide-react';
+import { Copy, Save, Loader2, Search, FolderOpen, Download } from 'lucide-react';
 import Analytics from '@/lib/analytics';
 
 interface SummaryUpdaterButtonGroupProps {
@@ -12,6 +12,8 @@ interface SummaryUpdaterButtonGroupProps {
   onCopy: () => Promise<void>;
   onFind?: () => void;
   onOpenFolder: () => Promise<void>;
+  onExportToFile: () => Promise<void>;
+  isExporting?: boolean;
   hasSummary: boolean;
 }
 
@@ -22,6 +24,8 @@ export function SummaryUpdaterButtonGroup({
   onCopy,
   onFind,
   onOpenFolder,
+  onExportToFile,
+  isExporting = false,
   hasSummary
 }: SummaryUpdaterButtonGroupProps) {
   return (
@@ -65,6 +69,26 @@ export function SummaryUpdaterButtonGroup({
       >
         <Copy />
         <span className="hidden lg:inline">Copy</span>
+      </Button>
+
+      {/* Export to Markdown button */}
+      <Button
+        variant="outline"
+        size="sm"
+        title="Export to Markdown file"
+        onClick={() => {
+          Analytics.trackButtonClick('export_markdown', 'meeting_details');
+          onExportToFile();
+        }}
+        disabled={isExporting}
+        className="cursor-pointer"
+      >
+        {isExporting ? (
+          <Loader2 className="animate-spin" />
+        ) : (
+          <Download />
+        )}
+        <span className="hidden lg:inline">Export</span>
       </Button>
 
       {/* Find button */}
