@@ -146,9 +146,14 @@ fn device_id(purpose: DeviceIdPurpose) -> Result<String, String> {
         return Err(message);
     }
 
-    match device_id_from_vault() {
+    // The shared OnceCell serializes the read-then-create transaction across purposes.
+    // Without get_or_try_init here, analytics and gateway startup could each observe a
+    // missing entry, persist different UUIDs, and leave memory disagreeing with Keychain.
+    match DEVICE_ID_CACHE
+        .get_or_try_init(device_id_from_vault)
+        .cloned()
+    {
         Ok(value) => {
-            let _ = DEVICE_ID_CACHE.set(value.clone());
             *failure = None;
             Ok(value)
         }
@@ -569,5 +574,37 @@ mod tests {
             device_id_attempt(DeviceIdPurpose::Analytics),
             device_id_attempt(DeviceIdPurpose::Gateway),
         ));
+    }
+
+    #[test]
+    fn concurrent_device_id_initializers_publish_one_value() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::{Arc, Barrier};
+
+        let cache = Arc::new(OnceCell::<String>::new());
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let barrier = Arc::new(Barrier::new(2));
+        let mut tasks = Vec::new();
+        for _ in 0..2 {
+            let cache = Arc::clone(&cache);
+            let attempts = Arc::clone(&attempts);
+            let barrier = Arc::clone(&barrier);
+            tasks.push(std::thread::spawn(move || {
+                barrier.wait();
+                cache
+                    .get_or_try_init(|| {
+                        let attempt = attempts.fetch_add(1, Ordering::SeqCst);
+                        std::thread::sleep(Duration::from_millis(10));
+                        Ok::<_, String>(format!("device-{attempt}"))
+                    })
+                    .cloned()
+                    .unwrap()
+            }));
+        }
+
+        let first = tasks.remove(0).join().unwrap();
+        let second = tasks.remove(0).join().unwrap();
+        assert_eq!(first, second);
+        assert_eq!(attempts.load(Ordering::SeqCst), 1);
     }
 }
