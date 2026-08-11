@@ -13,6 +13,11 @@ use super::capture::{AudioCaptureBackend, get_current_backend};
 #[cfg(target_os = "macos")]
 use super::capture::CoreAudioCapture;
 
+#[cfg(target_os = "linux")]
+use super::capture::{find_monitor_source_by_description, PulseSystemCapture};
+#[cfg(target_os = "linux")]
+use std::sync::atomic::AtomicBool;
+
 /// Stream backend implementation
 pub enum StreamBackend {
     /// CPAL-based stream (ScreenCaptureKit or default)
@@ -20,6 +25,12 @@ pub enum StreamBackend {
     /// Core Audio direct implementation (macOS only)
     #[cfg(target_os = "macos")]
     CoreAudio {
+        task: Option<tokio::task::JoinHandle<()>>,
+    },
+    /// Native PipeWire/PulseAudio implementation (Linux only)
+    #[cfg(target_os = "linux")]
+    Pulse {
+        should_stop: Arc<AtomicBool>,
         task: Option<tokio::task::JoinHandle<()>>,
     },
 }
@@ -85,6 +96,16 @@ impl AudioStream {
         if use_core_audio {
             info!("🎵 Stream: Using Core Audio backend (cidre) for system audio");
             return Self::create_core_audio_stream(device, state, device_type, recording_sender).await;
+        }
+
+        // Linux system audio always goes through the native PipeWire/PulseAudio
+        // path instead of cpal's ALSA host — no backend toggle needed, unlike
+        // macOS's ScreenCaptureKit/CoreAudio choice, since there's only one way
+        // to capture system audio natively on Linux.
+        #[cfg(target_os = "linux")]
+        if device_type == DeviceType::System {
+            info!("🎵 Stream: Using native PulseAudio/PipeWire backend for system audio");
+            return Self::create_pulse_stream(device, state, device_type, recording_sender).await;
         }
 
         // Default path: use CPAL
@@ -233,6 +254,62 @@ impl AudioStream {
         })
     }
 
+    /// Create a native PulseAudio/PipeWire stream (Linux only)
+    #[cfg(target_os = "linux")]
+    async fn create_pulse_stream(
+        device: Arc<AudioDevice>,
+        state: Arc<RecordingState>,
+        device_type: DeviceType,
+        recording_sender: Option<mpsc::UnboundedSender<super::recording_state::AudioChunk>>,
+    ) -> Result<Self> {
+        info!("🔊 Stream: Creating PulseAudio stream for device: {}", device.name);
+
+        // The picker shows "<sink description> (System Audio)" (see
+        // devices/platform/linux.rs); strip that suffix to recover the sink
+        // description and resolve it to its real monitor source name.
+        let description = device
+            .name
+            .strip_suffix(" (System Audio)")
+            .unwrap_or(&device.name);
+
+        let monitor_source_name = find_monitor_source_by_description(description)
+            .map_err(|e| anyhow::anyhow!("Failed to resolve PulseAudio sink '{}': {}", description, e))?;
+
+        let capture_impl = PulseSystemCapture::new(&monitor_source_name)
+            .map_err(|e| anyhow::anyhow!("Failed to open PulseAudio record stream: {}", e))?;
+
+        let sample_rate = capture_impl.sample_rate();
+        let channels = capture_impl.channels();
+        let should_stop = capture_impl.stop_handle();
+
+        // Create audio capture processor for pipeline integration
+        let capture = AudioCapture::new(
+            device.clone(),
+            state.clone(),
+            sample_rate,
+            channels,
+            device_type,
+            recording_sender,
+        );
+
+        let device_name = device.name.clone();
+        let task = tokio::task::spawn_blocking(move || {
+            info!("✅ Stream: PulseAudio capture thread started for {}", device_name);
+            capture_impl.run(|samples| capture.process_audio_data(samples));
+            info!("⚠️ Stream: PulseAudio capture thread ended for {}", device_name);
+        });
+
+        info!("✅ Stream: PulseAudio stream fully initialized for device: {}", device.name);
+
+        Ok(Self {
+            device: device.clone(),
+            backend: StreamBackend::Pulse {
+                should_stop,
+                task: Some(task),
+            },
+        })
+    }
+
     /// Build stream based on sample format
     fn build_stream(
         device: &Device,
@@ -342,6 +419,20 @@ impl AudioStream {
                     std::thread::sleep(std::time::Duration::from_millis(50));
                     info!("Core Audio task aborted");
                 }
+            }
+            #[cfg(target_os = "linux")]
+            StreamBackend::Pulse { should_stop, task } => {
+                // Signal the blocking capture thread to stop after its current
+                // read() call returns, then give it a moment to actually exit.
+                // Unlike CoreAudio's tokio task, abort() can't preempt a thread
+                // blocked in a foreign blocking call, so the flag is what matters.
+                info!("Stopping PulseAudio capture thread...");
+                should_stop.store(true, std::sync::atomic::Ordering::Release);
+                if let Some(task_handle) = task {
+                    task_handle.abort();
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                }
+                info!("PulseAudio capture thread stopped");
             }
         }
 
