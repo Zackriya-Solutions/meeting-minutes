@@ -25,6 +25,8 @@ export class Analytics {
   private static sessionStartTime: number | null = null;
   private static meetingsInSession: number = 0;
   private static deviceInfo: DeviceInfo | null = null;
+  private static persistentUserId: string | null = null;
+  private static persistentUserIdPromise: Promise<string> | null = null;
 
   static async init(): Promise<void> {
     // Prevent duplicate initialization
@@ -163,6 +165,24 @@ export class Analytics {
 
   // User ID management with persistent storage
   static async getPersistentUserId(): Promise<string> {
+    if (this.persistentUserId) {
+      return this.persistentUserId;
+    }
+    if (this.persistentUserIdPromise) {
+      return this.persistentUserIdPromise;
+    }
+
+    this.persistentUserIdPromise = this.loadPersistentUserId();
+    try {
+      const userId = await this.persistentUserIdPromise;
+      this.persistentUserId = userId;
+      return userId;
+    } finally {
+      this.persistentUserIdPromise = null;
+    }
+  }
+
+  private static async loadPersistentUserId(): Promise<string> {
     try {
       // Use the same OS-vault-backed per-install identity that authenticates
       // first-party statistics. The stats server verifies this identity and
