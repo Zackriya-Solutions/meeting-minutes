@@ -13,7 +13,9 @@ pub const FALLBACK_GATEWAY: &str = "https://gw2.multitool.works";
 pub const PRIMARY_DEEPSEEK_BASE_URL: &str = "https://gw.multitool.works/deepseek/v1";
 const SERVICE: &str = "meetily.gateway";
 static DEVICE_ID_CACHE: OnceCell<String> = OnceCell::new();
-static DEVICE_ID_ATTEMPT: Lazy<std::sync::Mutex<Option<RetryFailure>>> =
+static ANALYTICS_DEVICE_ID_ATTEMPT: Lazy<std::sync::Mutex<Option<RetryFailure>>> =
+    Lazy::new(|| std::sync::Mutex::new(None));
+static GATEWAY_DEVICE_ID_ATTEMPT: Lazy<std::sync::Mutex<Option<RetryFailure>>> =
     Lazy::new(|| std::sync::Mutex::new(None));
 static INSTALL_TOKEN_CACHE: Lazy<tokio::sync::RwLock<Option<CachedInstallToken>>> =
     Lazy::new(|| tokio::sync::RwLock::new(None));
@@ -30,6 +32,19 @@ struct RetryFailure {
 impl RetryFailure {
     fn active_message(&self) -> Option<String> {
         (Instant::now() < self.retry_after).then(|| self.message.clone())
+    }
+}
+
+#[derive(Clone, Copy)]
+enum DeviceIdPurpose {
+    Analytics,
+    Gateway,
+}
+
+fn device_id_attempt(purpose: DeviceIdPurpose) -> &'static std::sync::Mutex<Option<RetryFailure>> {
+    match purpose {
+        DeviceIdPurpose::Analytics => &ANALYTICS_DEVICE_ID_ATTEMPT,
+        DeviceIdPurpose::Gateway => &GATEWAY_DEVICE_ID_ATTEMPT,
     }
 }
 
@@ -112,15 +127,16 @@ fn device_id_from_vault() -> Result<String, String> {
     Ok(value)
 }
 
-pub(crate) fn device_id() -> Result<String, String> {
+fn device_id(purpose: DeviceIdPurpose) -> Result<String, String> {
     if let Some(value) = DEVICE_ID_CACHE.get() {
         return Ok(value.clone());
     }
 
     // Serialize the OS dialog and briefly suppress duplicate consumers after a denial.
-    // Unlike the success value, a failure is not permanent: unlocking the vault or fixing
-    // its ACL can recover in the same app process after the short cooldown.
-    let mut failure = DEVICE_ID_ATTEMPT
+    // Analytics and gateway registration keep separate failure cooldowns so one feature
+    // cannot replay a stale error into the other. Unlike the shared successful device ID,
+    // failures are temporary and can recover in the same app process.
+    let mut failure = device_id_attempt(purpose)
         .lock()
         .map_err(|_| "credential retry state is unavailable".to_string())?;
     if let Some(value) = DEVICE_ID_CACHE.get() {
@@ -146,8 +162,14 @@ pub(crate) fn device_id() -> Result<String, String> {
     }
 }
 
-pub(crate) async fn device_id_async() -> Result<String, String> {
-    tauri::async_runtime::spawn_blocking(device_id)
+pub(crate) async fn analytics_device_id() -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(|| device_id(DeviceIdPurpose::Analytics))
+        .await
+        .map_err(|error| format!("credential task failed: {error}"))?
+}
+
+async fn gateway_device_id() -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(|| device_id(DeviceIdPurpose::Gateway))
         .await
         .map_err(|error| format!("credential task failed: {error}"))?
 }
@@ -215,7 +237,7 @@ fn interpret_registration(status: u16, content_type: &str, body: &str) -> Result
 
 async fn register(base: &str) -> Result<String, String> {
     let key = registration_key()?;
-    let device = device_id_async().await?;
+    let device = gateway_device_id().await?;
     log::info!("[gateway] registering with {base}");
 
     let response = reqwest::Client::new()
@@ -539,5 +561,13 @@ mod tests {
             retry_after: Instant::now() - Duration::from_millis(1),
         };
         assert_eq!(expired.active_message(), None);
+    }
+
+    #[test]
+    fn analytics_and_gateway_failures_have_independent_cooldowns() {
+        assert!(!std::ptr::eq(
+            device_id_attempt(DeviceIdPurpose::Analytics),
+            device_id_attempt(DeviceIdPurpose::Gateway),
+        ));
     }
 }
