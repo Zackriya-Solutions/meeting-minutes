@@ -143,17 +143,20 @@ pub async fn ensure_model<R: Runtime>(
             "Downloaded DPDFNet2 model failed integrity verification"
         ));
     }
-    if valid_model(&destination, profile) {
-        return Ok(destination);
-    }
-    temporary.persist(&destination).map_err(|error| {
-        anyhow!(
+    match temporary.persist_noclobber(&destination) {
+        Ok(_) => Ok(destination),
+        Err(error) if valid_model(&destination, profile) => {
+            // Another process won the atomic publication race. Its immutable,
+            // checksum-verified file is safe to reuse and is never overwritten.
+            drop(error.file);
+            Ok(destination)
+        }
+        Err(error) => Err(anyhow!(
             "Could not publish verified DPDFNet2 model {}: {}",
             destination.display(),
             error.error
-        )
-    })?;
-    Ok(destination)
+        )),
+    }
 }
 
 fn metadata_value(session: &Session, key: &str) -> Result<String> {
