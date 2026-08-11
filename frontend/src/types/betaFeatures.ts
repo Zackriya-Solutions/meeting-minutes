@@ -22,10 +22,17 @@ export interface BetaFeatures {
    * @since v0.3.0
    */
   importAndRetranscribe: boolean;
+
+  /**
+   * Recover missed speech in imported recordings with local DPDFNet2 enhancement.
+   * @since v0.5.0
+   */
+  noisyAudioDenoising: boolean;
 }
 
 export const DEFAULT_BETA_FEATURES: BetaFeatures = {
   importAndRetranscribe: true, // Default: enabled
+  noisyAudioDenoising: false,
 };
 
 
@@ -34,6 +41,7 @@ export const DEFAULT_BETA_FEATURES: BetaFeatures = {
  */
 export const BETA_FEATURE_NAMES: Record<keyof BetaFeatures, string> = {
   importAndRetranscribe: 'Import Audio & Retranscribe',
+  noisyAudioDenoising: 'Auto denoise imported audio',
 };
 
 /**
@@ -41,6 +49,7 @@ export const BETA_FEATURE_NAMES: Record<keyof BetaFeatures, string> = {
  */
 export const BETA_FEATURE_DESCRIPTIONS: Record<keyof BetaFeatures, string> = {
   importAndRetranscribe: 'Import audio files to transcribe or retranscribe existing meetings with different language settings.',
+  noisyAudioDenoising: 'Use local DPDFNet2 to recover speech missed in noisy imports. Enabling this allows a one-time internet download of the selected model (about 10 MB) from Hugging Face; audio processing remains local.',
 };
 
 /**

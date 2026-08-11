@@ -357,6 +357,7 @@ fn address_candidate(
 fn extract_candidates(segments: &[Segment]) -> Vec<ExtractedCandidate> {
     let mut extracted = Vec::new();
     for (index, segment) in segments.iter().enumerate() {
+        let mut strong_addresses = HashSet::new();
         for capture in SELF_INTRO.captures_iter(&segment.text) {
             // Strong grammatical evidence is safe even when ASR lowercases a proper name.
             extracted.push(ExtractedCandidate {
@@ -384,6 +385,7 @@ fn extract_candidates(segments: &[Segment]) -> Vec<ExtractedCandidate> {
             if !has_name_like_capitalization(&capture[1]) {
                 continue;
             }
+            strong_addresses.insert(normalize_name(&capture[1]));
             extracted.push(address_candidate(
                 segments,
                 index,
@@ -396,6 +398,11 @@ fn extract_candidates(segments: &[Segment]) -> Vec<ExtractedCandidate> {
                 continue;
             }
             let candidate_text = display_name(&capture[1]);
+            // STRONG_DIRECT_ADDRESS is a strict subset of this pattern. Count the
+            // evidence once, keeping the stronger confidence assigned above.
+            if strong_addresses.contains(&normalize_name(&candidate_text)) {
+                continue;
+            }
             extracted.push(address_candidate(segments, index, candidate_text, 0.60));
         }
         for capture in CONTEXTUAL_DIRECT_ADDRESS.captures_iter(&segment.text) {
