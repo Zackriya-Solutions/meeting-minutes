@@ -215,11 +215,18 @@ where
         } else {
             segments.extend(processor.process_audio(&samples)?);
         }
+        let provisional_segments = if raw_processor.is_some()
+            && decode_sample_rate != super::dpdfnet::NARROWBAND_SAMPLE_RATE
+        {
+            raw_segments.len()
+        } else {
+            segments.len()
+        };
 
         if let Some(total) = expected_samples {
             let next = ((processed_samples.saturating_mul(100) / total.max(1)).min(99)) as u32;
             if next >= last_progress + 2 {
-                if !progress(next, segments.len() + raw_segments.len()) {
+                if !progress(next, provisional_segments) {
                     let _ = child.kill();
                     let _ = child.wait();
                     let _ = stderr_reader.join();
@@ -227,7 +234,7 @@ where
                 }
                 last_progress = next;
             }
-        } else if !progress(0, segments.len() + raw_segments.len()) {
+        } else if !progress(0, provisional_segments) {
             let _ = child.kill();
             let _ = child.wait();
             let _ = stderr_reader.join();

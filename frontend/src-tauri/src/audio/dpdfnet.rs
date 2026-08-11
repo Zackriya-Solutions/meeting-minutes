@@ -28,14 +28,18 @@ struct ModelProfile {
     cache_filename: &'static str,
     source_filename: &'static str,
     size: u64,
-    sha256: &'static str,
+    sha256: [u8; 32],
 }
 
 const NARROWBAND_MODEL: ModelProfile = ModelProfile {
     cache_filename: "dpdfnet2_8khz.onnx",
     source_filename: "dpdfnet2_8khz.onnx",
     size: 10_188_357,
-    sha256: "6218f1dbd6e4bac5768c63b7d899fe7b84b3788f2a35c4e246d4ab0946165c5d",
+    sha256: [
+        0x62, 0x18, 0xf1, 0xdb, 0xd6, 0xe4, 0xba, 0xc5, 0x76, 0x8c, 0x63, 0xb7, 0xd8, 0x99, 0xfe,
+        0x7b, 0x84, 0xb3, 0x78, 0x8f, 0x2a, 0x35, 0xc4, 0xe2, 0x46, 0xd4, 0xab, 0x09, 0x46, 0x16,
+        0x5c, 0x5d,
+    ],
 };
 const WIDEBAND_MODEL: ModelProfile = ModelProfile {
     // The pinned upstream export is named `dpdfnet2.onnx`. Give it an explicit
@@ -44,7 +48,11 @@ const WIDEBAND_MODEL: ModelProfile = ModelProfile {
     cache_filename: "dpdfnet2_16khz.onnx",
     source_filename: "dpdfnet2.onnx",
     size: 10_178_747,
-    sha256: "4f0ee28935b4a32abecc717d745416976565834d839601acf43031094b4dc94c",
+    sha256: [
+        0x4f, 0x0e, 0xe2, 0x89, 0x35, 0xb4, 0xa3, 0x2a, 0xbe, 0xcc, 0x71, 0x7d, 0x74, 0x54, 0x16,
+        0x97, 0x65, 0x65, 0x83, 0x4d, 0x83, 0x96, 0x01, 0xac, 0xf4, 0x30, 0x31, 0x09, 0x4b, 0x4d,
+        0xc9, 0x4c,
+    ],
 };
 
 fn profile_for_source(sample_rate: u32) -> ModelProfile {
@@ -65,11 +73,11 @@ fn model_path<R: Runtime>(app: &AppHandle<R>, profile: ModelProfile) -> Result<P
         .join(profile.cache_filename))
 }
 
-fn sha256_file(path: &Path) -> Result<String> {
+fn sha256_file(path: &Path) -> Result<[u8; 32]> {
     let mut file = std::fs::File::open(path)?;
     let mut digest = Sha256::new();
     std::io::copy(&mut file, &mut digest)?;
-    Ok(format!("{:x}", digest.finalize()))
+    Ok(digest.finalize().into())
 }
 
 fn valid_model(path: &Path, profile: ModelProfile) -> bool {
@@ -425,7 +433,7 @@ mod tests {
     #[test]
     fn tested_model_checksum_is_stable() {
         for profile in [NARROWBAND_MODEL, WIDEBAND_MODEL] {
-            assert_eq!(profile.sha256.len(), 64);
+            assert!(profile.sha256.iter().any(|byte| *byte != 0));
             assert!(profile.size > 10_000_000);
         }
         assert_eq!(NARROWBAND_MODEL.source_filename, "dpdfnet2_8khz.onnx");
