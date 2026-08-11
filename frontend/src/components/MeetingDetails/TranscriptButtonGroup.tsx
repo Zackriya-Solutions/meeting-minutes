@@ -3,11 +3,16 @@
 import { useState, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { ButtonGroup } from '@/components/ui/button-group';
-import { Copy, FolderOpen, RefreshCw } from 'lucide-react';
+import { Copy, FolderOpen, RefreshCw, Wand2, Download, Loader2 } from 'lucide-react';
 import Analytics from '@/lib/analytics';
 import { RetranscribeDialog } from './RetranscribeDialog';
 import { useConfig } from '@/contexts/ConfigContext';
-
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 
 interface TranscriptButtonGroupProps {
   transcriptCount: number;
@@ -16,6 +21,13 @@ interface TranscriptButtonGroupProps {
   meetingId?: string;
   meetingFolderPath?: string | null;
   onRefetchTranscripts?: () => Promise<void>;
+  // Auto-naming props
+  onTriggerAutoNaming?: () => Promise<any>;
+  isAutoNaming?: boolean;
+  // Export props
+  onExportToFile?: () => Promise<any>;
+  onCopyMarkdown?: () => Promise<void>;
+  isExporting?: boolean;
 }
 
 
@@ -26,6 +38,11 @@ export function TranscriptButtonGroup({
   meetingId,
   meetingFolderPath,
   onRefetchTranscripts,
+  onTriggerAutoNaming,
+  isAutoNaming,
+  onExportToFile,
+  onCopyMarkdown,
+  isExporting,
 }: TranscriptButtonGroupProps) {
   const { betaFeatures } = useConfig();
   const [showRetranscribeDialog, setShowRetranscribeDialog] = useState(false);
@@ -84,6 +101,68 @@ export function TranscriptButtonGroup({
           </Button>
         )}
       </ButtonGroup>
+
+      {/* Auto-naming button */}
+      {onTriggerAutoNaming && transcriptCount > 0 && (
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => {
+            Analytics.trackButtonClick('auto_rename', 'meeting_details');
+            onTriggerAutoNaming();
+          }}
+          disabled={isAutoNaming}
+          title="Auto-generate meeting name from transcript"
+        >
+          {isAutoNaming ? (
+            <Loader2 className="animate-spin" size={16} />
+          ) : (
+            <Wand2 size={16} />
+          )}
+          <span className="hidden lg:inline">Rename</span>
+        </Button>
+      )}
+
+      {/* Export dropdown */}
+      {onExportToFile && onCopyMarkdown && transcriptCount > 0 && (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={isExporting}
+              title="Export meeting to Markdown"
+            >
+              {isExporting ? (
+                <Loader2 className="animate-spin" size={16} />
+              ) : (
+                <Download size={16} />
+              )}
+              <span className="hidden lg:inline">Export</span>
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem
+              onClick={() => {
+                Analytics.trackButtonClick('export_markdown_file', 'meeting_details');
+                onExportToFile();
+              }}
+            >
+              <Download size={14} className="mr-2" />
+              Export to File
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={() => {
+                Analytics.trackButtonClick('export_markdown_clipboard', 'meeting_details');
+                onCopyMarkdown();
+              }}
+            >
+              <Copy size={14} className="mr-2" />
+              Copy Markdown
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
 
       {betaFeatures.importAndRetranscribe && meetingId && meetingFolderPath && (
         <RetranscribeDialog

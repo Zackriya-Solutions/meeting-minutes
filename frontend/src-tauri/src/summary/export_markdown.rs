@@ -36,7 +36,7 @@ pub async fn api_export_meeting_markdown<R: tauri::Runtime>(
         meeting_id
     );
 
-    let pool = &state.db_manager.pool;
+    let pool = state.db_manager.pool();
 
     // 1. Get meeting details
     let meeting = MeetingsRepository::get_meeting(pool, &meeting_id)
@@ -168,7 +168,7 @@ pub async fn api_get_meeting_markdown(
     state: tauri::State<'_, AppState>,
     meeting_id: String,
 ) -> Result<String, String> {
-    let pool = &state.db_manager.pool;
+    let pool = state.db_manager.pool();
 
     let meeting = MeetingsRepository::get_meeting(pool, &meeting_id)
         .await
