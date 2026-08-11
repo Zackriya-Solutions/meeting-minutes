@@ -361,7 +361,7 @@ pub struct AudioFileInfo {
 /// Progress update emitted during import
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ImportProgress {
-    pub stage: String, // "copying", "decoding", "vad", "transcribing", "saving"
+    pub stage: String, // "copying", "decoding", "vad", "raw_retry", "transcribing", "saving"
     pub progress_percentage: u32,
     pub message: String,
 }
@@ -1441,9 +1441,9 @@ async fn run_import<R: Runtime>(
             warn!("Noise suppression failed; retrying raw audio: {denoise_error}");
             emit_progress(
                 &app,
-                "denoising",
-                16,
-                "Noise suppression failed; retrying original audio...",
+                "raw_retry",
+                20,
+                "Noise suppression stopped; restarting from the beginning with original audio...",
             );
             let raw_path = dest_path.clone();
             let raw_app = app.clone();
@@ -1454,13 +1454,13 @@ async fn run_import<R: Runtime>(
                     expected_duration,
                     None,
                     |stream_progress, segments_found| {
-                        let overall = 15 + ((stream_progress as f32 * 0.15) as u32);
+                        let overall = 20 + ((stream_progress as f32 * 0.15) as u32);
                         emit_progress(
                             &raw_app,
-                            "vad",
+                            "raw_retry",
                             overall,
                             &format!(
-                                "Streaming original audio... {}% ({} speech segments)",
+                                "Retrying original audio from the beginning... {}% ({} speech segments)",
                                 stream_progress, segments_found
                             ),
                         );
