@@ -1,9 +1,22 @@
 use anyhow::Result;
 use cpal::traits::{DeviceTrait, HostTrait};
 use log::{info, warn};
+use std::sync::Mutex;
 
 use crate::audio::capture::list_pulse_sinks;
 use crate::audio::devices::configuration::{AudioDevice, DeviceType};
+
+/// alsa-lib's device/config enumeration (`snd_device_name_hint`,
+/// `snd_config_update_r`) is not safe to call concurrently from multiple
+/// threads: it mutates a process-global config cache. `list_audio_devices()`
+/// is polled every few seconds by the device disconnect/reconnect monitor
+/// (device_monitor.rs) while a recording is active, and can also be invoked
+/// at any time from the UI (device list refresh) or when starting a new
+/// recording (recording_manager.rs). Without serialization, an overlapping
+/// call from a second Tokio worker thread corrupts alsa-lib's heap state,
+/// which glibc eventually detects and aborts the process on — this is what
+/// produced the SIGABRT crashes after ~30 minutes of recording.
+pub(crate) static ALSA_ENUM_LOCK: Mutex<()> = Mutex::new(());
 
 /// Configure Linux audio devices. Microphones still go through cpal/ALSA
 /// (unaffected by this). System Audio entries come from PulseAudio/PipeWire's
@@ -13,8 +26,12 @@ pub fn configure_linux_audio(host: &cpal::Host) -> Result<Vec<AudioDevice>> {
     let mut devices = Vec::new();
 
     info!("🎙️ configure_linux_audio: enumerating cpal/ALSA input devices");
-    // Add input devices
-    for device in host.input_devices()? {
+    // Serialize ALSA enumeration: see ALSA_ENUM_LOCK doc comment above.
+    let input_devices: Vec<_> = {
+        let _guard = ALSA_ENUM_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        host.input_devices()?.collect()
+    };
+    for device in input_devices {
         if let Ok(name) = device.name() {
             devices.push(AudioDevice::new(name, DeviceType::Input));
         }
