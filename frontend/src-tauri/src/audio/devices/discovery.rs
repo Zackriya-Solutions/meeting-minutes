@@ -1,12 +1,13 @@
 use anyhow::Result;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use log::error;
+use log::{error, info};
 
 use super::configuration::{AudioDevice, DeviceType};
 use super::platform;
 
 /// List all available audio devices on the system
 pub async fn list_audio_devices() -> Result<Vec<AudioDevice>> {
+    info!("🎙️ list_audio_devices: start");
     let host = cpal::default_host();
 
     // Platform-specific device enumeration
@@ -18,7 +19,10 @@ pub async fn list_audio_devices() -> Result<Vec<AudioDevice>> {
 
         #[cfg(target_os = "linux")]
         {
-            platform::configure_linux_audio(&host)?
+            info!("🎙️ list_audio_devices: calling configure_linux_audio");
+            let result = platform::configure_linux_audio(&host)?;
+            info!("🎙️ list_audio_devices: configure_linux_audio returned {} device(s)", result.len());
+            result
         }
 
         #[cfg(target_os = "macos")]
@@ -26,9 +30,18 @@ pub async fn list_audio_devices() -> Result<Vec<AudioDevice>> {
             platform::configure_macos_audio(&host)?
         }
     };
+    info!("🎙️ list_audio_devices: platform enumeration done, {} device(s) so far", devices.len());
 
     // Add any additional devices from the default host
-    if let Ok(other_devices) = host.devices() {
+    // On Linux this also enumerates via alsa-lib, so it must go through the
+    // same lock as configure_linux_audio (see ALSA_ENUM_LOCK's doc comment).
+    let other_devices_result = {
+        #[cfg(target_os = "linux")]
+        let _guard = platform::linux::ALSA_ENUM_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
+        host.devices()
+    };
+    if let Ok(other_devices) = other_devices_result {
         for device in other_devices {
             if let Ok(name) = device.name() {
                 if !devices.iter().any(|d| d.name == name) {

@@ -35,7 +35,25 @@ pub fn default_output_device() -> Result<AudioDevice> {
         return Ok(AudioDevice::new(device.name()?, DeviceType::Output));
     }
 
-    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    #[cfg(target_os = "linux")]
+    {
+        // System audio on Linux is captured natively via PulseAudio/PipeWire
+        // (see audio/capture/pulse_linux.rs), not via cpal's ALSA host, so the
+        // "default" device must be one of the real Pulse sinks, decorated the
+        // same way configure_linux_audio() lists them.
+        let sinks = crate::audio::capture::list_pulse_sinks()
+            .map_err(|e| anyhow!("Failed to list PulseAudio/PipeWire sinks: {}", e))?;
+        let sink = sinks
+            .into_iter()
+            .next()
+            .ok_or_else(|| anyhow!("No PulseAudio/PipeWire sink found"))?;
+        return Ok(AudioDevice::new(
+            format!("{} (System Audio)", sink.description),
+            DeviceType::Output,
+        ));
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
     {
         let host = cpal::default_host();
         let device = host
