@@ -332,6 +332,10 @@ After installing these prerequisites, run the local unsigned-build script from t
 
 This enables CUDA for Whisper transcription, Parakeet transcription through ONNX Runtime, and Qwen/GGUF summarization through `llama-helper`.
 
+Windows uses a dedicated CUDA script because a complete CUDA package has two independently compiled Rust targets: the Tauri application (Whisper and Parakeet) and the `llama-helper` sidecar (Qwen/GGUF). The script builds both with CUDA, stages the matching sidecar, and validates the additional CUDA, Visual Studio, and LLVM prerequisites. The existing `build-gpu.ps1` is a Vulkan-only wrapper for the Tauri application; the Vulkan instructions below build and stage the CPU `llama-helper` explicitly.
+
+This distinction is specific to the Windows PowerShell scripts. When run from the `frontend` directory, `./build-gpu.sh` already detects the backend for the Tauri application and builds and stages `llama-helper` with the corresponding supported backend on Linux and macOS. CUDA and Vulkan use the same feature in both targets; macOS CoreML is mapped to Metal for `llama-helper`, which does not support CoreML. The CUDA feature wiring is cross-platform, but this CUDA change has been runtime-tested only on Windows.
+
 The script disables updater artifacts for this local build and produces unsigned MSI and NSIS installers under `target/release/bundle`.
 
 Repository maintainers who have configured the existing DigiCert and Tauri updater signing environment can instead run `.\frontend\build-cuda.ps1 -Signed`. The script validates the required signing inputs before starting the build.

@@ -272,6 +272,19 @@ openblas = ["whisper-rs/openblas"]  # Optimized CPU BLAS
 
 The built-in Qwen/GGUF summarizer runs in the separate `llama-helper` sidecar. Build that package with its own `cuda` feature to enable `llama.cpp` CUDA offload.
 
+### Windows CUDA vs Vulkan Build Scripts
+
+The existing `frontend/build-gpu.ps1` is a Vulkan-only wrapper for the Tauri application and does not build or stage `llama-helper`. The Windows Vulkan instructions in `docs/BUILDING.md` therefore build and stage a CPU helper explicitly. In that documented configuration, Vulkan accelerates Whisper, while Parakeet and `llama-helper` use the CPU.
+
+`frontend/build-cuda.ps1` is intentionally separate because a complete CUDA package must coordinate two independent builds:
+
+- the Tauri application enables CUDA for Whisper and Parakeet;
+- `llama-helper` enables CUDA separately for Qwen/GGUF summarization.
+
+The CUDA script also validates the CUDA Toolkit installation, Visual Studio integration, and LLVM/libclang prerequisites required by the Windows build, then stages the matching CUDA sidecar before packaging. Local builds are unsigned by default; maintainers with the repository signing environment can use `-Signed`.
+
+This difference is specific to the Windows PowerShell scripts. When run from the `frontend` directory, `./build-gpu.sh` already detects the backend for the Tauri application and builds and stages `llama-helper` with the corresponding supported backend on Linux and macOS. CUDA and Vulkan use the same feature in both targets; macOS CoreML is mapped to Metal for `llama-helper`, which does not support CoreML. The Cargo CUDA wiring is cross-platform, but the CUDA package described here has been runtime-tested only on Windows.
+
 ### Why Not CUDA on Hosted CI?
 
 **CUDA requires:**
@@ -350,10 +363,10 @@ error: could not find OpenBLAS library
 
 ### Potential Enhancements
 
-1. **Add CUDA support** for users with NVIDIA GPUs
-   - Detect if NVIDIA GPU available
-   - Optionally enable CUDA feature
-   - Fallback to Vulkan if CUDA fails
+1. **Complete CUDA validation and release support**
+   - Runtime-test the existing cross-platform CUDA feature on Linux NVIDIA systems
+   - Decide whether maintainers will publish an official signed Windows CUDA installer
+   - Add CUDA CI only if suitable GPU-backed runners become available
 
 2. **Add CoreML support** for macOS
    - Enable explicit CoreML acceleration
