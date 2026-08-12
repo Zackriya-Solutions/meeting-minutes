@@ -1,16 +1,34 @@
 # GPU Acceleration Guide
 
-Meetily supports GPU acceleration for transcription, which can significantly improve performance. This guide provides detailed information on how to set up and configure GPU acceleration for your system.
+Meetily supports GPU acceleration for transcription and built-in local summarization. GPU acceleration backends are selected at build time, and CUDA and Vulkan are independent Cargo features.
 
 ## Supported Backends
 
-Meetily uses the `whisper-rs` library, which supports several GPU acceleration backends:
+Meetily has more than one local inference engine:
 
-*   **CUDA:** For NVIDIA GPUs.
-*   **Metal:** For Apple Silicon and modern Intel-based Macs.
-*   **Core ML:** An additional acceleration layer for Apple Silicon.
-*   **Vulkan:** A cross-platform solution for modern AMD and Intel GPUs.
-*   **OpenBLAS:** A CPU-based optimization that can provide a significant speed-up over standard CPU processing.
+* **Whisper transcription** uses `whisper-rs`, a Rust wrapper around `whisper.cpp`.
+* **Parakeet transcription** uses ONNX Runtime (`ort` is its Rust interface).
+* **Built-in Qwen/GGUF summarization** runs in the `llama-helper` sidecar through `llama.cpp`.
+
+The supported build backends are:
+
+* **CUDA:** NVIDIA GPU acceleration. It enables CUDA for Whisper and ONNX Runtime in the Tauri application; `llama-helper` must also be built with its CUDA feature to accelerate built-in summarization.
+* **Metal/Core ML:** Apple acceleration.
+* **Vulkan:** A separate Whisper backend for modern AMD and Intel GPUs on Windows/Linux.
+* **OpenBLAS:** CPU optimization rather than GPU acceleration.
+
+Parakeet currently supports CPU or CUDA in Meetily. Selecting Vulkan does not enable Vulkan for Parakeet.
+
+### Acceleration coverage
+
+| Build | Whisper transcription | Parakeet transcription | Built-in Qwen/GGUF summarization |
+| --- | --- | --- | --- |
+| CPU | CPU | CPU | CPU |
+| CUDA | CUDA through `whisper.cpp` | ONNX Runtime CUDA, with CPU fallback | CUDA through `llama.cpp`, with CPU fallback |
+| Vulkan | Vulkan through `whisper.cpp` | CPU | Requires a separately Vulkan-enabled `llama-helper` build |
+| Metal | Metal through `whisper.cpp` | CPU | Metal through `llama.cpp` |
+
+Installing or detecting the CUDA Toolkit does not change an application that was already built. Parakeet uses the NVIDIA GPU only when Meetily is compiled with the `cuda` Cargo feature—which enables `ort/cuda`—and ONNX Runtime successfully initializes its CUDA execution provider. Otherwise, Parakeet uses its CPU provider.
 
 ## Automatic GPU Detection
 
@@ -23,24 +41,21 @@ Here's the detection priority:
 3.  **Vulkan (AMD/Intel)**
 4.  **OpenBLAS (CPU)**
 
-If no GPU is detected, the application will fall back to CPU-only processing.
+If no supported GPU backend is available, the application falls back to CPU processing. CUDA Parakeet sessions prefer the CUDA execution provider and keep the CPU provider as fallback. Built-in summarization retries model loading once on CPU if CUDA loading fails.
 
 ## Manual Configuration
 
-If you want to manually configure the GPU acceleration backend, you can do so by enabling the corresponding feature flag in the `frontend/src-tauri/Cargo.toml` file.
+GPU backends are selected with Cargo features. Passing `--features cuda` does not enable unrelated features such as Vulkan.
 
-For example, to enable CUDA, you would modify the `[features]` section as follows:
+The existing Cargo feature mapping is:
 
 ```toml
 [features]
-default = ["cuda"]
-
-# ... other features
-
-cuda = ["whisper-rs/cuda"]
+cuda = ["whisper-rs/cuda", "ort/cuda"]
+vulkan = ["whisper-rs/vulkan"]
 ```
 
-Then, you would build the application using the standard `pnpm tauri:build` command.
+Do not edit `default` to select a backend. Pass the desired feature to the build command instead.
 
 ## Platform-Specific Instructions
 
@@ -54,4 +69,4 @@ On macOS, Metal GPU acceleration is enabled by default. No additional configurat
 
 ### Windows
 
-To enable GPU acceleration on Windows, you will need to install the appropriate toolkit for your GPU (e.g., the CUDA Toolkit for NVIDIA GPUs) and then build the application with the corresponding feature flag enabled.
+See the [Windows build instructions](BUILDING.md#-building-on-windows) for NVIDIA CUDA and AMD/Intel Vulkan prerequisites and commands.

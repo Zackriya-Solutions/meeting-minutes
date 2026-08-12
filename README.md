@@ -194,7 +194,7 @@ Built-in support for hardware acceleration across platforms:
 - **macOS**: Apple Silicon (Metal) + CoreML
 - **Windows/Linux**: NVIDIA (CUDA), AMD/Intel (Vulkan)
 
-Automatically enabled at build time - no configuration needed.
+The GPU-aware build scripts select a backend based on the available development toolkit. See the [GPU Acceleration Guide](docs/GPU_ACCELERATION.md) for supported configurations.
 
 ## System Architecture
 

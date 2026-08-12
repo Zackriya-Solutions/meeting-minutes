@@ -257,31 +257,38 @@ pnpm run tauri build
 
 ## Technical Details
 
-### Whisper.cpp Features
+### Cargo Acceleration Features
 
-The `whisper-rs` crate (which wraps whisper.cpp) supports these features:
+The Tauri application maps its Cargo features to the native inference engines:
 
 ```toml
 [features]
 metal = ["whisper-rs/metal"]       # macOS Metal
-cuda = ["whisper-rs/cuda"]          # NVIDIA CUDA
+cuda = ["whisper-rs/cuda", "ort/cuda"] # NVIDIA CUDA for Whisper and Parakeet
 vulkan = ["whisper-rs/vulkan"]      # Cross-platform Vulkan
 hipblas = ["whisper-rs/hipblas"]    # AMD ROCm
 openblas = ["whisper-rs/openblas"]  # Optimized CPU BLAS
 ```
 
-### Why Not CUDA?
+The built-in Qwen/GGUF summarizer runs in the separate `llama-helper` sidecar. Build that package with its own `cuda` feature to enable `llama.cpp` CUDA offload.
+
+### Why Not CUDA on Hosted CI?
 
 **CUDA requires:**
 - NVIDIA GPU hardware
 - CUDA toolkit installation
 - NVIDIA drivers
 
-**GitHub Actions runners:**
-- Don't have NVIDIA GPUs
-- Can't use CUDA
+**Standard GitHub-hosted runners:**
+- Do not have NVIDIA GPUs for runtime validation
+- Do not include this repository's required CUDA Toolkit and Visual Studio integration
 
-**Vulkan is better for CI/CD because:**
+**The CI strategy is therefore:**
+- Run the repository's existing workflows manually when maintainers need CI validation
+- Keep the existing Vulkan packaging workflow for hosted Windows builds
+- Build and smoke-test CUDA locally with `frontend/build-cuda.ps1` on a prepared NVIDIA development machine
+
+**Vulkan remains useful for hosted packaging because:**
 - Software-based fallback available
 - Works without dedicated GPU hardware
 - Broader compatibility

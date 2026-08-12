@@ -316,4 +316,39 @@ pnpm tauri:build
 
 By default, the application will be built with CPU-only processing. To enable GPU acceleration, see the [GPU Acceleration Guide](GPU_ACCELERATION.md).
 
+### NVIDIA CUDA build
+
+CUDA builds additionally require:
+
+- NVIDIA CUDA Toolkit with `nvcc` on `PATH`
+- CUDA Visual Studio/MSBuild integration
+- LLVM with `libclang.dll`
+
+After installing these prerequisites, run the local unsigned-build script from the repository root:
+
+```powershell
+.\frontend\build-cuda.ps1
+```
+
+This enables CUDA for Whisper transcription, Parakeet transcription through ONNX Runtime, and Qwen/GGUF summarization through `llama-helper`.
+
+The script disables updater artifacts for this local build and produces unsigned MSI and NSIS installers under `target/release/bundle`.
+
+Repository maintainers who have configured the existing DigiCert and Tauri updater signing environment can instead run `.\frontend\build-cuda.ps1 -Signed`. The script validates the required signing inputs before starting the build.
+
+### AMD/Intel Vulkan build
+
+Install the Vulkan SDK. From the repository root, build and stage the CPU `llama-helper`, then build the Tauri application with Vulkan:
+
+```powershell
+cargo build --release -p llama-helper
+New-Item -ItemType Directory -Force frontend\src-tauri\binaries | Out-Null
+Copy-Item target\release\llama-helper.exe frontend\src-tauri\binaries\llama-helper-x86_64-pc-windows-msvc.exe -Force
+Set-Location frontend
+pnpm install --frozen-lockfile
+pnpm run tauri:build:vulkan
+```
+
+This enables Vulkan for Whisper transcription. Parakeet and `llama-helper` use the CPU in this configuration.
+
 </details>
