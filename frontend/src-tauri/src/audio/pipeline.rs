@@ -351,7 +351,7 @@ impl AudioCapture {
                 Ok(resampler) => {
                     info!("✅ Persistent resampler initialized for '{}' ({}Hz → {}Hz, chunk_size={})",
                           device.name, sample_rate, TARGET_SAMPLE_RATE, RESAMPLER_CHUNK_SIZE);
-                    info!("   Buffering enabled for variable chunk sizes (e.g., 320, 512, 1024, etc.)");
+                    info!("   Buffering enabled for variable-size chunks (e.g., 320, 512, 1024, etc.)");
                     Some(resampler)
                 }
                 Err(e) => {
