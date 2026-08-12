@@ -1179,27 +1179,24 @@ pub async fn attempt_device_reconnect(
         _ => return Err(format!("Invalid device type: {}", device_type)),
     };
 
-    // Check if recording is active
-    {
-        let manager_guard = RECORDING_MANAGER.lock().unwrap();
-        if manager_guard.is_none() {
-            return Err("Recording not active".to_string());
-        }
-    } // Release lock
+    // Take the manager out of the global mutex before the reconnection work,
+    // instead of holding the lock across the .await below. Since TECH-01,
+    // stream shutdown inside attempt_device_reconnect() is async and can take
+    // up to a few seconds (bounded join of the capture thread) instead of the
+    // near-instant sync call it used to be — holding a std::sync::Mutex across
+    // that would block every other command that locks RECORDING_MANAGER
+    // (stop_recording, status queries, ...) for the same duration. Same
+    // take()/put-back pattern as stop_recording() above.
+    let mut manager = match RECORDING_MANAGER.lock().unwrap().take() {
+        Some(m) => m,
+        None => return Err("Recording not active".to_string()),
+    };
 
-    // Spawn blocking task to handle the async reconnection
-    let result = tokio::task::spawn_blocking(move || {
-        tokio::runtime::Handle::current().block_on(async {
-            let mut manager_guard = RECORDING_MANAGER.lock().unwrap();
-            if let Some(manager) = manager_guard.as_mut() {
-                manager.attempt_device_reconnect(&device_name, monitor_type).await
-            } else {
-                Err(anyhow::anyhow!("Recording not active"))
-            }
-        })
-    })
-    .await
-    .map_err(|e| format!("Task join error: {}", e))?;
+    let result = manager.attempt_device_reconnect(&device_name, monitor_type).await;
+
+    // Put it back regardless of outcome — a failed reconnect attempt doesn't
+    // mean recording stopped.
+    *RECORDING_MANAGER.lock().unwrap() = Some(manager);
 
     match result {
         Ok(success) => {

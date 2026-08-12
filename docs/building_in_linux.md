@@ -219,6 +219,27 @@ src-tauri/target/release/bundle/appimage/Meetily_<version>_amd64.AppImage
 
 ---
 
+## 🎙️ Audio device names (PipeWire/PulseAudio)
+
+On Linux, the **Microphone** and **System Audio** pickers are populated directly
+from PulseAudio/PipeWire introspection. The labels you see in Meetily are the
+same ones shown by the desktop's native audio settings (KDE, GNOME, etc.).
+
+- **Microphone** lists real input sources (`alsa_input.*`) with their human-readable
+  descriptions. Sink monitors are excluded because they appear under **System Audio**.
+- **System Audio** lists playback sinks and captures through each sink's monitor
+  source, also using the server's own descriptions.
+
+The available entries depend on the **active card profile**, exactly as in the
+system settings: a USB headset set to output-only profile will not show up as a
+microphone.
+
+If no PulseAudio/`pipewire-pulse` server is reachable, Meetily falls back to a
+small whitelist of ALSA endpoints (`default`, `pipewire`, `pulse`) so the list
+never becomes empty.
+
+---
+
 ## 🧭 Troubleshooting
 
 ### "CUDA toolkit not found"

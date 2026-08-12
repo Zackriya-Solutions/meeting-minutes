@@ -1,15 +1,17 @@
 use anyhow::Result;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use log::error;
+use log::{error, info};
 
-use super::configuration::{AudioDevice, DeviceType};
+use super::configuration::AudioDevice;
 use super::platform;
 
 /// List all available audio devices on the system
 pub async fn list_audio_devices() -> Result<Vec<AudioDevice>> {
+    info!("🎙️ list_audio_devices: start");
     let host = cpal::default_host();
 
     // Platform-specific device enumeration
+    #[allow(unused_mut)]
     let mut devices = {
         #[cfg(target_os = "windows")]
         {
@@ -18,7 +20,10 @@ pub async fn list_audio_devices() -> Result<Vec<AudioDevice>> {
 
         #[cfg(target_os = "linux")]
         {
-            platform::configure_linux_audio(&host)?
+            info!("🎙️ list_audio_devices: calling configure_linux_audio");
+            let result = platform::configure_linux_audio(&host)?;
+            info!("🎙️ list_audio_devices: configure_linux_audio returned {} device(s)", result.len());
+            result
         }
 
         #[cfg(target_os = "macos")]
@@ -26,13 +31,25 @@ pub async fn list_audio_devices() -> Result<Vec<AudioDevice>> {
             platform::configure_macos_audio(&host)?
         }
     };
+    info!("🎙️ list_audio_devices: platform enumeration done, {} device(s) so far", devices.len());
 
-    // Add any additional devices from the default host
-    if let Ok(other_devices) = host.devices() {
-        for device in other_devices {
-            if let Ok(name) = device.name() {
-                if !devices.iter().any(|d| d.name == name) {
-                    devices.push(AudioDevice::new(name, DeviceType::Output));
+    // Add any additional devices from the default host.
+    //
+    // On Linux this is intentionally disabled: configure_linux_audio() already
+    // provides every useful device (PulseAudio/PipeWire sources and sinks, or a
+    // filtered ALSA fallback). This block would otherwise re-inject all raw ALSA
+    // PCM names as Output devices, polluting the "System Audio" picker with
+    // entries like hdmi:, front:, sysdefault:, etc.
+    #[cfg(not(target_os = "linux"))]
+    {
+        use super::configuration::DeviceType;
+
+        if let Ok(other_devices) = host.devices() {
+            for device in other_devices {
+                if let Ok(name) = device.name() {
+                    if !devices.iter().any(|d| d.name == name) {
+                        devices.push(AudioDevice::new(name, DeviceType::Output));
+                    }
                 }
             }
         }
@@ -47,35 +64,50 @@ pub fn trigger_audio_permission() -> Result<bool> {
     use log::info;
 
     let host = cpal::default_host();
-    let device = match host.default_input_device() {
-        Some(d) => d,
-        None => {
-            info!("[trigger_audio_permission] No default input device found - permission likely denied");
-            return Ok(false);
-        }
-    };
 
-    let config = match device.default_input_config() {
-        Ok(c) => c,
-        Err(e) => {
-            info!("[trigger_audio_permission] Failed to get input config: {} - permission likely denied", e);
-            return Ok(false);
-        }
-    };
+    // Serialize only the alsa-lib calls that touch the global config cache
+    // (device/config lookup, PCM open via build_input_stream): see
+    // ALSA_GLOBAL_LOCK doc comment in devices/platform/linux.rs. play()/sleep/
+    // drop() below operate on an already-open handle and don't need the lock —
+    // holding it that long would needlessly block every other Linux audio
+    // caller (device_monitor's poll, a stream starting elsewhere) for the
+    // ~500ms this function sleeps.
+    let stream = {
+        #[cfg(target_os = "linux")]
+        let _guard = platform::linux::ALSA_GLOBAL_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
 
-    // Build and start an input stream to trigger the permission request
-    let stream = match device.build_input_stream(
-        &config.into(),
-        |_data: &[f32], _: &cpal::InputCallbackInfo| {
-            // Do nothing, we just want to trigger the permission request
-        },
-        |err| error!("Error in audio stream: {}", err),
-        None,
-    ) {
-        Ok(s) => s,
-        Err(e) => {
-            info!("[trigger_audio_permission] Failed to build input stream: {} - permission likely denied", e);
-            return Ok(false);
+        let device = match host.default_input_device() {
+            Some(d) => d,
+            None => {
+                info!("[trigger_audio_permission] No default input device found - permission likely denied");
+                return Ok(false);
+            }
+        };
+
+        let config = match device.default_input_config() {
+            Ok(c) => c,
+            Err(e) => {
+                info!("[trigger_audio_permission] Failed to get input config: {} - permission likely denied", e);
+                return Ok(false);
+            }
+        };
+
+        // Build and start an input stream to trigger the permission request
+        match device.build_input_stream(
+            &config.into(),
+            |_data: &[f32], _: &cpal::InputCallbackInfo| {
+                // Do nothing, we just want to trigger the permission request
+            },
+            |err| error!("Error in audio stream: {}", err),
+            None,
+        ) {
+            Ok(s) => s,
+            Err(e) => {
+                info!("[trigger_audio_permission] Failed to build input stream: {} - permission likely denied", e);
+                return Ok(false);
+            }
         }
     };
 
