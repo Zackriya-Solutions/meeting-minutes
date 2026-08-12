@@ -13,8 +13,8 @@ import { Wordmark } from '@/components/memento/Wordmark';
 import { useSidebar as useMementoSidebar } from '@/components/Sidebar/SidebarProvider';
 import { useImportDialog } from '@/contexts/ImportDialogContext';
 import { fluidFontWeight, spring } from '@/lib/fluid/springs';
-import { RegularButton } from '@/vendor/deslop/mini-app/components/Button';
-import MotionProvider from '@/vendor/deslop/mini-app/components/MotionProvider';
+import { Button } from '@/components/ui/fluid-functional-button';
+import { ShapeProvider } from '@/lib/shape-context';
 import {
   IconCalendarToday,
   IconConstruction,
@@ -300,20 +300,16 @@ export function AppSidebar() {
       </SidebarFooter>
       <div className="flex-1" />
       <SidebarFooter className="mt-auto border-0 p-6">
-        <div
-          data-mini-app
-          className="apple w-full [--accent-green:var(--accent-orange)] [--glass-border-color:transparent]"
-        >
-          <MotionProvider>
-            <RegularButton
-              variant="filled"
-              label={t('Record meeting')}
-              labelWeight="medium"
-              isFill
-              onClick={handleRecordingToggle}
-            />
-          </MotionProvider>
-        </div>
+        <ShapeProvider defaultShape="rounded" publishToRoot={false}>
+          <Button
+            type="button"
+            variant="primary"
+            className="w-full text-[var(--black)] [--background:var(--background-primary)] [--foreground:var(--accent-orange)]"
+            onClick={handleRecordingToggle}
+          >
+            {t('Record meeting')}
+          </Button>
+        </ShapeProvider>
       </SidebarFooter>
     </Sidebar>
   );

@@ -226,6 +226,7 @@ export function TranscriptPanel({
     return transcripts.map(t => ({
       id: t.id,
       timestamp: t.audio_start_time ?? 0,
+      recognizedAt: t.timestamp,
       endTime: t.audio_end_time,
       text: t.text,
       confidence: t.confidence,

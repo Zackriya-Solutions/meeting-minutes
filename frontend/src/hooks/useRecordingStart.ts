@@ -14,10 +14,12 @@ import { toast } from 'sonner';
 import { useT } from '@/lib/i18n';
 import {
   takeRequestedMeetingParticipants,
+  takeRequestedMeetingSchedule,
   takeRequestedMeetingTitle,
 } from '@/lib/autoStartRecording';
 import { getCurrentLocalOutlookMeeting } from '@/lib/localOutlookCalendar';
 import { rememberMeetingParticipants } from '@/lib/meetingParticipants';
+import { rememberPendingMeetingSchedule } from '@/lib/meetingCalendarSchedule';
 
 interface UseRecordingStartReturn {
   handleRecordingStart: (meetingTitle?: string) => Promise<void>;
@@ -86,8 +88,10 @@ export function useRecordingStart(
     const storage = window.sessionStorage;
     const requestedTitle = takeRequestedMeetingTitle(storage);
     const requestedParticipants = takeRequestedMeetingParticipants(storage);
+    const requestedSchedule = takeRequestedMeetingSchedule(storage);
     if (requestedTitle) {
       rememberMeetingParticipants(storage, requestedParticipants);
+      rememberPendingMeetingSchedule(storage, requestedSchedule);
       return { title: requestedTitle, participants: requestedParticipants };
     }
 
@@ -95,6 +99,9 @@ export function useRecordingStart(
     const title = current?.subject.trim() || generateMeetingTitle();
     const participants = current?.attendees ?? [];
     rememberMeetingParticipants(storage, participants);
+    rememberPendingMeetingSchedule(storage, current
+      ? { startAt: current.start_at, endAt: current.end_at }
+      : null);
     return { title, participants };
   }, [generateMeetingTitle]);
 

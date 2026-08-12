@@ -34,6 +34,30 @@ svg.animate-spin {
 }
 
 @layer components {
+  .fluid-select-token-surface {
+    background-image: linear-gradient(var(--primary-10), var(--primary-10));
+  }
+
+  .fluid-select-token-trigger:hover {
+    background-image: linear-gradient(var(--primary-10), var(--primary-10));
+  }
+
+  .meeting-overflow-menu-surface {
+    background-color: var(--elevation-2);
+  }
+
+  .dark .meeting-overflow-menu-surface {
+    background-image: linear-gradient(var(--primary-10), var(--primary-10));
+  }
+
+  .fluid-tabs-active-surface {
+    background-color: var(--elevation-2);
+  }
+
+  .dark .fluid-tabs-active-surface {
+    background-image: linear-gradient(var(--primary-10), var(--primary-10));
+  }
+
   /* Summary preview must retain document structure even if a build accidentally resolves
      the legacy Tailwind config without the typography plugin. */
   .summary-markdown {
@@ -721,6 +745,7 @@ svg.animate-spin {
     border: 0;
     border-radius: 32px;
     background: var(--elevation-2);
+    box-shadow: inset 0 0 0 1px var(--primary-10);
     color: inherit;
     cursor: pointer;
     text-align: left;
@@ -985,7 +1010,6 @@ svg.animate-spin {
   .settings-cell__select {
     width: fit-content;
     min-width: 0;
-    border-radius: 999px;
     font-family: var(--ui-font-interface);
   }
   .settings-cell__device-select {
@@ -1189,8 +1213,8 @@ input, textarea, button, [role='dialog'], [role='menu'], [role='listbox'] { font
 
 .mm-md ul, .mm-md ol { margin: 0 0 8px; padding-left: 20px; }
 .mm-summary-list > ul { padding-inline-start: 0; list-style: none; }
-.mm-summary-list > ul > li { display: grid; grid-template-columns: 6px minmax(0, 1fr); column-gap: 8px; }
-.mm-summary-list > ul > li::before { content: '•'; color: var(--primary-50); }
+.mm-summary-list > ul > li { position: relative; display: block; padding-inline-start: 14px; }
+.mm-summary-list > ul > li::before { position: absolute; inset-inline-start: 0; content: '•'; color: var(--primary-50); }
 .mm-summary-list > ol { padding-inline-start: 18px; }
 .mm-summary-plain > ul { padding-inline-start: 0; list-style: none; }
 .mm-md li { margin: 2px 0; }
@@ -1203,6 +1227,7 @@ input, textarea, button, [role='dialog'], [role='menu'], [role='listbox'] { font
 .mm-md a:focus-visible { outline: 2px solid hsl(var(--primary)); outline-offset: 2px; border-radius: 3px; }
 .mm-md a strong, .mm-md a b, .mm-md a code { color: inherit; }
 .mm-md strong { font-weight: 700; color: hsl(var(--foreground)); }
+.mm-summary-plain strong, .mm-summary-plain b { font-weight: 400; color: inherit; }
 .mm-md em { font-style: italic; }
 
 .mm-md code { font-family: var(--ui-font-mono); font-size: .9em; background: hsl(var(--background)); border: 1px solid hsl(var(--border) / 0.6); border-radius: 5px; padding: 1px 5px; overflow-wrap: break-word; -webkit-box-decoration-break: clone; box-decoration-break: clone; }

@@ -36,7 +36,7 @@ export function SummaryLanguageSettings() {
           <p className="settings-cell__caption">{t('Language for new meeting summaries')}</p>
         </div>
         <div className="settings-cell__control">
-          <Select value={pinned ?? AUTO_VALUE} onValueChange={handleLanguageChange}>
+          <Select shape="rounded" value={pinned ?? AUTO_VALUE} onValueChange={handleLanguageChange}>
             <SelectTrigger
               className="settings-cell__select settings-cell__device-select"
               placeholder={t('Auto')}

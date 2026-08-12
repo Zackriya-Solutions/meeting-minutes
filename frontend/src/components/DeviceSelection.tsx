@@ -147,6 +147,7 @@ export function DeviceSelection({ selectedDevices, onDeviceChange, disabled = fa
           </div>
           <div className="settings-cell__control">
             <Select
+              shape="rounded"
               value={selectedDevices.micDevice || 'default'}
               onValueChange={handleMicDeviceChange}
               disabled={disabled}
@@ -191,6 +192,7 @@ export function DeviceSelection({ selectedDevices, onDeviceChange, disabled = fa
 
           <div className="settings-cell__control">
             <Select
+              shape="rounded"
               value={selectedDevices.systemDevice || 'default'}
               onValueChange={handleSystemDeviceChange}
               disabled={disabled}

@@ -88,6 +88,8 @@ interface AnalyticsQuestionsEvent {
 
 
 export interface UseAnalyticsReportResult {
+  /** The latest persisted report state has been restored for the current meeting. */
+  hydrated: boolean;
   status: AnalyticsReportStatus;
   stageLabel: string;
   stageIndex: number;
@@ -104,7 +106,7 @@ export interface UseAnalyticsReportResult {
    * "⋯ → Аналитический отчёт" flow wants that, a build started to fill the meeting's own
    * analytics tabs does not.
    */
-  generate: (options?: { autoDownload?: boolean }) => Promise<void>;
+  generate: (options?: { autoDownload?: boolean; automatic?: boolean }) => Promise<void>;
   /** Cancel the in-flight report (no-op if nothing is running). */
   cancel: () => Promise<void>;
   /** Submit answers to the clarifying questions (empty array = skip all). */
@@ -172,6 +174,7 @@ function parseJsonArray<T>(raw: string | null | undefined, what: string): T[] {
 
 export function useAnalyticsReport(meetingId: string | null): UseAnalyticsReportResult {
   const t = useT();
+  const [hydratedMeetingId, setHydratedMeetingId] = useState<string | null>(null);
   const [status, setStatus] = useState<AnalyticsReportStatus>('idle');
   const [stageLabel, setStageLabel] = useState('');
   const [stageIndex, setStageIndex] = useState(0);
@@ -229,7 +232,8 @@ export function useAnalyticsReport(meetingId: string | null): UseAnalyticsReport
     let active = true;
     invoke<AnalyticsReportMeta | null>('get_analytics_report', { meetingId })
       .then((meta) => { if (active) applyMeta(meta); })
-      .catch((e) => { console.error('Failed to restore analytics report:', e); });
+      .catch((e) => { console.error('Failed to restore analytics report:', e); })
+      .finally(() => { if (active) setHydratedMeetingId(meetingId); });
     return () => { active = false; };
   }, [meetingId, reset, applyMeta]);
 
@@ -311,9 +315,11 @@ export function useAnalyticsReport(meetingId: string | null): UseAnalyticsReport
     return () => { active = false; clearInterval(intervalId); };
   }, [meetingId, status, applyMeta]);
 
-  const generate = useCallback(async (options?: { autoDownload?: boolean }) => {
+  const generate = useCallback(async (options?: { autoDownload?: boolean; automatic?: boolean }) => {
     if (!meetingId) return;
-    Analytics.trackButtonClick('generate_analytics_report', 'meeting_details');
+    if (!options?.automatic) {
+      Analytics.trackButtonClick('generate_analytics_report', 'meeting_details');
+    }
     // Optimistic running state so the button reacts immediately; real stage labels
     // arrive via the progress events.
     reportIdRef.current = null;
@@ -413,6 +419,7 @@ export function useAnalyticsReport(meetingId: string | null): UseAnalyticsReport
   }, [status, downloadReport]);
 
   return {
+    hydrated: Boolean(meetingId) && hydratedMeetingId === meetingId,
     status,
     stageLabel,
     stageIndex,

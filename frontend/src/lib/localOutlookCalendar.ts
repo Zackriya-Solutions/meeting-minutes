@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 const ENABLED_SETTING = 'calendar.local_outlook_enabled';
 export const LOCAL_OUTLOOK_SETTING_CHANGED_EVENT = 'memento:local-outlook-setting-changed';
 const CACHE_TTL_MS = 30 * 1000;
+const USE_DEV_OUTLOOK_MOCKS = process.env.NODE_ENV === 'development';
 
 export const OUTLOOK_CALENDAR_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 export const OUTLOOK_CALENDAR_EMPTY_RETRY_INTERVAL_MS = 60 * 1000;
@@ -70,11 +71,99 @@ export interface LocalOutlookMeeting {
   attendees: string[];
 }
 
+function devOutlookStatus(): LocalOutlookCalendarStatus {
+  return {
+    supported: true,
+    installed: true,
+    running: true,
+    permission: 'none',
+    permission_state: 'granted',
+    requires_admin: false,
+    provider: 'local-classic-outlook',
+    detail: 'Development Outlook calendar mock',
+  };
+}
+
+function devOutlookMeetings(): LocalOutlookMeeting[] {
+  const now = new Date();
+  const today = new Date(now);
+  today.setSeconds(0, 0);
+
+  const relativeDate = (minutes: number) => (
+    new Date(today.getTime() + minutes * 60 * 1000).toISOString()
+  );
+
+  return [
+    {
+      id: 'dev-outlook-design-review',
+      calendar_id: 'dev-outlook-calendar',
+      calendar_name: 'Календарь',
+      store_name: 'Microsoft Outlook',
+      subject: 'Дизайн-ревью онбординга',
+      start_at: relativeDate(-10),
+      end_at: relativeDate(20),
+      is_all_day: false,
+      is_meeting: true,
+      is_recurring: false,
+      location: 'Microsoft Teams',
+      response_status: 'accepted',
+      attendees: ['Михаил Наер', 'Аня Петрова', 'Игорь Соколов', 'Марина Волкова'],
+    },
+    {
+      id: 'dev-outlook-product-sync',
+      calendar_id: 'dev-outlook-calendar',
+      calendar_name: 'Календарь',
+      store_name: 'Microsoft Outlook',
+      subject: 'Синк продуктовой команды',
+      start_at: relativeDate(45),
+      end_at: relativeDate(75),
+      is_all_day: false,
+      is_meeting: true,
+      is_recurring: true,
+      location: 'Переговорка Маяк',
+      response_status: 'organized',
+      attendees: ['Михаил Наер', 'Саша Орлов', 'Катя Миронова'],
+    },
+    {
+      id: 'dev-outlook-release-planning',
+      calendar_id: 'dev-outlook-calendar',
+      calendar_name: 'Календарь',
+      store_name: 'Microsoft Outlook',
+      subject: 'Планёрка по релизу',
+      start_at: relativeDate(24 * 60 + 30),
+      end_at: relativeDate(24 * 60 + 75),
+      is_all_day: false,
+      is_meeting: true,
+      is_recurring: false,
+      location: 'Microsoft Teams',
+      response_status: 'tentative',
+      attendees: ['Михаил Наер', 'Артём Лебедев', 'Оля Макарова', 'Дима Белов'],
+    },
+    {
+      id: 'dev-outlook-feedback-review',
+      calendar_id: 'dev-outlook-calendar',
+      calendar_name: 'Календарь',
+      store_name: 'Microsoft Outlook',
+      subject: 'Разбор обратной связи',
+      start_at: relativeDate(24 * 60 + 180),
+      end_at: relativeDate(24 * 60 + 240),
+      is_all_day: false,
+      is_meeting: true,
+      is_recurring: false,
+      location: null,
+      response_status: 'accepted',
+      attendees: ['Михаил Наер', 'Лена Крылова'],
+    },
+  ];
+}
+
 export async function getLocalOutlookCalendarStatus(): Promise<LocalOutlookCalendarStatus> {
+  if (USE_DEV_OUTLOOK_MOCKS) return devOutlookStatus();
   return invoke<LocalOutlookCalendarStatus>('local_outlook_calendar_status');
 }
 
 export async function requestOutlookCalendarPermission(): Promise<LocalOutlookCalendarStatus> {
+  if (USE_DEV_OUTLOOK_MOCKS) return devOutlookStatus();
   return invoke<LocalOutlookCalendarStatus>('request_outlook_calendar_permission');
 }
 
@@ -82,6 +171,8 @@ export async function getUpcomingLocalOutlookMeetings(
   days = 7,
   options: { force?: boolean } = {},
 ): Promise<LocalOutlookMeeting[]> {
+  if (USE_DEV_OUTLOOK_MOCKS) return devOutlookMeetings();
+
   const cached = meetingCache.get(days);
   if (!options.force && cached && Date.now() - cached.fetchedAt < CACHE_TTL_MS) {
     return cached.meetings;
@@ -169,11 +260,13 @@ export async function getCurrentLocalOutlookMeeting(
 }
 
 export async function isLocalOutlookCalendarEnabled(): Promise<boolean> {
+  if (USE_DEV_OUTLOOK_MOCKS) return true;
   const settings = await invoke<Record<string, string>>('get_app_settings');
   return settings[ENABLED_SETTING] === 'true';
 }
 
 export async function setLocalOutlookCalendarEnabled(enabled: boolean): Promise<void> {
+  if (USE_DEV_OUTLOOK_MOCKS) return;
   await invoke('set_app_setting', {
     key: ENABLED_SETTING,
     value: enabled ? 'true' : 'false',

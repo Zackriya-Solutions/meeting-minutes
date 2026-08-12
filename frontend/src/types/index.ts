@@ -64,16 +64,63 @@ export function resolveSpeakerLabel(
   }
 }
 
-/** Localize only system-generated labels; user-confirmed display names stay untouched. */
+const AUTOMATIC_SPEAKER_PLACEHOLDERS = [
+  'Релизная выдра',
+  'Асинхронный енот',
+  'Стабильная лама',
+  'Векторный тукан',
+  'Дебажный бобр',
+  'Продовый песец',
+  'Системный суслик',
+  'Реактивный хорёк',
+  'Бинарный бизон',
+  'Табличный дятел',
+  'Кулерный кит',
+] as const;
+
+/**
+ * Give unidentified diarized voices stable, human-readable names inside a meeting.
+ * The Rust repository normalizes global speaker ids to meeting-local `Speaker N` labels,
+ * so the same voice keeps the same placeholder across every screen of that meeting.
+ */
+function automaticSpeakerPlaceholder(label: string): string | null {
+  const match = label.trim().match(/^(?:Speaker|Спикер)\s+(\d+)$/iu);
+  if (!match) return null;
+
+  const ordinal = Number.parseInt(match[1], 10);
+  if (!Number.isSafeInteger(ordinal) || ordinal < 1) return null;
+
+  const index = (ordinal - 1) % AUTOMATIC_SPEAKER_PLACEHOLDERS.length;
+  const cycle = Math.floor((ordinal - 1) / AUTOMATIC_SPEAKER_PLACEHOLDERS.length) + 1;
+  const placeholder = AUTOMATIC_SPEAKER_PLACEHOLDERS[index];
+  return cycle === 1 ? placeholder : `${placeholder} ${cycle}`;
+}
+
+/** Replace technical diarization labels wherever they occur inside persisted copy. */
+export function replaceAutomaticSpeakerLabels(value: string): string {
+  return value.replace(/(?:Speaker|Спикер)\s+\d+/giu, (label) => (
+    automaticSpeakerPlaceholder(label) ?? label
+  ));
+}
+
+/** Localize system labels and replace unidentified voices; confirmed names stay untouched. */
 export function localizeSpeakerLabel(
   label: string | null,
   translate: (value: string) => string,
 ): string | null {
   if (!label) return null;
-  const automatic = label.match(/^Speaker\s+(\d+)$/i);
-  if (automatic) return `${translate('Speaker')} ${automatic[1]}`;
+  const automatic = automaticSpeakerPlaceholder(label);
+  if (automatic) return automatic;
   if (label === 'You' || label === 'Others') return translate(label);
   return label;
+}
+
+/** A generated placeholder means that voices were separated, but no person was identified. */
+export function isUnresolvedSpeakerLabel(label: string | null | undefined): boolean {
+  if (!label) return true;
+  const normalized = label.trim();
+  return /^(?:speaker|спикер)\s+\d+$/iu.test(normalized)
+    || /^(?:unknown|неизвестный(?:\s+спикер)?)$/iu.test(normalized);
 }
 
 /**
@@ -185,6 +232,7 @@ export interface PaginatedTranscriptsResponse {
 export interface TranscriptSegmentData {
   id: string;
   timestamp: number; // audio_start_time in seconds
+  recognizedAt?: string; // Wall-clock time when speech recognition produced the segment
   endTime?: number; // audio_end_time in seconds
   text: string;
   confidence?: number;

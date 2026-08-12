@@ -30,6 +30,9 @@ importers:
       '@hookform/resolvers':
         specifier: ^5.1.1
         version: 5.2.2(react-hook-form@7.76.0(react@18.3.1))
+      '@lisse/react':
+        specifier: ^0.5.2
+        version: 0.5.2(react@18.3.1)
       '@radix-ui/react-accordion':
         specifier: ^1.2.12
         version: 1.2.12(@types/react-dom@18.3.7(@types/react@18.3.28))(@types/react@18.3.28)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
@@ -1233,6 +1236,16 @@ packages:
   '@linaria/utils@4.5.3':
     resolution: {integrity: sha512-tSpxA3Zn0DKJ2n/YBnYAgiDY+MNvkmzAHrD8R9PKrpGaZ+wz1jQEmE1vGn1cqh8dJyWK0NzPAA8sf1cqa+RmAg==}
     engines: {node: ^12.16.0 || >=13.7.0}
+
+  '@lisse/core@0.5.2':
+    resolution: {integrity: sha512-9gMuO1Cqwerm8dFmzpspZYyEAJaId8TmVaOrqUBxMJNpkRmeVYXIthwfC1Mz7Ciph9bT7xtPXKVyPC+t58lTSA==}
+    engines: {node: '>=18'}
+
+  '@lisse/react@0.5.2':
+    resolution: {integrity: sha512-KgoMO0rjMMTrikvspFkkxg/Ctmr6FAQqtf79f2a6/otZeUoxya4hfjAkxdNxvHfDbzqqugAlJyRhhi6rsMlXcA==}
+    engines: {node: '>=18'}
+    peerDependencies:
+      react: '>=18.0.0'
 
   '@mixmark-io/domino@2.2.0':
     resolution: {integrity: sha512-Y28PR25bHXUg88kCV7nivXrP2Nj2RueZ3/l/jdx6J9f8J4nsEGcgX0Qe6lt7Pa+J79+kPiJU3LguR6O/6zrLOw==}
@@ -7823,6 +7836,13 @@ snapshots:
       minimatch: 9.0.9
     transitivePeerDependencies:
       - supports-color
+
+  '@lisse/core@0.5.2': {}
+
+  '@lisse/react@0.5.2(react@18.3.1)':
+    dependencies:
+      '@lisse/core': 0.5.2
+      react: 18.3.1
 
   '@mixmark-io/domino@2.2.0': {}
 

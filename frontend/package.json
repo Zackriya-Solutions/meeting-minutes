@@ -44,6 +44,7 @@
         "@blocknote/react": "0.36.0",
         "@blocknote/shadcn": "0.36.0",
         "@hookform/resolvers": "^5.1.1",
+        "@lisse/react": "^0.5.2",
         "@radix-ui/react-accordion": "^1.2.12",
         "@radix-ui/react-alert-dialog": "^1.1.23",
         "@radix-ui/react-checkbox": "^1.3.11",

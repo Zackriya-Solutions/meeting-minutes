@@ -21,6 +21,7 @@ import { cn } from "@/lib/utils";
 import { avatarGradients } from "@/vendor/deslop/primitives/tokens.js";
 import StreamingText from "@/vendor/deslop/mini-app/StreamingText";
 import { Icon } from "@/components/memento/Icon";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 const ROLL_CALL_TIP_DISMISSED_KEY = 'memento:roll-call-tip-dismissed:v1';
 
@@ -124,11 +125,33 @@ function speakerInitials(label: string): string {
     if (words.length === 0) return '?';
 
     if (words.length === 1) {
-        return Array.from(words[0]).slice(0, 2).join('').toLocaleUpperCase();
+        return Array.from(words[0]).slice(0, 2).join('');
     }
 
-    return `${Array.from(words[0])[0] ?? ''}${Array.from(words.at(-1) ?? '')[0] ?? ''}`
-        .toLocaleUpperCase();
+    return `${Array.from(words[0])[0] ?? ''}${Array.from(words.at(-1) ?? '')[0] ?? ''}`;
+}
+
+function formatRecognitionTime(value?: string | null): string | null {
+    const source = value?.trim();
+    if (!source) return null;
+
+    // Live recognition stores a wall-clock value such as 14:30:05. Saved/imported
+    // transcripts may carry an ISO date instead, which has to be shown in local time.
+    const plainClock = source.match(/^(\d{1,2}):(\d{2})(?::\d{2}(?:\.\d+)?)?$/);
+    if (plainClock) return `${plainClock[1].padStart(2, '0')}:${plainClock[2]}`;
+
+    const date = new Date(source);
+    if (!Number.isNaN(date.getTime())) {
+        return new Intl.DateTimeFormat(undefined, {
+            hour: '2-digit',
+            minute: '2-digit',
+        }).format(date);
+    }
+
+    const embeddedClock = source.match(/(?:^|[T\s])(\d{1,2}):(\d{2})/);
+    return embeddedClock
+        ? `${embeddedClock[1].padStart(2, '0')}:${embeddedClock[2]}`
+        : null;
 }
 
 function RollCallTip({ onDismiss }: { onDismiss: () => void }) {
@@ -140,7 +163,7 @@ function RollCallTip({ onDismiss }: { onDismiss: () => void }) {
             <MessageAvatar
                 aria-label="Memento"
                 title="Memento"
-                className="mr-2 h-8 w-8 text-sm font-bold text-white"
+                className="mr-2 h-10 w-10 min-w-10 text-sm font-bold text-white"
                 style={{
                     background: `linear-gradient(180deg, ${avatarGradient.top} 0%, ${avatarGradient.bottom} 100%)`,
                 }}
@@ -187,6 +210,7 @@ function RollCallTip({ onDismiss }: { onDismiss: () => void }) {
 const TranscriptSegment = memo(function TranscriptSegment({
     id,
     text,
+    recognizedAt = null,
     isStreaming,
     highlight = false,
     speakerLabel = null,
@@ -198,6 +222,7 @@ const TranscriptSegment = memo(function TranscriptSegment({
 }: {
     id: string;
     text: string;
+    recognizedAt?: string | null;
     isStreaming: boolean;
     highlight?: boolean;
     speakerLabel?: string | null;
@@ -209,6 +234,7 @@ const TranscriptSegment = memo(function TranscriptSegment({
 }) {
     const t = useT();
     const displayText = cleanStopWords(text) || (text.trim() === '' ? t('[Silence]') : text);
+    const recognitionTime = formatRecognitionTime(recognizedAt);
 
     const align = isOwn ? 'end' : 'start';
     const avatarLabel = speakerLabel ?? t('Speaker');
@@ -239,7 +265,7 @@ const TranscriptSegment = memo(function TranscriptSegment({
                     background: `linear-gradient(180deg, ${avatarGradient.top} 0%, ${avatarGradient.bottom} 100%)`,
                 }}
                 className={cn(
-                    'h-8 w-8 text-sm font-bold text-white',
+                    'h-10 w-10 min-w-10 text-sm font-bold text-white',
                     isOwn ? 'ml-2' : 'mr-2',
                 )}
             >
@@ -265,16 +291,20 @@ const TranscriptSegment = memo(function TranscriptSegment({
                         <div className="flex flex-col items-start gap-0.5 text-left">
                             {speakerLabel && (
                                 speakerRenamable && speakerId != null && onSpeakerClick ? (
-                                    <button
-                                        type="button"
-                                        onClick={() => onSpeakerClick(speakerId)}
-                                        title={t('Rename speaker')}
-                                        className="text-[10px] font-medium uppercase leading-tight tracking-wide text-[var(--deslop-primary-60)] hover:text-[var(--deslop-primary)] focus:outline-none"
-                                    >
-                                        {speakerLabel}
-                                    </button>
+                                    <Tooltip>
+                                        <TooltipTrigger asChild>
+                                            <button
+                                                type="button"
+                                                onClick={() => onSpeakerClick(speakerId)}
+                                                className="border-b border-dashed border-[var(--primary-30)] text-xs font-normal leading-4 text-[var(--deslop-primary-60)] hover:text-[var(--deslop-primary)] focus:outline-none"
+                                            >
+                                                {speakerLabel}
+                                            </button>
+                                        </TooltipTrigger>
+                                        <TooltipContent>{t('Rename')}</TooltipContent>
+                                    </Tooltip>
                                 ) : (
-                                    <span className="text-[10px] font-medium uppercase leading-tight tracking-wide text-[var(--deslop-primary-60)]">
+                                    <span className="text-xs font-normal leading-4 text-[var(--deslop-primary-60)]">
                                         {speakerLabel}
                                     </span>
                                 )
@@ -289,6 +319,11 @@ const TranscriptSegment = memo(function TranscriptSegment({
                                 </StreamingText>
                             ) : (
                                 <span>{displayText}</span>
+                            )}
+                            {recognitionTime && (
+                                <span className="mm-numeric mt-1 self-end text-[10px] leading-none text-[var(--deslop-primary-50)]">
+                                    {recognitionTime}
+                                </span>
                             )}
                         </div>
                     </BubbleContent>
@@ -495,6 +530,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                     <TranscriptSegment
                                         id={segment.id}
                                         text={getDisplayText(segment)}
+                                        recognizedAt={segment.recognizedAt}
                                         isStreaming={isStreaming}
                                         highlight={highlightedId === segment.id}
                                         speakerLabel={speakerLabel}

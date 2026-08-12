@@ -36,3 +36,7 @@ from Deslop Mini Apps. Memento scopes the source `--primary` token to the safe
 `mini-app/components/Button/RegularButton`, its `GlassBorder`, `MotionProvider`,
 and `hooks/DeviceProvider` are vendored from Deslop Mini Apps revision
 `9927f52a58160e21467879105797cafda2f20c19`.
+
+`mini-app/components/CellStack` and `InitialsAvatar` are vendored with their
+motion, squircle, identity, and primitive-token dependencies from revision
+`9d92c7fe18ef962b4c717055e723210f5ed258da`.

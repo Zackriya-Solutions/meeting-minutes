@@ -1,52 +1,39 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { LANGUAGE_OPTIONS } from "@/lib/summary-languages";
 import { useRecentLanguages } from "@/hooks/useRecentLanguages";
-import { Icon } from "@/components/memento/Icon";
 import { useT } from "@/lib/i18n";
-import { Button } from "@/components/ui/fluid-button";
-import { Input } from "@/components/ui/fluid-input";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+  CommandSeparator,
+} from "@/components/ui/command";
+import { MaterialSymbol } from "@/vendor/deslop/primitives/material-symbols-react";
+import { cn } from "@/lib/utils";
 
 interface LanguagePickerPopoverProps {
   value: string | null;
   onChange: (code: string | null) => void;
-  onClose: () => void;
   mode?: "meeting" | "settings";
   autoSubtitle?: string;
+  className?: string;
 }
 
 export function LanguagePickerPopover({
   value,
   onChange,
-  onClose,
   mode = "meeting",
   autoSubtitle,
+  className,
 }: LanguagePickerPopoverProps) {
   const t = useT();
   const { recents } = useRecentLanguages();
   const [query, setQuery] = useState("");
-  const containerRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    inputRef.current?.focus();
-  }, []);
-
-  useEffect(() => {
-    const onDocClick = (e: MouseEvent) => {
-      if (!containerRef.current?.contains(e.target as Node)) onClose();
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    document.addEventListener("mousedown", onDocClick);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDocClick);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [onClose]);
 
   const filter = query.trim().toLowerCase();
 
@@ -78,104 +65,122 @@ export function LanguagePickerPopover({
     [recents, filter],
   );
 
-  const showAuto = mode === "meeting" && (!filter || "auto".includes(filter));
+  const autoLabel = t('Auto');
+  const showAuto = mode === "meeting" && (
+    !filter || "auto".includes(filter) || autoLabel.toLowerCase().includes(filter)
+  );
   const showRecents = mode === "meeting" && recentsResolved.length > 0;
   const hasNoResults =
     filteredAll.length === 0 && recentsResolved.length === 0 && !showAuto;
 
   return (
-    <div
-      ref={containerRef}
-      className="w-72 rounded-lg bg-background border border-border shadow-none overflow-hidden"
+    <Command
+      shouldFilter={false}
+      className={cn(
+        "w-72 rounded-lg border border-border bg-background text-foreground shadow-none",
+        className,
+      )}
       role="dialog"
       aria-label={t('Pick summary language')}
     >
-      <div className="flex items-center gap-2 px-3 py-2.5 border-b border-border">
-        <Icon name="search" size={16} className="text-muted-foreground" />
-        <Input
-          ref={inputRef}
-          type="text"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder={t('Search language...')}
-          className="flex-1 text-sm text-foreground bg-transparent border-none outline-none placeholder:text-muted-foreground"
-        />
-      </div>
+      <CommandInput
+        autoFocus
+        value={query}
+        onValueChange={setQuery}
+        placeholder={t('Search language...')}
+        className="text-sm"
+      />
 
-      <div className="max-h-80 overflow-y-auto py-1">
+      <CommandList className="max-h-80">
+        {hasNoResults && <CommandEmpty>{t('No matches')}</CommandEmpty>}
+
         {showRecents && (
           <>
-            <div className="px-3 pt-1 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-              {t('Recently Used')}
-            </div>
-            {recentsResolved.map((opt) => (
-              <Button variant="ghost"
-                key={`recent-${opt.code}`}
-                type="button"
-                aria-pressed={value === opt.code}
-                onClick={() => onChange(opt.code)}
-                className={`flex h-auto w-full items-center justify-between px-3 py-1.5 text-sm hover:bg-background text-left ${
-                  value === opt.code ? "text-primary font-medium" : "text-foreground"
-                }`}
-              >
-                <span>
-                  {opt.label}{" "}
-                  <span className="text-xs text-muted-foreground">({opt.code})</span>
-                </span>
-                {value === opt.code && <span className="text-primary" aria-hidden="true">✓</span>}
-              </Button>
-            ))}
-            <div className="my-1 h-px bg-muted" />
+            <CommandGroup heading={t('Recently Used')}>
+              {recentsResolved.map((opt) => (
+                <LanguageCommandItem
+                  key={`recent-${opt.code}`}
+                  code={opt.code}
+                  label={opt.label}
+                  selected={value === opt.code}
+                  onSelect={() => onChange(opt.code)}
+                />
+              ))}
+            </CommandGroup>
+            <CommandSeparator />
           </>
         )}
 
         {showAuto && (
-          <Button variant="ghost"
-            type="button"
+          <CommandItem
+            value="auto"
             aria-pressed={value === null}
-            onClick={() => onChange(null)}
-            className={`flex h-auto w-full items-center justify-between px-3 py-1.5 text-sm hover:bg-background text-left ${
-              value === null ? "text-primary font-medium" : "text-foreground"
-            }`}
+            onSelect={() => onChange(null)}
+            className="min-h-10 px-3 py-2"
           >
-            <span className="flex flex-col">
-              <span>{t('Auto')}</span>
+            <span className="flex min-w-0 flex-1 flex-col">
+              <span>{autoLabel}</span>
               {autoSubtitle && (
                 <span className="text-xs font-normal text-muted-foreground">{autoSubtitle}</span>
               )}
             </span>
-            {value === null && <span className="text-primary" aria-hidden="true">✓</span>}
-          </Button>
+            <SelectionCheck selected={value === null} />
+          </CommandItem>
         )}
 
         {filteredAll.length > 0 && (
-          <div className="px-3 pt-1 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-            {mode === "meeting" ? t("Other Languages") : t("All Languages")}
-          </div>
+          <CommandGroup heading={mode === "meeting" ? t("Other Languages") : t("All Languages")}>
+            {filteredAll.map((opt) => (
+              <LanguageCommandItem
+                key={`all-${opt.code}`}
+                code={opt.code}
+                label={opt.label}
+                selected={value === opt.code}
+                onSelect={() => onChange(opt.code)}
+              />
+            ))}
+          </CommandGroup>
         )}
+      </CommandList>
+    </Command>
+  );
+}
 
-        {filteredAll.map((opt) => (
-          <Button variant="ghost"
-            key={`all-${opt.code}`}
-            type="button"
-            aria-pressed={value === opt.code}
-            onClick={() => onChange(opt.code)}
-            className={`flex h-auto w-full items-center justify-between px-3 py-1.5 text-sm hover:bg-background text-left ${
-              value === opt.code ? "text-primary font-medium" : "text-foreground"
-            }`}
-          >
-            <span>
-              {opt.label}{" "}
-              <span className="text-xs text-muted-foreground">({opt.code})</span>
-            </span>
-            {value === opt.code && <span className="text-primary" aria-hidden="true">✓</span>}
-          </Button>
-        ))}
+function SelectionCheck({ selected }: { selected: boolean }) {
+  return (
+    <MaterialSymbol
+      name="check"
+      size={16}
+      weight={600}
+      aria-hidden="true"
+      className={cn("ml-auto shrink-0", selected ? "opacity-100" : "opacity-0")}
+    />
+  );
+}
 
-        {hasNoResults && (
-          <div className="px-3 py-2 text-sm text-muted-foreground">{t('No matches')}</div>
-        )}
-      </div>
-    </div>
+function LanguageCommandItem({
+  code,
+  label,
+  selected,
+  onSelect,
+}: {
+  code: string;
+  label: string;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <CommandItem
+      value={`${label} ${code}`}
+      aria-pressed={selected}
+      onSelect={onSelect}
+      className="min-h-9 px-3"
+    >
+      <span className="min-w-0 flex-1 truncate">
+        {label}{" "}
+        <span className="text-xs text-muted-foreground">({code})</span>
+      </span>
+      <SelectionCheck selected={selected} />
+    </CommandItem>
   );
 }

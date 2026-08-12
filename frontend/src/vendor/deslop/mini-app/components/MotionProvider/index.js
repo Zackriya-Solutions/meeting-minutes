@@ -1,9 +1,9 @@
 import PropTypes from "prop-types"
 import { LazyMotion, domMax } from "motion/react"
 
-const MotionProvider = ({ children }) => {
+const MotionProvider = ({ children, strict = true }) => {
     return (
-        <LazyMotion features={domMax} strict>
+        <LazyMotion features={domMax} strict={strict}>
             {children}
         </LazyMotion>
     )
@@ -11,5 +11,6 @@ const MotionProvider = ({ children }) => {
 
 MotionProvider.propTypes = {
     children: PropTypes.node,
+    strict: PropTypes.bool,
 }
 export default MotionProvider

@@ -706,6 +706,27 @@ impl SummaryService {
                     error!("Failed to save completed process for {}: {}", meeting_id, e);
                 } else {
                     info!("Summary saved successfully for meeting_id: {}", meeting_id);
+                    // The summary and its analytical sections are one product result. Start
+                    // the second pipeline here, in the background owner, instead of making
+                    // the user discover and press a separate button in the meeting screen.
+                    // `start_analytics_report` returns immediately and de-duplicates any run
+                    // already started by an open renderer.
+                    match crate::report::commands::start_analytics_report(
+                        _app.clone(),
+                        pool.clone(),
+                        meeting_id.clone(),
+                    )
+                    .await
+                    {
+                        Ok(report) => info!(
+                            "Automatic analytics report {} started for generated summary {}",
+                            report.report_id, meeting_id
+                        ),
+                        Err(error) => warn!(
+                            "Failed to start automatic analytics report for {}: {}",
+                            meeting_id, error
+                        ),
+                    }
                     // A generated summary is already final persisted state; requiring the
                     // user to press Save before search/RAG indexing made auto-save
                     // misleading and left freshly summarized meetings unavailable in chat.

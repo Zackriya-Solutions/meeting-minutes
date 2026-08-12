@@ -19,7 +19,7 @@
     },
     {
       "title": "Agreements",
-      "instruction": "Write 1–3 concise bullet points containing only explicit agreements, final decisions, and concrete commitments. The bullet text has a hard maximum of 150 visible characters total, including spaces but excluding the section heading and Markdown bullet markers; aim for 120–130 characters rather than the boundary. Prioritize the most consequential agreements and reformulate them compactly so every bullet is complete and the finished list naturally fits the limit. Do not mechanically truncate text or use an ellipsis. Do not turn suggestions, open questions, or tentative options into agreements. Leave the section empty when there are no agreements.",
+      "instruction": "Write 1–3 concise bullet points containing only explicit agreements, final decisions, and concrete commitments. Write every bullet as one natural sentence that starts with the responsible person's name and an active verb, for example: 'Anna will finish the copy by Friday' or 'Artem will prepare the release build'. Include the due time in the same sentence when it was stated. Do not use a table, labels, or an owner–task dash construction. The bullet text has a hard maximum of 150 visible characters total, including spaces but excluding the section heading and Markdown bullet markers; aim for 120–130 characters rather than the boundary. Prioritize the most consequential agreements and reformulate them compactly so every bullet is complete and the finished list naturally fits the limit. Do not mechanically truncate text or use an ellipsis. Do not turn suggestions, open questions, or tentative options into agreements. Leave the section empty when there are no agreements.",
       "format": "list"
     },
     {

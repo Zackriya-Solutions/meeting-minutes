@@ -547,8 +547,8 @@ fn compact_standard_meeting_violations(markdown: &str) -> Vec<String> {
             section,
             "Summary",
             false,
-            Some(3),
-            Some(150),
+            None,
+            Some(500),
         )),
         None => {
             violations.push("The report is missing the mandatory 'Summary' section.".to_string())
@@ -917,7 +917,7 @@ pub async fn generate_meeting_summary(
                 violations.join("; ")
             );
             let repair_prompt = format!(
-                "{final_user_prompt}\n\n<report_to_revise>\n{final_markdown}\n</report_to_revise>\n\nThe draft report above failed mandatory output validation:\n- {}\n\nReturn the complete corrected Markdown report. Preserve factual meaning and all other sections, but rewrite the invalid sections so every requirement is satisfied. When Summary or Agreements violates its length cap, replace that section with exactly one complete bullet of at most 12 words and 100 visible characters; Agreements may remain empty when nothing was agreed. Count words and Unicode characters before answering. Do not truncate text or use ellipses.",
+                "{final_user_prompt}\n\n<report_to_revise>\n{final_markdown}\n</report_to_revise>\n\nThe draft report above failed mandatory output validation:\n- {}\n\nReturn the complete corrected Markdown report. Preserve factual meaning and all other sections, but rewrite the invalid sections so every requirement is satisfied. Summary may contain any number of bullets, but their combined visible text must have at most 500 Unicode characters. Agreements may remain empty when nothing was agreed; otherwise it may contain at most 3 bullets and 150 visible Unicode characters in total. Do not truncate text or use ellipses.",
                 violations.join("\n- ")
             );
             let repaired = generate_summary(
@@ -1035,8 +1035,8 @@ mod tests {
     }
 
     #[test]
-    fn compact_standard_meeting_accepts_bounded_bullet_sections() {
-        let markdown = "**Участники**\n- Андрей\n- Вы\n\n**Краткое содержание**\n- Обсудили запуск и исправления продукта.\n\n**Договорённости**\n- Андрей готовит релиз.\n\n**Ключевые решения**\n- Выпустить завтра";
+    fn compact_standard_meeting_accepts_any_number_of_summary_bullets() {
+        let markdown = "**Участники**\n- Андрей\n- Вы\n\n**Краткое содержание**\n- Обсудили запуск продукта.\n- Проверили исправления.\n- Согласовали дальнейшую работу.\n- Назначили следующую встречу.\n\n**Договорённости**\n- Андрей готовит релиз.\n\n**Ключевые решения**\n- Выпустить завтра";
         assert!(compact_standard_meeting_violations(markdown).is_empty());
     }
 
@@ -1048,13 +1048,13 @@ mod tests {
 
     #[test]
     fn compact_standard_meeting_rejects_missing_participants_and_long_copy() {
-        let long_summary = "а".repeat(151);
+        let long_summary = "а".repeat(501);
         let markdown = format!(
             "**Краткое содержание**\n- {long_summary}\n\n**Договорённости**\nТекст без буллита"
         );
         let violations = compact_standard_meeting_violations(&markdown).join(" ");
         assert!(violations.contains("Attendees"));
-        assert!(violations.contains("151 visible characters"));
+        assert!(violations.contains("501 visible characters"));
         assert!(violations.contains("Markdown bullet"));
     }
 

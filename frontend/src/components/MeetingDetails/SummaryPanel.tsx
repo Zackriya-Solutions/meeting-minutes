@@ -271,7 +271,6 @@ export function SummaryPanel({
         <LanguagePickerPopover
           value={summaryLang}
           onChange={handleLangChange}
-          onClose={() => setLangPickerOpen(false)}
           autoSubtitle={autoSubtitle}
         />
       </PopoverContent>

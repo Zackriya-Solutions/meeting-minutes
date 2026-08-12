@@ -49,6 +49,21 @@ function capitalize(value: string): string {
   return value ? value.charAt(0).toLocaleUpperCase() + value.slice(1) : value;
 }
 
+const RUSSIAN_MONTHS_GENITIVE = [
+  'января',
+  'февраля',
+  'марта',
+  'апреля',
+  'мая',
+  'июня',
+  'июля',
+  'августа',
+  'сентября',
+  'октября',
+  'ноября',
+  'декабря',
+] as const;
+
 export function CalendarSettings({ variant = 'settings', onOpenMeeting }: CalendarSettingsProps) {
   const { t, lang } = useLanguage();
   const [status, setStatus] = useState<LocalOutlookCalendarStatus | null>(null);
@@ -258,6 +273,9 @@ export function CalendarSettings({ variant = 'settings', onOpenMeeting }: Calend
           const start = new Date(meeting.start_at);
           const end = new Date(meeting.end_at);
           const title = meeting.subject.trim() || t('Upcoming meeting');
+          const month = lang === 'ru'
+            ? capitalize(RUSSIAN_MONTHS_GENITIVE[start.getMonth()])
+            : capitalize(monthFormatter.format(start));
 
           return (
             <button
@@ -270,7 +288,7 @@ export function CalendarSettings({ variant = 'settings', onOpenMeeting }: Calend
               <span className="home-meeting-date">
                 <span className="home-meeting-day home-display">{dayFormatter.format(start)}</span>
                 <span className="home-meeting-date-copy">
-                  <span className="home-meeting-month">{capitalize(monthFormatter.format(start))}</span>
+                  <span className="home-meeting-month">{month}</span>
                   <span className="home-meeting-weekday">{capitalize(weekdayFormatter.format(start))}</span>
                 </span>
               </span>

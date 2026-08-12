@@ -43,6 +43,18 @@ pub async fn generate_analytics_report<R: Runtime>(
 ) -> Result<GenerateAnalyticsReportResponse, String> {
     let pool = state.db_manager.pool().clone();
 
+    start_analytics_report(app, pool, meeting_id).await
+}
+
+/// Start the report without going through Tauri IPC. Summary generation uses this entry
+/// point so every post-meeting block is built automatically after the summary is persisted.
+/// The same lock and active-row lookup as the public command make this safe to call from
+/// background completion and from an already-open meeting screen at the same time.
+pub async fn start_analytics_report<R: Runtime>(
+    app: AppHandle<R>,
+    pool: sqlx::SqlitePool,
+    meeting_id: String,
+) -> Result<GenerateAnalyticsReportResponse, String> {
     let _generate_guard = GENERATE_LOCK.lock().await;
 
     if let Some(existing) =

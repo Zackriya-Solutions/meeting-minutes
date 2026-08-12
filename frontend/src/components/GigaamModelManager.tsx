@@ -194,6 +194,7 @@ export function GigaamModelManager({ compact = false }: { compact?: boolean }) {
           {present ? (
             <div className="settings-cell__control">
               <Select
+                shape="rounded"
                 value={status?.selected ?? 'e2e-rnnt-en-ru'}
                 onValueChange={selectVariant}
                 disabled={!status || downloading || switching}
@@ -252,6 +253,7 @@ export function GigaamModelManager({ compact = false }: { compact?: boolean }) {
       <div className="mt-4">
         <label className="mb-1 block text-xs font-medium text-muted-foreground">{t('Model variant')}</label>
         <Select
+          shape="rounded"
           value={status?.selected ?? 'e2e-rnnt-en-ru'}
           onValueChange={selectVariant}
           disabled={!status || downloading || switching}

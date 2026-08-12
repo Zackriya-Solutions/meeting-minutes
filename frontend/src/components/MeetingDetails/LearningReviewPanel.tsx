@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { localizeSpeakerLabel } from '@/types';
 
 interface MeetingTypeSuggestion {
   id: number;
@@ -134,8 +135,7 @@ function clock(totalSeconds: number) {
 }
 
 function localizedSpeakerLabel(label: string | null | undefined, t: (value: string) => string) {
-  const automatic = label?.match(/^Speaker (\d+)$/);
-  return automatic ? `${t('Speaker')} ${automatic[1]}` : label;
+  return localizeSpeakerLabel(label ?? null, t);
 }
 
 export function LearningReviewPanel({

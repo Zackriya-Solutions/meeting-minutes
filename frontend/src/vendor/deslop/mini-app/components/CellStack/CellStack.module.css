@@ -1,0 +1,72 @@
+.root {
+  --background: var(--background-primary);
+
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-space-6);
+  align-self: stretch;
+  cursor: pointer;
+}
+
+.root[data-expanded="false"] {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.root[data-expanded="false"] > .card {
+  grid-area: 1/1;
+}
+
+.card {
+  position: relative;
+  overflow: hidden;
+  background-color: var(--elevation-2);
+  background-image: linear-gradient(var(--primary-5), var(--primary-5));
+}
+
+.card::after {
+  position: absolute;
+  z-index: 10;
+  inset: 0;
+  background: var(--primary-5);
+  content: "";
+  opacity: 0;
+  pointer-events: none;
+}
+
+.card:active::after {
+  opacity: 1;
+}
+
+.card button:active {
+  background-color: transparent;
+}
+
+:global([data-mini-app].apple) .card {
+  border-radius: var(--ui-radius-26);
+}
+
+:global([data-mini-app].material) .card {
+  border-radius: var(--ui-radius-16);
+}
+
+.fill {
+  position: absolute;
+  inset: 0;
+  background-color: var(--background);
+  pointer-events: none;
+}
+
+.content { position: relative; }
+.morphLine { display: block; }
+.logoStack {
+  position: relative;
+  transition: transform 150ms ease;
+}
+
+.root[data-expanded="false"] .logoStack {
+  transform: translateY(6px);
+}
+
+.logoFront { position: relative; z-index: 2; }
+.logoBehind { position: absolute; inset: 0; z-index: 1; }

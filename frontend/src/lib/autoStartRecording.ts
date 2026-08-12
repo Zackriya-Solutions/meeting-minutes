@@ -12,6 +12,12 @@
 export const AUTO_START_FLAG_KEY = 'autoStartRecording';
 export const AUTO_START_TITLE_KEY = 'autoStartRecordingTitle';
 export const AUTO_START_PARTICIPANTS_KEY = 'autoStartRecordingParticipants';
+export const AUTO_START_SCHEDULE_KEY = 'autoStartRecordingSchedule';
+
+export interface RequestedMeetingSchedule {
+  startAt: string;
+  endAt: string;
+}
 
 /**
  * Ask the recorder to start as soon as it mounts, optionally under a name the caller
@@ -22,6 +28,7 @@ export function requestAutoStart(
   storage: Storage,
   title?: string | null,
   participants?: readonly string[] | null,
+  schedule?: RequestedMeetingSchedule | null,
 ): void {
   storage.setItem(AUTO_START_FLAG_KEY, 'true');
   const requested = title?.trim();
@@ -36,6 +43,11 @@ export function requestAutoStart(
   } else {
     storage.removeItem(AUTO_START_PARTICIPANTS_KEY);
   }
+  if (schedule) {
+    storage.setItem(AUTO_START_SCHEDULE_KEY, JSON.stringify(schedule));
+  } else {
+    storage.removeItem(AUTO_START_SCHEDULE_KEY);
+  }
 }
 
 /** Withdraw a pending request without starting anything. */
@@ -43,6 +55,7 @@ export function clearAutoStartRequest(storage: Storage): void {
   storage.removeItem(AUTO_START_FLAG_KEY);
   storage.removeItem(AUTO_START_TITLE_KEY);
   storage.removeItem(AUTO_START_PARTICIPANTS_KEY);
+  storage.removeItem(AUTO_START_SCHEDULE_KEY);
 }
 
 /**
@@ -69,6 +82,22 @@ export function takeRequestedMeetingParticipants(storage: Storage): string[] {
     return Array.isArray(parsed) ? normalizeParticipants(parsed as unknown[]) : [];
   } catch {
     return [];
+  }
+}
+
+export function takeRequestedMeetingSchedule(storage: Storage): RequestedMeetingSchedule | null {
+  const stored = storage.getItem(AUTO_START_SCHEDULE_KEY);
+  storage.removeItem(AUTO_START_SCHEDULE_KEY);
+  if (!stored) return null;
+  try {
+    const parsed = JSON.parse(stored) as Partial<RequestedMeetingSchedule>;
+    const start = new Date(parsed.startAt ?? '').getTime();
+    const end = new Date(parsed.endAt ?? '').getTime();
+    return Number.isFinite(start) && Number.isFinite(end) && end > start
+      ? { startAt: parsed.startAt!, endAt: parsed.endAt! }
+      : null;
+  } catch {
+    return null;
   }
 }
 

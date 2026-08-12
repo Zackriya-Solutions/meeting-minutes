@@ -46,6 +46,8 @@ import { spring } from '@/lib/fluid/springs';
 import { CalendarSettings } from '@/components/CalendarSettings';
 import type { LocalOutlookMeeting } from '@/lib/localOutlookCalendar';
 
+const MINIMUM_HOME_MEETING_DURATION_SECONDS = 2 * 60;
+
 interface CalendarMeeting {
   meeting: CurrentMeeting;
   title: string;
@@ -315,6 +317,13 @@ export function HomeMeetingList({ animateOnMount = true }: { animateOnMount?: bo
     stopSummaryPolling,
   } = useSidebar();
   const { t, lang } = useLanguage();
+  const visibleMeetings = useMemo(
+    () => meetings.filter((meeting) => (
+      meeting.durationSeconds == null
+      || meeting.durationSeconds >= MINIMUM_HOME_MEETING_DURATION_SECONDS
+    )),
+    [meetings],
+  );
   const [question, setQuestion] = useState('');
   const [meetingToDelete, setMeetingToDelete] = useState<CalendarMeeting | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -322,7 +331,7 @@ export function HomeMeetingList({ animateOnMount = true }: { animateOnMount?: bo
   // seed the replacement list synchronously from that warmed cache so row
   // descriptions never disappear for a frame and reflow the whole screen.
   const [meetingDescriptions, setMeetingDescriptions] = useState<Record<string, string>>(
-    () => cachedMeetingDescriptions(meetings),
+    () => cachedMeetingDescriptions(visibleMeetings),
   );
   const screenRef = useRef<HTMLDivElement>(null);
   const locale = lang === 'ru' ? 'ru-RU' : 'en-US';
@@ -349,7 +358,7 @@ export function HomeMeetingList({ animateOnMount = true }: { animateOnMount?: bo
 
     const loadDescriptions = async () => {
       const entries = await Promise.all(
-        meetings.map(async (meeting) => {
+        visibleMeetings.map(async (meeting) => {
           const summary = await prefetchMeetingSummary(meeting.id);
           return [meeting.id, meetingSummaryDescription(summary)] as const;
         }),
@@ -366,12 +375,12 @@ export function HomeMeetingList({ animateOnMount = true }: { animateOnMount?: bo
     return () => {
       cancelled = true;
     };
-  }, [meetings]);
+  }, [visibleMeetings]);
 
   const calendarMeetings = useMemo<CalendarMeeting[]>(() => {
     const timeFormatter = new Intl.DateTimeFormat(locale, { hour: '2-digit', minute: '2-digit' });
 
-    return [...meetings]
+    return [...visibleMeetings]
       .sort((left, right) => meetingTimestamp(right) - meetingTimestamp(left))
       .map((meeting) => {
         const display = getMeetingDisplayInfo(meeting, lang);
@@ -393,7 +402,7 @@ export function HomeMeetingList({ animateOnMount = true }: { animateOnMount?: bo
           description: meetingDescriptions[meeting.id] ?? null,
         };
       });
-  }, [lang, locale, meetingDescriptions, meetings]);
+  }, [lang, locale, meetingDescriptions, visibleMeetings]);
 
   const calendarMeetingGroups = useMemo<CalendarMeetingGroup[]>(() => {
     const groups = new Map<string, CalendarMeetingGroup>();
