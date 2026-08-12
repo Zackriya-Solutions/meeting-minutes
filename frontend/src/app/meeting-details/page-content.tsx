@@ -88,18 +88,6 @@ export default function PageContent({
     meetingTitle: meetingData.meetingTitle,
   });
 
-  // Auto-naming hook
-  const autoNaming = useAutoNaming({
-    meetingId: meeting.id,
-    onTitleUpdated: meetingData.updateMeetingTitle,
-  });
-
-  // Export operations hook
-  const exportOps = useExportOperations({
-    meetingId: meeting.id,
-    meetingTitle: meetingData.meetingTitle,
-  });
-
   // Callback to register the modal open function
   const handleRegisterModalOpen = (openFn: () => void) => {
     console.log('📝 Registering modal open function in PageContent');
@@ -228,13 +216,6 @@ export default function PageContent({
           onExportToFile={exportOperations.exportToFile}
           onCopyMarkdown={exportOperations.copyMarkdown}
         />
-          onTriggerAutoNaming={autoNaming.triggerAutoNaming}
-          isAutoNaming={autoNaming.isAutoNaming}
-          // Export props
-          onExportToFile={exportOps.exportToFile}
-          onCopyMarkdown={exportOps.copyMarkdown}
-          isExporting={exportOps.isExporting}
-        />
         <SummaryPanel
           meeting={meeting}
           meetingTitle={meetingData.meetingTitle}
@@ -248,6 +229,9 @@ export default function PageContent({
           onSaveAll={meetingData.saveAllChanges}
           onCopySummary={copyOperations.handleCopySummary}
           onOpenFolder={meetingOperations.handleOpenMeetingFolder}
+          // Export props
+          onExportToFile={exportOperations.exportToFile}
+          isExporting={exportOperations.isExporting}
           aiSummary={meetingData.aiSummary}
           summaryStatus={summaryGeneration.summaryStatus}
           transcripts={meetingData.transcripts}

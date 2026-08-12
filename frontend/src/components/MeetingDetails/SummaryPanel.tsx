@@ -60,6 +60,9 @@ interface SummaryPanelProps {
   onTemplateSelect: (templateId: string, templateName: string) => void;
   isModelConfigLoading?: boolean;
   onOpenModelSettings?: (openFn: () => void) => void;
+  // Export props
+  onExportToFile: () => Promise<any>;
+  isExporting?: boolean;
 }
 
 export function SummaryPanel({
@@ -95,7 +98,9 @@ export function SummaryPanel({
   selectedTemplate,
   onTemplateSelect,
   isModelConfigLoading = false,
-  onOpenModelSettings
+  onOpenModelSettings,
+  onExportToFile,
+  isExporting = false,
 }: SummaryPanelProps) {
   const [summaryLang, setSummaryLang] = useState<string | null>(null);
   const [summaryLangStorage, setSummaryLangStorage] = useState<SummaryLanguageStorage>('metadata');
@@ -301,6 +306,8 @@ export function SummaryPanel({
                 }}
                 onOpenFolder={onOpenFolder}
                 hasSummary={!!aiSummary}
+                onExportToFile={onExportToFile}
+                isExporting={isExporting}
               />
             </div>
           </div>

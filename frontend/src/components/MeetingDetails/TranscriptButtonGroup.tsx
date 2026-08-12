@@ -22,7 +22,7 @@ interface TranscriptButtonGroupProps {
   meetingFolderPath?: string | null;
   onRefetchTranscripts?: () => Promise<void>;
   // Auto-naming props
-  onTriggerAutoNaming?: () => Promise<any>;
+  onAutoRename?: () => Promise<any>;
   isAutoNaming?: boolean;
   // Export props
   onExportToFile?: () => Promise<any>;
@@ -38,7 +38,7 @@ export function TranscriptButtonGroup({
   meetingId,
   meetingFolderPath,
   onRefetchTranscripts,
-  onTriggerAutoNaming,
+  onAutoRename,
   isAutoNaming,
   onExportToFile,
   onCopyMarkdown,
@@ -103,13 +103,13 @@ export function TranscriptButtonGroup({
       </ButtonGroup>
 
       {/* Auto-naming button */}
-      {onTriggerAutoNaming && transcriptCount > 0 && (
+      {onAutoRename && transcriptCount > 0 && (
         <Button
           variant="outline"
           size="sm"
           onClick={() => {
             Analytics.trackButtonClick('auto_rename', 'meeting_details');
-            onTriggerAutoNaming();
+            onAutoRename();
           }}
           disabled={isAutoNaming}
           title="Auto-generate meeting name from transcript"
