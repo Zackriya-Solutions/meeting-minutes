@@ -6,17 +6,21 @@ use std::sync::Mutex;
 use crate::audio::capture::{list_pulse_sinks, list_pulse_sources};
 use crate::audio::devices::configuration::{AudioDevice, DeviceType};
 
-/// alsa-lib's device/config enumeration (`snd_device_name_hint`,
-/// `snd_config_update_r`) is not safe to call concurrently from multiple
-/// threads: it mutates a process-global config cache. `list_audio_devices()`
-/// is polled every few seconds by the device disconnect/reconnect monitor
-/// (device_monitor.rs) while a recording is active, and can also be invoked
-/// at any time from the UI (device list refresh) or when starting a new
-/// recording (recording_manager.rs). Without serialization, an overlapping
-/// call from a second Tokio worker thread corrupts alsa-lib's heap state,
-/// which glibc eventually detects and aborts the process on — this is what
-/// produced the SIGABRT crashes after ~30 minutes of recording.
-pub(crate) static ALSA_ENUM_LOCK: Mutex<()> = Mutex::new(());
+/// Global lock serializing every interaction with alsa-lib on Linux.
+///
+/// alsa-lib's config/cache functions (`snd_device_name_hint`,
+/// `snd_config_update_r`) and PCM open functions (`snd_pcm_open`, called
+/// internally by `default_input_config`/`default_output_config`/
+/// `build_input_stream`) all mutate a process-global config cache and are not
+/// safe to call concurrently from multiple threads. `list_audio_devices()` is
+/// polled every few seconds by the device disconnect/reconnect monitor
+/// (device_monitor.rs) while a recording is active, and PCM setup happens on
+/// another Tokio worker thread whenever a cpal fallback stream starts
+/// (degraded mode, stale saved preference, permission trigger, etc.). Without
+/// serialization, an overlapping call corrupts alsa-lib's heap state, which
+/// glibc eventually detects and aborts the process on — this is what produced
+/// the SIGABRT crashes after ~30 minutes of recording.
+pub(crate) static ALSA_GLOBAL_LOCK: Mutex<()> = Mutex::new(());
 
 /// Degraded-mode filter: which raw cpal/ALSA PCM names are worth showing
 /// when the PulseAudio/PipeWire server can't be reached.
@@ -63,9 +67,9 @@ pub fn configure_linux_audio(host: &cpal::Host) -> Result<Vec<AudioDevice>> {
                 e
             );
 
-            // Serialize ALSA enumeration: see ALSA_ENUM_LOCK doc comment above.
+            // Serialize every alsa-lib call: see ALSA_GLOBAL_LOCK doc comment above.
             let input_devices: Vec<_> = {
-                let _guard = ALSA_ENUM_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+                let _guard = ALSA_GLOBAL_LOCK.lock().unwrap_or_else(|e| e.into_inner());
                 host.input_devices()?.collect()
             };
 

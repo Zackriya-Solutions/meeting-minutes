@@ -63,6 +63,13 @@ pub async fn list_audio_devices() -> Result<Vec<AudioDevice>> {
 pub fn trigger_audio_permission() -> Result<bool> {
     use log::info;
 
+    // Serialize every alsa-lib call on Linux: see ALSA_GLOBAL_LOCK doc comment
+    // in devices/platform/linux.rs.
+    #[cfg(target_os = "linux")]
+    let _guard = platform::linux::ALSA_GLOBAL_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+
     let host = cpal::default_host();
     let device = match host.default_input_device() {
         Some(d) => d,

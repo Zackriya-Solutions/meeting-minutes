@@ -481,8 +481,25 @@ impl AudioStream {
         &self.device
     }
 
-    /// Stop the stream
-    pub fn stop(self) -> Result<()> {
+    /// Signal the capture thread to stop, without waiting for it to exit.
+    ///
+    /// Used only by `AudioStreamManager::Drop`, which cannot be async. Every
+    /// normal shutdown path must use `stop().await` instead.
+    pub fn signal_stop_only(&self) {
+        match &self.backend {
+            #[cfg(target_os = "linux")]
+            StreamBackend::Pulse { should_stop, .. } => {
+                should_stop.store(true, std::sync::atomic::Ordering::Release);
+            }
+            _ => {
+                // CPAL/CoreAudio backends clean themselves up through their own
+                // Drop implementations; no explicit signal is needed here.
+            }
+        }
+    }
+
+    /// Stop the stream and wait for its capture thread/task to finish.
+    pub async fn stop(self) -> Result<()> {
         info!("Stopping audio stream for device: {}", self.device.name);
 
         match self.backend {
@@ -511,16 +528,26 @@ impl AudioStream {
             #[cfg(target_os = "linux")]
             StreamBackend::Pulse { should_stop, task } => {
                 // Signal the blocking capture thread to stop after its current
-                // read() call returns, then give it a moment to actually exit.
-                // Unlike CoreAudio's tokio task, abort() can't preempt a thread
-                // blocked in a foreign blocking call, so the flag is what matters.
-                info!("Stopping PulseAudio capture thread...");
+                // read() call returns, then await its JoinHandle with a bounded
+                // timeout. abort() on a spawn_blocking task that has already
+                // started is a no-op, so waiting is the only reliable way to
+                // know the thread has actually exited.
+                info!("Signalling PulseAudio capture thread to stop...");
                 should_stop.store(true, std::sync::atomic::Ordering::Release);
                 if let Some(task_handle) = task {
-                    task_handle.abort();
-                    std::thread::sleep(std::time::Duration::from_millis(100));
+                    match tokio::time::timeout(
+                        std::time::Duration::from_secs(2),
+                        task_handle,
+                    )
+                    .await
+                    {
+                        Ok(Ok(())) => info!("PulseAudio capture thread joined cleanly"),
+                        Ok(Err(e)) => warn!("PulseAudio capture thread panicked: {}", e),
+                        Err(_) => warn!(
+                            "PulseAudio capture thread did not stop within 2s, abandoning join (thread may still be running)"
+                        ),
+                    }
                 }
-                info!("PulseAudio capture thread stopped");
             }
         }
 
@@ -605,15 +632,15 @@ impl AudioStreamManager {
         Ok(())
     }
 
-    /// Stop all audio streams
-    pub fn stop_streams(&mut self) -> Result<()> {
+    /// Stop all audio streams and wait for each capture thread to finish.
+    pub async fn stop_streams(&mut self) -> Result<()> {
         info!("Stopping all audio streams");
 
         let mut errors = Vec::new();
 
         // Stop microphone stream
         if let Some(mic_stream) = self.microphone_stream.take() {
-            if let Err(e) = mic_stream.stop() {
+            if let Err(e) = mic_stream.stop().await {
                 error!("Failed to stop microphone stream: {}", e);
                 errors.push(e);
             }
@@ -621,7 +648,7 @@ impl AudioStreamManager {
 
         // Stop system stream
         if let Some(sys_stream) = self.system_stream.take() {
-            if let Err(e) = sys_stream.stop() {
+            if let Err(e) = sys_stream.stop().await {
                 error!("Failed to stop system stream: {}", e);
                 errors.push(e);
             }
@@ -655,8 +682,16 @@ impl AudioStreamManager {
 
 impl Drop for AudioStreamManager {
     fn drop(&mut self) {
-        if let Err(e) = self.stop_streams() {
-            error!("Error stopping streams during drop: {}", e);
+        // Drop can't be async, so this is a best-effort signal-only shutdown —
+        // it does not wait for capture threads to actually exit. The real,
+        // awaited shutdown always happens via an explicit stop_streams().await
+        // earlier in every control-flow path (recording_manager.rs); this is
+        // only a safety net for paths that drop the manager without calling it.
+        if let Some(mic_stream) = self.microphone_stream.take() {
+            mic_stream.signal_stop_only();
+        }
+        if let Some(sys_stream) = self.system_stream.take() {
+            sys_stream.signal_stop_only();
         }
     }
 }

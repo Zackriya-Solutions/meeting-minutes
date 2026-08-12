@@ -121,15 +121,24 @@ async fn get_windows_output() -> Result<AudioOutputInfo> {
 async fn get_linux_output() -> Result<AudioOutputInfo> {
     use cpal::traits::{DeviceTrait, HostTrait};
 
-    let host = cpal::default_host();
-    let device = host.default_output_device()
-        .ok_or_else(|| anyhow::anyhow!("No default output device found"))?;
+    // Serialize every alsa-lib call: see ALSA_GLOBAL_LOCK doc comment in
+    // devices/platform/linux.rs. The rest of the function (string heuristics)
+    // does not touch alsa-lib and can run unlocked.
+    let (device_name, sample_rate) = {
+        let _guard = crate::audio::devices::platform::linux::ALSA_GLOBAL_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
 
-    let device_name = device.name().unwrap_or_else(|_| "Unknown".to_string());
+        let host = cpal::default_host();
+        let device = host.default_output_device()
+            .ok_or_else(|| anyhow::anyhow!("No default output device found"))?;
 
-    let sample_rate = device.default_output_config()
-        .ok()
-        .map(|config| config.sample_rate().0);
+        let name = device.name().unwrap_or_else(|_| "Unknown".to_string());
+        let rate = device.default_output_config()
+            .ok()
+            .map(|config| config.sample_rate().0);
+        (name, rate)
+    };
 
     // Linux Bluetooth detection (PulseAudio/PipeWire naming)
     let name_lower = device_name.to_lowercase();
