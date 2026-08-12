@@ -351,7 +351,7 @@ impl AudioCapture {
                 Ok(resampler) => {
                     info!("✅ Persistent resampler initialized for '{}' ({}Hz → {}Hz, chunk_size={})",
                           device.name, sample_rate, TARGET_SAMPLE_RATE, RESAMPLER_CHUNK_SIZE);
-                    info!("   Buffering enabled for variable-size chunks (e.g., 320, 512, 1024, etc.)");
+                    info!("   Buffering enabled for variable chunk sizes (e.g., 320, 512, 1024, etc.)");
                     Some(resampler)
                 }
                 Err(e) => {
@@ -719,12 +719,9 @@ impl AudioPipeline {
         // For now, we log it for monitoring and potential optimization
         let _ = (mic_device_name, mic_device_kind, system_device_name, system_device_kind);
 
-        // Create VAD processor with balanced redemption time for speech accumulation
-        // The VAD processor now handles 48kHz->16kHz resampling internally
-        // This bridges natural pauses without excessive fragmentation
-        // For mac os core audio, 900ms, for windows 400ms seems good
-
-        let redemption_time = if cfg!(target_os = "macos") { 400 } else { 400 };
+        // Match the continuous-speech VAD tuning in vad.rs so natural pauses do not
+        // split one-shot transcription into short, context-poor segments.
+        let redemption_time = 2_000;
 
         let vad_processor = match ContinuousVadProcessor::new(sample_rate, redemption_time) {
             Ok(processor) => {
