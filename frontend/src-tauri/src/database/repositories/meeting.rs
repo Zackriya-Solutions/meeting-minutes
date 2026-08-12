@@ -53,7 +53,10 @@ fn duration_from_metadata_json(contents: &str) -> Option<f64> {
     let completed_at = metadata.get("completed_at")?.as_str()?;
     let created_at = chrono::DateTime::parse_from_rfc3339(created_at).ok()?;
     let completed_at = chrono::DateTime::parse_from_rfc3339(completed_at).ok()?;
-    let duration = (completed_at - created_at).num_milliseconds() as f64 / 1000.0;
+    // Preserve sub-millisecond precision long enough to round to the millisecond shown
+    // by the UI. `num_milliseconds()` truncates 17.710972s to 17.710s.
+    let duration = (completed_at - created_at).num_microseconds()? as f64 / 1_000_000.0;
+    let duration = (duration * 1_000.0).round() / 1_000.0;
     (duration.is_finite() && duration > 0.0).then_some(duration)
 }
 

@@ -1,9 +1,7 @@
 // Audio file import module - allows importing external audio files as new meetings
 
 use crate::api::TranscriptSegment;
-use crate::audio::decoder::{
-    decode_audio_file, decode_audio_file_to_whisper, decode_audio_file_with_progress,
-};
+use crate::audio::decoder::{decode_audio_file_to_whisper, decode_audio_file_with_progress};
 use crate::audio::vad::{get_speech_chunks_with_progress, ContinuousVadProcessor, SpeechSegment};
 use crate::config::{DEFAULT_PARAKEET_MODEL, DEFAULT_WHISPER_MODEL};
 use crate::database::repositories::audio_identity::{ExistingAudioMeeting, IdentityRegistration};
@@ -17,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::{BufReader, Read};
+use std::io::{BufReader, Read, Seek, SeekFrom};
 use std::panic::AssertUnwindSafe;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -112,7 +110,7 @@ const VAD_REDEMPTION_TIME_MS: u32 = 2000;
 /// Maximum file size: 20GB (prevents OOM and excessive processing time)
 const MAX_FILE_SIZE_BYTES: u64 = 20 * 1024 * 1024 * 1024; // 20GB
 
-/// Decode to 16 kHz mono and feed VAD incrementally.
+/// Decode to mono at the selected 8/16 kHz profile and feed VAD incrementally.
 ///
 /// This is the safe path for large recordings: at no point do we retain the
 /// complete decoded PCM stream. The old `Command::output` path could keep
@@ -122,17 +120,30 @@ fn stream_decode_speech_segments<F>(
     path: &Path,
     redemption_time_ms: u32,
     expected_duration_seconds: Option<f64>,
+    denoise_model: Option<&Path>,
     mut progress: F,
 ) -> Result<(Vec<SpeechSegment>, f64)>
 where
     F: FnMut(u32, usize) -> bool,
 {
     let ffmpeg = find_ffmpeg_path().ok_or_else(|| anyhow!("FFmpeg is not available"))?;
+    // Read the model's pinned audio metadata before starting FFmpeg. This keeps the
+    // decoder and model in lock-step for both telephone (8 kHz) and regular (16 kHz)
+    // imports without hard-coding tensor dimensions in the import pipeline.
+    let mut enhancer = denoise_model
+        .map(super::dpdfnet::DpdfNetEnhancer::load)
+        .transpose()?;
+    let decode_sample_rate = enhancer
+        .as_ref()
+        .map(super::dpdfnet::DpdfNetEnhancer::sample_rate)
+        .unwrap_or(16_000);
     let mut child = Command::new(ffmpeg)
         .args(["-nostdin", "-v", "error"])
         .arg("-i")
         .arg(path)
-        .args(["-vn", "-ac", "1", "-ar", "16000", "-f", "f32le", "pipe:1"])
+        .args(["-vn", "-ac", "1", "-ar"])
+        .arg(decode_sample_rate.to_string())
+        .args(["-f", "f32le", "pipe:1"])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -153,16 +164,25 @@ where
         details
     });
 
-    let mut processor = ContinuousVadProcessor::new(16_000, redemption_time_ms)?;
+    let mut processor = ContinuousVadProcessor::new(decode_sample_rate, redemption_time_ms)?;
+    let mut raw_processor = if denoise_model.is_some() {
+        Some(ContinuousVadProcessor::new(
+            decode_sample_rate,
+            redemption_time_ms,
+        )?)
+    } else {
+        None
+    };
     let mut segments = Vec::new();
-    // 10 seconds of mono f32 at 16 kHz: small enough for stable memory, large
+    let mut raw_segments = Vec::new();
+    // 10 seconds of mono f32 at the selected decode rate: small enough for stable memory, large
     // enough to avoid excessive process/VAD overhead.
-    let mut bytes = vec![0_u8; 16_000 * 4 * 10];
+    let mut bytes = vec![0_u8; decode_sample_rate as usize * 4 * 10];
     let mut carry = Vec::<u8>::with_capacity(3);
     let mut processed_samples = 0_u64;
     let expected_samples = expected_duration_seconds
         .filter(|duration| duration.is_finite() && *duration > 0.0)
-        .map(|duration| (duration * 16_000.0) as u64);
+        .map(|duration| (duration * decode_sample_rate as f64) as u64);
     let mut last_progress = 0_u32;
 
     loop {
@@ -186,12 +206,27 @@ where
         let remaining = carry.split_off(aligned);
         carry = remaining;
         processed_samples += samples.len() as u64;
-        segments.extend(processor.process_audio(&samples)?);
+        if let Some(raw) = raw_processor.as_mut() {
+            raw_segments.extend(raw.process_audio(&samples)?);
+        }
+        if let Some(enhancer) = enhancer.as_mut() {
+            let enhanced = enhancer.process(&samples)?;
+            segments.extend(processor.process_audio(&enhanced)?);
+        } else {
+            segments.extend(processor.process_audio(&samples)?);
+        }
+        let provisional_segments = if raw_processor.is_some()
+            && decode_sample_rate != super::dpdfnet::NARROWBAND_SAMPLE_RATE
+        {
+            raw_segments.len()
+        } else {
+            segments.len()
+        };
 
         if let Some(total) = expected_samples {
             let next = ((processed_samples.saturating_mul(100) / total.max(1)).min(99)) as u32;
             if next >= last_progress + 2 {
-                if !progress(next, segments.len()) {
+                if !progress(next, provisional_segments) {
                     let _ = child.kill();
                     let _ = child.wait();
                     let _ = stderr_reader.join();
@@ -199,7 +234,7 @@ where
                 }
                 last_progress = next;
             }
-        } else if !progress(0, segments.len()) {
+        } else if !progress(0, provisional_segments) {
             let _ = child.kill();
             let _ = child.wait();
             let _ = stderr_reader.join();
@@ -213,7 +248,24 @@ where
         let _ = stderr_reader.join();
         return Err(anyhow!("FFmpeg returned an incomplete f32 sample"));
     }
+    if let Some(enhancer) = enhancer.as_mut() {
+        let tail = enhancer.flush()?;
+        segments.extend(processor.process_audio(&tail)?);
+    }
     segments.extend(processor.flush()?);
+    if let Some(mut raw) = raw_processor {
+        raw_segments.extend(raw.flush()?);
+        segments = if decode_sample_rate == super::dpdfnet::NARROWBAND_SAMPLE_RATE {
+            // Telephone audio is the profile where enhancement recovered speech that
+            // was otherwise completely hidden, so prefer enhanced candidates.
+            merge_primary_and_gap_candidates(segments, raw_segments)
+        } else {
+            // On ordinary recordings enhancement can occasionally alter a word even
+            // when raw speech is already clear. Keep raw candidates primary and use
+            // enhanced audio only to recover intervals missed by raw VAD.
+            merge_primary_and_gap_candidates(raw_segments, segments)
+        };
+    }
     let status = child
         .wait()
         .map_err(|error| anyhow!("Failed to wait for FFmpeg: {error}"))?;
@@ -227,9 +279,76 @@ where
     if processed_samples == 0 {
         return Err(anyhow!("FFmpeg decoded no audio samples"));
     }
-    let duration_seconds = processed_samples as f64 / 16_000.0;
+    let duration_seconds = processed_samples as f64 / decode_sample_rate as f64;
     let _ = progress(100, segments.len());
     Ok((segments, duration_seconds))
+}
+
+/// Keep every primary candidate and add only the non-overlapping portions of fallback
+/// candidates. This protects recall without transcribing the same interval twice.
+fn merge_primary_and_gap_candidates(
+    mut primary: Vec<SpeechSegment>,
+    fallback: Vec<SpeechSegment>,
+) -> Vec<SpeechSegment> {
+    for candidate in fallback {
+        let duration_ms = candidate.end_timestamp_ms - candidate.start_timestamp_ms;
+        if duration_ms <= 0.0 || candidate.samples.is_empty() {
+            continue;
+        }
+
+        let mut gaps = vec![(candidate.start_timestamp_ms, candidate.end_timestamp_ms)];
+        for existing in &primary {
+            let mut next = Vec::with_capacity(gaps.len() + 1);
+            for (start, end) in gaps {
+                if existing.end_timestamp_ms <= start || existing.start_timestamp_ms >= end {
+                    next.push((start, end));
+                    continue;
+                }
+                if existing.start_timestamp_ms > start {
+                    next.push((start, existing.start_timestamp_ms.min(end)));
+                }
+                if existing.end_timestamp_ms < end {
+                    next.push((existing.end_timestamp_ms.max(start), end));
+                }
+            }
+            gaps = next;
+            if gaps.is_empty() {
+                break;
+            }
+        }
+
+        let sample_count = candidate.samples.len();
+        for (start, end) in gaps {
+            let start_offset = ((start - candidate.start_timestamp_ms) / duration_ms
+                * sample_count as f64)
+                .ceil() as usize;
+            let end_offset = ((end - candidate.start_timestamp_ms) / duration_ms
+                * sample_count as f64)
+                .floor() as usize;
+            let start_offset = start_offset.min(sample_count);
+            let end_offset = end_offset.min(sample_count);
+            // A remaining gap shorter than one sample cannot carry recoverable audio;
+            // dropping that sub-sample interval also guarantees no duplicated sample.
+            if start_offset >= end_offset {
+                continue;
+            }
+            let milliseconds_per_sample = duration_ms / sample_count as f64;
+            primary.push(SpeechSegment {
+                samples: candidate.samples[start_offset..end_offset].to_vec(),
+                start_timestamp_ms: candidate.start_timestamp_ms
+                    + start_offset as f64 * milliseconds_per_sample,
+                end_timestamp_ms: candidate.start_timestamp_ms
+                    + end_offset as f64 * milliseconds_per_sample,
+                confidence: candidate.confidence,
+            });
+        }
+    }
+    primary.sort_by(|left, right| {
+        left.start_timestamp_ms
+            .partial_cmp(&right.start_timestamp_ms)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    primary
 }
 
 /// Information about a selected audio file
@@ -249,7 +368,7 @@ pub struct AudioFileInfo {
 /// Progress update emitted during import
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ImportProgress {
-    pub stage: String, // "copying", "decoding", "vad", "transcribing", "saving"
+    pub stage: String, // "copying", "decoding", "vad", "raw_retry", "transcribing", "saving"
     pub progress_percentage: u32,
     pub message: String,
 }
@@ -565,13 +684,15 @@ pub fn validate_audio_file(path: &Path) -> Result<AudioFileInfo> {
             duration
         }
         Err(e) => {
-            // Fallback to full decode if metadata unavailable
+            // Some valid WAV files contain non-standard ancillary chunks (notably `fact`)
+            // that strict demuxers reject even though FFmpeg can decode the audio stream.
+            // Count a low-rate FFmpeg PCM stream in constant memory instead of retaining a
+            // complete multi-hour decode just to learn its duration.
             warn!(
-                "Metadata extraction failed: {}, falling back to full decode",
+                "Metadata extraction failed: {}, falling back to FFmpeg probe",
                 e
             );
-            let decoded = decode_audio_file(path)?;
-            decoded.duration_seconds
+            extract_duration_with_ffmpeg(path)?
         }
     };
 
@@ -736,6 +857,156 @@ pub(crate) fn extract_duration_from_metadata(path: &Path) -> Result<f64> {
     Ok(duration_seconds)
 }
 
+/// Decode to throw-away 8 kHz mono PCM and count samples. This is slower than container
+/// metadata but works for decodable files with malformed/non-standard headers and keeps
+/// memory bounded regardless of recording length.
+fn extract_duration_with_ffmpeg(path: &Path) -> Result<f64> {
+    const PROBE_SAMPLE_RATE: u64 = 8_000;
+    const MAX_PROBE_DURATION_SECONDS: u64 = 24 * 60 * 60;
+    const MAX_PROBE_BYTES: u64 = PROBE_SAMPLE_RATE * 2 * MAX_PROBE_DURATION_SECONDS;
+    let ffmpeg = find_ffmpeg_path().ok_or_else(|| anyhow!("FFmpeg is not available"))?;
+    let mut child = Command::new(ffmpeg)
+        .args(["-nostdin", "-v", "error"])
+        .arg("-i")
+        .arg(path)
+        .args([
+            "-map", "0:a:0", "-vn", "-ac", "1", "-ar", "8000", "-f", "s16le", "pipe:1",
+        ])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| anyhow!("Failed to start FFmpeg probe: {error}"))?;
+    let mut stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| anyhow!("FFmpeg probe stdout is unavailable"))?;
+    let mut stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| anyhow!("FFmpeg probe stderr is unavailable"))?;
+    let stderr_reader = std::thread::spawn(move || {
+        let mut details = String::new();
+        let _ = stderr.read_to_string(&mut details);
+        details
+    });
+    let mut bytes = 0_u64;
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        if IMPORT_CANCELLED.load(Ordering::SeqCst) {
+            let _ = child.kill();
+            let _ = child.wait();
+            let _ = stderr_reader.join();
+            return Err(anyhow!("Import cancelled"));
+        }
+        let read = stdout.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        bytes = bytes.saturating_add(read as u64);
+        if bytes > MAX_PROBE_BYTES {
+            let _ = child.kill();
+            let _ = child.wait();
+            let _ = stderr_reader.join();
+            return Err(anyhow!(
+                "FFmpeg audio probe exceeded the 24-hour import limit"
+            ));
+        }
+    }
+    let status = child.wait()?;
+    let details = stderr_reader.join().unwrap_or_default();
+    if !status.success() {
+        return Err(anyhow!("FFmpeg audio probe failed: {}", details.trim()));
+    }
+    if bytes < 2 {
+        return Err(anyhow!("FFmpeg decoded no audio samples"));
+    }
+    Ok((bytes / 2) as f64 / PROBE_SAMPLE_RATE as f64)
+}
+
+fn wav_sample_rate(path: &Path) -> Result<u32> {
+    let mut file = BufReader::new(File::open(path)?);
+    let mut riff = [0_u8; 12];
+    file.read_exact(&mut riff)?;
+    if &riff[..4] != b"RIFF" || &riff[8..] != b"WAVE" {
+        return Err(anyhow!("Not a RIFF/WAVE file"));
+    }
+    loop {
+        let mut header = [0_u8; 8];
+        file.read_exact(&mut header)?;
+        let size = u32::from_le_bytes(header[4..8].try_into().unwrap()) as u64;
+        if &header[..4] == b"fmt " {
+            if size < 16 {
+                return Err(anyhow!("WAV fmt chunk is too short"));
+            }
+            let mut format = [0_u8; 16];
+            file.read_exact(&mut format)?;
+            return Ok(u32::from_le_bytes(format[4..8].try_into().unwrap()));
+        }
+        file.seek(SeekFrom::Current((size + size % 2) as i64))?;
+    }
+}
+
+fn probe_audio_sample_rate(path: &Path) -> Result<u32> {
+    if path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("wav"))
+    {
+        if let Ok(sample_rate) = wav_sample_rate(path) {
+            return Ok(sample_rate);
+        }
+    }
+
+    use symphonia::core::formats::FormatOptions;
+    use symphonia::core::io::MediaSourceStream;
+    use symphonia::core::meta::MetadataOptions;
+    use symphonia::core::probe::Hint;
+    let file = File::open(path)?;
+    let mut hint = Hint::new();
+    if let Some(extension) = path.extension().and_then(|value| value.to_str()) {
+        hint.with_extension(extension);
+    }
+    let probed = symphonia::default::get_probe().format(
+        &hint,
+        MediaSourceStream::new(Box::new(file), Default::default()),
+        &FormatOptions::default(),
+        &MetadataOptions::default(),
+    )?;
+    probed
+        .format
+        .tracks()
+        .iter()
+        .find_map(|track| track.codec_params.sample_rate)
+        .ok_or_else(|| anyhow!("Audio sample rate is unavailable"))
+}
+
+fn denoise_profile_sample_rate(path: &Path, enabled: bool) -> Option<u32> {
+    if !enabled {
+        return None;
+    }
+    match probe_audio_sample_rate(path) {
+        Ok(sample_rate) => {
+            let model_sample_rate = if sample_rate <= 12_000 {
+                super::dpdfnet::NARROWBAND_SAMPLE_RATE
+            } else {
+                super::dpdfnet::WIDEBAND_SAMPLE_RATE
+            };
+            info!(
+                "Import denoising preflight: source={}Hz, model={}Hz",
+                sample_rate, model_sample_rate
+            );
+            Some(model_sample_rate)
+        }
+        Err(error) => {
+            warn!(
+                "Could not determine source sample rate; skipping experimental denoising: {error}"
+            );
+            None
+        }
+    }
+}
+
 /// Start import of an audio file
 async fn start_import<R: Runtime>(
     app: AppHandle<R>,
@@ -744,6 +1015,7 @@ async fn start_import<R: Runtime>(
     language: Option<String>,
     model: Option<String>,
     provider: Option<String>,
+    denoise_audio: bool,
 ) -> Result<ImportRunOutcome> {
     // Acquire guard - ensures flag is cleared even on panic/early return
     let _guard = ImportGuard::acquire().map_err(|e| anyhow!(e))?;
@@ -759,6 +1031,7 @@ async fn start_import<R: Runtime>(
         language,
         model,
         provider,
+        denoise_audio,
         None,
     )
     .await;
@@ -815,6 +1088,7 @@ pub async fn start_batch_import<R: Runtime>(
     language: Option<String>,
     model: Option<String>,
     provider: Option<String>,
+    denoise_audio: bool,
 ) -> Result<BatchImportResult> {
     let _guard = ImportGuard::acquire().map_err(|error| anyhow!(error))?;
     IMPORT_CANCELLED.store(false, Ordering::SeqCst);
@@ -911,6 +1185,7 @@ pub async fn start_batch_import<R: Runtime>(
             language.clone(),
             model.clone(),
             provider.clone(),
+            denoise_audio,
             Some(source_sha256.clone()),
         ))
         .catch_unwind()
@@ -974,12 +1249,13 @@ pub async fn start_batch_import_folder<R: Runtime>(
     language: Option<String>,
     model: Option<String>,
     provider: Option<String>,
+    denoise_audio: bool,
     report_path: Option<PathBuf>,
 ) -> Result<BatchImportResult> {
     let items = tokio::task::spawn_blocking(move || batch_items_from_folder(&folder))
         .await
         .map_err(|error| anyhow!("Folder scan task join error: {}", error))??;
-    let result = start_batch_import(app, items, language, model, provider).await?;
+    let result = start_batch_import(app, items, language, model, provider, denoise_audio).await?;
     if let Some(path) = report_path {
         write_batch_report(&path, &result)?;
         info!("Wrote batch import report to {}", path.display());
@@ -1017,6 +1293,7 @@ async fn run_import<R: Runtime>(
     language: Option<String>,
     model: Option<String>,
     provider: Option<String>,
+    denoise_audio: bool,
     source_sha256: Option<String>,
 ) -> Result<ImportRunOutcome> {
     let source = PathBuf::from(&source_path);
@@ -1050,6 +1327,7 @@ async fn run_import<R: Runtime>(
     }
 
     let (provider, model) = resolve_import_transcription(pool, provider, model).await?;
+    let denoise_sample_rate = denoise_profile_sample_rate(&source, denoise_audio);
     info!(
         "Starting import for '{}' from {} with language {:?}, model {:?}, provider {:?}",
         title, source_path, language, model, provider
@@ -1095,6 +1373,30 @@ async fn run_import<R: Runtime>(
 
     info!("Copied audio to: {}", dest_path.display());
 
+    let denoise_model = if let Some(sample_rate) = denoise_sample_rate {
+        emit_progress(
+            &app,
+            "denoising",
+            12,
+            "Preparing noise suppression model...",
+        );
+        match super::dpdfnet::ensure_model(&app, sample_rate).await {
+            Ok(model) => Some(model),
+            Err(error) => {
+                warn!("Noise suppression is unavailable; importing raw audio: {error}");
+                emit_progress(
+                    &app,
+                    "denoising",
+                    14,
+                    "Noise suppression unavailable; continuing with original audio...",
+                );
+                None
+            }
+        }
+    } else {
+        None
+    };
+
     // Check for cancellation
     if IMPORT_CANCELLED.load(Ordering::SeqCst) {
         return Err(anyhow!("Import cancelled"));
@@ -1108,14 +1410,18 @@ async fn run_import<R: Runtime>(
         "Streaming audio through speech detection...",
     );
 
-    let expected_duration = extract_duration_from_metadata(&dest_path).ok();
+    let expected_duration = extract_duration_from_metadata(&dest_path)
+        .or_else(|_| extract_duration_with_ffmpeg(&dest_path))
+        .ok();
     let path_for_stream = dest_path.clone();
+    let denoise_for_stream = denoise_model.clone();
     let app_for_stream = app.clone();
-    let streamed = tokio::task::spawn_blocking(move || {
+    let mut streamed = tokio::task::spawn_blocking(move || {
         stream_decode_speech_segments(
             &path_for_stream,
             VAD_REDEMPTION_TIME_MS,
             expected_duration,
+            denoise_for_stream.as_deref(),
             |stream_progress, segments_found| {
                 let overall = 15 + ((stream_progress as f32 * 0.15) as u32);
                 emit_progress(
@@ -1133,6 +1439,46 @@ async fn run_import<R: Runtime>(
     })
     .await
     .map_err(|error| anyhow!("Streaming decode task panicked: {error}"))?;
+
+    // A corrupt cache, unsupported ONNX runtime, or a model inference failure must not
+    // make an otherwise valid import unusable. Retry once through the original stream;
+    // the experimental feature is allowed to improve recall, never reduce reliability.
+    if let Err(denoise_error) = &streamed {
+        if denoise_model.is_some() {
+            warn!("Noise suppression failed; retrying raw audio: {denoise_error}");
+            emit_progress(
+                &app,
+                "raw_retry",
+                20,
+                "Noise suppression stopped; restarting from the beginning with original audio...",
+            );
+            let raw_path = dest_path.clone();
+            let raw_app = app.clone();
+            streamed = tokio::task::spawn_blocking(move || {
+                stream_decode_speech_segments(
+                    &raw_path,
+                    VAD_REDEMPTION_TIME_MS,
+                    expected_duration,
+                    None,
+                    |stream_progress, segments_found| {
+                        let overall = 20 + ((stream_progress as f32 * 0.15) as u32);
+                        emit_progress(
+                            &raw_app,
+                            "raw_retry",
+                            overall,
+                            &format!(
+                                "Retrying original audio from the beginning... {}% ({} speech segments)",
+                                stream_progress, segments_found
+                            ),
+                        );
+                        !IMPORT_CANCELLED.load(Ordering::SeqCst)
+                    },
+                )
+            })
+            .await
+            .map_err(|error| anyhow!("Raw streaming retry task panicked: {error}"))?;
+        }
+    }
 
     let (speech_segments, duration_seconds) = match streamed {
         Ok(result) => result,
@@ -2220,6 +2566,7 @@ pub async fn start_import_audio_command<R: Runtime>(
     language: Option<String>,
     model: Option<String>,
     provider: Option<String>,
+    denoise_audio: Option<bool>,
 ) -> Result<ImportStarted, String> {
     // Check if import is already in progress (guard will be acquired in start_import)
     if IMPORT_IN_PROGRESS.load(Ordering::SeqCst) {
@@ -2228,7 +2575,16 @@ pub async fn start_import_audio_command<R: Runtime>(
 
     // Spawn import in background
     tauri::async_runtime::spawn(async move {
-        let result = start_import(app, source_path, title, language, model, provider).await;
+        let result = start_import(
+            app,
+            source_path,
+            title,
+            language,
+            model,
+            provider,
+            denoise_audio.unwrap_or(false),
+        )
+        .await;
 
         if let Err(e) = result {
             error!("Import failed: {}", e);
@@ -2248,6 +2604,7 @@ pub async fn start_batch_import_audio_command<R: Runtime>(
     language: Option<String>,
     model: Option<String>,
     provider: Option<String>,
+    denoise_audio: Option<bool>,
 ) -> Result<ImportStarted, String> {
     if IMPORT_IN_PROGRESS.load(Ordering::SeqCst) {
         return Err("Import already in progress".to_string());
@@ -2257,7 +2614,15 @@ pub async fn start_batch_import_audio_command<R: Runtime>(
     }
 
     tauri::async_runtime::spawn(async move {
-        if let Err(error) = start_batch_import(app.clone(), items, language, model, provider).await
+        if let Err(error) = start_batch_import(
+            app.clone(),
+            items,
+            language,
+            model,
+            provider,
+            denoise_audio.unwrap_or(false),
+        )
+        .await
         {
             error!("Batch import failed to start: {}", error);
             let _ = app.emit(
@@ -2283,6 +2648,7 @@ pub async fn start_batch_import_folder_command<R: Runtime>(
     language: Option<String>,
     model: Option<String>,
     provider: Option<String>,
+    denoise_audio: Option<bool>,
     report_path: Option<String>,
 ) -> Result<ImportStarted, String> {
     if IMPORT_IN_PROGRESS.load(Ordering::SeqCst) {
@@ -2298,8 +2664,16 @@ pub async fn start_batch_import_folder_command<R: Runtime>(
     let report_path = report_path.map(PathBuf::from);
 
     tauri::async_runtime::spawn(async move {
-        match start_batch_import_folder(app.clone(), folder, language, model, provider, report_path)
-            .await
+        match start_batch_import_folder(
+            app.clone(),
+            folder,
+            language,
+            model,
+            provider,
+            denoise_audio.unwrap_or(false),
+            report_path,
+        )
+        .await
         {
             Ok(result) => {
                 info!(
@@ -2565,8 +2939,10 @@ mod tests {
         std::fs::write(&wav, contents).unwrap();
 
         let (segments, duration) =
-            stream_decode_speech_segments(&wav, VAD_REDEMPTION_TIME_MS, Some(2.0), |_, _| true)
-                .unwrap();
+            stream_decode_speech_segments(&wav, VAD_REDEMPTION_TIME_MS, Some(2.0), None, |_, _| {
+                true
+            })
+            .unwrap();
         assert!(segments.is_empty());
         assert!((duration - 2.0).abs() < 0.02);
     }
@@ -2707,6 +3083,170 @@ mod tests {
             assert_eq!(info.format, "WAV");
             assert!(info.duration_seconds > 0.0);
             assert!(info.size_bytes > 0);
+        }
+    }
+
+    #[test]
+    fn wav_sample_rate_ignores_nonstandard_fact_chunk() {
+        let file = tempfile::NamedTempFile::with_suffix(".wav").unwrap();
+        let mut wav = Vec::new();
+        wav.extend_from_slice(b"RIFF");
+        wav.extend_from_slice(&52_u32.to_le_bytes());
+        wav.extend_from_slice(b"WAVE");
+        wav.extend_from_slice(b"fact");
+        wav.extend_from_slice(&8_u32.to_le_bytes());
+        wav.extend_from_slice(&[0_u8; 8]);
+        wav.extend_from_slice(b"fmt ");
+        wav.extend_from_slice(&16_u32.to_le_bytes());
+        wav.extend_from_slice(&7_u16.to_le_bytes()); // G.711 mu-law
+        wav.extend_from_slice(&1_u16.to_le_bytes());
+        wav.extend_from_slice(&8_000_u32.to_le_bytes());
+        wav.extend_from_slice(&8_000_u32.to_le_bytes());
+        wav.extend_from_slice(&1_u16.to_le_bytes());
+        wav.extend_from_slice(&8_u16.to_le_bytes());
+        std::fs::write(file.path(), wav).unwrap();
+
+        assert_eq!(wav_sample_rate(file.path()).unwrap(), 8_000);
+        assert_eq!(
+            denoise_profile_sample_rate(file.path(), true),
+            Some(super::super::dpdfnet::NARROWBAND_SAMPLE_RATE)
+        );
+        assert_eq!(denoise_profile_sample_rate(file.path(), false), None);
+    }
+
+    #[test]
+    fn regular_audio_uses_wideband_denoising_profile() {
+        let file = tempfile::NamedTempFile::with_suffix(".wav").unwrap();
+        let mut wav = Vec::new();
+        wav.extend_from_slice(b"RIFF");
+        wav.extend_from_slice(&36_u32.to_le_bytes());
+        wav.extend_from_slice(b"WAVEfmt ");
+        wav.extend_from_slice(&16_u32.to_le_bytes());
+        wav.extend_from_slice(&1_u16.to_le_bytes());
+        wav.extend_from_slice(&1_u16.to_le_bytes());
+        wav.extend_from_slice(&48_000_u32.to_le_bytes());
+        wav.extend_from_slice(&96_000_u32.to_le_bytes());
+        wav.extend_from_slice(&2_u16.to_le_bytes());
+        wav.extend_from_slice(&16_u16.to_le_bytes());
+        std::fs::write(file.path(), wav).unwrap();
+
+        assert_eq!(
+            denoise_profile_sample_rate(file.path(), true),
+            Some(super::super::dpdfnet::WIDEBAND_SAMPLE_RATE)
+        );
+    }
+
+    #[test]
+    fn fallback_vad_candidates_only_fill_primary_gaps() {
+        fn segment(start: f64, end: f64) -> SpeechSegment {
+            SpeechSegment {
+                samples: vec![0.0; (end - start) as usize],
+                start_timestamp_ms: start,
+                end_timestamp_ms: end,
+                confidence: 0.8,
+            }
+        }
+        let merged = merge_primary_and_gap_candidates(
+            vec![segment(1_000.0, 3_000.0)],
+            vec![segment(1_500.0, 2_500.0), segment(5_000.0, 6_000.0)],
+        );
+        assert_eq!(merged.len(), 2);
+        assert_eq!(merged[0].start_timestamp_ms, 1_000.0);
+        assert_eq!(merged[1].start_timestamp_ms, 5_000.0);
+    }
+
+    #[test]
+    fn partially_overlapping_fallback_is_trimmed_to_the_gap() {
+        fn segment(start: f64, end: f64) -> SpeechSegment {
+            SpeechSegment {
+                samples: (start as usize..end as usize)
+                    .map(|sample| sample as f32)
+                    .collect(),
+                start_timestamp_ms: start,
+                end_timestamp_ms: end,
+                confidence: 0.8,
+            }
+        }
+
+        let merged = merge_primary_and_gap_candidates(
+            vec![segment(1_000.0, 2_000.0)],
+            vec![segment(1_500.0, 2_500.0)],
+        );
+
+        assert_eq!(merged.len(), 2);
+        assert_eq!(merged[1].start_timestamp_ms, 2_000.0);
+        assert_eq!(merged[1].end_timestamp_ms, 2_500.0);
+        assert_eq!(merged[1].samples.first(), Some(&2_000.0));
+        assert_eq!(merged[1].samples.last(), Some(&2_499.0));
+    }
+
+    #[test]
+    #[ignore]
+    fn research_validate_external_audio() {
+        let path = std::env::var("TEST_AUDIO_PATH").expect("set TEST_AUDIO_PATH");
+        let info = validate_audio_file(Path::new(&path)).unwrap();
+        println!("validated: {info:?}");
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn research_dpdfnet_streaming_vad() {
+        let audios = std::env::var("TEST_AUDIO_PATHS")
+            .ok()
+            .map(|paths| paths.split('|').map(str::to_owned).collect::<Vec<_>>())
+            .unwrap_or_else(
+                || vec![std::env::var("TEST_AUDIO_PATH").expect("set TEST_AUDIO_PATH")],
+            );
+        let model = std::env::var("DPDFNET_MODEL_PATH").ok();
+        let use_gigaam = if let Ok(gigaam_dir) = std::env::var("GIGAAM_DIR") {
+            crate::gigaam_engine::load_global(
+                crate::gigaam_engine::variant::GigaamVariant::E2eRnntFp32,
+                gigaam_dir.into(),
+            )
+            .expect("failed to load GigaAM RNN-T fp32");
+            true
+        } else {
+            false
+        };
+
+        for audio in audios {
+            let modes: Vec<Option<&Path>> = match model.as_deref() {
+                Some(path) => vec![None, Some(Path::new(path))],
+                None => vec![None],
+            };
+            for selected_model in modes {
+                let (segments, duration) = stream_decode_speech_segments(
+                    Path::new(&audio),
+                    VAD_REDEMPTION_TIME_MS,
+                    None,
+                    selected_model,
+                    |_, _| true,
+                )
+                .unwrap();
+                let speech_seconds: f64 = segments
+                    .iter()
+                    .map(|segment| segment.end_timestamp_ms - segment.start_timestamp_ms)
+                    .sum::<f64>()
+                    / 1_000.0;
+                println!(
+                    "audio={audio}, denoise={}, duration={duration:.3}s, segments={}, speech={speech_seconds:.3}s",
+                    selected_model.is_some(),
+                    segments.len()
+                );
+                if use_gigaam {
+                    for segment in &segments {
+                        match crate::gigaam_engine::transcribe(segment.samples.clone()).await {
+                            Some(Ok(text)) => println!(
+                                "[{:.0}-{:.0}ms] {}",
+                                segment.start_timestamp_ms, segment.end_timestamp_ms, text
+                            ),
+                            Some(Err(error)) => println!("<transcription error: {error}>"),
+                            None => panic!("GigaAM engine was not loaded"),
+                        }
+                    }
+                }
+                assert!(duration > 0.0);
+            }
         }
     }
 

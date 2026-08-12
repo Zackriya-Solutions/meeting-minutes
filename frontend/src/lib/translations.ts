@@ -476,6 +476,8 @@ export const RU: Record<string, string> = {
   "When disabled, beta features will be hidden. Your existing meetings remain unaffected.": "После отключения бета‑функции будут скрыты.",
   "Import Audio & Retranscribe": "Импорт аудио",
   "Import audio files to transcribe or retranscribe existing meetings with different language settings.": "Создавать встречи из аудиофайлов и запускать расшифровку заново",
+  "Auto denoise imported audio": "Автоматически подавлять шум при импорте",
+  "Use local DPDFNet2 to recover speech missed in noisy imports. Enabling this allows a one-time internet download of the selected model (about 10 MB) from Hugging Face; audio processing remains local.": "Локальная DPDFNet2 ищет пропущенную речь в шумных файлах. При включении вы разрешаете однократно скачать выбранную модель (около 10 МБ) из Hugging Face; обработка аудио остаётся локальной.",
   "Meeting deleted successfully": "Встреча удалена",
   "All associated data has been removed": "Все связанные данные удалены",
   "Failed to delete meeting": "Не удалось удалить встречу",

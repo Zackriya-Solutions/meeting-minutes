@@ -5,6 +5,7 @@ import Analytics from '@/lib/analytics';
 import { applyPinnedSummaryLanguageToMeeting } from '@/lib/summary-language-preferences';
 import { toast } from 'sonner';
 import { useT } from '@/lib/i18n';
+import { loadBetaFeatures } from '@/types/betaFeatures';
 
 export interface AudioFileInfo {
   path: string;
@@ -387,6 +388,7 @@ export function useImportAudio({
           language: language || null,
           model: model || null,
           provider: provider || null,
+          denoiseAudio: loadBetaFeatures().noisyAudioDenoising,
         });
       } catch (err: any) {
         setStatus('error');
@@ -420,6 +422,7 @@ export function useImportAudio({
           language: language || null,
           model: model || null,
           provider: provider || null,
+          denoiseAudio: loadBetaFeatures().noisyAudioDenoising,
         });
       } catch (err: any) {
         setStatus('error');

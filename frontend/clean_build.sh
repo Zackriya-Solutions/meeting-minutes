@@ -115,4 +115,36 @@ echo "Building Next.js application..."
 echo "Building Tauri app..."
 # Local builds produce the .app and DMG only. Updater artifacts require the
 # private signing key and are created by the protected GitHub release workflow.
-"${PNPM[@]}" exec tauri build --config '{"bundle":{"createUpdaterArtifacts":false}}'
+TAURI_BUILD_CONFIG='{"bundle":{"createUpdaterArtifacts":false}}'
+if [[ "$(uname -s)" == "Darwin" ]]; then
+    LOCAL_SIGNING_IDENTITY="${APPLE_SIGNING_IDENTITY:-}"
+    if [[ -z "$LOCAL_SIGNING_IDENTITY" ]]; then
+        # An ad-hoc signature changes its designated requirement after every build.
+        # macOS then treats the rebuilt app as a stranger to its own Keychain items,
+        # producing repeated password prompts. Prefer an installed Developer ID when
+        # the maintainer has one, while retaining ad-hoc signing on clean machines.
+        LOCAL_SIGNING_IDENTITY="$(
+            security find-identity -v -p codesigning 2>/dev/null \
+                | sed -n 's/.*"\(Developer ID Application:.*\)"/\1/p' \
+                | head -n 1
+        )"
+    fi
+
+    if [[ -n "$LOCAL_SIGNING_IDENTITY" ]]; then
+        if ! security find-identity -v -p codesigning 2>/dev/null \
+            | grep -Fq "\"$LOCAL_SIGNING_IDENTITY\""; then
+            echo "Configured signing identity is not available: $LOCAL_SIGNING_IDENTITY"
+            exit 1
+        fi
+        echo "Signing local macOS build with stable identity: $LOCAL_SIGNING_IDENTITY"
+        TAURI_BUILD_CONFIG="$(
+            MEMENTO_LOCAL_SIGNING_IDENTITY="$LOCAL_SIGNING_IDENTITY" python3 -c \
+                'import json, os; print(json.dumps({"bundle": {"createUpdaterArtifacts": False, "macOS": {"signingIdentity": os.environ["MEMENTO_LOCAL_SIGNING_IDENTITY"]}}}))'
+        )"
+    else
+        echo "WARNING: no Developer ID identity found; using an ad-hoc signature."
+        echo "         Rebuilt apps may ask again for access to existing Keychain items."
+    fi
+fi
+
+"${PNPM[@]}" exec tauri build --config "$TAURI_BUILD_CONFIG"

@@ -6,6 +6,8 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use sqlx::{FromRow, SqlitePool};
 use std::collections::{HashMap, HashSet};
+#[cfg(not(test))]
+use std::time::{Duration, Instant};
 
 use crate::state::AppState;
 
@@ -357,6 +359,7 @@ fn address_candidate(
 fn extract_candidates(segments: &[Segment]) -> Vec<ExtractedCandidate> {
     let mut extracted = Vec::new();
     for (index, segment) in segments.iter().enumerate() {
+        let mut strong_addresses = HashSet::new();
         for capture in SELF_INTRO.captures_iter(&segment.text) {
             // Strong grammatical evidence is safe even when ASR lowercases a proper name.
             extracted.push(ExtractedCandidate {
@@ -384,6 +387,7 @@ fn extract_candidates(segments: &[Segment]) -> Vec<ExtractedCandidate> {
             if !has_name_like_capitalization(&capture[1]) {
                 continue;
             }
+            strong_addresses.insert(normalize_name(&capture[1]));
             extracted.push(address_candidate(
                 segments,
                 index,
@@ -396,6 +400,11 @@ fn extract_candidates(segments: &[Segment]) -> Vec<ExtractedCandidate> {
                 continue;
             }
             let candidate_text = display_name(&capture[1]);
+            // STRONG_DIRECT_ADDRESS is a strict subset of this pattern. Count the
+            // evidence once, keeping the stronger confidence assigned above.
+            if strong_addresses.contains(&normalize_name(&candidate_text)) {
+                continue;
+            }
             extracted.push(address_candidate(segments, index, candidate_text, 0.60));
         }
         for capture in CONTEXTUAL_DIRECT_ADDRESS.captures_iter(&segment.text) {
@@ -445,24 +454,39 @@ fn extract_title_candidates(title: &str) -> Vec<ExtractedCandidate> {
 const REJECTION_SALT_SERVICE: &str = "meetily.speaker-names";
 #[cfg(not(test))]
 const REJECTION_SALT_ACCOUNT: &str = "rejection-salt-v1";
+#[cfg(not(test))]
+static REJECTION_SALT_CACHE: tokio::sync::OnceCell<String> = tokio::sync::OnceCell::const_new();
+#[cfg(not(test))]
+static REJECTION_SALT_ATTEMPT: Lazy<tokio::sync::Mutex<Option<(Instant, String)>>> =
+    Lazy::new(|| tokio::sync::Mutex::new(None));
+#[cfg(not(test))]
+const REJECTION_SALT_RETRY_COOLDOWN: Duration = Duration::from_secs(30);
 
 #[cfg(not(test))]
-async fn rejection_salt(pool: &SqlitePool) -> Result<String, String> {
-    let entry = keyring::Entry::new(REJECTION_SALT_SERVICE, REJECTION_SALT_ACCOUNT)
-        .map_err(|error| format!("credential vault unavailable: {error}"))?;
-    if let Ok(value) = entry.get_password() {
-        if !value.is_empty() {
-            // Remove the legacy database copy after a successful vault read. This
-            // keeps future database backups from containing both salt and hashes.
-            sqlx::query(
-                "DELETE FROM app_settings_kv \
-                 WHERE key='speaker_alias.rejection_salt.secret'",
-            )
-            .execute(pool)
-            .await
-            .map_err(|error| error.to_string())?;
-            return Ok(value);
+async fn rejection_salt_from_vault(pool: &SqlitePool) -> Result<String, String> {
+    let stored = tauri::async_runtime::spawn_blocking(|| {
+        let entry = keyring::Entry::new(REJECTION_SALT_SERVICE, REJECTION_SALT_ACCOUNT)
+            .map_err(|error| format!("credential vault unavailable: {error}"))?;
+        match entry.get_password() {
+            Ok(value) if !value.is_empty() => Ok(Some(value)),
+            Ok(_) | Err(keyring::Error::NoEntry) => Ok(None),
+            Err(error) => Err(format!("cannot read speaker-name rejection salt: {error}")),
         }
+    })
+    .await
+    .map_err(|error| format!("credential task failed: {error}"))??;
+
+    if let Some(value) = stored {
+        // Remove the legacy database copy after a successful vault read. This
+        // keeps future database backups from containing both salt and hashes.
+        sqlx::query(
+            "DELETE FROM app_settings_kv \
+                 WHERE key='speaker_alias.rejection_salt.secret'",
+        )
+        .execute(pool)
+        .await
+        .map_err(|error| error.to_string())?;
+        return Ok(value);
     }
 
     let legacy = sqlx::query_scalar::<_, String>(
@@ -472,9 +496,15 @@ async fn rejection_salt(pool: &SqlitePool) -> Result<String, String> {
     .await
     .map_err(|error| error.to_string())?;
     let salt = legacy.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-    entry
-        .set_password(&salt)
-        .map_err(|error| format!("cannot save speaker-name rejection salt: {error}"))?;
+    let salt_to_store = salt.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        keyring::Entry::new(REJECTION_SALT_SERVICE, REJECTION_SALT_ACCOUNT)
+            .map_err(|error| format!("credential vault unavailable: {error}"))?
+            .set_password(&salt_to_store)
+            .map_err(|error| format!("cannot save speaker-name rejection salt: {error}"))
+    })
+    .await
+    .map_err(|error| format!("credential task failed: {error}"))??;
     sqlx::query(
         "DELETE FROM app_settings_kv \
          WHERE key='speaker_alias.rejection_salt.secret'",
@@ -483,6 +513,40 @@ async fn rejection_salt(pool: &SqlitePool) -> Result<String, String> {
     .await
     .map_err(|error| error.to_string())?;
     Ok(salt)
+}
+
+#[cfg(not(test))]
+async fn rejection_salt(pool: &SqlitePool) -> Result<String, String> {
+    if let Some(value) = REJECTION_SALT_CACHE.get() {
+        return Ok(value.clone());
+    }
+
+    // Serialize the OS dialog and apply only a short failure cooldown. Successful
+    // retrieval is process-cached, while a transient denial can recover without restart.
+    let mut failure = REJECTION_SALT_ATTEMPT.lock().await;
+    if let Some(value) = REJECTION_SALT_CACHE.get() {
+        return Ok(value.clone());
+    }
+    if let Some((retry_after, message)) = failure.as_ref() {
+        if Instant::now() < *retry_after {
+            return Err(message.clone());
+        }
+    }
+
+    match rejection_salt_from_vault(pool).await {
+        Ok(value) => {
+            let _ = REJECTION_SALT_CACHE.set(value.clone());
+            *failure = None;
+            Ok(value)
+        }
+        Err(error) => {
+            *failure = Some((
+                Instant::now() + REJECTION_SALT_RETRY_COOLDOWN,
+                error.clone(),
+            ));
+            Err(error)
+        }
+    }
 }
 
 #[cfg(test)]
@@ -805,6 +869,22 @@ pub async fn infer_and_apply_names(pool: &SqlitePool, meeting_id: &str) -> Resul
 /// New meetings call the same resolver at the end of diarization; this sweep only repairs
 /// archives created before automatic naming existed or interrupted between the two passes.
 pub async fn backfill_existing_speaker_names(pool: &SqlitePool) -> Result<(usize, usize), String> {
+    // This is a migration sweep for archives created before automatic naming existed,
+    // not recurring startup work. Claim it before touching the Keychain so a denial or
+    // interrupted scan cannot ask again on every launch; new meetings run the resolver
+    // directly after diarization and do not depend on this marker.
+    let claimed = sqlx::query(
+        "INSERT OR IGNORE INTO app_settings_kv(key, value, updated_at) \
+         VALUES('speaker_names.archive_backfill_v1_attempted', 'true', CURRENT_TIMESTAMP)",
+    )
+    .execute(pool)
+    .await
+    .map_err(|error| error.to_string())?
+    .rows_affected();
+    if claimed == 0 {
+        return Ok((0, 0));
+    }
+
     let meeting_ids: Vec<String> = sqlx::query_scalar(
         "SELECT DISTINCT meeting_id FROM transcripts \
          WHERE speaker_id IS NOT NULL ORDER BY meeting_id",
@@ -1540,5 +1620,54 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(aliases, 0);
+    }
+
+    #[tokio::test]
+    async fn archive_backfill_is_claimed_before_any_repeat_scan() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::query(
+            "CREATE TABLE app_settings_kv(\
+                key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT\
+            )",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "CREATE TABLE transcripts(\
+                id TEXT PRIMARY KEY, meeting_id TEXT, speaker_id INTEGER\
+            )",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        assert_eq!(
+            backfill_existing_speaker_names(&pool).await.unwrap(),
+            (0, 0)
+        );
+        let marker: String = sqlx::query_scalar(
+            "SELECT value FROM app_settings_kv \
+             WHERE key='speaker_names.archive_backfill_v1_attempted'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(marker, "true");
+
+        // The second call must return before touching archive tables (and therefore
+        // before the Keychain-backed salt), even if those tables are unavailable.
+        sqlx::query("DROP TABLE transcripts")
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            backfill_existing_speaker_names(&pool).await.unwrap(),
+            (0, 0)
+        );
     }
 }
