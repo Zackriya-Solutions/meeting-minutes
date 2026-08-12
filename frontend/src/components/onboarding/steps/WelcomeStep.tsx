@@ -11,8 +11,7 @@ import {
   TypeSectionList,
   TypeStartView,
 } from '../type/TypeOnboarding';
-import { Button } from '@/components/ui/fluid-functional-button';
-import { ShapeProvider } from '@/lib/shape-context';
+import { RegularButton } from '@/vendor/deslop/mini-app/components/Button';
 import {
   TypeEfficiencyIcon,
   TypeLightbulbIcon,
@@ -60,16 +59,13 @@ export function WelcomeStep() {
         </TypeSection>
       </TypeSectionList>
       <TypeButtonRow>
-        <ShapeProvider defaultShape="rounded" publishToRoot={false}>
-          <Button
-            type="button"
-            variant="primary"
-            className="w-full text-[var(--black)] [--background:var(--background-primary)] [--foreground:var(--accent-orange)]"
-            onClick={beginSetup}
-          >
-            {t('Get Started')}
-          </Button>
-        </ShapeProvider>
+        <RegularButton
+          variant="filled"
+          label={t('Get Started')}
+          isFill
+          isShine
+          onClick={beginSetup}
+        />
       </TypeButtonRow>
     </>
   );

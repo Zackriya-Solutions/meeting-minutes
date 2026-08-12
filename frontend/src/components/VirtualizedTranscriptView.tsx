@@ -289,7 +289,7 @@ const TranscriptSegment = memo(function TranscriptSegment({
                         )}
                     >
                         <div className="flex flex-col items-start gap-0.5 text-left">
-                            {speakerLabel && (
+                            {(
                                 speakerRenamable && speakerId != null && onSpeakerClick ? (
                                     <Tooltip>
                                         <TooltipTrigger asChild>
@@ -298,14 +298,14 @@ const TranscriptSegment = memo(function TranscriptSegment({
                                                 onClick={() => onSpeakerClick(speakerId)}
                                                 className="border-b border-dashed border-[var(--primary-30)] text-xs font-normal leading-4 text-[var(--deslop-primary-60)] hover:text-[var(--deslop-primary)] focus:outline-none"
                                             >
-                                                {speakerLabel}
+                                                {avatarLabel}
                                             </button>
                                         </TooltipTrigger>
                                         <TooltipContent>{t('Rename')}</TooltipContent>
                                     </Tooltip>
                                 ) : (
                                     <span className="text-xs font-normal leading-4 text-[var(--deslop-primary-60)]">
-                                        {speakerLabel}
+                                        {avatarLabel}
                                     </span>
                                 )
                             )}

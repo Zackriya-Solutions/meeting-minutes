@@ -7,8 +7,7 @@ import {
   TypeExitCover,
   TypeStartView,
 } from '../type/TypeOnboarding';
-import { Button } from '@/components/ui/fluid-functional-button';
-import { ShapeProvider } from '@/lib/shape-context';
+import { RegularButton } from '@/vendor/deslop/mini-app/components/Button';
 
 export function ReadyStep() {
   const t = useT();
@@ -36,18 +35,14 @@ export function ReadyStep() {
     <>
       <TypeStartView title={title} description={description} />
       <TypeButtonRow>
-        <ShapeProvider defaultShape="rounded" publishToRoot={false}>
-          <Button
-            type="button"
-            variant="primary"
-            className="w-full text-[var(--black)] [--background:var(--background-primary)] [--foreground:var(--accent-orange)]"
-            loading={isFinishing}
-            disabled={!ready || isFinishing}
-            onClick={() => void finish()}
-          >
-            {isFinishing ? t('Checking...') : t('Start using Memento')}
-          </Button>
-        </ShapeProvider>
+        <RegularButton
+          variant="filled"
+          label={isFinishing ? t('Checking...') : t('Start using Memento')}
+          isFill
+          aria-disabled={!ready || isFinishing}
+          style={!ready || isFinishing ? { opacity: 0.45, pointerEvents: 'none' } : undefined}
+          onClick={ready && !isFinishing ? () => void finish() : undefined}
+        />
       </TypeButtonRow>
       {isFinishing ? <TypeExitCover /> : null}
     </>

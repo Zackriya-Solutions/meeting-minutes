@@ -810,6 +810,7 @@ export const RU: Record<string, string> = {
   "Meeting": "Встреча",
   "Resize meeting panel": "Изменить ширину панели встречи",
   "Resize or close meeting panel": "Изменить ширину или закрыть встречу",
+  "Resize recording panel": "Изменить ширину панели записи",
   "Select a collection…": "Выберите коллекцию…",
   "Select a meeting…": "Выберите встречу…",
   "New chat": "Новый чат",
