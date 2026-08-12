@@ -14,7 +14,7 @@ use super::capture::{AudioCaptureBackend, get_current_backend};
 use super::capture::CoreAudioCapture;
 
 #[cfg(target_os = "linux")]
-use super::capture::{find_monitor_source_by_description, PulseSystemCapture};
+use super::capture::{find_monitor_source_by_description, find_source_by_description, PulseCapture};
 #[cfg(target_os = "linux")]
 use std::sync::atomic::AtomicBool;
 
@@ -72,8 +72,9 @@ impl AudioStream {
         info!("🎵 Stream: Creating audio stream for device: {} with backend: {:?}, device_type: {:?}",
               device.name, backend_type, device_type);
 
-        // For system audio devices, use the selected backend
-        // For microphone devices, always use CPAL
+        // For system audio devices, use the selected backend.
+        // For microphone devices, prefer CPAL, except on Linux where we first
+        // try the native PulseAudio/PipeWire source path (see below).
         #[cfg(target_os = "macos")]
         let use_core_audio = device_type == DeviceType::System
             && backend_type == AudioCaptureBackend::CoreAudio;
@@ -106,6 +107,29 @@ impl AudioStream {
         if device_type == DeviceType::System {
             info!("🎵 Stream: Using native PulseAudio/PipeWire backend for system audio");
             return Self::create_pulse_stream(device, state, device_type, recording_sender).await;
+        }
+
+        // Linux microphones come from the PulseAudio/PipeWire source list (real
+        // human-readable descriptions, see devices/platform/linux.rs). Fall back
+        // to CPAL when the name isn't a known Pulse source: stale saved
+        // preferences and degraded-mode (no Pulse server) entries must keep
+        // working.
+        #[cfg(target_os = "linux")]
+        if device_type == DeviceType::Microphone {
+            match Self::create_pulse_mic_stream(
+                device.clone(),
+                state.clone(),
+                device_type.clone(),
+                recording_sender.clone(),
+            )
+            .await
+            {
+                Ok(stream) => return Ok(stream),
+                Err(e) => warn!(
+                    "🎤 Stream: native PulseAudio mic path unavailable ({}), falling back to CPAL",
+                    e
+                ),
+            }
         }
 
         // Default path: use CPAL
@@ -275,7 +299,7 @@ impl AudioStream {
         let monitor_source_name = find_monitor_source_by_description(description)
             .map_err(|e| anyhow::anyhow!("Failed to resolve PulseAudio sink '{}': {}", description, e))?;
 
-        let capture_impl = PulseSystemCapture::new(&monitor_source_name)
+        let capture_impl = PulseCapture::new_system(&monitor_source_name)
             .map_err(|e| anyhow::anyhow!("Failed to open PulseAudio record stream: {}", e))?;
 
         let sample_rate = capture_impl.sample_rate();
@@ -300,6 +324,70 @@ impl AudioStream {
         });
 
         info!("✅ Stream: PulseAudio stream fully initialized for device: {}", device.name);
+
+        Ok(Self {
+            device: device.clone(),
+            backend: StreamBackend::Pulse {
+                should_stop,
+                task: Some(task),
+            },
+        })
+    }
+
+    /// Create a native PulseAudio/PipeWire microphone stream (Linux only)
+    #[cfg(target_os = "linux")]
+    async fn create_pulse_mic_stream(
+        device: Arc<AudioDevice>,
+        state: Arc<RecordingState>,
+        device_type: DeviceType,
+        recording_sender: Option<mpsc::UnboundedSender<super::recording_state::AudioChunk>>,
+    ) -> Result<Self> {
+        info!(
+            "🔊 Stream: Creating PulseAudio microphone stream for device: {}",
+            device.name
+        );
+
+        // Microphone names are stored as the PulseAudio source description.
+        // from_name() has already stripped the "(input)" suffix. If the
+        // description isn't known (stale saved preference or degraded-mode
+        // entry), this errors out and the caller falls back to CPAL.
+        let source_name = find_source_by_description(&device.name)
+            .map_err(|e| anyhow::anyhow!("Failed to resolve PulseAudio source '{}': {}", device.name, e))?;
+
+        let capture_impl = PulseCapture::new_microphone(&source_name)
+            .map_err(|e| anyhow::anyhow!("Failed to open PulseAudio record stream: {}", e))?;
+
+        let sample_rate = capture_impl.sample_rate();
+        let channels = capture_impl.channels();
+        let should_stop = capture_impl.stop_handle();
+
+        // Create audio capture processor for pipeline integration
+        let capture = AudioCapture::new(
+            device.clone(),
+            state.clone(),
+            sample_rate,
+            channels,
+            device_type,
+            recording_sender,
+        );
+
+        let device_name = device.name.clone();
+        let task = tokio::task::spawn_blocking(move || {
+            info!(
+                "✅ Stream: PulseAudio microphone capture thread started for {}",
+                device_name
+            );
+            capture_impl.run(|samples| capture.process_audio_data(samples));
+            info!(
+                "⚠️ Stream: PulseAudio microphone capture thread ended for {}",
+                device_name
+            );
+        });
+
+        info!(
+            "✅ Stream: PulseAudio microphone stream fully initialized for device: {}",
+            device.name
+        );
 
         Ok(Self {
             device: device.clone(),

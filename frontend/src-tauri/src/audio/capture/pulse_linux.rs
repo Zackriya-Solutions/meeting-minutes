@@ -13,6 +13,7 @@ use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
 use libpulse_binding::callbacks::ListResult;
+use libpulse_binding::context::introspect::ServerInfo;
 use libpulse_binding::context::{Context, FlagSet as ContextFlagSet, State as ContextState};
 use libpulse_binding::mainloop::standard::{IterateResult, Mainloop};
 use libpulse_binding::operation::{Operation, State as OperationState};
@@ -35,7 +36,6 @@ pub struct PulseSink {
 /// server-side, so the rest of the pipeline (which expects 48kHz) never needs
 /// to know the sink's native sample rate or channel count.
 const CAPTURE_SAMPLE_RATE: u32 = 48000;
-const CAPTURE_CHANNELS: u16 = 2;
 
 /// Pump the mainloop until `operation` finishes, blocking between iterations.
 fn run_operation_to_completion<T: ?Sized>(
@@ -163,18 +163,150 @@ pub fn find_monitor_source_by_description(description: &str) -> Result<String> {
         .ok_or_else(|| anyhow!("No PulseAudio sink found matching '{}'", description))
 }
 
-/// Blocking system-audio capture stream, backed by libpulse-simple's record API
-/// against a sink's monitor source.
-pub struct PulseSystemCapture {
-    simple: Simple,
-    should_stop: Arc<AtomicBool>,
+/// A PulseAudio input source (microphone, line-in, …), excluding sink monitors.
+#[derive(Debug, Clone)]
+pub struct PulseSource {
+    /// Human-readable description straight from the server — this is the exact
+    /// string KDE's own audio settings show (e.g. "Ryzen HD Audio Controller
+    /// Headset Mono Microphone").
+    pub description: String,
+    /// Real PulseAudio source name, e.g.
+    /// "alsa_input.pci-0000_c1_00.6.HiFi__Headset__source".
+    pub source_name: String,
 }
 
-impl PulseSystemCapture {
-    pub fn new(monitor_source_name: &str) -> Result<Self> {
+/// List all real input sources (sink monitors excluded — those are offered as
+/// "System Audio" devices via `list_sinks`).
+pub fn list_sources() -> Result<Vec<PulseSource>> {
+    info!("🎤 pulse_linux::list_sources: connecting");
+    let (mut mainloop, context) = connect()?;
+
+    info!("🎤 pulse_linux::list_sources: connected, requesting source list");
+    let sources: Rc<RefCell<Vec<PulseSource>>> = Rc::new(RefCell::new(Vec::new()));
+    let sources_cb = sources.clone();
+
+    let operation = context.introspect().get_source_info_list(move |result| {
+        if let ListResult::Item(info) = result {
+            // Monitors of sinks are already exposed as "System Audio" devices
+            // through list_sinks(); ignore them here.
+            if info.monitor_of_sink.is_some() {
+                return;
+            }
+
+            let source_name = info.name.as_deref().unwrap_or_default();
+            if source_name.is_empty() {
+                return;
+            }
+
+            let description = info
+                .description
+                .as_deref()
+                .unwrap_or(source_name)
+                .to_string();
+
+            sources_cb.borrow_mut().push(PulseSource {
+                description,
+                source_name: source_name.to_string(),
+            });
+        }
+    });
+
+    info!("🎤 pulse_linux::list_sources: pumping mainloop until source list operation completes");
+    run_operation_to_completion(&mut mainloop, &operation)?;
+    drop(operation);
+
+    let result = sources.borrow().clone();
+    info!("🎤 pulse_linux::list_sources: got {} source(s)", result.len());
+    Ok(result)
+}
+
+/// Resolve a source's real PulseAudio name from its display description.
+pub fn find_source_by_description(description: &str) -> Result<String> {
+    let mut matches = list_sources()?
+        .into_iter()
+        .filter(|source| source.description == description)
+        .peekable();
+
+    if matches.peek().is_some() {
+        let count = matches.clone().count();
+        if count > 1 {
+            warn!(
+                "🎤 pulse_linux::find_source_by_description: {} sources share the description '{}'; using the first one",
+                count, description
+            );
+        }
+    }
+
+    matches
+        .next()
+        .map(|source| source.source_name)
+        .ok_or_else(|| anyhow!("No PulseAudio source found matching '{}'", description))
+}
+
+/// Description of the server's default input source, if any.
+/// Used to resolve "Default Microphone".
+pub fn default_source_description() -> Result<Option<String>> {
+    info!("🎤 pulse_linux::default_source_description: connecting");
+    let (mut mainloop, context) = connect()?;
+
+    info!("🎤 pulse_linux::default_source_description: requesting server info");
+    let default_name: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(None));
+    let default_name_cb = default_name.clone();
+
+    let operation = context.introspect().get_server_info(move |info: &ServerInfo| {
+        if let Some(name) = info.default_source_name.as_deref() {
+            *default_name_cb.borrow_mut() = Some(name.to_string());
+        }
+    });
+
+    run_operation_to_completion(&mut mainloop, &operation)?;
+    drop(operation);
+
+    let default_name = default_name.borrow().clone();
+    let Some(default_name) = default_name else {
+        return Ok(None);
+    };
+
+    info!(
+        "🎤 pulse_linux::default_source_description: default source name is '{}'",
+        default_name
+    );
+
+    // Resolve the display description for the default source. Do a second
+    // introspection call: it's rare (startup of a recording) and keeps the code
+    // straightforward.
+    let sources = list_sources()?;
+    let default_source = sources.iter().find(|s| s.source_name == default_name);
+
+    if let Some(source) = default_source {
+        info!(
+            "🎤 pulse_linux::default_source_description: default source description is '{}'",
+            source.description
+        );
+        Ok(Some(source.description.clone()))
+    } else {
+        warn!(
+            "🎤 pulse_linux::default_source_description: default source '{}' not found in source list",
+            default_name
+        );
+        Ok(None)
+    }
+}
+
+/// Blocking PulseAudio record stream, backed by libpulse-simple's record API.
+/// Used both for sink monitors (system audio) and real input sources
+/// (microphones).
+pub struct PulseCapture {
+    simple: Simple,
+    should_stop: Arc<AtomicBool>,
+    channels: u16,
+}
+
+impl PulseCapture {
+    fn new_with_channels(source_name: &str, channels: u16, stream_label: &str) -> Result<Self> {
         let spec = Spec {
             format: Format::FLOAT32NE,
-            channels: CAPTURE_CHANNELS as u8,
+            channels: channels as u8,
             rate: CAPTURE_SAMPLE_RATE,
         };
         if !spec.is_valid() {
@@ -185,8 +317,8 @@ impl PulseSystemCapture {
             None, // default server
             "Meetily",
             Direction::Record,
-            Some(monitor_source_name),
-            "System Audio",
+            Some(source_name),
+            stream_label,
             &spec,
             None, // default channel map
             None, // default buffering attributes
@@ -194,7 +326,7 @@ impl PulseSystemCapture {
         .map_err(|e| {
             anyhow!(
                 "Failed to open PulseAudio record stream on '{}': {}",
-                monitor_source_name,
+                source_name,
                 e
             )
         })?;
@@ -202,7 +334,19 @@ impl PulseSystemCapture {
         Ok(Self {
             simple,
             should_stop: Arc::new(AtomicBool::new(false)),
+            channels,
         })
+    }
+
+    /// System audio: stereo capture of a sink's monitor source.
+    pub fn new_system(monitor_source_name: &str) -> Result<Self> {
+        Self::new_with_channels(monitor_source_name, 2, "System Audio")
+    }
+
+    /// Microphone: mono capture of a real input source. PulseAudio downmixes and
+    /// resamples server-side, so the pipeline still receives 48kHz.
+    pub fn new_microphone(source_name: &str) -> Result<Self> {
+        Self::new_with_channels(source_name, 1, "Microphone")
     }
 
     pub fn sample_rate(&self) -> u32 {
@@ -210,7 +354,7 @@ impl PulseSystemCapture {
     }
 
     pub fn channels(&self) -> u16 {
-        CAPTURE_CHANNELS
+        self.channels
     }
 
     /// Handle used to signal the capture loop (running on another thread) to stop.
@@ -226,8 +370,8 @@ impl PulseSystemCapture {
         // ~21ms at 48kHz stereo: matches the 1024-frame chunking used by the
         // macOS Core Audio path.
         const FRAMES_PER_CHUNK: usize = 1024;
-        let mut byte_buf = vec![0u8; FRAMES_PER_CHUNK * CAPTURE_CHANNELS as usize * 4];
-        let mut sample_buf = Vec::with_capacity(FRAMES_PER_CHUNK * CAPTURE_CHANNELS as usize);
+        let mut byte_buf = vec![0u8; FRAMES_PER_CHUNK * self.channels as usize * 4];
+        let mut sample_buf = Vec::with_capacity(FRAMES_PER_CHUNK * self.channels as usize);
 
         while !self.should_stop.load(Ordering::Acquire) {
             if let Err(e) = self.simple.read(&mut byte_buf) {
@@ -262,6 +406,16 @@ mod tests {
     }
 
     #[test]
+    #[ignore] // Requires a running PulseAudio/PipeWire server; run manually.
+    fn test_list_sources() {
+        let sources = list_sources().expect("Failed to list sources");
+        for source in &sources {
+            println!("source: {} -> {}", source.description, source.source_name);
+        }
+        assert!(!sources.is_empty(), "Expected at least one real input source on a machine with audio input");
+    }
+
+    #[test]
     #[ignore] // Requires real audio playback during the test; run manually.
     fn test_capture_reads_nonzero_samples() {
         let sinks = list_sinks().expect("Failed to list sinks");
@@ -273,7 +427,7 @@ mod tests {
             .expect("No sink available");
 
         println!("Capturing from: {} ({})", sink.description, sink.monitor_source_name);
-        let capture = PulseSystemCapture::new(&sink.monitor_source_name).expect("Failed to open capture");
+        let capture = PulseCapture::new_system(&sink.monitor_source_name).expect("Failed to open capture");
         let stop = capture.stop_handle();
 
         let received = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));

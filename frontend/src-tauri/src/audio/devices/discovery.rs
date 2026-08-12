@@ -2,7 +2,7 @@ use anyhow::Result;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use log::{error, info};
 
-use super::configuration::{AudioDevice, DeviceType};
+use super::configuration::AudioDevice;
 use super::platform;
 
 /// List all available audio devices on the system
@@ -11,6 +11,7 @@ pub async fn list_audio_devices() -> Result<Vec<AudioDevice>> {
     let host = cpal::default_host();
 
     // Platform-specific device enumeration
+    #[allow(unused_mut)]
     let mut devices = {
         #[cfg(target_os = "windows")]
         {
@@ -32,20 +33,23 @@ pub async fn list_audio_devices() -> Result<Vec<AudioDevice>> {
     };
     info!("🎙️ list_audio_devices: platform enumeration done, {} device(s) so far", devices.len());
 
-    // Add any additional devices from the default host
-    // On Linux this also enumerates via alsa-lib, so it must go through the
-    // same lock as configure_linux_audio (see ALSA_ENUM_LOCK's doc comment).
-    let other_devices_result = {
-        #[cfg(target_os = "linux")]
-        let _guard = platform::linux::ALSA_ENUM_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    // Add any additional devices from the default host.
+    //
+    // On Linux this is intentionally disabled: configure_linux_audio() already
+    // provides every useful device (PulseAudio/PipeWire sources and sinks, or a
+    // filtered ALSA fallback). This block would otherwise re-inject all raw ALSA
+    // PCM names as Output devices, polluting the "System Audio" picker with
+    // entries like hdmi:, front:, sysdefault:, etc.
+    #[cfg(not(target_os = "linux"))]
+    {
+        use super::configuration::DeviceType;
 
-        host.devices()
-    };
-    if let Ok(other_devices) = other_devices_result {
-        for device in other_devices {
-            if let Ok(name) = device.name() {
-                if !devices.iter().any(|d| d.name == name) {
-                    devices.push(AudioDevice::new(name, DeviceType::Output));
+        if let Ok(other_devices) = host.devices() {
+            for device in other_devices {
+                if let Ok(name) = device.name() {
+                    if !devices.iter().any(|d| d.name == name) {
+                        devices.push(AudioDevice::new(name, DeviceType::Output));
+                    }
                 }
             }
         }
