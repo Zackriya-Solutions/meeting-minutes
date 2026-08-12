@@ -24,6 +24,13 @@ impl SystemAudioCapture {
     }
 
     pub fn list_system_devices() -> Result<Vec<String>> {
+        // See ALSA_GLOBAL_LOCK doc comment in devices/platform/linux.rs: any
+        // alsa-lib enumeration must be serialized on Linux.
+        #[cfg(target_os = "linux")]
+        let _guard = crate::audio::devices::platform::linux::ALSA_GLOBAL_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+
         let host = cpal::default_host();
         let devices = host.output_devices()
             .map_err(|e| anyhow::anyhow!("Failed to enumerate output devices: {}", e))?;
@@ -104,6 +111,12 @@ impl SystemAudioCapture {
     }
 
     pub fn check_system_audio_permissions() -> bool {
+        // See ALSA_GLOBAL_LOCK doc comment in devices/platform/linux.rs.
+        #[cfg(target_os = "linux")]
+        let _guard = crate::audio::devices::platform::linux::ALSA_GLOBAL_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+
         // Check if we can enumerate audio devices
         match cpal::default_host().output_devices() {
             Ok(_) => true,

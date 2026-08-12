@@ -63,43 +63,51 @@ pub async fn list_audio_devices() -> Result<Vec<AudioDevice>> {
 pub fn trigger_audio_permission() -> Result<bool> {
     use log::info;
 
-    // Serialize every alsa-lib call on Linux: see ALSA_GLOBAL_LOCK doc comment
-    // in devices/platform/linux.rs.
-    #[cfg(target_os = "linux")]
-    let _guard = platform::linux::ALSA_GLOBAL_LOCK
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
-
     let host = cpal::default_host();
-    let device = match host.default_input_device() {
-        Some(d) => d,
-        None => {
-            info!("[trigger_audio_permission] No default input device found - permission likely denied");
-            return Ok(false);
-        }
-    };
 
-    let config = match device.default_input_config() {
-        Ok(c) => c,
-        Err(e) => {
-            info!("[trigger_audio_permission] Failed to get input config: {} - permission likely denied", e);
-            return Ok(false);
-        }
-    };
+    // Serialize only the alsa-lib calls that touch the global config cache
+    // (device/config lookup, PCM open via build_input_stream): see
+    // ALSA_GLOBAL_LOCK doc comment in devices/platform/linux.rs. play()/sleep/
+    // drop() below operate on an already-open handle and don't need the lock —
+    // holding it that long would needlessly block every other Linux audio
+    // caller (device_monitor's poll, a stream starting elsewhere) for the
+    // ~500ms this function sleeps.
+    let stream = {
+        #[cfg(target_os = "linux")]
+        let _guard = platform::linux::ALSA_GLOBAL_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
 
-    // Build and start an input stream to trigger the permission request
-    let stream = match device.build_input_stream(
-        &config.into(),
-        |_data: &[f32], _: &cpal::InputCallbackInfo| {
-            // Do nothing, we just want to trigger the permission request
-        },
-        |err| error!("Error in audio stream: {}", err),
-        None,
-    ) {
-        Ok(s) => s,
-        Err(e) => {
-            info!("[trigger_audio_permission] Failed to build input stream: {} - permission likely denied", e);
-            return Ok(false);
+        let device = match host.default_input_device() {
+            Some(d) => d,
+            None => {
+                info!("[trigger_audio_permission] No default input device found - permission likely denied");
+                return Ok(false);
+            }
+        };
+
+        let config = match device.default_input_config() {
+            Ok(c) => c,
+            Err(e) => {
+                info!("[trigger_audio_permission] Failed to get input config: {} - permission likely denied", e);
+                return Ok(false);
+            }
+        };
+
+        // Build and start an input stream to trigger the permission request
+        match device.build_input_stream(
+            &config.into(),
+            |_data: &[f32], _: &cpal::InputCallbackInfo| {
+                // Do nothing, we just want to trigger the permission request
+            },
+            |err| error!("Error in audio stream: {}", err),
+            None,
+        ) {
+            Ok(s) => s,
+            Err(e) => {
+                info!("[trigger_audio_permission] Failed to build input stream: {} - permission likely denied", e);
+                return Ok(false);
+            }
         }
     };
 

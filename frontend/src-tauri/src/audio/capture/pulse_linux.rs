@@ -379,6 +379,14 @@ impl PulseCapture {
                 break;
             }
 
+            // Re-check right after the blocking read returns: if stop() timed
+            // out waiting for this thread (stalled source) and moved on, a
+            // late read() shouldn't inject one more chunk into whatever
+            // pipeline state now exists (new stream, new recording).
+            if self.should_stop.load(Ordering::Acquire) {
+                break;
+            }
+
             sample_buf.clear();
             sample_buf.extend(
                 byte_buf
