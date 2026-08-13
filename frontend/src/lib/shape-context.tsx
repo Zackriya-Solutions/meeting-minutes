@@ -79,9 +79,11 @@ function useShapeContext() {
 function ShapeProvider({
   children,
   defaultShape = "pill",
+  publishToRoot = true,
 }: {
   children: ReactNode;
   defaultShape?: ShapeVariant;
+  publishToRoot?: boolean;
 }) {
   const [shape, setShapeState] = useState<ShapeVariant>(defaultShape);
   const transitionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -113,11 +115,12 @@ function ShapeProvider({
   // system — e.g. the @layer base :focus-visible fallback ring in
   // globals.css. Set on <html> so portalled content sees it too.
   useEffect(() => {
+    if (!publishToRoot) return;
     document.documentElement.style.setProperty(
       "--shape-input-radius",
       `${shapeMap[shape].bgRadius}px`
     );
-  }, [shape]);
+  }, [publishToRoot, shape]);
 
   const value = useMemo(
     () => ({ shape, setShape, classes: shapeMap[shape] }),

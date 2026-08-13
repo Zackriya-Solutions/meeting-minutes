@@ -4,11 +4,11 @@ import { DeviceSelection } from "@/components/DeviceSelection";
 import { LanguageSelection } from "@/components/LanguageSelection";
 import { TranscriptSettings } from "@/components/TranscriptSettings";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { useConfig } from "@/contexts/ConfigContext";
 import { useRecordingState } from "@/contexts/RecordingStateContext";
 import { useT } from "@/lib/i18n";
-import { X } from "@/components/deslop-icons";
 
 type modalType = "modelSettings" | "deviceSettings" | "languageSettings" | "modelSelector" | "errorAlert" | "chunkDropWarning";
 
@@ -63,19 +63,11 @@ export function SettingsModals({
 
   return <>
     {/* Legacy Settings Modal */}
-    {modals.modelSettings && (
-      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-        <div className="bg-background rounded-lg shadow-none max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+    <Dialog open={modals.modelSettings} onOpenChange={(open) => !open && onClose('modelSettings')}>
+        <DialogContent size="lg" className="max-w-4xl max-h-[90vh] overflow-hidden flex flex-col p-0">
           {/* Header */}
           <div className="flex justify-between items-center p-6 border-b">
-            <h3 className="text-xl font-semibold text-foreground">{t('Preferences')}</h3>
-            <button
-              onClick={() => onClose("modelSettings")
-              }
-              className="text-muted-foreground hover:text-foreground"
-            >
-              <X size={24} />
-            </button>
+            <DialogTitle>{t('Preferences')}</DialogTitle>
           </div>
 
           {/* Content - Scrollable */}
@@ -162,22 +154,14 @@ export function SettingsModals({
               {t('Done')}
             </button>
           </div>
-        </div>
-      </div>
-    )}
+        </DialogContent>
+    </Dialog>
 
     {/* Device Settings Modal */}
-    {modals.deviceSettings && (
-      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-        <div className="bg-background rounded-lg p-6 max-w-md w-full mx-4 shadow-none">
+    <Dialog open={modals.deviceSettings} onOpenChange={(open) => !open && onClose('deviceSettings')}>
+        <DialogContent className="max-w-md">
           <div className="flex justify-between items-center mb-4">
-            <h3 className="text-lg font-semibold text-foreground">{t('Audio Device Settings')}</h3>
-            <button
-              onClick={() => onClose('deviceSettings')}
-              className="text-muted-foreground hover:text-foreground"
-            >
-              <X size={24} />
-            </button>
+            <DialogTitle>{t('Audio Device Settings')}</DialogTitle>
           </div>
 
           <DeviceSelection
@@ -201,22 +185,14 @@ export function SettingsModals({
               {t('Done')}
             </button>
           </div>
-        </div>
-      </div>
-    )}
+        </DialogContent>
+    </Dialog>
 
     {/* Настройки языка Modal */}
-    {modals.languageSettings && (
-      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-        <div className="bg-background rounded-lg p-6 max-w-md w-full mx-4 shadow-none">
+    <Dialog open={modals.languageSettings} onOpenChange={(open) => !open && onClose('languageSettings')}>
+        <DialogContent className="max-w-md">
           <div className="flex justify-between items-center mb-4">
-            <h3 className="text-lg font-semibold text-foreground">{t('Language Settings')}</h3>
-            <button
-              onClick={() => onClose('languageSettings')}
-              className="text-muted-foreground hover:text-foreground"
-            >
-              <X size={24} />
-            </button>
+            <DialogTitle>{t('Language Settings')}</DialogTitle>
           </div>
 
           <LanguageSelection
@@ -234,25 +210,17 @@ export function SettingsModals({
               {t('Done')}
             </button>
           </div>
-        </div>
-      </div>
-    )}
+        </DialogContent>
+    </Dialog>
 
     {/* Model Selection Modal */}
-    {modals.modelSelector && (
-      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-        <div className="bg-background rounded-lg max-w-4xl w-full mx-4 shadow-none max-h-[90vh] flex flex-col">
+    <Dialog open={modals.modelSelector} onOpenChange={(open) => !open && onClose('modelSelector')}>
+        <DialogContent size="lg" className="max-w-4xl max-h-[90vh] flex flex-col p-0">
           {/* Fixed Header */}
           <div className="flex justify-between items-center p-6 pb-4 border-b border-border">
-            <h3 className="text-lg font-semibold text-foreground">
+            <DialogTitle>
               {messages.modelSelector ? t('Speech Recognition Setup Required') : t('Transcription Model Settings')}
-            </h3>
-            <button
-              onClick={() => onClose('modelSelector')}
-              className="text-muted-foreground hover:text-foreground"
-            >
-              <X size={24} />
-            </button>
+            </DialogTitle>
           </div>
 
           {/* Scrollable Content */}
@@ -290,13 +258,12 @@ export function SettingsModals({
               {messages.modelSelector ? t('Cancel') : t('Done')}
             </button>
           </div>
-        </div>
-      </div>
-    )}
+        </DialogContent>
+    </Dialog>
 
     {/* Error Alert Modal */}
-    {modals.errorAlert && (
-      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+    <Dialog open={modals.errorAlert} onOpenChange={(open) => !open && onClose('errorAlert')}>
+      <DialogContent className="max-w-md p-0">
         <Alert className="max-w-md mx-4 border-destructive/40 bg-background shadow-none">
           <AlertTitle className="text-destructive">{t('Recording Stopped')}</AlertTitle>
           <AlertDescription className="text-destructive">
@@ -309,12 +276,12 @@ export function SettingsModals({
             </button>
           </AlertDescription>
         </Alert>
-      </div>
-    )}
+      </DialogContent>
+    </Dialog>
 
     {/* Chunk Drop Warning Modal */}
-    {modals.chunkDropWarning && (
-      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+    <Dialog open={modals.chunkDropWarning} onOpenChange={(open) => !open && onClose('chunkDropWarning')}>
+      <DialogContent size="lg" className="max-w-lg p-0">
         <Alert className="max-w-lg mx-4 border-primary/40 bg-background shadow-none">
           <AlertTitle className="text-primary">{t('Transcription Performance Warning')}</AlertTitle>
           <AlertDescription className="text-primary">
@@ -327,7 +294,7 @@ export function SettingsModals({
             </button>
           </AlertDescription>
         </Alert>
-      </div>
-    )}
+      </DialogContent>
+    </Dialog>
   </>
 }

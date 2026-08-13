@@ -34,6 +34,51 @@ svg.animate-spin {
 }
 
 @layer components {
+  .speaker-rename-underline {
+    position: relative;
+    display: inline-block;
+    padding-bottom: 1px;
+  }
+
+  .speaker-rename-underline::after {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    height: 1px;
+    background-image: repeating-linear-gradient(
+      to right,
+      var(--deslop-primary-30) 0 3px,
+      transparent 3px 5px
+    );
+    content: '';
+    pointer-events: none;
+  }
+
+  .fluid-select-token-surface {
+    background-image: linear-gradient(var(--primary-10), var(--primary-10));
+  }
+
+  .fluid-select-token-trigger:hover {
+    background-image: linear-gradient(var(--primary-10), var(--primary-10));
+  }
+
+  .meeting-overflow-menu-surface {
+    background-color: var(--elevation-2);
+  }
+
+  .dark .meeting-overflow-menu-surface {
+    background-image: linear-gradient(var(--primary-10), var(--primary-10));
+  }
+
+  .fluid-tabs-active-surface {
+    background-color: var(--elevation-2);
+  }
+
+  .dark .fluid-tabs-active-surface {
+    background-image: linear-gradient(var(--primary-10), var(--primary-10));
+  }
+
   /* Summary preview must retain document structure even if a build accidentally resolves
      the legacy Tailwind config without the typography plugin. */
   .summary-markdown {
@@ -67,6 +112,17 @@ svg.animate-spin {
   }
   .summary-markdown th { background: hsl(var(--muted)); color: hsl(var(--foreground)); font-weight: 700; }
   .summary-markdown tr:nth-child(even) td { background: color-mix(in srgb, hsl(var(--muted)) 45%, transparent); }
+  .meeting-numbers-table {
+    max-width: 600px;
+  }
+  .meeting-numbers-table table {
+    table-layout: fixed;
+  }
+  .meeting-numbers-table :is(th, td) {
+    width: min(33.333%, 200px);
+    max-width: 200px;
+    white-space: normal;
+  }
   .summary-markdown blockquote {
     margin: 1rem 0;
     border-left: 3px solid hsl(var(--primary) / 0.4);
@@ -607,10 +663,11 @@ svg.animate-spin {
     background: var(--elevation-1);
     pointer-events: none;
   }
-  /* Treat the route drawer like a right sidebar without animating layout.
-     Changing the wrapper width forced every meeting card to reflow on every
-     animation frame. Moving the fixed-width home column on the compositor
-     keeps card geometry stable while preserving the same visual centering. */
+  /* Treat the route drawer like a right sidebar. The home column needs to
+     resize as the drawer releases its space, but every geometric value must
+     interpolate from the same frame. In particular, do not toggle the
+     inherited --home-column-gutter token: untyped custom properties change
+     discretely in WebKit and made the cards snap 84px narrower before growing. */
   @media (min-width: 1024px) {
     .route-drawer-background {
       --route-drawer-reserved-width: 462px;
@@ -619,30 +676,42 @@ svg.animate-spin {
       will-change: auto;
     }
     .route-drawer-background .home-screen__inner {
-      transition: transform 450ms cubic-bezier(.22, 1, .36, 1);
+      transition:
+        width 450ms cubic-bezier(.22, 1, .36, 1),
+        transform 450ms cubic-bezier(.22, 1, .36, 1);
       will-change: transform;
     }
-    .route-drawer-background[data-active] .home-screen__inner {
+    .route-drawer-background .home-ask-dock {
+      transition:
+        width 450ms cubic-bezier(.22, 1, .36, 1),
+        transform 450ms cubic-bezier(.22, 1, .36, 1);
+    }
+    .route-drawer-background[data-route-drawer-open] .home-screen__inner {
+      width: min(
+        var(--home-column-width),
+        calc(
+          100% - var(--route-drawer-reserved-width) - 48px +
+          var(--home-column-gutter) + var(--home-column-gutter)
+        )
+      );
       transform: translate3d(
         calc(var(--route-drawer-reserved-width) / -2),
         0,
         0
       );
     }
-    .route-drawer-background[data-active] .home-ask-dock {
-      --home-ask-surface-width: calc(
-        100vw - var(--sidebar-width, 0px) - var(--route-drawer-reserved-width)
-      );
-      left: calc(
-        var(--sidebar-width, 0px) +
-        (100vw - var(--sidebar-width, 0px) - var(--route-drawer-reserved-width)) / 2
-      );
+    .route-drawer-background[data-route-drawer-open] .home-ask-dock {
       width: min(
         calc(
-          100vw - var(--sidebar-width, 0px) - var(--route-drawer-reserved-width) -
-          var(--home-column-gutter) - var(--home-column-gutter)
+          100vw - var(--sidebar-width, 0px) - var(--route-drawer-reserved-width) - 48px +
+          var(--home-column-gutter) + var(--home-column-gutter)
         ),
-        calc(var(--home-column-width) - var(--home-column-gutter) - var(--home-column-gutter))
+        var(--home-column-width)
+      );
+      transform: translate3d(
+        calc(-50% - var(--route-drawer-reserved-width) / 2),
+        0,
+        0
       );
     }
   }
@@ -658,7 +727,8 @@ svg.animate-spin {
   @media (prefers-reduced-motion: reduce) {
     .memento-drawer-overlay,
     .memento-drawer-popup,
-    .route-drawer-background .home-screen__inner { transition-duration: 1ms; }
+    .route-drawer-background .home-screen__inner,
+    .route-drawer-background .home-ask-dock { transition-duration: 1ms; }
   }
 
   .memento-shell { background: var(--elevation-1); color: hsl(var(--foreground)); }
@@ -681,7 +751,9 @@ svg.animate-spin {
   .memento-record-dock { padding: 6px; border: 1px solid hsl(var(--border)); border-radius: 999px; background: hsl(var(--muted)); }
   .memento-serif-title { font-family: var(--ui-font-serif); font-weight: 400; letter-spacing: -.035em; }
   .memento-screen-title {
-    font-family: var(--ui-font-display);
+    /* Form controls are globally set to inherit the interface font below.
+       Keep editable titles on the same display face as their saved <h1>. */
+    font-family: var(--ui-font-display) !important;
     font-size: var(--ui-title-40-font-size) !important;
     font-weight: 600;
     letter-spacing: var(--ui-title-40-letter-spacing);
@@ -721,6 +793,7 @@ svg.animate-spin {
     border: 0;
     border-radius: 32px;
     background: var(--elevation-2);
+    box-shadow: inset 0 0 0 1px var(--primary-10);
     color: inherit;
     cursor: pointer;
     text-align: left;
@@ -790,6 +863,13 @@ svg.animate-spin {
     pointer-events: none;
     background: var(--deslop-primary-8);
   }
+  /* The drawer route and `/` briefly hand the archive between two React
+     owners. Preserve the row under a stationary pointer during that hand-off;
+     the fluid indicator is recreated only after the next mousemove. */
+  .home-history__list:not(:has(> .home-history__hover-indicator))
+    .home-history-cell:hover {
+    background: var(--deslop-primary-8);
+  }
   .home-history__list .home-history-cell:active {
     background: var(--deslop-primary-10);
   }
@@ -850,9 +930,11 @@ svg.animate-spin {
       (100vw - var(--sidebar-width, 0px)) / 2
     );
     width: min(
-      calc(100% - var(--home-column-gutter) - var(--home-column-gutter)),
-      calc(var(--home-column-width) - var(--home-column-gutter) - var(--home-column-gutter))
+      calc(100vw - var(--sidebar-width, 0px)),
+      var(--home-column-width)
     );
+    box-sizing: border-box;
+    padding-inline: var(--home-column-gutter);
     transform: translateX(-50%);
   }
   .home-screen .home-ask-dock::before {
@@ -985,7 +1067,6 @@ svg.animate-spin {
   .settings-cell__select {
     width: fit-content;
     min-width: 0;
-    border-radius: 999px;
     font-family: var(--ui-font-interface);
   }
   .settings-cell__device-select {
@@ -1189,8 +1270,8 @@ input, textarea, button, [role='dialog'], [role='menu'], [role='listbox'] { font
 
 .mm-md ul, .mm-md ol { margin: 0 0 8px; padding-left: 20px; }
 .mm-summary-list > ul { padding-inline-start: 0; list-style: none; }
-.mm-summary-list > ul > li { display: grid; grid-template-columns: 6px minmax(0, 1fr); column-gap: 8px; }
-.mm-summary-list > ul > li::before { content: '•'; color: var(--primary-50); }
+.mm-summary-list > ul > li { position: relative; display: block; padding-inline-start: 14px; }
+.mm-summary-list > ul > li::before { position: absolute; inset-inline-start: 0; content: '•'; color: var(--primary-50); }
 .mm-summary-list > ol { padding-inline-start: 18px; }
 .mm-summary-plain > ul { padding-inline-start: 0; list-style: none; }
 .mm-md li { margin: 2px 0; }
@@ -1203,6 +1284,7 @@ input, textarea, button, [role='dialog'], [role='menu'], [role='listbox'] { font
 .mm-md a:focus-visible { outline: 2px solid hsl(var(--primary)); outline-offset: 2px; border-radius: 3px; }
 .mm-md a strong, .mm-md a b, .mm-md a code { color: inherit; }
 .mm-md strong { font-weight: 700; color: hsl(var(--foreground)); }
+.mm-summary-plain strong, .mm-summary-plain b { font-weight: 400; color: inherit; }
 .mm-md em { font-style: italic; }
 
 .mm-md code { font-family: var(--ui-font-mono); font-size: .9em; background: hsl(var(--background)); border: 1px solid hsl(var(--border) / 0.6); border-radius: 5px; padding: 1px 5px; overflow-wrap: break-word; -webkit-box-decoration-break: clone; box-decoration-break: clone; }

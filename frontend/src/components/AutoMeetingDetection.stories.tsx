@@ -82,7 +82,7 @@ function MementoPromptDemo() {
       <p className="text-sm text-muted-foreground">Плашка появляется поверх приложения при старте встречи.</p>
       <MeetingDetectionBanner
         open
-        state="recording"
+        state="suggestion"
         appNames={['Zoom']}
         onPrimaryAction={() => undefined}
         onDismiss={() => undefined}

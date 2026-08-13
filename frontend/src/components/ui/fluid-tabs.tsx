@@ -124,7 +124,7 @@ const FluidTabsList = React.forwardRef<
         {selectedRect && (
           <motion.span
             aria-hidden="true"
-            className="pointer-events-none absolute rounded-lg bg-[var(--elevation-1)]"
+            className="fluid-tabs-active-surface pointer-events-none absolute rounded-lg"
             initial={false}
             animate={{ ...selectedRect, opacity: isHoveringSelected ? 1 : 0.92 }}
             transition={spring.moderate}

@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { SpeakerInfo, DiarizationCompletePayload } from "@/types";
+import { normalizedSpeakerName } from "@/lib/summarySpeakerLinks";
 
 interface UseMeetingSpeakersProps {
     /** The saved meeting whose speakers we track (null while none is open). */
@@ -85,9 +86,25 @@ export function useMeetingSpeakers({
 
         // Optimistically update local state so every label re-renders immediately.
         setSpeakers((prev) =>
-            prev.map((s) =>
-                s.id === speakerId ? { ...s, display_name: trimmed, is_confirmed: true } : s
-            )
+            prev.map((speaker) => {
+                if (speaker.id !== speakerId) return speaker;
+                const aliases = [...(speaker.aliases ?? [])];
+                if (
+                    speaker.display_name.trim()
+                    && normalizedSpeakerName(speaker.display_name) !== normalizedSpeakerName(trimmed)
+                    && !aliases.some(
+                        (alias) => normalizedSpeakerName(alias) === normalizedSpeakerName(speaker.display_name),
+                    )
+                ) {
+                    aliases.push(speaker.display_name.trim());
+                }
+                return {
+                    ...speaker,
+                    display_name: trimmed,
+                    aliases,
+                    is_confirmed: true,
+                };
+            })
         );
         setSpeakersById((prev) => {
             const next = new Map(prev);

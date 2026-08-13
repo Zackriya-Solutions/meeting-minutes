@@ -45,8 +45,8 @@ export default function PageContent({
   loadedCount,
   onLoadMore,
   seekToSeconds = null,
-  speakersById = null,
   speakers = [],
+  speakersById = null,
   selfSpeakerIds = null,
   speakerCount = 0,
   onRenameSpeaker,
@@ -72,8 +72,8 @@ export default function PageContent({
   /** Jump-to-timestamp (seconds) from search/RAG deep links (?t=). */
   seekToSeconds?: number | null;
   // Speaker diarization props
-  speakersById?: Map<number, string> | null;
   speakers?: SpeakerInfo[];
+  speakersById?: Map<number, string> | null;
   selfSpeakerIds?: ReadonlySet<number> | null;
   speakerCount?: number;
   onRenameSpeaker?: (speakerId: number, displayName: string) => Promise<void> | void;
@@ -283,8 +283,8 @@ export default function PageContent({
         onOpenMeetingFolder={meetingOperations.handleOpenMeetingFolder}
         seekToSeconds={seekToSeconds}
         markedMoments={markedMoments}
-        speakersById={speakersById}
         speakers={speakers}
+        speakersById={speakersById}
         selfSpeakerIds={selfSpeakerIds}
         speakerCount={speakerCount}
         onRenameSpeaker={onRenameSpeaker}

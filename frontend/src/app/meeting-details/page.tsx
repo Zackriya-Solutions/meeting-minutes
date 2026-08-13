@@ -91,7 +91,9 @@ function UpcomingMeetingPreview() {
 
   const recordThisMeeting = () => {
     if (!canRecord) return;
-    requestAutoStart(window.sessionStorage, title, participants);
+    requestAutoStart(window.sessionStorage, title, participants, hasStart && hasEnd
+      ? { startAt: start.toISOString(), endAt: end.toISOString() }
+      : null);
     router.push('/recording');
   };
 
@@ -500,8 +502,8 @@ function MeetingDetailsContent() {
     onLoadMore={loadMore}
     seekToSeconds={seekToSeconds}
     // Speaker diarization props
-    speakersById={speakersById}
     speakers={speakers}
+    speakersById={speakersById}
     selfSpeakerIds={selfSpeakerIds}
     speakerCount={speakers.length}
     onRenameSpeaker={handleRenameSpeaker}

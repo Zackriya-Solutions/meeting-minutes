@@ -897,6 +897,7 @@ export function ModelSettingsModal({
           <Label>{t('Summarization Model')}</Label>
           <div className="flex space-x-2 mt-1">
             <Select
+              shape="rounded"
               value={modelConfig.provider}
               onValueChange={(value) => {
                 const provider = value as ModelConfig['provider'];

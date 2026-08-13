@@ -1,7 +1,8 @@
 'use client';
 
 import React from 'react';
-import { X, Info, Shield } from '@/components/deslop-icons';
+import { Info, Shield } from '@/components/deslop-icons';
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { useT } from '@/lib/i18n';
 
 interface AnalyticsDataModalProps {
@@ -11,23 +12,15 @@ interface AnalyticsDataModalProps {
 
 export default function AnalyticsDataModal({ isOpen, onClose }: AnalyticsDataModalProps) {
   const t = useT();
-  if (!isOpen) return null;
-
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-background rounded-lg shadow-none max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
+    <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent size="lg" className="max-w-2xl max-h-[90vh] overflow-y-auto p-0">
         {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-border">
           <div className="flex items-center gap-3">
             <Shield className="w-6 h-6 text-primary" />
-            <h2 className="text-xl font-semibold text-foreground">{t('What Analytics Collects')}</h2>
+            <DialogTitle>{t('What Analytics Collects')}</DialogTitle>
           </div>
-          <button
-            onClick={onClose}
-            className="text-muted-foreground hover:text-muted-foreground transition-colors"
-          >
-            <X className="w-5 h-5" />
-          </button>
         </div>
 
         {/* Content */}
@@ -155,7 +148,7 @@ export default function AnalyticsDataModal({ isOpen, onClose }: AnalyticsDataMod
             {t('Close')}
           </button>
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }

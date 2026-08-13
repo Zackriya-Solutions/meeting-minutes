@@ -61,12 +61,8 @@ export function MeetingOverflowMenu({
   meetingId,
   report,
   canOpenReport = false,
-  hasSummary,
   hasTranscript,
-  onCopySummary,
   onRenameMeeting,
-  onShareSummaryToTelegram,
-  canShareToTelegram = false,
   modelConfig,
   setModelConfig,
   onSaveModelConfig,
@@ -173,34 +169,16 @@ export function MeetingOverflowMenu({
         <DropdownContent
           align="end"
           sideOffset={6}
-          className="bg-[var(--elevation-2)]"
+          className="meeting-overflow-menu-surface"
         >
           <MenuItem
             index={0}
             iconName="edit"
-            label={t('Rename meeting')}
+            label={t('Rename')}
             onSelect={onRenameMeeting}
           />
 
           <DropdownSeparator />
-
-          <MenuItem
-            index={1}
-            iconName="content_copy"
-            label={t('Copy summary')}
-            disabled={!hasSummary}
-            onSelect={() => void onCopySummary()}
-          />
-
-          {canShareToTelegram && onShareSummaryToTelegram && (
-            <MenuItem
-              index={2}
-              iconName="send"
-              label={t('Send to Telegram')}
-              disabled={!hasSummary}
-              onSelect={() => void onShareSummaryToTelegram()}
-            />
-          )}
 
           {canOpenReport && (
             <MenuItem
@@ -214,7 +192,7 @@ export function MeetingOverflowMenu({
           <MenuItem
             index={4}
             iconName={reportIcon}
-            label={t('Analytical report')}
+            label={t('Analytics')}
             trailing={reportTrailing}
             disabled={!hasTranscript && report.status !== 'completed'}
             onSelect={handleAnalyticsReport}
@@ -225,7 +203,7 @@ export function MeetingOverflowMenu({
           <MenuItem
             index={5}
             iconName="language"
-            label={t('Summary language')}
+            label={t('Results language')}
             trailing={languageLabel}
             onSelect={() => setLanguageOpen(true)}
           />
@@ -233,7 +211,7 @@ export function MeetingOverflowMenu({
           <MenuItem
             index={6}
             iconName="settings"
-            label={t('AI Model')}
+            label={t('Model')}
             trailing={modelLabel}
             onSelect={() => setModelOpen(true)}
           />
@@ -246,7 +224,7 @@ export function MeetingOverflowMenu({
           <MenuItem
             index={7}
             iconName={reprocessingLabel ? 'progress_activity' : 'refresh'}
-            label={t('Split replies again')}
+            label={t('Split replies')}
             trailing={reprocessingLabel ?? undefined}
             disabled={!!reprocessingLabel}
             closeOnClick={false}
@@ -258,7 +236,7 @@ export function MeetingOverflowMenu({
           <MenuItem
             index={8}
             iconName={deleting ? 'progress_activity' : 'delete'}
-            label={t('Delete meeting')}
+            label={t('Delete')}
             disabled={deleting}
             closeOnClick={false}
             onSelect={() => void handleDelete()}
@@ -274,12 +252,12 @@ export function MeetingOverflowMenu({
       />
 
       <Dialog open={languageOpen} onOpenChange={setLanguageOpen}>
-        <DialogContent className="max-w-[320px] p-1.5">
+        <DialogContent className="max-w-[320px] overflow-hidden p-0 [&_[cmdk-input-wrapper]]:pr-12">
           <LanguagePickerPopover
             value={language}
             onChange={handleLanguageChange}
-            onClose={() => setLanguageOpen(false)}
             autoSubtitle={t('Uses dominant transcript language')}
+            className="w-full rounded-none border-0 bg-transparent"
           />
         </DialogContent>
       </Dialog>

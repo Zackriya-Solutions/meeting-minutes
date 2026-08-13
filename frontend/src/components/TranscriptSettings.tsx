@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useT } from '@/lib/i18n';
 import { GigaamModelManager } from './GigaamModelManager';
-import { DiarizationModelManager } from './DiarizationModelManager';
 import { SlidersHorizontal, Sparkles } from '@/components/deslop-icons';
 import { Switch } from './ui/switch';
 
@@ -60,10 +59,6 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
   return (
     <div className="space-y-4 pb-6">
       <GigaamModelManager compact />
-
-      {/* The automatic post-meeting pass diarizes, so these models are effectively part of
-          the transcription setup rather than an optional extra. */}
-      <DiarizationModelManager compact />
 
       <MicSensitivitySetting />
 

@@ -2,9 +2,8 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
-import { useRecordingState, RecordingStatus } from '@/contexts/RecordingStateContext';
+import { useRecordingState } from '@/contexts/RecordingStateContext';
 import { useConfig } from '@/contexts/ConfigContext';
-import { StatusOverlays } from '@/app/_components/StatusOverlays';
 import Analytics from '@/lib/analytics';
 import { SettingsModals } from './_components/SettingsModal';
 import { HomePanel } from './_components/HomePanel';
@@ -23,9 +22,6 @@ export default function Home() {
   // Use contexts for state management
   const { transcriptModelConfig } = useConfig();
   const recordingState = useRecordingState();
-
-  // Extract status from global state
-  const { status } = recordingState;
 
   // Hooks
   const t = useT();
@@ -48,7 +44,6 @@ export default function Home() {
     const stopAutoListening = () => {
       if (handled || !sessionStorage.getItem('autoStopRecordingSessionId')) return;
       handled = true;
-      toast.info(t('Call signal ended — saving the meeting'));
       setIsStopping(true);
       void handleRecordingStop(true);
     };
@@ -64,7 +59,7 @@ export default function Home() {
         window.clearTimeout(pendingStopTimeout);
       }
     };
-  }, [handleRecordingStop, setIsStopping, t]);
+  }, [handleRecordingStop, setIsStopping]);
 
   useEffect(() => {
     // Track page view
@@ -164,11 +159,6 @@ export default function Home() {
             used to sit here belonged to the old full-page transcript screen; the
             archive header's "New meeting" action starts one now. */}
 
-        {/* Status Overlays - Processing and Saving */}
-        <StatusOverlays
-          isProcessing={status === RecordingStatus.PROCESSING_TRANSCRIPTS && !recordingState.isRecording}
-          isSaving={status === RecordingStatus.SAVING}
-        />
       </div>
     </div>
   );

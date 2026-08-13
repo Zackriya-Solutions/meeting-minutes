@@ -1,130 +1,182 @@
-"use client"
+"use client";
 
-import * as React from "react"
-import * as AlertDialogPrimitive from "@radix-ui/react-alert-dialog"
+import {
+  createContext,
+  forwardRef,
+  useContext,
+  useEffect,
+  useState,
+  type ComponentPropsWithoutRef,
+  type HTMLAttributes,
+} from "react";
+import * as AlertDialogPrimitive from "@radix-ui/react-alert-dialog";
+import { motion } from "framer-motion";
 
-import { cn } from "@/lib/utils"
-import { buttonVariants } from "@/components/ui/button"
+import { Button as FluidButton } from "@/components/ui/fluid-button";
+import { cn } from "@/lib/utils";
+import { spring, exitFallbackMs } from "@/lib/springs";
+import { useShape } from "@/lib/shape-context";
+import { SurfaceProvider, useSurface } from "@/lib/surface-context";
+import { surfaceClasses } from "@/lib/surface-classes";
 
-const AlertDialog = AlertDialogPrimitive.Root
+const DIALOG_OFFSET = 4;
+const AlertDialogOpenContext = createContext(false);
 
-const AlertDialogTrigger = AlertDialogPrimitive.Trigger
+function AlertDialog({
+  children,
+  open: controlledOpen,
+  defaultOpen,
+  onOpenChange,
+  ...props
+}: React.ComponentProps<typeof AlertDialogPrimitive.Root>) {
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(defaultOpen ?? false);
+  const open = controlledOpen ?? uncontrolledOpen;
 
-const AlertDialogPortal = AlertDialogPrimitive.Portal
+  const handleOpenChange = (next: boolean) => {
+    setUncontrolledOpen(next);
+    onOpenChange?.(next);
+  };
 
-const AlertDialogOverlay = React.forwardRef<
+  return (
+    <AlertDialogOpenContext.Provider value={open}>
+      <AlertDialogPrimitive.Root open={open} onOpenChange={handleOpenChange} {...props}>
+        {children}
+      </AlertDialogPrimitive.Root>
+    </AlertDialogOpenContext.Provider>
+  );
+}
+
+const AlertDialogTrigger = AlertDialogPrimitive.Trigger;
+const AlertDialogPortal = AlertDialogPrimitive.Portal;
+
+const AlertDialogOverlay = forwardRef<
   React.ElementRef<typeof AlertDialogPrimitive.Overlay>,
-  React.ComponentPropsWithoutRef<typeof AlertDialogPrimitive.Overlay>
+  ComponentPropsWithoutRef<typeof AlertDialogPrimitive.Overlay>
 >(({ className, ...props }, ref) => (
   <AlertDialogPrimitive.Overlay
-    className={cn(
-      "fixed inset-0 z-50 bg-black/80 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
-      className
-    )}
-    {...props}
     ref={ref}
-  />
-))
-AlertDialogOverlay.displayName = AlertDialogPrimitive.Overlay.displayName
-
-const AlertDialogContent = React.forwardRef<
-  React.ElementRef<typeof AlertDialogPrimitive.Content>,
-  React.ComponentPropsWithoutRef<typeof AlertDialogPrimitive.Content>
->(({ className, ...props }, ref) => (
-  <AlertDialogPortal>
-    <AlertDialogOverlay />
-    <AlertDialogPrimitive.Content
-      ref={ref}
-      className={cn(
-        "fixed left-[50%] top-[50%] z-50 grid w-full max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 border bg-background p-6 shadow-lg duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%] data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%] sm:rounded-lg",
-        className
-      )}
-      {...props}
-    />
-  </AlertDialogPortal>
-))
-AlertDialogContent.displayName = AlertDialogPrimitive.Content.displayName
-
-const AlertDialogHeader = ({
-  className,
-  ...props
-}: React.HTMLAttributes<HTMLDivElement>) => (
-  <div
-    className={cn(
-      "flex flex-col space-y-2 text-center sm:text-left",
-      className
-    )}
+    className={cn("fixed inset-0 z-[2000] bg-black/40 dark:bg-black/80", className)}
     {...props}
   />
-)
-AlertDialogHeader.displayName = "AlertDialogHeader"
+));
+AlertDialogOverlay.displayName = AlertDialogPrimitive.Overlay.displayName;
 
-const AlertDialogFooter = ({
-  className,
-  ...props
-}: React.HTMLAttributes<HTMLDivElement>) => (
-  <div
-    className={cn(
-      "flex flex-col-reverse sm:flex-row sm:justify-end sm:space-x-2",
-      className
-    )}
-    {...props}
-  />
-)
-AlertDialogFooter.displayName = "AlertDialogFooter"
+const AlertDialogContent = forwardRef<
+  HTMLDivElement,
+  ComponentPropsWithoutRef<typeof AlertDialogPrimitive.Content>
+>(({ className, children, ...props }, ref) => {
+  const open = useContext(AlertDialogOpenContext);
+  const shape = useShape();
+  const substrate = useSurface();
+  const dialogLevel = Math.min(substrate + DIALOG_OFFSET, 8);
+  const [mounted, setMounted] = useState(false);
 
-const AlertDialogTitle = React.forwardRef<
-  React.ElementRef<typeof AlertDialogPrimitive.Title>,
-  React.ComponentPropsWithoutRef<typeof AlertDialogPrimitive.Title>
->(({ className, ...props }, ref) => (
+  useEffect(() => {
+    if (open) setMounted(true);
+  }, [open]);
+
+  useEffect(() => {
+    if (open) return;
+    const id = setTimeout(() => setMounted(false), exitFallbackMs(spring.slow));
+    return () => clearTimeout(id);
+  }, [open]);
+
+  if (!mounted) return null;
+
+  return (
+    <AlertDialogPrimitive.Portal forceMount>
+      <AlertDialogPrimitive.Overlay asChild forceMount>
+        <motion.div
+          className="fixed inset-0 z-[2000] bg-black/40 dark:bg-black/80"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: open ? 1 : 0 }}
+          transition={open ? spring.slow : spring.slow.exit}
+        />
+      </AlertDialogPrimitive.Overlay>
+      <AlertDialogPrimitive.Content ref={ref} asChild forceMount {...props}>
+        <motion.div
+          className={cn(
+            "fixed left-1/2 top-1/2 z-[2001] grid w-[calc(100%-2rem)] max-w-[400px] gap-4 p-6 focus:outline-none",
+            surfaceClasses(dialogLevel),
+            shape.container,
+            className
+          )}
+          initial={{ opacity: 0, scale: 0.97, x: "-50%", y: "-50%" }}
+          animate={{
+            opacity: open ? 1 : 0,
+            scale: open ? 1 : 0.97,
+            x: "-50%",
+            y: "-50%",
+          }}
+          transition={open ? spring.slow : spring.slow.exit}
+          onAnimationComplete={() => {
+            if (!open) setMounted(false);
+          }}
+        >
+          <SurfaceProvider value={dialogLevel}>{children}</SurfaceProvider>
+        </motion.div>
+      </AlertDialogPrimitive.Content>
+    </AlertDialogPrimitive.Portal>
+  );
+});
+AlertDialogContent.displayName = "AlertDialogContent";
+
+function AlertDialogHeader({ className, ...props }: HTMLAttributes<HTMLDivElement>) {
+  return <div className={cn("flex flex-col gap-1.5", className)} {...props} />;
+}
+
+function AlertDialogFooter({ className, ...props }: HTMLAttributes<HTMLDivElement>) {
+  return <div className={cn("mt-2 flex justify-end gap-2", className)} {...props} />;
+}
+
+const AlertDialogTitle = forwardRef<
+  HTMLHeadingElement,
+  ComponentPropsWithoutRef<typeof AlertDialogPrimitive.Title>
+>(({ className, style, ...props }, ref) => (
   <AlertDialogPrimitive.Title
     ref={ref}
-    className={cn("text-lg font-semibold", className)}
+    className={cn("text-[16px] leading-tight text-foreground", className)}
+    style={{ fontVariationSettings: "'wght' 700", ...style }}
     {...props}
   />
-))
-AlertDialogTitle.displayName = AlertDialogPrimitive.Title.displayName
+));
+AlertDialogTitle.displayName = AlertDialogPrimitive.Title.displayName;
 
-const AlertDialogDescription = React.forwardRef<
-  React.ElementRef<typeof AlertDialogPrimitive.Description>,
-  React.ComponentPropsWithoutRef<typeof AlertDialogPrimitive.Description>
+const AlertDialogDescription = forwardRef<
+  HTMLParagraphElement,
+  ComponentPropsWithoutRef<typeof AlertDialogPrimitive.Description>
 >(({ className, ...props }, ref) => (
   <AlertDialogPrimitive.Description
     ref={ref}
-    className={cn("text-sm text-muted-foreground", className)}
+    className={cn("text-[13px] text-muted-foreground", className)}
     {...props}
   />
-))
-AlertDialogDescription.displayName =
-  AlertDialogPrimitive.Description.displayName
+));
+AlertDialogDescription.displayName = AlertDialogPrimitive.Description.displayName;
 
-const AlertDialogAction = React.forwardRef<
-  React.ElementRef<typeof AlertDialogPrimitive.Action>,
-  React.ComponentPropsWithoutRef<typeof AlertDialogPrimitive.Action>
->(({ className, ...props }, ref) => (
-  <AlertDialogPrimitive.Action
-    ref={ref}
-    className={cn(buttonVariants(), className)}
-    {...props}
-  />
-))
-AlertDialogAction.displayName = AlertDialogPrimitive.Action.displayName
+const AlertDialogAction = forwardRef<
+  HTMLButtonElement,
+  ComponentPropsWithoutRef<typeof AlertDialogPrimitive.Action>
+>(({ className, children, ...props }, ref) => (
+  <AlertDialogPrimitive.Action asChild {...props}>
+    <FluidButton ref={ref} variant="destructive" className={className}>
+      {children}
+    </FluidButton>
+  </AlertDialogPrimitive.Action>
+));
+AlertDialogAction.displayName = AlertDialogPrimitive.Action.displayName;
 
-const AlertDialogCancel = React.forwardRef<
-  React.ElementRef<typeof AlertDialogPrimitive.Cancel>,
-  React.ComponentPropsWithoutRef<typeof AlertDialogPrimitive.Cancel>
->(({ className, ...props }, ref) => (
-  <AlertDialogPrimitive.Cancel
-    ref={ref}
-    className={cn(
-      buttonVariants({ variant: "outline" }),
-      "mt-2 sm:mt-0",
-      className
-    )}
-    {...props}
-  />
-))
-AlertDialogCancel.displayName = AlertDialogPrimitive.Cancel.displayName
+const AlertDialogCancel = forwardRef<
+  HTMLButtonElement,
+  ComponentPropsWithoutRef<typeof AlertDialogPrimitive.Cancel>
+>(({ className, children, ...props }, ref) => (
+  <AlertDialogPrimitive.Cancel asChild {...props}>
+    <FluidButton ref={ref} variant="secondary" className={className}>
+      {children}
+    </FluidButton>
+  </AlertDialogPrimitive.Cancel>
+));
+AlertDialogCancel.displayName = AlertDialogPrimitive.Cancel.displayName;
 
 export {
   AlertDialog,
@@ -138,4 +190,4 @@ export {
   AlertDialogDescription,
   AlertDialogAction,
   AlertDialogCancel,
-}
+};

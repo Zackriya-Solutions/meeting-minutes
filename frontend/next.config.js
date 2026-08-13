@@ -7,6 +7,17 @@ const resolveFromTiptapPm = (pkg) =>
 /** @param {string} phase */
 module.exports = (phase) => ({
   distDir: phase === PHASE_DEVELOPMENT_SERVER ? '.next-dev' : '.next',
+
+  // The component showcase is a dev-only surface, and its catalog imports every
+  // production component by namespace — so a `notFound()` guard inside the route hides
+  // the page but still drags the whole component graph into the export (it was the
+  // heaviest route in the bundle at 684 kB). Registering the extra extension only for
+  // `next dev` means `page.showcase.tsx` is a route while developing and just a
+  // colocated file in a production build.
+  pageExtensions:
+    phase === PHASE_DEVELOPMENT_SERVER
+      ? ['showcase.tsx', 'tsx', 'ts', 'jsx', 'js']
+      : ['tsx', 'ts', 'jsx', 'js'],
   reactStrictMode: false, // Disabled for BlockNote compatibility
   output: 'export',
   images: {

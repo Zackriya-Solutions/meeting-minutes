@@ -10,8 +10,11 @@ import {
 } from '@/components/ui/sidebar';
 import { useT } from '@/lib/i18n';
 import { Wordmark } from '@/components/memento/Wordmark';
+import { useSidebar as useMementoSidebar } from '@/components/Sidebar/SidebarProvider';
 import { useImportDialog } from '@/contexts/ImportDialogContext';
 import { fluidFontWeight, spring } from '@/lib/fluid/springs';
+import { Button } from '@/components/ui/fluid-functional-button';
+import { ShapeProvider } from '@/lib/shape-context';
 import {
   IconCalendarToday,
   IconConstruction,
@@ -239,6 +242,7 @@ export function AppSidebar() {
   const router = useRouter();
   const { setTheme } = useTheme();
   const { openImportDialog } = useImportDialog();
+  const { handleRecordingToggle } = useMementoSidebar();
   const t = useT();
   const meetingsActive = pathname === '/' || pathname.startsWith('/meeting-details');
 
@@ -257,8 +261,7 @@ export function AppSidebar() {
       >
         <Wordmark />
       </button>
-      <div className="flex-1" />
-      <SidebarFooter className="mt-auto border-0 p-3">
+      <SidebarFooter className="border-0 px-3 pb-0 pt-6">
         <FluidSidebarGroup
           items={[
             {
@@ -294,6 +297,19 @@ export function AppSidebar() {
             },
           ]}
         />
+      </SidebarFooter>
+      <div className="flex-1" />
+      <SidebarFooter className="mt-auto border-0 px-6 pb-6 pt-6">
+        <ShapeProvider defaultShape="pill" publishToRoot={false}>
+          <Button
+            type="button"
+            variant="primary"
+            className="h-11 w-full text-[var(--black)] [--background:var(--background-primary)] [--foreground:var(--accent-orange)]"
+            onClick={handleRecordingToggle}
+          >
+            {t('Record meeting')}
+          </Button>
+        </ShapeProvider>
       </SidebarFooter>
     </Sidebar>
   );

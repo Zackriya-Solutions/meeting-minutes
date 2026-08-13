@@ -1,117 +1,223 @@
-"use client"
+"use client";
 
-import * as React from "react"
-import * as DialogPrimitive from "@radix-ui/react-dialog"
-import { X } from "@/components/deslop-icons"
+import {
+  createContext,
+  forwardRef,
+  useContext,
+  useEffect,
+  useState,
+  type ComponentPropsWithoutRef,
+  type HTMLAttributes,
+} from "react";
+import * as DialogPrimitive from "@radix-ui/react-dialog";
+import { motion } from "framer-motion";
 
-import { cn } from "@/lib/utils"
+import { Button as FluidButton } from "@/components/ui/fluid-button";
+import { useIcon } from "@/lib/icon-context";
+import { cn } from "@/lib/utils";
+import { spring, exitFallbackMs } from "@/lib/springs";
+import { useShape } from "@/lib/shape-context";
+import { useSize, useSizeVariant } from "@/lib/size-context";
+import { SurfaceProvider, useSurface } from "@/lib/surface-context";
+import { surfaceClasses } from "@/lib/surface-classes";
 
-const Dialog = DialogPrimitive.Root
+const DIALOG_OFFSET = 4;
+const DIALOG_OVERLAY_Z = "z-[2000]";
+const DIALOG_CONTENT_Z = "z-[2001]";
 
-const DialogTrigger = DialogPrimitive.Trigger
+const DialogOpenContext = createContext(false);
 
-const DialogPortal = DialogPrimitive.Portal
+function Dialog({
+  children,
+  open: controlledOpen,
+  defaultOpen,
+  onOpenChange,
+  ...props
+}: DialogPrimitive.DialogProps) {
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(defaultOpen ?? false);
+  const open = controlledOpen ?? uncontrolledOpen;
 
-const DialogClose = DialogPrimitive.Close
+  const handleOpenChange = (next: boolean) => {
+    setUncontrolledOpen(next);
+    onOpenChange?.(next);
+  };
 
-const DialogOverlay = React.forwardRef<
+  return (
+    <DialogOpenContext.Provider value={open}>
+      <DialogPrimitive.Root open={open} onOpenChange={handleOpenChange} {...props}>
+        {children}
+      </DialogPrimitive.Root>
+    </DialogOpenContext.Provider>
+  );
+}
+
+const DialogTrigger = DialogPrimitive.Trigger;
+const DialogPortal = DialogPrimitive.Portal;
+const DialogClose = DialogPrimitive.Close;
+
+const DialogOverlay = forwardRef<
   React.ElementRef<typeof DialogPrimitive.Overlay>,
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Overlay>
 >(({ className, ...props }, ref) => (
   <DialogPrimitive.Overlay
     ref={ref}
     className={cn(
-      "fixed inset-0 z-50 bg-black/80  data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
+      "fixed inset-0 bg-black/40 dark:bg-black/80",
+      DIALOG_OVERLAY_Z,
       className
     )}
     {...props}
   />
-))
-DialogOverlay.displayName = DialogPrimitive.Overlay.displayName
+));
+DialogOverlay.displayName = DialogPrimitive.Overlay.displayName;
 
 interface DialogContentProps
-  extends React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content> {
-  overlayClassName?: string
+  extends ComponentPropsWithoutRef<typeof DialogPrimitive.Content> {
+  size?: "sm" | "lg";
+  container?: HTMLElement | null;
+  overlayClassName?: string;
 }
 
-const DialogContent = React.forwardRef<
-  React.ElementRef<typeof DialogPrimitive.Content>,
-  DialogContentProps
->(({ className, children, overlayClassName, ...props }, ref) => (
-  <DialogPortal>
-    <DialogOverlay className={overlayClassName} />
-    <DialogPrimitive.Content
+const DialogContent = forwardRef<HTMLDivElement, DialogContentProps>(
+  (
+    {
+      className,
+      children,
+      size = "sm",
+      container,
+      overlayClassName,
+      ...props
+    },
+    ref
+  ) => {
+    const XIcon = useIcon("x");
+    const open = useContext(DialogOpenContext);
+    const shape = useShape();
+    const substrate = useSurface();
+    const dialogLevel = Math.min(substrate + DIALOG_OFFSET, 8);
+    const compact = useSize().variant === "compact";
+    const [mounted, setMounted] = useState(false);
+
+    useEffect(() => {
+      if (open) setMounted(true);
+    }, [open]);
+
+    useEffect(() => {
+      if (open) return;
+      const id = setTimeout(() => setMounted(false), exitFallbackMs(spring.slow));
+      return () => clearTimeout(id);
+    }, [open]);
+
+    if (!mounted) return null;
+
+    return (
+      <DialogPrimitive.Portal forceMount container={container ?? undefined}>
+        <DialogPrimitive.Overlay asChild forceMount>
+          <motion.div
+            className={cn(
+              container ? "absolute" : "fixed",
+              "inset-0 bg-black/40 dark:bg-black/80",
+              DIALOG_OVERLAY_Z,
+              overlayClassName
+            )}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: open ? 1 : 0 }}
+            transition={open ? spring.slow : spring.slow.exit}
+          />
+        </DialogPrimitive.Overlay>
+
+        <DialogPrimitive.Content ref={ref} asChild forceMount {...props}>
+          <motion.div
+            className={cn(
+              container ? "absolute" : "fixed",
+              "left-1/2 top-1/2 w-[calc(100%-2rem)]",
+              DIALOG_CONTENT_Z,
+              surfaceClasses(dialogLevel),
+              "p-6 focus:outline-none",
+              size === "sm" && (compact ? "max-w-[360px]" : "max-w-[400px]"),
+              size === "lg" && (compact ? "max-w-[480px]" : "max-w-[540px]"),
+              shape.container,
+              className
+            )}
+            initial={{ opacity: 0, scale: 0.97, x: "-50%", y: "-50%" }}
+            animate={{
+              opacity: open ? 1 : 0,
+              scale: open ? 1 : 0.97,
+              x: "-50%",
+              y: "-50%",
+            }}
+            transition={open ? spring.slow : spring.slow.exit}
+            onAnimationComplete={() => {
+              if (!open) setMounted(false);
+            }}
+          >
+            <SurfaceProvider value={dialogLevel}>
+              {children}
+              <DialogPrimitive.Close asChild>
+                <FluidButton
+                  variant="ghost"
+                  size="icon-sm"
+                  className="absolute right-3 top-3"
+                >
+                  <XIcon />
+                  <span className="sr-only">Close</span>
+                </FluidButton>
+              </DialogPrimitive.Close>
+            </SurfaceProvider>
+          </motion.div>
+        </DialogPrimitive.Content>
+      </DialogPrimitive.Portal>
+    );
+  }
+);
+DialogContent.displayName = "DialogContent";
+
+function DialogHeader({ className, ...props }: HTMLAttributes<HTMLDivElement>) {
+  return <div className={cn("mb-4 flex flex-col gap-1.5", className)} {...props} />;
+}
+
+function DialogFooter({ className, ...props }: HTMLAttributes<HTMLDivElement>) {
+  return <div className={cn("mt-6 flex justify-end gap-2", className)} {...props} />;
+}
+
+const DialogTitle = forwardRef<
+  HTMLHeadingElement,
+  ComponentPropsWithoutRef<typeof DialogPrimitive.Title>
+>(({ className, style, ...props }, ref) => {
+  const compact = useSizeVariant() === "compact";
+  return (
+    <DialogPrimitive.Title
       ref={ref}
       className={cn(
-        "fixed left-[50%] top-[50%] z-50 grid w-full max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 border bg-background p-6 shadow-lg duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%] data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%] sm:rounded-lg",
+        compact ? "text-[15px]" : "text-[16px]",
+        "leading-tight text-foreground",
+        className
+      )}
+      style={{ fontVariationSettings: "'wght' 700", ...style }}
+      {...props}
+    />
+  );
+});
+DialogTitle.displayName = "DialogTitle";
+
+const DialogDescription = forwardRef<
+  HTMLParagraphElement,
+  ComponentPropsWithoutRef<typeof DialogPrimitive.Description>
+>(({ className, ...props }, ref) => {
+  const compact = useSizeVariant() === "compact";
+  return (
+    <DialogPrimitive.Description
+      ref={ref}
+      className={cn(
+        compact ? "text-[12px]" : "text-[13px]",
+        "text-muted-foreground",
         className
       )}
       {...props}
-    >
-      {children}
-      <DialogPrimitive.Close className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-muted-foreground">
-        <X className="h-4 w-4" />
-        <span className="sr-only">Close</span>
-      </DialogPrimitive.Close>
-    </DialogPrimitive.Content>
-  </DialogPortal>
-))
-DialogContent.displayName = DialogPrimitive.Content.displayName
-
-const DialogHeader = ({
-  className,
-  ...props
-}: React.HTMLAttributes<HTMLDivElement>) => (
-  <div
-    className={cn(
-      "flex flex-col space-y-1.5 text-center sm:text-left",
-      className
-    )}
-    {...props}
-  />
-)
-DialogHeader.displayName = "DialogHeader"
-
-const DialogFooter = ({
-  className,
-  ...props
-}: React.HTMLAttributes<HTMLDivElement>) => (
-  <div
-    className={cn(
-      "flex flex-col-reverse sm:flex-row sm:justify-end sm:space-x-2",
-      className
-    )}
-    {...props}
-  />
-)
-DialogFooter.displayName = "DialogFooter"
-
-const DialogTitle = React.forwardRef<
-  React.ElementRef<typeof DialogPrimitive.Title>,
-  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Title>
->(({ className, ...props }, ref) => (
-  <DialogPrimitive.Title
-    ref={ref}
-    className={cn(
-      "text-lg font-semibold leading-none tracking-tight",
-      className
-    )}
-    {...props}
-  />
-))
-DialogTitle.displayName = DialogPrimitive.Title.displayName
-
-const DialogDescription = React.forwardRef<
-  React.ElementRef<typeof DialogPrimitive.Description>,
-  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Description>
->(({ className, ...props }, ref) => (
-  <DialogPrimitive.Description
-    ref={ref}
-    className={cn("text-sm text-muted-foreground", className)}
-    {...props}
-  />
-))
-DialogDescription.displayName = DialogPrimitive.Description.displayName
+    />
+  );
+});
+DialogDescription.displayName = "DialogDescription";
 
 export {
   Dialog,
@@ -124,4 +230,4 @@ export {
   DialogFooter,
   DialogTitle,
   DialogDescription,
-}
+};

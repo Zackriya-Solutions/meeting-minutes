@@ -3,7 +3,7 @@
 import './globals.css'
 import '@/vendor/deslop/deslop-primitives.css'
 import { LanguageProvider } from '@/lib/i18n'
-import { SidebarProvider } from '@/components/Sidebar/SidebarProvider'
+import { SidebarProvider, useSidebar } from '@/components/Sidebar/SidebarProvider'
 import { AppSidebar } from '@/components/AppSidebar'
 import { SidebarInset, SidebarProvider as ShadcnSidebarProvider } from '@/components/ui/sidebar'
 import MainContent from '@/components/MainContent'
@@ -33,6 +33,8 @@ import { ManagedDefaultsMigrationDialog } from '@/components/ManagedDefaultsMigr
 import { AutoMeetingDetection } from '@/components/AutoMeetingDetection'
 import { ThemeProvider, useTheme } from 'next-themes'
 import { GlobalRecordingPill } from '@/components/GlobalRecordingPill'
+import { usePathname } from 'next/navigation'
+import { useBaseWindowConstraint } from '@/hooks/useRouteDrawerWindowConstraint'
 
 function NativeWindowThemeSync() {
   const { resolvedTheme } = useTheme()
@@ -45,6 +47,17 @@ function NativeWindowThemeSync() {
     })
   }, [resolvedTheme])
 
+  return null
+}
+
+function NativeWindowLayoutConstraint() {
+  const pathname = usePathname()
+  const { sidebarWidth } = useSidebar()
+  const hasRouteDrawer = pathname === '/recording'
+    || pathname === '/chat'
+    || pathname.startsWith('/meeting-details')
+
+  useBaseWindowConstraint(sidebarWidth, !hasRouteDrawer)
   return null
 }
 
@@ -132,6 +145,25 @@ function ConditionalImportDialog({
 // export { metadata } from './metadata'
 
 export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode
+}) {
+  const pathname = usePathname()
+  const isShowcase = pathname === '/showcase' || pathname === '/showcase-preview'
+
+  if (isShowcase) {
+    return (
+      <html lang="ru" suppressHydrationWarning>
+        <body>{children}</body>
+      </html>
+    )
+  }
+
+  return <ProductRuntime>{children}</ProductRuntime>
+}
+
+function ProductRuntime({
   children,
 }: {
   children: React.ReactNode
@@ -309,6 +341,7 @@ export default function RootLayout({
                       <OnboardingProvider>
                         <UpdateCheckProvider>
                           <SidebarProvider>
+                            <NativeWindowLayoutConstraint />
                             <ImportDialogProvider onOpen={handleOpenImportDialog}>
                               <OnboardingGate>
                               <ShadcnSidebarProvider defaultOpen>

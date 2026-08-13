@@ -1,4 +1,4 @@
-import type { Transcript } from "@/types";
+import { isUnresolvedSpeakerLabel, type Transcript } from "@/types";
 import { summaryToMarkdown } from "@/lib/summaryToMarkdown";
 
 type AppLanguage = "ru" | "en";
@@ -112,7 +112,9 @@ function extractMeetingTopics(summary: unknown, transcripts: Transcript[]): stri
   const summaryLines = markdown
     .split(/\n+/)
     .map(cleanText)
-    .filter((line) => line.length >= 8 && !GENERIC_SECTIONS.has(line.toLocaleLowerCase()));
+    .filter((line) => line.length >= 8
+      && !GENERIC_SECTIONS.has(line.toLocaleLowerCase())
+      && !isUnresolvedSpeakerLabel(line));
 
   if (summaryLines.length > 0) return uniqueTopics(summaryLines, 48).slice(0, 3);
 

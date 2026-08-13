@@ -40,6 +40,7 @@ export default function RecordingPage() {
   const segments = useMemo(() => transcripts.map((transcript) => ({
     id: transcript.id,
     timestamp: transcript.audio_start_time ?? 0,
+    recognizedAt: transcript.timestamp,
     endTime: transcript.audio_end_time,
     text: transcript.text,
     confidence: transcript.confidence,

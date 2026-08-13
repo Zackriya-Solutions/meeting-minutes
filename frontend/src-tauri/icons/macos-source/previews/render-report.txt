@@ -1,8 +1,7 @@
-tool=/Users/manaer/Downloads/Xcode-beta.app/Contents/Developer/usr/bin/ictool
+tool=Xcode-beta.app/Contents/Developer/usr/bin/ictool
 xcode=Xcode 27.0 Build version 27A5194q
 icon=frontend/src-tauri/icons/macos-source/build/MementoMac.icon
 status=incompatible-cli
-2026-08-04 13:09:03.243 ibtoold[2686:7361511] CoreSimulatorService connection became invalid.  Simulator services will no longer be available.
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">

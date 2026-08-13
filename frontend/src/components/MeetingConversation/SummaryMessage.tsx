@@ -1,25 +1,38 @@
 "use client";
 
-import { type ComponentProps, useEffect, useMemo, useState } from 'react';
-import { Calligraph } from 'calligraph';
+import {
+  type ComponentProps,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { SummaryPanel } from '@/components/MeetingDetails/SummaryPanel';
-import { Copy, RefreshCw } from '@/components/deslop-icons';
+import { SpeakerRenameDialog } from '@/components/MeetingDetails/SpeakerRenameDialog';
+import { RefreshCw } from '@/components/deslop-icons';
 import { ChatMarkdown } from '@/components/chat/ChatMarkdown';
 import { Button as FluidButton } from '@/components/ui/fluid-button';
 import { FluidSpinner } from '@/components/ui/fluid-spinner';
-import { Progress } from '@/components/ui/progress';
-import MiniAppMarkdown from '@/vendor/deslop/mini-app/components/Markdown';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import {
-  extractSummaryAgreementRows,
-  extractSummaryParticipants,
-  extractSummaryTiming,
+  extractSummaryAgreements,
   summaryToMarkdown,
   splitSummaryLead,
 } from '@/lib/summaryToMarkdown';
+import {
+  linkAgreementSpeakers,
+  normalizedSpeakerName,
+  roleForSpeaker,
+} from '@/lib/summarySpeakerLinks';
 import { useT } from '@/lib/i18n';
-import { localizeSpeakerLabel, type SpeakerInfo } from '@/types';
-
-import styles from './SummaryMessage.module.css';
+import { isUnresolvedSpeakerLabel, type SpeakerInfo } from '@/types';
+import type { AnalyticsRoleRow } from '@/hooks/meeting-details/useMeetingAnalyticsSections';
+import Cell, { CellText } from '@/vendor/deslop/mini-app/Cell';
+import CellStack from '@/vendor/deslop/mini-app/components/CellStack';
+import InitialsAvatar from '@/vendor/deslop/mini-app/components/InitialsAvatar';
+import MotionProvider from '@/vendor/deslop/mini-app/components/MotionProvider';
 
 /**
  * Summary for the meeting conversation (variant 3a): flows as content in the feed —
@@ -31,70 +44,94 @@ type SummaryPanelProps = ComponentProps<typeof SummaryPanel>;
 
 interface SummaryMessageProps {
   summaryPanelProps: SummaryPanelProps;
-  actualDurationSeconds?: number | null;
-  speakers?: SpeakerInfo[];
+  speakers: SpeakerInfo[];
+  roles?: AnalyticsRoleRow[];
+  onRenameSpeaker?: (speakerId: number, displayName: string) => Promise<void> | void;
 }
 
 type ActionIconProps = { size?: number; strokeWidth?: number; className?: string };
 const RegenerateIcon = ({ size = 16, strokeWidth = 1.5, className }: ActionIconProps) => (
   <RefreshCw size={size} strokeWidth={strokeWidth} className={className} />
 );
-const CopyIcon = ({ size = 16, strokeWidth = 1.5, className }: ActionIconProps) => (
-  <Copy size={size} strokeWidth={strokeWidth} className={className} />
-);
 
-function formatDuration(seconds: number): string {
-  const roundedMinutes = Math.max(1, Math.round(seconds / 60));
-  if (roundedMinutes < 60) return `${roundedMinutes} мин`;
-
-  const hours = Math.floor(roundedMinutes / 60);
-  const minutes = roundedMinutes % 60;
-  return minutes > 0 ? `${hours} ч ${minutes} мин` : `${hours} ч`;
+function ParticipantAvatar({ userId, name }: { userId: number; name: string }) {
+  const firstWord = name.trim().split(/\s+/, 1)[0] ?? name;
+  return <InitialsAvatar size={32} userId={userId} name={firstWord} />;
 }
 
-function normalizedLabel(value: string): string {
-  return value.trim().toLocaleLowerCase('ru-RU').replace(/ё/g, 'е');
-}
-
-function markdownTableCell(value: string): string {
-  return value.replace(/\|/g, '\\|').replace(/\r?\n/g, '<br />');
-}
-
-function engagementPercentages(speakers: SpeakerInfo[]): Map<number, number> {
-  const totalDuration = speakers.reduce(
-    (sum, speaker) => sum + Math.max(0, speaker.speech_duration_seconds || 0),
-    0,
-  );
-  const totalTurns = speakers.reduce((sum, speaker) => sum + Math.max(0, speaker.segment_count), 0);
-  const weighted = speakers.map((speaker) => {
-    const durationShare = totalDuration > 0
-      ? Math.max(0, speaker.speech_duration_seconds || 0) / totalDuration
-      : 0;
-    const turnShare = totalTurns > 0 ? Math.max(0, speaker.segment_count) / totalTurns : 0;
-    return { id: speaker.id, score: durationShare * 0.7 + turnShare * 0.3 };
-  });
-  const scoreTotal = weighted.reduce((sum, item) => sum + item.score, 0);
-  if (scoreTotal <= 0) return new Map();
-
-  const apportioned = weighted.map((item, index) => {
-    const exact = (item.score / scoreTotal) * 100;
-    return { ...item, index, percent: Math.floor(exact), remainder: exact - Math.floor(exact) };
-  });
-  let unassigned = 100 - apportioned.reduce((sum, item) => sum + item.percent, 0);
-  [...apportioned]
-    .sort((left, right) => right.remainder - left.remainder || left.index - right.index)
-    .forEach((item) => {
-      if (unassigned <= 0) return;
-      apportioned[item.index].percent += 1;
-      unassigned -= 1;
-    });
-
-  return new Map(apportioned.map((item) => [item.id, item.percent]));
-}
-
-export function SummaryMessage({ summaryPanelProps: p, actualDurationSeconds, speakers = [] }: SummaryMessageProps) {
+function RenameHint({ children }: { children: ReactNode }) {
   const t = useT();
-  const [animateEngagement, setAnimateEngagement] = useState(false);
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="speaker-rename-underline">
+          {children}
+        </span>
+      </TooltipTrigger>
+      <TooltipContent>{t('Rename')}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+function compactParticipantPreview(participants: readonly string[]): string {
+  const visible = participants.slice(0, 2).join(', ');
+  const remaining = participants.length - 2;
+  return remaining > 0
+    ? `${visible}\nи ещё ${remaining}`
+    : visible;
+}
+
+function ParticipantPreview({ participants }: { participants: readonly string[] }) {
+  const containerRef = useRef<HTMLSpanElement>(null);
+  const measureRef = useRef<HTMLSpanElement>(null);
+  const [allFit, setAllFit] = useState(false);
+  const fullText = participants.join(', ');
+
+  const measure = useCallback(() => {
+    const container = containerRef.current;
+    const fullLine = measureRef.current;
+    if (!container || !fullLine) return;
+    setAllFit(fullLine.scrollWidth <= container.clientWidth + 1);
+  }, [fullText]);
+
+  useEffect(() => {
+    measure();
+    const container = containerRef.current;
+    if (!container || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [measure]);
+
+  return (
+    <span ref={containerRef} className="relative block min-w-0 w-full whitespace-pre-line">
+      <span
+        ref={measureRef}
+        aria-hidden="true"
+        className="pointer-events-none invisible absolute left-0 top-0 whitespace-nowrap"
+      >
+        {fullText}
+      </span>
+      <span>{allFit ? fullText : compactParticipantPreview(participants)}</span>
+    </span>
+  );
+}
+
+const NON_NAMES = new Set(['ну', 'вот', 'сказали']);
+
+function isResolvedParticipantName(name: string): boolean {
+  const normalized = name.trim().toLocaleLowerCase('ru-RU');
+  return !isUnresolvedSpeakerLabel(name) && !NON_NAMES.has(normalized);
+}
+
+export function SummaryMessage({
+  summaryPanelProps: p,
+  speakers,
+  roles = [],
+  onRenameSpeaker,
+}: SummaryMessageProps) {
+  const t = useT();
+  const [renamingSpeaker, setRenamingSpeaker] = useState<SpeakerInfo | null>(null);
 
   const isGenerating =
     p.summaryStatus === 'processing' || p.summaryStatus === 'summarizing' || p.summaryStatus === 'regenerating';
@@ -102,65 +139,34 @@ export function SummaryMessage({ summaryPanelProps: p, actualDurationSeconds, sp
   const failureMessage = isGenerating ? null : (p.summaryError || p.summaryLoadError);
 
   const content = useMemo(() => {
-    if (!hasSummary) return { participants: '', lead: '', timing: '', agreements: [] };
+    if (!hasSummary) return { lead: '', agreements: '' };
     const markdown = summaryToMarkdown(p.aiSummary);
     return {
-      participants: extractSummaryParticipants(
-        markdown,
-        (label) => localizeSpeakerLabel(label, t) ?? label,
-      ),
       lead: splitSummaryLead(markdown).lead,
-      timing: extractSummaryTiming(markdown),
-      agreements: extractSummaryAgreementRows(markdown),
+      agreements: extractSummaryAgreements(markdown),
     };
-  }, [hasSummary, p.aiSummary, t]);
+  }, [hasSummary, p.aiSummary]);
 
   const participants = useMemo(
-    () => content.participants
-      .split('\n')
-      .map((line) => line.replace(/^\s*[-+*]\s+/, '').trim())
-      .filter(Boolean),
-    [content.participants],
+    () => speakers
+      .map((speaker) => speaker.display_name.trim())
+      .filter(isResolvedParticipantName)
+      .filter((name, index, names) => names.indexOf(name) === index),
+    [speakers],
   );
-  const participantAnimationKey = participants.join('\u0000');
-  const agreementsTable = useMemo(() => [
-    `| ${t('Who')} | ${t('What')} | ${t('When')} |`,
-    '| --- | --- | --- |',
-    ...content.agreements.map(({ who, what, when }) =>
-      `| ${markdownTableCell(who)} | ${markdownTableCell(what)} | ${markdownTableCell(when)} |`),
-  ].join('\n'), [content.agreements, t]);
-
-  useEffect(() => {
-    if (participants.length === 0) return;
-
-    setAnimateEngagement(false);
-    const frame = window.requestAnimationFrame(() => setAnimateEngagement(true));
-    return () => window.cancelAnimationFrame(frame);
-  }, [participantAnimationKey, participants.length]);
-
-  const engagementByLabel = useMemo(() => {
-    const percentages = engagementPercentages(speakers);
-    const byLabel = new Map<string, number>();
-    speakers.forEach((speaker) => {
-      const label = normalizedLabel(
-        localizeSpeakerLabel(speaker.is_self ? 'You' : speaker.display_name, t) ?? speaker.display_name,
-      );
-      const percent = percentages.get(speaker.id);
-      if (percent != null) byLabel.set(label, (byLabel.get(label) ?? 0) + percent);
-    });
-    return byLabel;
-  }, [speakers, t]);
-
-  const participantRows = useMemo(() => participants
-    .map((participant, index) => ({
-      participant,
-      index,
-      engagement: engagementByLabel.get(normalizedLabel(participant)),
-    }))
-    .sort((left, right) =>
-      (right.engagement ?? -1) - (left.engagement ?? -1) || left.index - right.index),
-  [engagementByLabel, participants]);
-
+  const participantRoles = useMemo(() => new Map(
+    roles.map((role) => [normalizedSpeakerName(role.speaker), role.role]),
+  ), [roles]);
+  const roleFor = (participant: string) => {
+    const speaker = speakers.find(
+      ({ display_name }) => normalizedSpeakerName(display_name) === normalizedSpeakerName(participant),
+    );
+    return speaker ? roleForSpeaker(speaker, participantRoles) : undefined;
+  };
+  const linkedAgreements = useMemo(
+    () => linkAgreementSpeakers(content.agreements, speakers, t),
+    [content.agreements, speakers, t],
+  );
   return (
     <div>
       {isGenerating ? (
@@ -170,90 +176,91 @@ export function SummaryMessage({ summaryPanelProps: p, actualDurationSeconds, sp
         </div>
       ) : hasSummary ? (
         <div className="flex flex-col gap-6">
+          {participants.length > 1 ? (
+            <section className="apple mb-5" data-mini-app>
+              <h2 className="text-sm font-normal leading-5 text-[var(--primary-50)]">{t('Participants')}</h2>
+              <div className="mt-2">
+                <MotionProvider strict={false}>
+                  <CellStack>
+                    <CellStack.Morph>
+                      <Cell
+                        type="button"
+                        start={<ParticipantAvatar userId={1} name={participants[1]} />}
+                      >
+                        <CellText
+                          title={(
+                            <ParticipantPreview participants={participants} />
+                          )}
+                        />
+                      </Cell>
+                      <Cell
+                        type="button"
+                        start={<ParticipantAvatar userId={0} name={participants[0]} />}
+                      >
+                        <CellText
+                          title={<RenameHint>{participants[0]}</RenameHint>}
+                          description={roleFor(participants[0])}
+                        />
+                      </Cell>
+                    </CellStack.Morph>
+                    {participants.slice(1).map((participant, index) => (
+                      <Cell
+                        key={participant}
+                        type="button"
+                        start={<ParticipantAvatar userId={index + 1} name={participant} />}
+                      >
+                        <CellText
+                          title={<RenameHint>{participant}</RenameHint>}
+                          description={roleFor(participant)}
+                        />
+                      </Cell>
+                    ))}
+                  </CellStack>
+                </MotionProvider>
+              </div>
+            </section>
+          ) : null}
           {content.lead ? (
             <section>
               <h2 className="text-sm font-normal leading-5 text-[var(--primary-50)]">{t('About the meeting')}</h2>
               <ChatMarkdown content={content.lead} className="mm-summary-plain mt-2" />
             </section>
           ) : null}
-          {participants.length > 0 ? (
-            <section>
-              <h2 className="text-sm font-normal leading-5 text-[var(--primary-50)]">
-                {t(participants.length === 1 ? 'Participants' : 'Participant engagement')}
-              </h2>
-              <div className="mt-3 flex flex-col gap-3 text-[length:var(--ui-body-font-size)] leading-[21px] text-foreground">
-                {participantRows.map(({ participant, engagement }) => {
-                  return (
-                    <div key={participant}>
-                      <div className="flex min-w-0 items-center justify-between gap-2">
-                        <span className="min-w-0 truncate">{participant}</span>
-                        {participants.length > 1 && engagement != null && (
-                          <span className="mm-numeric inline-flex min-w-[4ch] shrink-0 justify-end text-[var(--primary-40)]">
-                            <Calligraph variant="number" animation="bouncy">
-                              {animateEngagement ? engagement : 0}
-                            </Calligraph>
-                            <span>%</span>
-                          </span>
-                        )}
-                      </div>
-                      {participants.length > 1 ? (
-                        <Progress
-                          value={animateEngagement ? (engagement ?? 0) : 0}
-                          aria-label={`${participant}: ${engagement ?? 0}%`}
-                          className="mt-1 gap-0"
-                        />
-                      ) : null}
-                    </div>
-                  );
-                })}
-              </div>
-            </section>
-          ) : null}
-          <section>
-            <h2 className="text-sm font-normal leading-5 text-[var(--primary-50)]">{t('Timing')}</h2>
-            <ChatMarkdown
-              content={[
-                actualDurationSeconds && actualDurationSeconds > 0
-                  ? `- ${t('Actual duration')}: ${formatDuration(actualDurationSeconds)}`
-                  : '',
-                content.timing || `- ${t('Planned timing was not specified.')}`,
-              ].filter(Boolean).join('\n')}
-              className="mm-summary-list mt-2"
-            />
-          </section>
-          {content.agreements.length > 0 ? (
+          {content.agreements ? (
             <section>
               <h2 className="text-sm font-normal leading-5 text-[var(--primary-50)]">{t('Agreements')}</h2>
-              <div
-                className={`mt-2 ${styles.agreementsTable}`}
-              >
-                <MiniAppMarkdown>{agreementsTable}</MiniAppMarkdown>
-              </div>
+              <ChatMarkdown
+                content={linkedAgreements}
+                className="mm-summary-list mm-summary-plain mt-2"
+                components={{
+                  a: ({ href, children }) => {
+                    const speakerIdMatch = href?.match(/^#speaker-(\d+)$/u);
+                    if (!speakerIdMatch || !onRenameSpeaker) {
+                      return <a href={href}>{children}</a>;
+                    }
+                    const speaker = speakers.find(({ id }) => id === Number(speakerIdMatch[1]));
+                    if (!speaker) return <>{children}</>;
+
+                    return (
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <button
+                            type="button"
+                            className="speaker-rename-underline text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary-20)]"
+                            onClick={() => setRenamingSpeaker(speaker)}
+                          >
+                            {children}
+                          </button>
+                        </TooltipTrigger>
+                        <TooltipContent>{t('Rename')}</TooltipContent>
+                      </Tooltip>
+                    );
+                  },
+                }}
+              />
             </section>
           ) : null}
 
-          <div className="flex gap-1">
-            <FluidButton
-              type="button"
-              variant="secondary"
-              size="sm"
-              leadingIcon={RegenerateIcon}
-              className="text-[var(--primary-60)]"
-              onClick={() => void p.onRegenerateSummary()}
-            >
-              {t('Regenerate')}
-            </FluidButton>
-            <FluidButton
-              type="button"
-              variant="secondary"
-              size="sm"
-              leadingIcon={CopyIcon}
-              className="text-[var(--primary-60)]"
-              onClick={() => void p.onCopySummary()}
-            >
-              {t('Copy')}
-            </FluidButton>
-          </div>
         </div>
       ) : p.summaryLoadStatus === 'loading' ? (
         <div className="flex items-center gap-2 py-4 text-sm text-muted-foreground">
@@ -280,6 +287,15 @@ export function SummaryMessage({ summaryPanelProps: p, actualDurationSeconds, sp
 
       {p.summaryError && !isGenerating && hasSummary && (
         <p className="mt-2 text-xs text-destructive">{p.summaryError}</p>
+      )}
+
+      {onRenameSpeaker && renamingSpeaker && (
+        <SpeakerRenameDialog
+          open={true}
+          currentName={renamingSpeaker.display_name}
+          onOpenChange={(open) => { if (!open) setRenamingSpeaker(null); }}
+          onRename={(name) => onRenameSpeaker(renamingSpeaker.id, name)}
+        />
       )}
     </div>
   );

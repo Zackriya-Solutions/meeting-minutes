@@ -60,9 +60,9 @@ const INITIAL_PACK: ModelPackState = {
   speakersReady: false,
 };
 
-interface OnboardingContextType {
+export interface OnboardingContextType {
   currentStep: number;
-  /** 3 with the macOS permissions step, 2 without it. */
+  /** Product, permissions, ready. */
   totalSteps: number;
   isMac: boolean;
   /** False until the saved status has been read — the gate must not flash. */
@@ -84,7 +84,7 @@ interface OnboardingContextType {
   completeOnboarding: () => Promise<string | null>;
 }
 
-const OnboardingContext = createContext<OnboardingContextType | undefined>(undefined);
+export const OnboardingContext = createContext<OnboardingContextType | undefined>(undefined);
 
 export function OnboardingProvider({ children }: { children: React.ReactNode }) {
   const [currentStep, setCurrentStep] = useState(1);
@@ -102,7 +102,7 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
   });
   const [permissionsSkipped, setPermissionsSkipped] = useState(false);
 
-  const totalSteps = isMac ? 3 : 2;
+  const totalSteps = 3;
 
   // Byte counters, kept outside React state so progress events can be merged without
   // depending on the previous render's numbers.

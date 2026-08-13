@@ -13,15 +13,11 @@ import {
   useState,
 } from "react"
 import { useRouter } from "next/navigation"
-import { LogicalSize } from "@tauri-apps/api/dpi"
-import { isTauri } from "@tauri-apps/api/core"
-import { getCurrentWindow } from "@tauri-apps/api/window"
 import {
   HOME_SCROLL_POSITION_KEY,
   HomeMeetingList,
 } from "@/app/_components/HomeMeetingList"
 import {
-  SIDEBAR_MAX_WIDTH,
   useSidebar,
 } from "@/components/Sidebar/SidebarProvider"
 import {
@@ -34,7 +30,15 @@ import {
   DrawerTitle,
 } from "@/components/ui/drawer"
 import { MeetingDrawerProvider } from "@/contexts/MeetingDrawerContext"
-import { useRouteDrawerLifecycle } from "@/hooks/useRouteDrawerLifecycle"
+import {
+  useRouteDrawerLifecycle,
+  waitForRouteDrawerBackgroundMotion,
+} from "@/hooks/useRouteDrawerLifecycle"
+import {
+  MAIN_CONTENT_MIN_WIDTH,
+  ROUTE_DRAWER_LAYOUT_GAP,
+  useRouteDrawerWindowConstraint,
+} from "@/hooks/useRouteDrawerWindowConstraint"
 import { useT } from "@/lib/i18n"
 
 const DRAWER_WIDTH_STORAGE_KEY = "memento.meeting-drawer-width"
@@ -42,17 +46,14 @@ const DRAWER_DEFAULT_WIDTH = 450
 const DRAWER_MAX_WIDTH = 700
 const DRAWER_MIN_WIDTH = 450
 const DRAWER_INSET = 12
-const LAYOUT_GAP = 24
-const MAIN_CONTENT_WIDTH = 600
-const BASE_WINDOW_MIN_WIDTH = SIDEBAR_MAX_WIDTH + MAIN_CONTENT_WIDTH + LAYOUT_GAP * 2
 
 function clampDrawerWidth(width: number, sidebarWidth: number) {
   const viewportMaximum = Math.max(
     DRAWER_MIN_WIDTH,
     window.innerWidth
       - sidebarWidth
-      - MAIN_CONTENT_WIDTH
-      - LAYOUT_GAP * 2
+      - MAIN_CONTENT_MIN_WIDTH
+      - ROUTE_DRAWER_LAYOUT_GAP * 2
       - DRAWER_INSET
   )
   return Math.min(DRAWER_MAX_WIDTH, viewportMaximum, Math.max(DRAWER_MIN_WIDTH, width))
@@ -66,6 +67,8 @@ export function MeetingDrawerShell({ children }: { children: ReactNode }) {
   const resizeStartRef = useRef<{ x: number; width: number } | null>(null)
   const widthRef = useRef(DRAWER_DEFAULT_WIDTH)
   const [drawerWidth, setDrawerWidth] = useState(DRAWER_DEFAULT_WIDTH)
+
+  useRouteDrawerWindowConstraint(sidebarWidth, drawerWidth)
 
   const updateDrawerWidth = useCallback((nextWidth: number) => {
     const clamped = clampDrawerWidth(nextWidth, sidebarWidth)
@@ -98,56 +101,8 @@ export function MeetingDrawerShell({ children }: { children: ReactNode }) {
     }
   }, [updateDrawerWidth])
 
-  useEffect(() => {
-    if (!isTauri()) return
-
-    let cancelled = false
-    const minimumWidth = Math.ceil(
-      sidebarWidth
-        + LAYOUT_GAP
-        + MAIN_CONTENT_WIDTH
-        + LAYOUT_GAP
-        + drawerWidth
-        + DRAWER_INSET
-    )
-
-    const applyWindowConstraint = async () => {
-      const appWindow = getCurrentWindow()
-      await appWindow.setMinSize(new LogicalSize(minimumWidth, 0))
-
-      const [physicalSize, scaleFactor] = await Promise.all([
-        appWindow.innerSize(),
-        appWindow.scaleFactor(),
-      ])
-      const logicalSize = physicalSize.toLogical(scaleFactor)
-
-      if (!cancelled && logicalSize.width < minimumWidth) {
-        await appWindow.setSize(new LogicalSize(minimumWidth, logicalSize.height))
-      }
-    }
-
-    applyWindowConstraint().catch((error) => {
-      console.error("Failed to update window minimum width", error)
-    })
-
-    return () => {
-      cancelled = true
-    }
-  }, [drawerWidth, sidebarWidth])
-
-  useEffect(() => {
-    if (!isTauri()) return
-
-    return () => {
-      getCurrentWindow()
-        .setMinSize(new LogicalSize(BASE_WINDOW_MIN_WIDTH, 0))
-        .catch((error) => console.error("Failed to restore window minimum width", error))
-    }
-  }, [])
-
-  const navigateHome = useCallback(() => {
-    // Let the background width commit before replacing the route so the home
-    // screen does not paint once at the drawer width and once at full width.
+  const navigateHome = useCallback(async () => {
+    await waitForRouteDrawerBackgroundMotion(backgroundRef.current)
     window.requestAnimationFrame(() => {
       router.replace("/", { scroll: false })
     })
@@ -213,6 +168,7 @@ export function MeetingDrawerShell({ children }: { children: ReactNode }) {
         <DrawerIndent
           ref={backgroundRef}
           data-home-scroll-container
+          data-route-drawer-open={open ? "" : undefined}
           className="route-drawer-background h-screen overflow-x-hidden overflow-y-auto"
           style={{
             "--route-drawer-reserved-width": `${drawerWidth + DRAWER_INSET}px`,

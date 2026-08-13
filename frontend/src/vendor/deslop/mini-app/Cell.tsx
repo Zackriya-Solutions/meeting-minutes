@@ -18,7 +18,7 @@ interface CellTextProps {
  * The source package is not currently published, so Memento vendors the
  * component beside the Deslop primitives it already consumes.
  */
-export const Cell = forwardRef<HTMLButtonElement, CellProps>(function Cell(
+const CellRoot = forwardRef<HTMLButtonElement, CellProps>(function Cell(
   { start, end, children, className = '', ...props },
   ref,
 ) {
@@ -41,3 +41,6 @@ export function CellText({ title, description, bold = false }: CellTextProps) {
     </span>
   );
 }
+
+export const Cell = Object.assign(CellRoot, { Text: CellText });
+export default Cell;

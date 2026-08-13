@@ -38,6 +38,7 @@ export function useMeetingRefinement(
     onFinished?: () => Promise<void> | void,
 ): MeetingRefinement {
     const t = useT();
+    const toastId = meetingId ? `meeting-refinement:${meetingId}` : undefined;
     const [running, setRunning] = useState(false);
     const [stage, setStage] = useState<RefinementStage | null>(null);
     const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
@@ -66,6 +67,10 @@ export function useMeetingRefinement(
                 setRunning(true);
                 setStage(null);
                 setProgress(null);
+                toast.loading(t('Processing'), {
+                    id: toastId,
+                    duration: Infinity,
+                });
             }),
         );
 
@@ -81,6 +86,20 @@ export function useMeetingRefinement(
                         ? { done: event.payload.done, total: event.payload.total }
                         : null,
                 );
+                toast.loading(
+                    refinementLabel(
+                        true,
+                        event.payload.stage,
+                        event.payload.total > 0
+                            ? { done: event.payload.done, total: event.payload.total }
+                            : null,
+                        t,
+                    ),
+                    {
+                        id: toastId,
+                        duration: Infinity,
+                    },
+                );
             }),
         );
 
@@ -90,6 +109,7 @@ export function useMeetingRefinement(
                 setRunning(false);
                 setStage(null);
                 setProgress(null);
+                toast.success(t('Meeting processing complete'), { id: toastId });
                 await onFinishedRef.current?.();
             }),
         );
@@ -105,6 +125,7 @@ export function useMeetingRefinement(
                     event.payload.error
                         ? `${t('Reprocessing failed')}: ${event.payload.error}`
                         : t('Reprocessing failed'),
+                    { id: toastId },
                 );
             }),
         );
@@ -112,19 +133,26 @@ export function useMeetingRefinement(
         return () => {
             cancelled = true;
             unlisteners.forEach((un) => un());
+            if (toastId) toast.dismiss(toastId);
         };
-    }, [meetingId, t]);
+    }, [meetingId, t, toastId]);
 
     const rerun = useCallback(async () => {
         if (!meetingId) return;
         try {
             await invoke('rerun_meeting_refinement', { meetingId });
             setRunning(true);
-            toast.info(t('Reprocessing started. This takes a few minutes.'));
+            toast.loading(t('Processing'), {
+                id: toastId,
+                duration: Infinity,
+            });
         } catch (error) {
-            toast.error(typeof error === 'string' ? error : t('Reprocessing failed'));
+            toast.error(
+                typeof error === 'string' ? error : t('Reprocessing failed'),
+                { id: toastId },
+            );
         }
-    }, [meetingId, t]);
+    }, [meetingId, t, toastId]);
 
     const label = refinementLabel(running, stage, progress, t);
 

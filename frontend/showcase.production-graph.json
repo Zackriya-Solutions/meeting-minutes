@@ -1,0 +1,860 @@
+{
+  "root": ".",
+  "entry": "src/app/layout.tsx",
+  "nodes": [
+    "src/app/layout.tsx",
+    "src/components/AISummary/Block.tsx",
+    "src/components/AISummary/BlockNoteSummaryView.tsx",
+    "src/components/AISummary/Section.tsx",
+    "src/components/AISummary/index.tsx",
+    "src/components/About.tsx",
+    "src/components/AnalyticsConsentSwitch.tsx",
+    "src/components/AnalyticsDataModal.tsx",
+    "src/components/AnalyticsProvider.tsx",
+    "src/components/AppSidebar.tsx",
+    "src/components/AudioBackendSelector.tsx",
+    "src/components/AudioLevelMeter.tsx",
+    "src/components/AutoMeetingDetection.tsx",
+    "src/components/BetaSettings.tsx",
+    "src/components/BlockNoteEditor/BasicBlockNoteTest.tsx",
+    "src/components/BlockNoteEditor/Editor.tsx",
+    "src/components/BluetoothPlaybackWarning.tsx",
+    "src/components/BuiltInModelManager.tsx",
+    "src/components/CalendarSettings.tsx",
+    "src/components/ChunkProgressDisplay.tsx",
+    "src/components/ComplianceNotification.tsx",
+    "src/components/ConfidenceIndicator.tsx",
+    "src/components/ConfirmationModel/confirmation-modal.tsx",
+    "src/components/ConsoleToggle.tsx",
+    "src/components/CustomDialog.tsx",
+    "src/components/DatabaseImport/HomebrewDatabaseDetector.tsx",
+    "src/components/DatabaseImport/LegacyDatabaseImport.tsx",
+    "src/components/DeviceSelection.tsx",
+    "src/components/DiarizationModelManager.tsx",
+    "src/components/EditableTitle.tsx",
+    "src/components/EmbeddingModelSettings.tsx",
+    "src/components/EmptyStateSummary.tsx",
+    "src/components/GigaamModelManager.tsx",
+    "src/components/GlobalRecordingPill.tsx",
+    "src/components/GlobalSettingsButton.tsx",
+    "src/components/ImportAudio/ImportAudioDialog.tsx",
+    "src/components/ImportAudio/ImportDropOverlay.tsx",
+    "src/components/Info.tsx",
+    "src/components/KnowledgeReadinessCard.tsx",
+    "src/components/LanguagePickerPopover.tsx",
+    "src/components/LanguageSelection.tsx",
+    "src/components/Logo.tsx",
+    "src/components/MainContent/index.tsx",
+    "src/components/MainNav/index.tsx",
+    "src/components/ManagedDefaultsMigrationDialog.tsx",
+    "src/components/MeetingConversation/AnalyticsReportButton.tsx",
+    "src/components/MeetingConversation/AnalyticsReportDialog.tsx",
+    "src/components/MeetingConversation/MeetingComposer.tsx",
+    "src/components/MeetingConversation/MeetingConversation.tsx",
+    "src/components/MeetingConversation/MeetingOverflowMenu.tsx",
+    "src/components/MeetingConversation/SummaryMessage.tsx",
+    "src/components/MeetingConversation/TranscriptCard.tsx",
+    "src/components/MeetingConversation/TranscriptSearchDialog.tsx",
+    "src/components/MeetingConversation/analytics/AnalyticsBuildPrompt.tsx",
+    "src/components/MeetingConversation/analytics/MeetingDynamicsPanel.tsx",
+    "src/components/MeetingConversation/analytics/MeetingNumbersPanel.tsx",
+    "src/components/MeetingConversation/analytics/MeetingScoreSections.tsx",
+    "src/components/MeetingConversation/analytics/MeetingTimelinePanel.tsx",
+    "src/components/MeetingConversation/analytics/primitives.tsx",
+    "src/components/MeetingDetails/DeleteMeetingButton.tsx",
+    "src/components/MeetingDetails/DetectSpeakersButton.tsx",
+    "src/components/MeetingDetails/InterviewWorkflowPanel.tsx",
+    "src/components/MeetingDetails/LearningReviewPanel.tsx",
+    "src/components/MeetingDetails/MeetingAudioPlayer.tsx",
+    "src/components/MeetingDetails/MeetingContentWindowNotice.tsx",
+    "src/components/MeetingDetails/OneOnOneWorkflowPanel.tsx",
+    "src/components/MeetingDetails/RetranscribeDialog.tsx",
+    "src/components/MeetingDetails/SpeakerNameCandidatesButton.tsx",
+    "src/components/MeetingDetails/SpeakerRenameDialog.tsx",
+    "src/components/MeetingDetails/StandupWorkflowPanel.tsx",
+    "src/components/MeetingDetails/SummaryGeneratorButtonGroup.tsx",
+    "src/components/MeetingDetails/SummaryPanel.tsx",
+    "src/components/MeetingDetails/SummaryUpdaterButtonGroup.tsx",
+    "src/components/MeetingDetails/TranscriptButtonGroup.tsx",
+    "src/components/MeetingDetails/TranscriptPanel.tsx",
+    "src/components/MeetingDetectionBanner.tsx",
+    "src/components/MessageToast.tsx",
+    "src/components/ModelDownloadProgress.tsx",
+    "src/components/ModelSettingsModal.tsx",
+    "src/components/ParakeetModelManager.tsx",
+    "src/components/PermissionWarning.tsx",
+    "src/components/PreferenceSettings.tsx",
+    "src/components/PrivacySettings.tsx",
+    "src/components/RecordingControls.tsx",
+    "src/components/RecordingSettings.tsx",
+    "src/components/RecordingStatusBar.tsx",
+    "src/components/SettingTabs.tsx",
+    "src/components/Sidebar/SidebarProvider.tsx",
+    "src/components/SummaryLanguageSettings.tsx",
+    "src/components/TranscriptRecovery/TranscriptRecovery.tsx",
+    "src/components/TranscriptSettings.tsx",
+    "src/components/TranscriptView.tsx",
+    "src/components/UpcomingMeetings.tsx",
+    "src/components/UpdateCheckProvider.tsx",
+    "src/components/UpdateDialog.tsx",
+    "src/components/UpdateNotification.tsx",
+    "src/components/VirtualizedTranscriptView.tsx",
+    "src/components/WhisperModelManager.tsx",
+    "src/components/chat/ChatMarkdown.tsx",
+    "src/components/chat/MessageBubble.tsx",
+    "src/components/deslop-icons.tsx",
+    "src/components/memento/Icon.tsx",
+    "src/components/memento/RecordOverlay.tsx",
+    "src/components/memento/Wordmark.tsx",
+    "src/components/molecules/form-components/form-input-item.tsx",
+    "src/components/molecules/form-components/form-input-switch.tsx",
+    "src/components/molecules/form-components/form-select-item.tsx",
+    "src/components/onboarding/OnboardingContainer.tsx",
+    "src/components/onboarding/OnboardingFlow.tsx",
+    "src/components/onboarding/OnboardingGate.tsx",
+    "src/components/onboarding/shared/PermissionRow.tsx",
+    "src/components/onboarding/shared/ProgressIndicator.tsx",
+    "src/components/onboarding/shared/StatusIndicator.tsx",
+    "src/components/onboarding/steps/ModelSetupStep.tsx",
+    "src/components/onboarding/steps/PermissionsStep.tsx",
+    "src/components/onboarding/steps/WelcomeStep.tsx",
+    "src/components/shared/DownloadProgressToast.tsx",
+    "src/components/ui/accordion.tsx",
+    "src/components/ui/alert-dialog.tsx",
+    "src/components/ui/alert.tsx",
+    "src/components/ui/badge.tsx",
+    "src/components/ui/bubble.tsx",
+    "src/components/ui/button-group.tsx",
+    "src/components/ui/button.tsx",
+    "src/components/ui/card.tsx",
+    "src/components/ui/checkbox.tsx",
+    "src/components/ui/command.tsx",
+    "src/components/ui/context-menu.tsx",
+    "src/components/ui/dialog.tsx",
+    "src/components/ui/drawer.tsx",
+    "src/components/ui/dropdown-menu.tsx",
+    "src/components/ui/dropdown.tsx",
+    "src/components/ui/fluid-badge.tsx",
+    "src/components/ui/fluid-button.tsx",
+    "src/components/ui/fluid-dialog.tsx",
+    "src/components/ui/fluid-input-group.tsx",
+    "src/components/ui/fluid-input.tsx",
+    "src/components/ui/fluid-radio-group.tsx",
+    "src/components/ui/fluid-select.tsx",
+    "src/components/ui/fluid-spinner.tsx",
+    "src/components/ui/fluid-tabs.tsx",
+    "src/components/ui/form.tsx",
+    "src/components/ui/input-group.tsx",
+    "src/components/ui/input.tsx",
+    "src/components/ui/label.tsx",
+    "src/components/ui/live-waveform.tsx",
+    "src/components/ui/menu-item.tsx",
+    "src/components/ui/message-scroller.tsx",
+    "src/components/ui/message.tsx",
+    "src/components/ui/popover.tsx",
+    "src/components/ui/progress.tsx",
+    "src/components/ui/prompt-input.tsx",
+    "src/components/ui/radio-group.tsx",
+    "src/components/ui/scroll-area.tsx",
+    "src/components/ui/select.tsx",
+    "src/components/ui/separator.tsx",
+    "src/components/ui/sheet.tsx",
+    "src/components/ui/sidebar.tsx",
+    "src/components/ui/siri-wave-4.tsx",
+    "src/components/ui/skeleton.tsx",
+    "src/components/ui/sonner.tsx",
+    "src/components/ui/switch.tsx",
+    "src/components/ui/table.tsx",
+    "src/components/ui/tabs.tsx",
+    "src/components/ui/textarea.tsx",
+    "src/components/ui/tooltip.tsx",
+    "src/components/ui/visually-hidden.tsx",
+    "src/vendor/deslop/mini-app/components/Markdown/index.js",
+    "src/vendor/deslop/mini-app/components/Skeleton/index.js",
+    "src/vendor/deslop/mini-app/components/Table/index.js",
+    "src/vendor/deslop/mini-app/components/Text/index.js"
+  ],
+  "edges": [
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/AISummary/Block.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/AISummary/BlockNoteSummaryView.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/AISummary/Section.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/AISummary/index.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/About.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/AnalyticsConsentSwitch.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/AnalyticsDataModal.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/AnalyticsProvider.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/AppSidebar.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/AudioBackendSelector.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/AudioLevelMeter.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/AutoMeetingDetection.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/BetaSettings.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/BlockNoteEditor/BasicBlockNoteTest.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/BlockNoteEditor/Editor.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/BluetoothPlaybackWarning.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/BuiltInModelManager.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/CalendarSettings.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/ChunkProgressDisplay.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/ComplianceNotification.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/ConfidenceIndicator.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/ConfirmationModel/confirmation-modal.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/ConsoleToggle.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/CustomDialog.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/DatabaseImport/HomebrewDatabaseDetector.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/DatabaseImport/LegacyDatabaseImport.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/DeviceSelection.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/DiarizationModelManager.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/EditableTitle.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/EmbeddingModelSettings.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/EmptyStateSummary.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/GigaamModelManager.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/GlobalRecordingPill.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/GlobalSettingsButton.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/ImportAudio/ImportAudioDialog.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/ImportAudio/ImportDropOverlay.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/Info.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/KnowledgeReadinessCard.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/LanguagePickerPopover.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/LanguageSelection.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/Logo.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/MainContent/index.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/MainNav/index.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/ManagedDefaultsMigrationDialog.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/MeetingConversation/AnalyticsReportButton.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/MeetingConversation/AnalyticsReportDialog.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/MeetingConversation/MeetingComposer.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/MeetingConversation/MeetingConversation.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/MeetingConversation/MeetingOverflowMenu.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/MeetingConversation/SummaryMessage.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/MeetingConversation/TranscriptCard.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/MeetingConversation/TranscriptSearchDialog.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/MeetingConversation/analytics/AnalyticsBuildPrompt.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/MeetingConversation/analytics/MeetingDynamicsPanel.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/MeetingConversation/analytics/MeetingNumbersPanel.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/MeetingConversation/analytics/MeetingScoreSections.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/MeetingConversation/analytics/MeetingTimelinePanel.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/MeetingConversation/analytics/primitives.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/MeetingDetails/DeleteMeetingButton.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/MeetingDetails/DetectSpeakersButton.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/MeetingDetails/InterviewWorkflowPanel.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/MeetingDetails/LearningReviewPanel.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/MeetingDetails/MeetingAudioPlayer.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/MeetingDetails/MeetingContentWindowNotice.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/MeetingDetails/OneOnOneWorkflowPanel.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/MeetingDetails/RetranscribeDialog.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/MeetingDetails/SpeakerNameCandidatesButton.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/MeetingDetails/SpeakerRenameDialog.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/MeetingDetails/StandupWorkflowPanel.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/MeetingDetails/SummaryGeneratorButtonGroup.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/MeetingDetails/SummaryPanel.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/MeetingDetails/SummaryUpdaterButtonGroup.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/MeetingDetails/TranscriptButtonGroup.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/MeetingDetails/TranscriptPanel.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/MeetingDetectionBanner.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/MessageToast.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/ModelDownloadProgress.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/ModelSettingsModal.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/ParakeetModelManager.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/PermissionWarning.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/PreferenceSettings.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/PrivacySettings.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/RecordingControls.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/RecordingSettings.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/RecordingStatusBar.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/SettingTabs.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/Sidebar/SidebarProvider.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/SummaryLanguageSettings.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/TranscriptRecovery/TranscriptRecovery.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/TranscriptSettings.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/TranscriptView.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/UpcomingMeetings.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/UpdateCheckProvider.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/UpdateDialog.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/UpdateNotification.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/VirtualizedTranscriptView.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/WhisperModelManager.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/chat/ChatMarkdown.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/chat/MessageBubble.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/deslop-icons.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/memento/Icon.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/memento/RecordOverlay.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/memento/Wordmark.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/molecules/form-components/form-input-item.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/molecules/form-components/form-input-switch.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/molecules/form-components/form-select-item.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/onboarding/OnboardingContainer.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/onboarding/OnboardingFlow.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/onboarding/OnboardingGate.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/onboarding/shared/PermissionRow.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/onboarding/shared/ProgressIndicator.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/onboarding/shared/StatusIndicator.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/onboarding/steps/ModelSetupStep.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/onboarding/steps/PermissionsStep.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/onboarding/steps/WelcomeStep.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/shared/DownloadProgressToast.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/ui/accordion.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/ui/alert-dialog.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/ui/alert.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/ui/badge.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/ui/bubble.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/ui/button-group.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/ui/button.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/ui/card.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/ui/checkbox.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/ui/command.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/ui/context-menu.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/ui/dialog.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/ui/drawer.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/ui/dropdown-menu.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/ui/dropdown.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/ui/fluid-badge.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/ui/fluid-button.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/ui/fluid-dialog.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/ui/fluid-input-group.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/ui/fluid-input.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/ui/fluid-radio-group.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/ui/fluid-select.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/ui/fluid-spinner.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/ui/fluid-tabs.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/ui/form.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/ui/input-group.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/ui/input.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/ui/label.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/ui/live-waveform.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/ui/menu-item.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/ui/message-scroller.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/ui/message.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/ui/popover.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/ui/progress.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/ui/prompt-input.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/ui/radio-group.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/ui/scroll-area.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/ui/select.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/ui/separator.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/ui/sheet.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/ui/sidebar.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/ui/siri-wave-4.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/ui/skeleton.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/ui/sonner.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/ui/switch.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/ui/table.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/ui/tabs.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/ui/textarea.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/ui/tooltip.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/components/ui/visually-hidden.tsx"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/vendor/deslop/mini-app/components/Markdown/index.js"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/vendor/deslop/mini-app/components/Skeleton/index.js"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/vendor/deslop/mini-app/components/Table/index.js"
+    },
+    {
+      "from": "src/app/layout.tsx",
+      "to": "src/vendor/deslop/mini-app/components/Text/index.js"
+    }
+  ],
+  "unresolved": []
+}

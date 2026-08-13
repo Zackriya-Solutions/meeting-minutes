@@ -21,7 +21,11 @@ import { Select as SelectPrimitive } from "@base-ui/react/select";
 import { cn } from "@/lib/utils";
 import { spring, exitFallbackMs } from "@/lib/springs";
 import { useProximityHover } from "@/hooks/use-proximity-hover";
-import { useShape } from "@/lib/shape-context";
+import {
+  ShapeProvider,
+  useShape,
+  type ShapeVariant,
+} from "@/lib/shape-context";
 import { Elevated } from "@/lib/elevated";
 
 type IconComponent = ComponentType<{
@@ -83,6 +87,8 @@ interface SelectProps {
   disabled?: boolean;
   name?: string;
   required?: boolean;
+  /** Pins the compound trigger and its portalled menu to one shape. */
+  shape?: ShapeVariant;
 }
 
 /**
@@ -120,6 +126,7 @@ function Select({
   disabled = false,
   name,
   required,
+  shape,
 }: SelectProps) {
   const [internalValue, setInternalValue] = useState(defaultValue ?? "");
   const [open, setOpen] = useState(false);
@@ -172,7 +179,7 @@ function Select({
     [currentValue, open]
   );
 
-  return (
+  const root = (
     <SelectContext.Provider value={ctx}>
       <SelectPrimitive.Root
         // Always controlled; "" (no selection) maps to Base UI's null.
@@ -192,6 +199,14 @@ function Select({
         {children}
       </SelectPrimitive.Root>
     </SelectContext.Provider>
+  );
+
+  return shape ? (
+    <ShapeProvider defaultShape={shape} publishToRoot={false}>
+      {root}
+    </ShapeProvider>
+  ) : (
+    root
   );
 }
 
@@ -213,7 +228,7 @@ const triggerVariants = cva(
     variants: {
       variant: {
         bordered:
-          "border border-[var(--primary-10)] bg-[var(--elevation-2)] text-[var(--deslop-primary)] hover:bg-[var(--primary-5)]",
+          "fluid-select-token-surface fluid-select-token-trigger border border-[var(--primary-10)] bg-[var(--elevation-2)] text-[var(--deslop-primary)]",
         borderless:
           "border border-transparent bg-transparent text-[var(--deslop-primary)] hover:bg-[var(--primary-5)]",
       },
@@ -478,7 +493,7 @@ const SelectContent = forwardRef<HTMLDivElement, SelectContentProps>(
                 className={cn(
                   // min-w tracks the trigger via the Positioner's --anchor-width
                   // var, matching the pre-migration minWidth: triggerRect.width.
-                  `relative flex flex-col gap-0.5 min-w-[var(--anchor-width)] max-h-[min(300px,var(--available-height))] overflow-y-auto ${shape.container} p-1 select-none outline-none`,
+                  `fluid-select-token-surface relative flex flex-col gap-0.5 min-w-[var(--anchor-width)] max-h-[min(300px,var(--available-height))] overflow-y-auto ${shape.container} p-1 select-none outline-none`,
                   className
                 )}
               >

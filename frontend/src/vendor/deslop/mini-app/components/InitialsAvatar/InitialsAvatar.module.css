@@ -1,0 +1,21 @@
+.root {
+  --skeleton-radius: 50%;
+  --skeleton-inset-bottom: 0px;
+
+  border-radius: var(--ui-radius-full);
+  color: var(--white);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--ui-font-interface);
+  font-size: var(--ui-title-20-font-size);
+  line-height: var(--ui-title-20-line-height);
+  font-style: normal;
+  font-weight: var(--ui-title-20-font-weight);
+}
+
+.initials {
+  transition: opacity 0.45s cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.hiddenInitials { opacity: 0; }

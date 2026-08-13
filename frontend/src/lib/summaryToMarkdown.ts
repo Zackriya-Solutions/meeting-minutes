@@ -1,3 +1,5 @@
+import { replaceAutomaticSpeakerLabels } from '@/types';
+
 /**
  * Best-effort conversion of a persisted meeting summary (a markdown blob, BlockNote
  * JSON, or a legacy section map) into Markdown, plus the read-first overview and
@@ -85,7 +87,7 @@ export function summaryToMarkdown(summary: any): string {
     else if (typeof summary.markdown === 'string' && summary.markdown.trim()) md = summary.markdown;
     else if (Array.isArray(summary.summary_json)) md = blocksToMarkdown(summary.summary_json);
     else if (typeof summary === 'object') md = sectionsToMarkdown(summary);
-    return normalizeHeadings(md.trim()).trim();
+    return replaceAutomaticSpeakerLabels(normalizeHeadings(md.trim()).trim());
   } catch {
     return '';
   }

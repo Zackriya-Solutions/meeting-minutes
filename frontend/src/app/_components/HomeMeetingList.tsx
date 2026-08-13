@@ -33,23 +33,20 @@ import {
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
 import { PromptInput } from '@/components/ui/prompt-input';
-import { Button as FluidButton } from '@/components/ui/fluid-button';
 import { useSidebar, type CurrentMeeting } from '@/components/Sidebar/SidebarProvider';
-import { RecordingStatus, useRecordingState } from '@/contexts/RecordingStateContext';
 import { useLanguage } from '@/lib/i18n';
 import Analytics from '@/lib/analytics';
 import { clearMarkedMoments } from '@/lib/markedMoments';
 import { formatRelativeMeetingDate, getMeetingDisplayInfo } from '@/lib/meetingDisplay';
 import { prefetchMeetingSummary, readCachedMeetingSummary } from '@/lib/meetingSummaryCache';
-import { canStartRecordingNow } from '@/lib/recordingNavigation';
-import { requestAutoStart } from '@/lib/autoStartRecording';
 import { splitSummaryLead, summaryToMarkdown } from '@/lib/summaryToMarkdown';
 import { Cell, CellText } from '@/vendor/deslop/mini-app/Cell';
-import { IconPlus } from '@/vendor/deslop/primitives/material-symbols-react';
 import { buildArchivePromptSuggestions } from '@/lib/promptSuggestions';
 import { spring } from '@/lib/fluid/springs';
 import { CalendarSettings } from '@/components/CalendarSettings';
 import type { LocalOutlookMeeting } from '@/lib/localOutlookCalendar';
+
+const MINIMUM_HOME_MEETING_DURATION_SECONDS = 2 * 60;
 
 interface CalendarMeeting {
   meeting: CurrentMeeting;
@@ -312,7 +309,6 @@ function cachedMeetingDescriptions(meetings: CurrentMeeting[]): Record<string, s
 
 export function HomeMeetingList({ animateOnMount = true }: { animateOnMount?: boolean }) {
   const router = useRouter();
-  const { isRecording, status } = useRecordingState();
   const {
     currentMeeting,
     meetings,
@@ -321,6 +317,13 @@ export function HomeMeetingList({ animateOnMount = true }: { animateOnMount?: bo
     stopSummaryPolling,
   } = useSidebar();
   const { t, lang } = useLanguage();
+  const visibleMeetings = useMemo(
+    () => meetings.filter((meeting) => (
+      meeting.durationSeconds == null
+      || meeting.durationSeconds >= MINIMUM_HOME_MEETING_DURATION_SECONDS
+    )),
+    [meetings],
+  );
   const [question, setQuestion] = useState('');
   const [meetingToDelete, setMeetingToDelete] = useState<CalendarMeeting | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -328,20 +331,10 @@ export function HomeMeetingList({ animateOnMount = true }: { animateOnMount?: bo
   // seed the replacement list synchronously from that warmed cache so row
   // descriptions never disappear for a frame and reflow the whole screen.
   const [meetingDescriptions, setMeetingDescriptions] = useState<Record<string, string>>(
-    () => cachedMeetingDescriptions(meetings),
+    () => cachedMeetingDescriptions(visibleMeetings),
   );
   const screenRef = useRef<HTMLDivElement>(null);
   const locale = lang === 'ru' ? 'ru-RU' : 'en-US';
-  const canStartMeeting = canStartRecordingNow(isRecording, status);
-
-  const startNewMeeting = () => {
-    if (!canStartMeeting) return;
-
-    // Untitled on purpose: this also clears any title a calendar entry left behind,
-    // so a plain new meeting is never named after the last one that was opened.
-    requestAutoStart(window.sessionStorage);
-    router.push('/recording');
-  };
 
   // The provider owns the archive request and retries when the WebView is not
   // ready yet. Only request on an empty initial state; route drawers render
@@ -365,7 +358,7 @@ export function HomeMeetingList({ animateOnMount = true }: { animateOnMount?: bo
 
     const loadDescriptions = async () => {
       const entries = await Promise.all(
-        meetings.map(async (meeting) => {
+        visibleMeetings.map(async (meeting) => {
           const summary = await prefetchMeetingSummary(meeting.id);
           return [meeting.id, meetingSummaryDescription(summary)] as const;
         }),
@@ -382,12 +375,12 @@ export function HomeMeetingList({ animateOnMount = true }: { animateOnMount?: bo
     return () => {
       cancelled = true;
     };
-  }, [meetings]);
+  }, [visibleMeetings]);
 
   const calendarMeetings = useMemo<CalendarMeeting[]>(() => {
     const timeFormatter = new Intl.DateTimeFormat(locale, { hour: '2-digit', minute: '2-digit' });
 
-    return [...meetings]
+    return [...visibleMeetings]
       .sort((left, right) => meetingTimestamp(right) - meetingTimestamp(left))
       .map((meeting) => {
         const display = getMeetingDisplayInfo(meeting, lang);
@@ -409,7 +402,7 @@ export function HomeMeetingList({ animateOnMount = true }: { animateOnMount?: bo
           description: meetingDescriptions[meeting.id] ?? null,
         };
       });
-  }, [lang, locale, meetingDescriptions, meetings]);
+  }, [lang, locale, meetingDescriptions, visibleMeetings]);
 
   const calendarMeetingGroups = useMemo<CalendarMeetingGroup[]>(() => {
     const groups = new Map<string, CalendarMeetingGroup>();
@@ -507,18 +500,6 @@ export function HomeMeetingList({ animateOnMount = true }: { animateOnMount?: bo
       <div className="home-screen__inner">
         <header className="home-screen__header">
           <h1 className="memento-screen-title">{t('Meetings')}</h1>
-          <FluidButton
-            type="button"
-            variant="tertiary"
-            size="icon-lg"
-            className="no-drag rounded-[20px] text-[var(--primary-50)] [&>span:last-child]:absolute [&>span:last-child]:inset-0 [&_.deslop-material-symbol]:flex [&_.deslop-material-symbol]:h-5 [&_.deslop-material-symbol]:w-5 [&_.deslop-material-symbol]:items-center [&_.deslop-material-symbol]:justify-center"
-            onClick={startNewMeeting}
-            disabled={!canStartMeeting}
-            aria-label={t('New meeting')}
-            title={t('New meeting')}
-          >
-            <IconPlus aria-hidden="true" size={20} weight={400} />
-          </FluidButton>
         </header>
 
         <main className="home-screen__content">

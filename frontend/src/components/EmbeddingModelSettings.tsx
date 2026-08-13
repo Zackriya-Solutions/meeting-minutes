@@ -143,6 +143,7 @@ export function EmbeddingModelSettings() {
 
         <div className="settings-cell__control">
           <Select
+            shape="rounded"
             value={status?.model ?? 'multilingual-e5-small'}
             onValueChange={changeModel}
             disabled={!status || selecting || downloading}

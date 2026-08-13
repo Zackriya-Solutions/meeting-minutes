@@ -2,6 +2,12 @@ import { useCallback, useState } from 'react';
 import { toast } from 'sonner';
 import { useOnboarding } from '@/contexts/OnboardingContext';
 import { useT } from '@/lib/i18n';
+import { configureOnboardingWindow, restoreMainWindow } from '@/lib/onboarding-window';
+import {
+  ONBOARDING_COMPACT_HEIGHT,
+  ONBOARDING_FADE_MS,
+  ONBOARDING_PRODUCT_REVEAL_KEY,
+} from '@/lib/onboarding-transition';
 
 /**
  * Finish setup and land the user somewhere that explains the product.
@@ -20,13 +26,44 @@ export function useFinishOnboarding() {
 
   const finish = useCallback(async () => {
     setIsFinishing(true);
+    let resizePromise: Promise<void> | null = null;
+
     try {
-      const demoMeetingId = await completeOnboarding();
+      // Start persistence immediately, then give WebKit one paint boundary to commit the
+      // exit fade. Native resize and setup work continue together instead of forming two
+      // separate waits.
+      const completionPromise = completeOnboarding();
+      await new Promise<void>((resolve) => {
+        requestAnimationFrame(() => resolve());
+      });
+
+      resizePromise = restoreMainWindow({ animated: true });
+      const [demoMeetingId] = await Promise.all([
+        completionPromise,
+        resizePromise,
+        new Promise<void>((resolve) => window.setTimeout(resolve, ONBOARDING_FADE_MS)),
+      ]);
+
+      try {
+        window.sessionStorage.setItem(ONBOARDING_PRODUCT_REVEAL_KEY, '1');
+      } catch {
+        // A disabled storage backend should not block setup completion.
+      }
+
       window.location.href = demoMeetingId
         ? `/meeting-details?id=${encodeURIComponent(demoMeetingId)}`
         : '/';
     } catch (error) {
       console.error('[onboarding] failed to complete setup:', error);
+      try {
+        window.sessionStorage.removeItem(ONBOARDING_PRODUCT_REVEAL_KEY);
+      } catch {
+        // No-op: storage is an enhancement for the one-time reveal only.
+      }
+      if (resizePromise) await resizePromise.catch(() => undefined);
+      await configureOnboardingWindow(ONBOARDING_COMPACT_HEIGHT, { animated: true }).catch(
+        (resizeError) => console.warn('[onboarding] failed to restore compact window:', resizeError),
+      );
       toast.error(t('Failed to complete setup'), { description: t('Please try again.') });
       setIsFinishing(false);
     }

@@ -284,6 +284,7 @@ export function PreferenceSettings() {
           </div>
           <div className="settings-cell__control">
             <Select
+              shape="rounded"
               value={autoCaptureMode ?? ''}
               disabled={!notificationSettings}
               onValueChange={(value) => void handleAutoCaptureModeChange(value as AutoCaptureMode)}
@@ -365,9 +366,7 @@ export function PreferenceSettings() {
       </div>
 
       {/* Analytics Section */}
-      <div className="settings-section settings-cell">
-        <AnalyticsConsentSwitch />
-      </div>
+      <AnalyticsConsentSwitch />
     </div>
   )
 }

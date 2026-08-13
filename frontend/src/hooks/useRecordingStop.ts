@@ -19,6 +19,10 @@ import {
   saveMeetingParticipants,
   takeMeetingParticipants,
 } from '@/lib/meetingParticipants';
+import {
+  saveMeetingCalendarSchedule,
+  takePendingMeetingSchedule,
+} from '@/lib/meetingCalendarSchedule';
 import Analytics from '@/lib/analytics';
 import { useT } from '@/lib/i18n';
 import {
@@ -307,6 +311,11 @@ export function useRecordingStop(
           if (!meetingId) {
             console.error('No meeting_id in response:', responseData);
             throw new Error(t('No meeting ID received from save operation'));
+          }
+
+          const calendarSchedule = takePendingMeetingSchedule(sessionStorage);
+          if (calendarSchedule) {
+            saveMeetingCalendarSchedule(localStorage, meetingId, calendarSchedule);
           }
 
           // Who the calendar invited, learned when the recording started. Attaching it

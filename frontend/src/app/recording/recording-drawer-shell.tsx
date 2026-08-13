@@ -3,6 +3,7 @@
 import { type ReactNode, useCallback, useLayoutEffect, useRef } from "react"
 import { useRouter } from "next/navigation"
 import { HOME_SCROLL_POSITION_KEY, HomeMeetingList } from "@/app/_components/HomeMeetingList"
+import { useSidebar } from "@/components/Sidebar/SidebarProvider"
 import {
   Drawer,
   DrawerContent,
@@ -12,13 +13,22 @@ import {
   DrawerProvider,
   DrawerTitle,
 } from "@/components/ui/drawer"
-import { useRouteDrawerLifecycle } from "@/hooks/useRouteDrawerLifecycle"
+import {
+  useRouteDrawerLifecycle,
+  waitForRouteDrawerBackgroundMotion,
+} from "@/hooks/useRouteDrawerLifecycle"
+import { useRouteDrawerWindowConstraint } from "@/hooks/useRouteDrawerWindowConstraint"
 import { useT } from "@/lib/i18n"
+
+const DRAWER_WIDTH = 450
 
 export function RecordingDrawerShell({ children }: { children: ReactNode }) {
   const router = useRouter()
   const t = useT()
+  const { sidebarWidth } = useSidebar()
   const backgroundRef = useRef<HTMLDivElement>(null)
+
+  useRouteDrawerWindowConstraint(sidebarWidth, DRAWER_WIDTH)
 
   useLayoutEffect(() => {
     const storedPosition = Number(window.sessionStorage.getItem(HOME_SCROLL_POSITION_KEY))
@@ -27,7 +37,8 @@ export function RecordingDrawerShell({ children }: { children: ReactNode }) {
     }
   }, [])
 
-  const navigateHome = useCallback(() => {
+  const navigateHome = useCallback(async () => {
+    await waitForRouteDrawerBackgroundMotion(backgroundRef.current)
     window.requestAnimationFrame(() => {
       router.replace("/", { scroll: false })
     })
@@ -52,6 +63,7 @@ export function RecordingDrawerShell({ children }: { children: ReactNode }) {
       <DrawerIndent
         ref={backgroundRef}
         data-home-scroll-container
+        data-route-drawer-open={open ? "" : undefined}
         className="route-drawer-background h-screen overflow-x-hidden overflow-y-auto"
       >
         <HomeMeetingList animateOnMount={false} />

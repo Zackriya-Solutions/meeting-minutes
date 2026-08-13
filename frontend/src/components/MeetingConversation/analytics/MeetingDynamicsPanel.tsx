@@ -1,14 +1,8 @@
 "use client";
 
-import type { ReactNode } from 'react';
 import { useT } from '@/lib/i18n';
-import { Progress } from '@/components/ui/progress';
-import type {
-  AnalyticsDynamicsSection,
-  AnalyticsRoleRow,
-} from '@/hooks/meeting-details/useMeetingAnalyticsSections';
+import type { AnalyticsDynamicsSection } from '@/hooks/meeting-details/useMeetingAnalyticsSections';
 import {
-  MomentLink,
   SectionHeading,
   SectionPlaceholder,
   StatTile,
@@ -26,31 +20,19 @@ import {
 
 export function MeetingDynamicsPanel({
   dynamics,
-  roles,
-  onSeek,
-  action,
 }: {
   /** null only if the (local) dynamics stage is missing from an old snapshot. */
   dynamics: AnalyticsDynamicsSection | null;
-  roles: AnalyticsRoleRow[];
-  onSeek?: (seconds: number) => void;
-  /** Trailing heading slot, used for "Открыть отчёт". */
-  action?: ReactNode;
 }) {
   const t = useT();
   const density = dynamics
     ? Math.round(Math.max(0, Math.min(1, dynamics.speech_density)) * 100)
     : 0;
-  const speakers = dynamics?.speakers ?? [];
-  const questionsBySpeaker = speakers
-    .filter((speaker) => speaker.questions > 0)
-    .map((speaker) => `${speaker.label} — ${speaker.questions}`)
-    .join(', ');
 
   return (
     <div className="mx-auto flex max-w-[720px] flex-col gap-7 pb-10 pt-1.5">
       <section>
-        <SectionHeading note={t('Deterministic analytics, no LLM')} action={action}>
+        <SectionHeading>
           {t('Meeting dynamics')}
         </SectionHeading>
         {dynamics ? (
@@ -80,87 +62,6 @@ export function MeetingDynamicsPanel({
         )}
       </section>
 
-      <section>
-        <SectionHeading>{t('Who talked — share of time')}</SectionHeading>
-        {speakers.length === 0 ? (
-          <div className="mt-2">
-            <SectionPlaceholder>{t('No speech data.')}</SectionPlaceholder>
-          </div>
-        ) : (
-          <>
-            <div className="mt-3 flex flex-col gap-3 text-[length:var(--ui-body-font-size)] leading-[21px] text-foreground">
-              {speakers.map((speaker) => {
-                const share = Math.round(Math.max(0, Math.min(1, speaker.talk_share)) * 100);
-                return (
-                  <div key={`${speaker.label}-${speaker.talk_secs}`}>
-                    <div className="flex min-w-0 items-center justify-between gap-2">
-                      <span className="min-w-0 truncate">{speaker.label}</span>
-                      <span className="mm-numeric shrink-0 text-[var(--primary-40)]">
-                        {formatClock(speaker.talk_secs)}&nbsp;· {share}%
-                      </span>
-                    </div>
-                    <Progress
-                      value={share}
-                      aria-label={`${speaker.label}: ${share}%`}
-                      className="mt-1 gap-0"
-                    />
-                  </div>
-                );
-              })}
-            </div>
-            {questionsBySpeaker && (
-              <p className="mt-3 text-xs text-[var(--primary-40)]">
-                {t('Questions by speaker')}: {questionsBySpeaker}.
-              </p>
-            )}
-          </>
-        )}
-      </section>
-
-      <section>
-        <SectionHeading note={t('Behaviour in this meeting, not a trait')}>
-          {t('Roles in the meeting')}
-        </SectionHeading>
-        {roles.length === 0 ? (
-          <div className="mt-2">
-            <SectionPlaceholder>{t('Roles could not be determined.')}</SectionPlaceholder>
-          </div>
-        ) : (
-          <div className="mt-3 flex flex-col gap-2">
-            {roles.map((role, index) => (
-              <RoleCard key={`${index}-${role.speaker}`} role={role} onSeek={onSeek} />
-            ))}
-          </div>
-        )}
-      </section>
-    </div>
-  );
-}
-
-function RoleCard({
-  role,
-  onSeek,
-}: {
-  role: AnalyticsRoleRow;
-  onSeek?: (seconds: number) => void;
-}) {
-  const t = useT();
-  return (
-    <div className="rounded-[14px] bg-[var(--primary-5)] px-3.5 py-3">
-      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-        <span className="text-[length:var(--ui-body-font-size)] font-medium leading-[21px] text-foreground">
-          {role.speaker}
-        </span>
-        <span className="text-xs text-[var(--primary-50)]">{role.role}</span>
-        <span className="ml-auto">
-          <MomentLink atSeconds={role.at_seconds} onSeek={onSeek} label={t('Open this moment')} />
-        </span>
-      </div>
-      {role.evidence && (
-        <p className="mt-1 text-[length:var(--ui-body-font-size)] leading-[21px] text-[var(--primary-60)]">
-          {role.evidence}
-        </p>
-      )}
     </div>
   );
 }

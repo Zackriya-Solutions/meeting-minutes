@@ -104,7 +104,7 @@ export function MomentLink({
   if (atSeconds == null) return null;
   const clock = formatClock(atSeconds);
   if (!onSeek) {
-    return <span className="mm-numeric text-xs text-[var(--primary-40)]">{clock}</span>;
+    return <span className="text-xs text-[var(--primary-40)]">{clock}</span>;
   }
   return (
     <button
@@ -112,7 +112,7 @@ export function MomentLink({
       onClick={() => onSeek(atSeconds)}
       title={label}
       aria-label={`${label} — ${clock}`}
-      className="mm-numeric rounded-md px-1 py-0.5 text-xs text-[var(--primary-40)] transition-colors hover:bg-[var(--primary-5)] hover:text-[var(--primary-70)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary-10)]"
+      className="rounded-md px-1 py-0.5 text-xs text-[var(--primary-40)] transition-colors hover:bg-[var(--primary-5)] hover:text-[var(--primary-70)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary-10)]"
     >
       {clock}
     </button>

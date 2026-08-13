@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Icon } from '@/components/memento/Icon';
 import { cn } from '@/lib/utils';
 
-export type MeetingDetectionBannerState = 'suggestion' | 'starting' | 'recording';
+export type MeetingDetectionBannerState = 'suggestion' | 'starting';
 
 interface MeetingDetectionBannerProps {
   open: boolean;
@@ -28,10 +28,6 @@ const copyByState: Record<MeetingDetectionBannerState, {
     action: 'Запускаем запись…',
     detail: 'Подключаем микрофон',
   },
-  recording: {
-    action: 'Открыть запись',
-    detail: 'Memento записывает',
-  },
 };
 
 export function MeetingDetectionBanner({
@@ -46,11 +42,9 @@ export function MeetingDetectionBanner({
   const copy = copyByState[state];
   const appLabel = appNames.join(', ');
   const title = appLabel ? `Встреча в ${appLabel}` : 'Встреча началась';
-  const subtitle = state === 'recording'
-    ? 'Запись началась'
-    : state === 'starting'
-      ? 'Встреча обнаружена'
-      : 'Обнаружен активный звонок';
+  const subtitle = state === 'starting'
+    ? 'Встреча обнаружена'
+    : 'Обнаружен активный звонок';
 
   return createPortal(
     <AnimatePresence>
@@ -91,7 +85,7 @@ export function MeetingDetectionBanner({
                 )}
               >
                 <span className="flex size-10 items-center justify-center rounded-xl bg-primary text-primary-foreground">
-                  <Icon name={state === 'recording' ? 'wave' : 'mic'} size={21} />
+                  <Icon name="mic" size={21} />
                 </span>
                 <span>
                   <span className="block whitespace-nowrap text-[17px] font-medium leading-tight">
@@ -118,12 +112,12 @@ export function MeetingDetectionBanner({
               type="button"
               variant="ghost"
               size="icon"
-              aria-label={state === 'recording' ? 'Открыть запись' : 'Начать запись'}
+              aria-label="Начать запись"
               disabled={state === 'starting'}
               onClick={onPrimaryAction}
               className="my-auto mr-3 size-11 shrink-0 rounded-full bg-primary text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground sm:hidden"
             >
-              <Icon name={state === 'recording' ? 'wave' : 'mic'} size={20} />
+              <Icon name="mic" size={20} />
             </Button>
           </motion.section>
         </div>

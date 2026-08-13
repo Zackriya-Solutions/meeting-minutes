@@ -65,7 +65,7 @@ export function clearStoredSidebarWidth(): void {
   } catch { /* ignore */ }
 }
 
-interface SidebarContextType {
+export interface SidebarContextType {
   currentMeeting: CurrentMeeting | null;
   setCurrentMeeting: React.Dispatch<React.SetStateAction<CurrentMeeting | null>>;
   sidebarItems: SidebarItem[];
@@ -98,7 +98,7 @@ interface SidebarContextType {
 
 }
 
-const SidebarContext = createContext<SidebarContextType | null>(null);
+export const SidebarContext = createContext<SidebarContextType | null>(null);
 
 export const useSidebar = () => {
   const context = useContext(SidebarContext);
