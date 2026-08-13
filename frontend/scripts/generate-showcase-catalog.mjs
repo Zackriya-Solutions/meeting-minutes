@@ -89,14 +89,16 @@ const groups = Object.keys(groupTitles).map((id) => ({
 const catalog = {
   title: 'Memento UI',
   scope: baseline.scope,
-  preview: { adapter: 'next-app-router', isolation: 'iframe', entry: 'src/app/showcase-preview/page.tsx' },
+  preview: { adapter: 'next-app-router', isolation: 'iframe', entry: 'src/app/showcase-preview/page.showcase.tsx' },
   groups: [{ id: 'foundations', title: 'Foundations', items: [{ id: 'design-tokens', title: 'Токены и бренд', source: 'src/showcase/foundations/DesignTokens.showcase.tsx', kind: 'foundation' }] }, ...groups],
   exclusions,
 };
 await fs.writeFile(path.join(root, 'showcase.catalog.json'), `${JSON.stringify(catalog, null, 2)}\n`);
 
 const nodes = ['src/app/layout.tsx', ...visualFiles];
-const graph = { root, entry: 'src/app/layout.tsx', nodes, edges: visualFiles.map((to) => ({ from: 'src/app/layout.tsx', to })), unresolved: [] };
+// Every path in the artifact is relative to this package, and `root` is committed — an
+// absolute cwd would bake whichever machine ran the generator into the repository.
+const graph = { root: '.', entry: 'src/app/layout.tsx', nodes, edges: visualFiles.map((to) => ({ from: 'src/app/layout.tsx', to })), unresolved: [] };
 await fs.writeFile(path.join(root, 'showcase.production-graph.json'), `${JSON.stringify(graph, null, 2)}\n`);
 
 console.log(`Generated ${components.length} shared visual component entries; ${exclusions.length} non-visual modules excluded.`);

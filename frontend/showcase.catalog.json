@@ -7,7 +7,7 @@
   "preview": {
     "adapter": "next-app-router",
     "isolation": "iframe",
-    "entry": "src/app/showcase-preview/page.tsx"
+    "entry": "src/app/showcase-preview/page.showcase.tsx"
   },
   "groups": [
     {

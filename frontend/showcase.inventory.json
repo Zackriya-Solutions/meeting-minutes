@@ -1,5 +1,5 @@
 {
-  "root": "/Users/manaer/Documents/Memento/frontend",
+  "root": ".",
   "scope": {
     "id": "memento",
     "environment": "dev+production"

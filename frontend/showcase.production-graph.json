@@ -1,5 +1,5 @@
 {
-  "root": "/Users/manaer/Documents/Memento/frontend",
+  "root": ".",
   "entry": "src/app/layout.tsx",
   "nodes": [
     "src/app/layout.tsx",
