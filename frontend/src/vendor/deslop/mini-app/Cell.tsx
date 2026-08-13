@@ -35,7 +35,9 @@ export function CellText({ title, description, bold = false }: CellTextProps) {
   return (
     <span className={styles.text}>
       <span className={styles.label} data-weight={bold ? 'medium' : 'regular'}>
-        {title}
+        {typeof title === 'string' ? (
+          <span className={styles.ellipsis}>{title}</span>
+        ) : title}
       </span>
       {description ? <span className={styles.caption}>{description}</span> : null}
     </span>
