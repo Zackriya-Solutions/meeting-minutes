@@ -1,4 +1,4 @@
-tool=/Users/manaer/Downloads/Xcode-beta.app/Contents/Developer/usr/bin/ictool
+tool=Xcode-beta.app/Contents/Developer/usr/bin/ictool
 xcode=Xcode 27.0 Build version 27A5194q
 icon=frontend/src-tauri/icons/macos-source/build/MementoMac.icon
 status=incompatible-cli

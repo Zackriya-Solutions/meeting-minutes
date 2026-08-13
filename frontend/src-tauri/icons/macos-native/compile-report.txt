@@ -1,5 +1,5 @@
 xcode=Xcode 27.0
-icon=/Users/manaer/Documents/Memento/frontend/src-tauri/icons/macos-source/build/MementoMac.icon
+icon=frontend/src-tauri/icons/macos-source/build/MementoMac.icon
 name=MementoMac
 minimum_deployment_target=13.0
 <?xml version="1.0" encoding="UTF-8"?>
@@ -17,8 +17,8 @@ minimum_deployment_target=13.0
 	</dict>
 </dict>
 </plist>
-assets_car=/Users/manaer/Documents/Memento/frontend/src-tauri/icons/macos-native/Assets.car
-fallback_icns=/Users/manaer/Documents/Memento/frontend/src-tauri/icons/macos-native/MementoMac.icns
-partial_info=/Users/manaer/Documents/Memento/frontend/src-tauri/icons/macos-native/partial-info.plist
-asset_info=/Users/manaer/Documents/Memento/frontend/src-tauri/icons/macos-native/asset-info.json
+assets_car=frontend/src-tauri/icons/macos-native/Assets.car
+fallback_icns=frontend/src-tauri/icons/macos-native/MementoMac.icns
+partial_info=frontend/src-tauri/icons/macos-native/partial-info.plist
+asset_info=frontend/src-tauri/icons/macos-native/asset-info.json
 status=ok
