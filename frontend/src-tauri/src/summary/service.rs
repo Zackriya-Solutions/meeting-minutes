@@ -260,7 +260,7 @@ impl SummaryService {
     /// the main thread. It updates the database with progress and results.
     ///
     /// # Arguments
-    /// * `_app` - Tauri app handle (for future use)
+    /// * `app` - Tauri app handle (app data dir, follow-up analytics pipeline)
     /// * `pool` - SQLx connection pool
     /// * `meeting_id` - Unique identifier for the meeting
     /// * `text` - Full transcript text
@@ -269,7 +269,7 @@ impl SummaryService {
     /// * `custom_prompt` - Optional user-provided context
     /// * `template_id` - Template identifier (e.g., "daily_standup", "standard_meeting")
     pub async fn process_transcript_background<R: tauri::Runtime>(
-        _app: AppHandle<R>,
+        app: AppHandle<R>,
         pool: SqlitePool,
         meeting_id: String,
         text: String,
@@ -533,7 +533,7 @@ impl SummaryService {
         };
 
         // Get app data directory for BuiltInAI provider
-        let app_data_dir = _app.path().app_data_dir().ok();
+        let app_data_dir = app.path().app_data_dir().ok();
 
         if let Some(code) = &summary_language {
             info!("📝 Summary language preference: {}", code);
@@ -711,21 +711,35 @@ impl SummaryService {
                     // the user discover and press a separate button in the meeting screen.
                     // `start_analytics_report` returns immediately and de-duplicates any run
                     // already started by an open renderer.
-                    match crate::report::commands::start_analytics_report(
-                        _app.clone(),
-                        pool.clone(),
-                        meeting_id.clone(),
-                    )
-                    .await
-                    {
-                        Ok(report) => info!(
-                            "Automatic analytics report {} started for generated summary {}",
-                            report.report_id, meeting_id
-                        ),
-                        Err(error) => warn!(
-                            "Failed to start automatic analytics report for {}: {}",
-                            meeting_id, error
-                        ),
+                    //
+                    // Corpus mode is the exception: it replays this same path over a whole
+                    // corpus to score summary prompts, so an automatic report per item would
+                    // spend the LLM budget on artifacts the run never reads.
+                    if crate::summary::corpus_runner::corpus_mode_requested() {
+                        info!(
+                            "Skipping automatic analytics report for {} in corpus mode",
+                            meeting_id
+                        );
+                    } else {
+                        match crate::report::commands::start_analytics_report(
+                            app.clone(),
+                            pool.clone(),
+                            meeting_id.clone(),
+                        )
+                        .await
+                        {
+                            Ok(report) => info!(
+                                "Automatic analytics report {} started for generated summary {}",
+                                report.report_id, meeting_id
+                            ),
+                            // The meeting screen treats "no report" as "offer to build one",
+                            // so a failed start degrades to the manual affordance rather than
+                            // needing its own error channel.
+                            Err(error) => warn!(
+                                "Failed to start automatic analytics report for {}: {}",
+                                meeting_id, error
+                            ),
+                        }
                     }
                     // A generated summary is already final persisted state; requiring the
                     // user to press Save before search/RAG indexing made auto-save
