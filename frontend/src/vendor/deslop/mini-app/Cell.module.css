@@ -76,13 +76,19 @@
 }
 
 .label {
-  overflow: hidden;
+  min-width: 0;
   color: var(--deslop-primary);
   font-size: var(--ui-body-font-size);
   font-variant-numeric: lining-nums tabular-nums;
   font-weight: 400;
   letter-spacing: var(--ui-body-letter-spacing);
   line-height: var(--ui-body-line-height);
+  white-space: nowrap;
+}
+
+.ellipsis {
+  display: block;
+  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }

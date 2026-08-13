@@ -10,6 +10,13 @@ import { useCellStack } from "./context"
 import * as styles from "./CellStack.module.css"
 
 const TRANSITION = TRANSITIONS.MATERIAL_STANDARD
+
+// With the description hidden, the text block drifts down by half a line so
+// the single collapsed line reads centered in the row.
+const DRIFT = 10
+
+// The expanded face's avatar grows into place; the collapsed face's avatar
+// tucks under it and folds away.
 const LOGO_FRONT = {
     collapsed: { scale: 0.6, x: -6, y: -6 },
     expanded: { scale: 1, x: 0, y: 0 },
@@ -19,6 +26,7 @@ const LOGO_BEHIND = {
     expanded: { scale: 0, x: 0, y: 0, opacity: 0 },
 }
 
+// Pull the plain content out of a declarative <Cell> face.
 const readFace = (cell) => {
     const { start, end, children: body } = cell.props
     return {
@@ -41,10 +49,18 @@ const morph = (text, variant = "text") =>
 
 function Morph({ children }) {
     const expanded = useCellStack()
-    const [collapsedFace, expandedFace] = Children.toArray(children).map(readFace)
+    const [collapsedFace, expandedFace] =
+        Children.toArray(children).map(readFace)
+
     const state = expanded ? "expanded" : "collapsed"
     const face = expanded ? expandedFace : collapsedFace
-    const description = face.description
+
+    const bothDescriptions = Boolean(
+        collapsedFace.description && expandedFace.description
+    )
+    const description =
+        face.description ?? expandedFace.description ?? collapsedFace.description
+    const drift = description && !face.description ? DRIFT : 0
 
     return (
         <Cell
@@ -68,12 +84,16 @@ function Morph({ children }) {
                     </m.div>
                 </div>
             }
-            end={face.value && <Cell.Text title={morph(face.value, "number")} />}
+            end={
+                face.value && <Cell.Text title={morph(face.value, "number")} />
+            }
         >
             <Cell.Text
                 title={
                     <m.span
                         className={styles.morphLine}
+                        animate={{ y: drift }}
+                        transition={TRANSITION}
                     >
                         {morph(face.title)}
                     </m.span>
@@ -82,8 +102,15 @@ function Morph({ children }) {
                     description && (
                         <m.span
                             className={styles.morphLine}
+                            animate={{
+                                y: drift,
+                                opacity: face.description ? 1 : 0,
+                            }}
+                            transition={TRANSITION}
                         >
-                            {morph(description)}
+                            {bothDescriptions
+                                ? morph(face.description)
+                                : description}
                         </m.span>
                     )
                 }
@@ -93,6 +120,8 @@ function Morph({ children }) {
     )
 }
 
-Morph.propTypes = { children: PropTypes.node.isRequired }
+Morph.propTypes = {
+    children: PropTypes.node.isRequired,
+}
 
 export default Morph
