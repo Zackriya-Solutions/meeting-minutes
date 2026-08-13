@@ -12,6 +12,7 @@ use super::devices::AudioDevice;
 use super::recording_state::{AudioChunk, AudioError, RecordingState, DeviceType};
 use super::audio_processing::{audio_to_mono, LoudnessNormalizer, NoiseSuppressionProcessor, HighPassFilter};
 use super::vad::{ContinuousVadProcessor};
+use super::speech_normalizer::SpeechNormalizer;
 
 /// Ring buffer for synchronized audio mixing
 /// Accumulates samples from mic and system streams until we have aligned windows
@@ -692,6 +693,9 @@ pub struct AudioPipeline {
     // PROFESSIONAL AUDIO MIXING: Ring buffer + RMS-based mixer
     ring_buffer: AudioMixerRingBuffer,
     mixer: ProfessionalAudioMixer,
+    // Lifts quiet remote speakers on the way to VAD/Whisper. Transcription path only -
+    // the recording written to disk stays untouched.
+    normalizer: SpeechNormalizer,
     // Recording sender for pre-mixed audio
     recording_sender_for_mixed: Option<mpsc::UnboundedSender<AudioChunk>>,
 }
@@ -759,6 +763,7 @@ impl AudioPipeline {
             // Initialize professional audio mixing
             ring_buffer,
             mixer,
+            normalizer: SpeechNormalizer::new(),
             recording_sender_for_mixed: None,  // Will be set by manager
         }
     }
@@ -825,14 +830,16 @@ impl AudioPipeline {
                             // Simple mixing without aggressive ducking
                             let mixed_clean = self.mixer.mix_window(&mic_window, &sys_window);
 
-                            // NO POST-GAIN NEEDED: Microphone already normalized by EBU R128 to -23 LUFS
-                            // This is broadcast-standard loudness (Netflix/YouTube/Spotify level)
-                            // System audio at natural levels
-                            // Previous 2x gain was causing excessive limiting/distortion
-                            let mixed_with_gain = mixed_clean;
+                            // The mic is normalized to -23 LUFS at capture, but the far side of a
+                            // call is not: a phone on speaker or someone across the room lands
+                            // 15-20 dB lower in the mixed stream, quiet enough for the VAD to drop
+                            // it as background. Level that up before VAD sees it, otherwise those
+                            // words never reach Whisper and one side of the conversation is simply
+                            // missing from the transcript.
+                            let for_transcription = self.normalizer.process(&mixed_clean);
 
                             // STEP 3: Send mixed audio for transcription (VAD + Whisper)
-                            match self.vad_processor.process_audio(&mixed_with_gain) {
+                            match self.vad_processor.process_audio(&for_transcription) {
                                 Ok(speech_segments) => {
                                     for segment in speech_segments {
                                         let duration_ms = segment.end_timestamp_ms - segment.start_timestamp_ms;
@@ -866,9 +873,11 @@ impl AudioPipeline {
                             }
 
                             // STEP 4: Send mixed audio for recording (WAV file)
+                            // Deliberately the un-levelled mix: the saved file should stay a
+                            // faithful copy of what the microphones picked up.
                             if let Some(ref sender) = self.recording_sender_for_mixed {
                                 let recording_chunk = AudioChunk {
-                                    data: mixed_with_gain.clone(),
+                                    data: mixed_clean.clone(),
                                     sample_rate: self.sample_rate,
                                     timestamp: chunk.timestamp,
                                     chunk_id: self.chunk_id_counter,

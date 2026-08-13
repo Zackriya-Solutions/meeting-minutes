@@ -4,6 +4,7 @@ pub mod decoder;
 pub mod encode;
 pub mod ffmpeg;
 pub mod vad;
+pub mod speech_normalizer;  // Levels quiet remote speakers before VAD sees them
 
 // Modularized device management
 pub mod devices;
