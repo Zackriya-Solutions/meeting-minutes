@@ -10,6 +10,42 @@ interface UseRouteDrawerLifecycleOptions {
 }
 
 const CLOSE_COMPLETION_FALLBACK_MS = 700
+const BACKGROUND_MOTION_FALLBACK_MS = 550
+const BACKGROUND_MOTION_TARGETS = ".home-screen__inner, .home-ask-dock"
+
+/**
+ * Waits for the archive geometry to settle before its route-owned copy is
+ * replaced by the home route. The drawer popup and the archive background
+ * are separate CSS transitions, so Base UI's popup completion alone is not
+ * a reliable hand-off boundary.
+ */
+export async function waitForRouteDrawerBackgroundMotion(
+  background: HTMLElement | null,
+) {
+  if (!background) return
+
+  const animations = Array.from(
+    background.querySelectorAll<HTMLElement>(BACKGROUND_MOTION_TARGETS),
+  )
+    .flatMap((target) => target.getAnimations())
+    .filter((animation) => (
+      animation.playState !== "finished" && animation.playState !== "idle"
+    ))
+
+  if (animations.length === 0) return
+
+  let timeoutId: number | null = null
+  const fallback = new Promise<void>((resolve) => {
+    timeoutId = window.setTimeout(resolve, BACKGROUND_MOTION_FALLBACK_MS)
+  })
+
+  await Promise.race([
+    Promise.allSettled(animations.map((animation) => animation.finished)),
+    fallback,
+  ])
+
+  if (timeoutId !== null) window.clearTimeout(timeoutId)
+}
 
 /**
  * Keeps a route-backed drawer and its route hand-off in one state machine.

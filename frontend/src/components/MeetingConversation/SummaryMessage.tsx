@@ -10,6 +10,7 @@ import {
   useState,
 } from 'react';
 import { SummaryPanel } from '@/components/MeetingDetails/SummaryPanel';
+import { SpeakerRenameDialog } from '@/components/MeetingDetails/SpeakerRenameDialog';
 import { RefreshCw } from '@/components/deslop-icons';
 import { ChatMarkdown } from '@/components/chat/ChatMarkdown';
 import { Button as FluidButton } from '@/components/ui/fluid-button';
@@ -20,6 +21,11 @@ import {
   summaryToMarkdown,
   splitSummaryLead,
 } from '@/lib/summaryToMarkdown';
+import {
+  linkAgreementSpeakers,
+  normalizedSpeakerName,
+  roleForSpeaker,
+} from '@/lib/summarySpeakerLinks';
 import { useT } from '@/lib/i18n';
 import { isUnresolvedSpeakerLabel, type SpeakerInfo } from '@/types';
 import type { AnalyticsRoleRow } from '@/hooks/meeting-details/useMeetingAnalyticsSections';
@@ -40,6 +46,7 @@ interface SummaryMessageProps {
   summaryPanelProps: SummaryPanelProps;
   speakers: SpeakerInfo[];
   roles?: AnalyticsRoleRow[];
+  onRenameSpeaker?: (speakerId: number, displayName: string) => Promise<void> | void;
 }
 
 type ActionIconProps = { size?: number; strokeWidth?: number; className?: string };
@@ -57,7 +64,7 @@ function RenameHint({ children }: { children: ReactNode }) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <span className="border-b border-dashed border-[var(--primary-30)]">
+        <span className="speaker-rename-underline">
           {children}
         </span>
       </TooltipTrigger>
@@ -105,7 +112,7 @@ function ParticipantPreview({ participants }: { participants: readonly string[] 
       >
         {fullText}
       </span>
-      <RenameHint>{allFit ? fullText : compactParticipantPreview(participants)}</RenameHint>
+      <span>{allFit ? fullText : compactParticipantPreview(participants)}</span>
     </span>
   );
 }
@@ -117,8 +124,14 @@ function isResolvedParticipantName(name: string): boolean {
   return !isUnresolvedSpeakerLabel(name) && !NON_NAMES.has(normalized);
 }
 
-export function SummaryMessage({ summaryPanelProps: p, speakers, roles = [] }: SummaryMessageProps) {
+export function SummaryMessage({
+  summaryPanelProps: p,
+  speakers,
+  roles = [],
+  onRenameSpeaker,
+}: SummaryMessageProps) {
   const t = useT();
+  const [renamingSpeaker, setRenamingSpeaker] = useState<SpeakerInfo | null>(null);
 
   const isGenerating =
     p.summaryStatus === 'processing' || p.summaryStatus === 'summarizing' || p.summaryStatus === 'regenerating';
@@ -142,10 +155,17 @@ export function SummaryMessage({ summaryPanelProps: p, speakers, roles = [] }: S
     [speakers],
   );
   const participantRoles = useMemo(() => new Map(
-    roles.map((role) => [role.speaker.trim().toLocaleLowerCase('ru-RU'), role.role]),
+    roles.map((role) => [normalizedSpeakerName(role.speaker), role.role]),
   ), [roles]);
-  const roleFor = (participant: string) => (
-    participantRoles.get(participant.trim().toLocaleLowerCase('ru-RU'))
+  const roleFor = (participant: string) => {
+    const speaker = speakers.find(
+      ({ display_name }) => normalizedSpeakerName(display_name) === normalizedSpeakerName(participant),
+    );
+    return speaker ? roleForSpeaker(speaker, participantRoles) : undefined;
+  };
+  const linkedAgreements = useMemo(
+    () => linkAgreementSpeakers(content.agreements, speakers, t),
+    [content.agreements, speakers, t],
   );
   return (
     <div>
@@ -210,8 +230,33 @@ export function SummaryMessage({ summaryPanelProps: p, speakers, roles = [] }: S
             <section>
               <h2 className="text-sm font-normal leading-5 text-[var(--primary-50)]">{t('Agreements')}</h2>
               <ChatMarkdown
-                content={content.agreements}
+                content={linkedAgreements}
                 className="mm-summary-list mm-summary-plain mt-2"
+                components={{
+                  a: ({ href, children }) => {
+                    const speakerIdMatch = href?.match(/^#speaker-(\d+)$/u);
+                    if (!speakerIdMatch || !onRenameSpeaker) {
+                      return <a href={href}>{children}</a>;
+                    }
+                    const speaker = speakers.find(({ id }) => id === Number(speakerIdMatch[1]));
+                    if (!speaker) return <>{children}</>;
+
+                    return (
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <button
+                            type="button"
+                            className="speaker-rename-underline text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary-20)]"
+                            onClick={() => setRenamingSpeaker(speaker)}
+                          >
+                            {children}
+                          </button>
+                        </TooltipTrigger>
+                        <TooltipContent>{t('Rename')}</TooltipContent>
+                      </Tooltip>
+                    );
+                  },
+                }}
               />
             </section>
           ) : null}
@@ -242,6 +287,15 @@ export function SummaryMessage({ summaryPanelProps: p, speakers, roles = [] }: S
 
       {p.summaryError && !isGenerating && hasSummary && (
         <p className="mt-2 text-xs text-destructive">{p.summaryError}</p>
+      )}
+
+      {onRenameSpeaker && renamingSpeaker && (
+        <SpeakerRenameDialog
+          open={true}
+          currentName={renamingSpeaker.display_name}
+          onOpenChange={(open) => { if (!open) setRenamingSpeaker(null); }}
+          onRename={(name) => onRenameSpeaker(renamingSpeaker.id, name)}
+        />
       )}
     </div>
   );

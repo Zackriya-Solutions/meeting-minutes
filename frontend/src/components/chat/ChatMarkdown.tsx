@@ -1,6 +1,7 @@
 "use client";
 
 import ReactMarkdown from 'react-markdown';
+import type { Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
@@ -13,12 +14,21 @@ import { cn } from '@/lib/utils';
  * answers, which previously rendered as raw pre-wrapped text. Styling lives in the
  * `.mm-md` block in globals.css so it stays consistent in the dark theme.
  */
-export function ChatMarkdown({ content, className }: { content: string; className?: string }) {
+export function ChatMarkdown({
+  content,
+  className,
+  components,
+}: {
+  content: string;
+  className?: string;
+  components?: Components;
+}) {
   return (
     <div className={cn('mm-md', className)}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkMath]}
         rehypePlugins={[[rehypeKatex, { errorColor: 'hsl(var(--destructive))', strict: 'ignore' }]]}
+        components={components}
       >
         {content}
       </ReactMarkdown>

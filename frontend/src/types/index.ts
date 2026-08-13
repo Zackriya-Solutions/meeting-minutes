@@ -129,6 +129,8 @@ export function isUnresolvedSpeakerLabel(label: string | null | undefined): bool
 export interface SpeakerInfo {
   id: number;
   display_name: string;
+  /** Previous and alternative labels that still identify this speaker in persisted prose. */
+  aliases?: string[];
   is_confirmed: boolean;
   /** Explicit owner identity attached to this diarized voice profile. */
   is_self: boolean;

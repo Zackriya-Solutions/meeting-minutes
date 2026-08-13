@@ -4,47 +4,38 @@ import {
     Dialog,
     DialogContent,
     DialogFooter,
-    DialogHeader,
     DialogTitle,
-} from "../ui/dialog";
-import { Button } from "../ui/button";
-import { Input } from "../ui/input";
-import { Switch } from "../ui/switch";
+} from "../ui/fluid-dialog";
+import { Button } from "../ui/fluid-button";
+import { Input } from "../ui/fluid-input";
 import { useT } from "@/lib/i18n";
+import { ShapeProvider } from "@/lib/shape-context";
 
 interface SpeakerRenameDialogProps {
     open: boolean;
     /** The speaker's current display name (seeds the input). */
     currentName: string;
-    /** Whether diarization currently recognizes this voice profile as the local user. */
-    currentIsSelf: boolean;
     onOpenChange: (open: boolean) => void;
     /** Persist the new name. May throw — errors surface as a toast. */
     onRename: (displayName: string) => Promise<void> | void;
-    /** Persist owner identity on the diarized voice profile. */
-    onSelfChange: (isSelf: boolean) => Promise<void> | void;
 }
 
 /** Minimal single-field dialog for renaming a diarized speaker. */
 export function SpeakerRenameDialog({
     open,
     currentName,
-    currentIsSelf,
     onOpenChange,
     onRename,
-    onSelfChange,
 }: SpeakerRenameDialogProps) {
     const t = useT();
     const [name, setName] = useState(currentName);
-    const [isSelf, setIsSelf] = useState(currentIsSelf);
     const [saving, setSaving] = useState(false);
 
     useEffect(() => {
         if (open) {
             setName(currentName);
-            setIsSelf(currentIsSelf);
         }
-    }, [open, currentName, currentIsSelf]);
+    }, [open, currentName]);
 
     const handleSave = async () => {
         const trimmed = name.trim();
@@ -53,9 +44,6 @@ export function SpeakerRenameDialog({
         try {
             if (trimmed !== currentName.trim()) {
                 await onRename(trimmed);
-            }
-            if (isSelf !== currentIsSelf) {
-                await onSelfChange(isSelf);
             }
             onOpenChange(false);
         } catch (err) {
@@ -68,52 +56,40 @@ export function SpeakerRenameDialog({
     };
 
     return (
-        <Dialog open={open} onOpenChange={(o) => { if (!saving) onOpenChange(o); }}>
-            <DialogContent className="sm:max-w-[360px]">
-                <DialogHeader>
-                    <DialogTitle>{t('Rename speaker')}</DialogTitle>
-                </DialogHeader>
-                <div className="py-1">
-                    <Input
-                        autoFocus
-                        value={name}
-                        onChange={(e) => setName(e.target.value)}
-                        onKeyDown={(e) => {
-                            if (e.key === "Enter") {
-                                e.preventDefault();
-                                handleSave();
-                            }
-                        }}
-                        placeholder={t('Speaker name')}
-                    />
-                </div>
-                <label className="flex items-center justify-between gap-4 rounded-lg border border-border px-3 py-3">
-                    <span className="min-w-0">
-                        <span className="block text-sm font-medium text-foreground">{t('This is me')}</span>
-                        <span className="mt-0.5 block text-xs text-muted-foreground">
-                            {t('Use this diarized voice to mark your messages')}
-                        </span>
-                    </span>
-                    <Switch
-                        checked={isSelf}
-                        onCheckedChange={setIsSelf}
-                        disabled={saving}
-                        aria-label={t('This is me')}
-                    />
-                </label>
-                <DialogFooter>
-                    <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
-                        {t('Cancel')}
-                    </Button>
-                    <Button
-                        onClick={handleSave}
-                        disabled={saving || !name.trim()}
-                        className="bg-primary hover:bg-primary/90"
-                    >
-                        {saving ? t('Saving...') : t('Save')}
-                    </Button>
-                </DialogFooter>
-            </DialogContent>
-        </Dialog>
+        <ShapeProvider defaultShape="rounded" publishToRoot={false}>
+            <Dialog open={open} onOpenChange={(o) => { if (!saving) onOpenChange(o); }}>
+                <DialogContent size="sm">
+                    <form onSubmit={(event) => { event.preventDefault(); void handleSave(); }}>
+                        <DialogTitle>{t('Rename speaker')}</DialogTitle>
+                        <Input
+                            autoFocus
+                            className="mt-4"
+                            value={name}
+                            onChange={(e) => setName(e.target.value)}
+                            placeholder={t('Speaker name')}
+                            disabled={saving}
+                        />
+                        <DialogFooter>
+                            <Button
+                                type="button"
+                                variant="secondary"
+                                onClick={() => onOpenChange(false)}
+                                disabled={saving}
+                            >
+                                {t('Cancel')}
+                            </Button>
+                            <Button
+                                type="submit"
+                                variant="primary"
+                                loading={saving}
+                                disabled={!name.trim()}
+                            >
+                                {t('Save')}
+                            </Button>
+                        </DialogFooter>
+                    </form>
+                </DialogContent>
+            </Dialog>
+        </ShapeProvider>
     );
 }

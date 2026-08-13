@@ -9,10 +9,8 @@ import { useMeetingChat, type Citation } from '@/hooks/useMeetingChat';
 import { useMeetingRefinement } from '@/hooks/useMeetingRefinement';
 import { useAnalyticsReport } from '@/hooks/meeting-details/useAnalyticsReport';
 import { useMeetingAnalyticsSections } from '@/hooks/meeting-details/useMeetingAnalyticsSections';
-import { MeetingDynamicsPanel } from './analytics/MeetingDynamicsPanel';
 import { MeetingNumbersPanel } from './analytics/MeetingNumbersPanel';
 import { MeetingScoreSections } from './analytics/MeetingScoreSections';
-import { MeetingTimelinePanel } from './analytics/MeetingTimelinePanel';
 import { MessageBubble, TypingIndicator } from '@/components/chat/MessageBubble';
 import { useLanguage } from '@/lib/i18n';
 import Analytics from '@/lib/analytics';
@@ -67,7 +65,7 @@ function ScrollEdgesObserver({ onChange }: { onChange: (edges: ScrollEdges) => v
  * scrolls as a whole. Clicking a citation expands the transcript pin and scrolls
  * it to the cited segment (by start_ms) in place, instead of routing away.
  *
- * Three tabs: the summary with its analytical blocks and timeline, the transcript, and the
+ * Three tabs: the summary with its analytical blocks, the transcript, and the
  * meeting chat. All report material comes from one completed run (see
  * `useMeetingAnalyticsSections`), so nothing here re-analyses a meeting; moment links jump
  * into the transcript tab, and «Открыть отчёт» opens that run's full HTML.
@@ -513,6 +511,7 @@ export function MeetingConversation({
                           summaryPanelProps={summaryProps}
                           speakers={speakers}
                           roles={analytics.sections?.roles}
+                          onRenameSpeaker={onRenameSpeaker}
                         />
                       </MessageScrollerItem>
                     )}
@@ -526,25 +525,12 @@ export function MeetingConversation({
                     )}
 
                     {analytics.sections && (
-                      <>
-                        <MessageScrollerItem messageId={`${meetingId}-numbers`}>
-                          <MeetingNumbersPanel
-                            numbers={analytics.sections.numbers}
-                            onSeek={handleSeekToMoment}
-                          />
-                        </MessageScrollerItem>
-                        <MessageScrollerItem messageId={`${meetingId}-dynamics`}>
-                          <MeetingDynamicsPanel
-                            dynamics={analytics.sections.dynamics}
-                          />
-                        </MessageScrollerItem>
-                        <MessageScrollerItem messageId={`${meetingId}-timeline`}>
-                          <MeetingTimelinePanel
-                            timeline={analytics.sections.timeline}
-                            onSeek={handleSeekToMoment}
-                          />
-                        </MessageScrollerItem>
-                      </>
+                      <MessageScrollerItem messageId={`${meetingId}-numbers`}>
+                        <MeetingNumbersPanel
+                          numbers={analytics.sections.numbers}
+                          onSeek={handleSeekToMoment}
+                        />
+                      </MessageScrollerItem>
                     )}
                   </MessageScrollerContent>
                 </MessageScrollerViewport>

@@ -299,12 +299,12 @@ export function AppSidebar() {
         />
       </SidebarFooter>
       <div className="flex-1" />
-      <SidebarFooter className="mt-auto border-0 p-6">
-        <ShapeProvider defaultShape="rounded" publishToRoot={false}>
+      <SidebarFooter className="mt-auto border-0 px-6 pb-6 pt-6">
+        <ShapeProvider defaultShape="pill" publishToRoot={false}>
           <Button
             type="button"
             variant="primary"
-            className="w-full text-[var(--black)] [--background:var(--background-primary)] [--foreground:var(--accent-orange)]"
+            className="h-11 w-full text-[var(--black)] [--background:var(--background-primary)] [--foreground:var(--accent-orange)]"
             onClick={handleRecordingToggle}
           >
             {t('Record meeting')}

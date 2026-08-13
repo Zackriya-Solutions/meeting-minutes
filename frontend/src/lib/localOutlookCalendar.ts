@@ -3,7 +3,10 @@ import { invoke } from '@tauri-apps/api/core';
 const ENABLED_SETTING = 'calendar.local_outlook_enabled';
 export const LOCAL_OUTLOOK_SETTING_CHANGED_EVENT = 'memento:local-outlook-setting-changed';
 const CACHE_TTL_MS = 30 * 1000;
-const USE_DEV_OUTLOOK_MOCKS = process.env.NODE_ENV === 'development';
+// Calendar fixtures are useful for an isolated UI demo, but must never be enabled
+// merely because the app is running in development. They otherwise replace the
+// user's real Outlook entries and also become the title source for recordings.
+const USE_DEV_OUTLOOK_MOCKS = process.env.NEXT_PUBLIC_USE_DEV_OUTLOOK_MOCKS === 'true';
 
 export const OUTLOOK_CALENDAR_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 export const OUTLOOK_CALENDAR_EMPTY_RETRY_INTERVAL_MS = 60 * 1000;

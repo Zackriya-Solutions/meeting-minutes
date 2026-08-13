@@ -296,7 +296,7 @@ const TranscriptSegment = memo(function TranscriptSegment({
                                             <button
                                                 type="button"
                                                 onClick={() => onSpeakerClick(speakerId)}
-                                                className="border-b border-dashed border-[var(--primary-30)] text-xs font-normal leading-4 text-[var(--deslop-primary-60)] hover:text-[var(--deslop-primary)] focus:outline-none"
+                                                className="speaker-rename-underline text-xs font-normal leading-4 text-[var(--deslop-primary-60)] hover:text-[var(--deslop-primary)] focus:outline-none"
                                             >
                                                 {avatarLabel}
                                             </button>
@@ -350,7 +350,6 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
     speakersById = null,
     selfSpeakerIds = null,
     onRenameSpeaker,
-    onSetSelfSpeaker,
     onPlayTimestamp,
     playbackTime = null,
     onCorrectTranscript,
@@ -359,7 +358,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
     // Segment id to briefly highlight after a jump-to-timestamp.
     const [highlightedId, setHighlightedId] = useState<string | null>(null);
     // Diarized speaker being renamed (null when the rename dialog is closed).
-    const [renamingSpeaker, setRenamingSpeaker] = useState<{ id: number; name: string; isSelf: boolean } | null>(null);
+    const [renamingSpeaker, setRenamingSpeaker] = useState<{ id: number; name: string } | null>(null);
     const [editingSegment, setEditingSegment] = useState<{ id: string; text: string } | null>(null);
     const [isSavingCorrection, setIsSavingCorrection] = useState(false);
     const [showRollCallTip, setShowRollCallTip] = useState(false);
@@ -396,9 +395,8 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
         setRenamingSpeaker({
             id: speakerId,
             name: speakersById?.get(speakerId) ?? '',
-            isSelf: selfSpeakerIds?.has(speakerId) ?? false,
         });
-    }, [selfSpeakerIds, speakersById]);
+    }, [speakersById]);
     // Ensures a given jump target is consumed only once (not re-triggered on paginate).
     const seekConsumedRef = useRef<number | null>(null);
     // Ref for infinite scroll trigger element
@@ -579,10 +577,8 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                 <SpeakerRenameDialog
                     open={true}
                     currentName={renamingSpeaker.name}
-                    currentIsSelf={renamingSpeaker.isSelf}
                     onOpenChange={(o) => { if (!o) setRenamingSpeaker(null); }}
                     onRename={(name) => onRenameSpeaker(renamingSpeaker.id, name)}
-                    onSelfChange={(isSelf) => onSetSelfSpeaker?.(renamingSpeaker.id, isSelf)}
                 />
             )}
             <Dialog open={editingSegment != null} onOpenChange={(open) => { if (!open && !isSavingCorrection) setEditingSegment(null); }}>

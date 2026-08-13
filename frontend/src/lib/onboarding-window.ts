@@ -8,7 +8,7 @@ import {
 const ONBOARDING_WINDOW_WIDTH = 600;
 const MAIN_WINDOW_WIDTH = 1100;
 const MAIN_WINDOW_HEIGHT = 700;
-const MAIN_WINDOW_MIN_WIDTH = 1068;
+const MAIN_WINDOW_MIN_WIDTH = 680;
 const WINDOW_SETTLE_BUFFER_MS = 34;
 
 interface WindowResizeOptions {
@@ -57,7 +57,8 @@ export async function configureOnboardingWindow(
   const currentWindow = getCurrentWindow();
   const size = new LogicalSize(ONBOARDING_WINDOW_WIDTH, height);
 
-  // The main window starts with a 1068 px minimum width. Clear those constraints before
+  // The main window starts with the narrowest supported sidebar + content width.
+  // Clear those constraints before
   // shrinking it, then pin both bounds so macOS cannot restore a larger saved window size.
   await currentWindow.setMinSize(null);
   await currentWindow.setMaxSize(null);

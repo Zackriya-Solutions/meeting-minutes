@@ -23,6 +23,11 @@ use std::collections::HashMap;
 pub struct MeetingSpeaker {
     pub id: i64,
     pub display_name: String,
+    /// Previous and alternative names tied to this stable speaker id.
+    ///
+    /// Summaries are persisted as prose, so the UI uses these aliases to resolve an old
+    /// rendered name back to the current `display_name` after a manual rename.
+    pub aliases: Vec<String>,
     pub is_confirmed: bool,
     /// User-confirmed owner identity. Derived from diarization/voice matching, never channel.
     pub is_self: bool,
@@ -185,12 +190,44 @@ impl SpeakersRepository {
         speaker_id: i64,
         display_name: &str,
     ) -> Result<u64, SqlxError> {
+        let mut transaction = pool.begin().await?;
+        let current: Option<(String, i64)> =
+            sqlx::query_as("SELECT display_name, is_confirmed FROM speakers WHERE id = ?")
+                .bind(speaker_id)
+                .fetch_optional(&mut *transaction)
+                .await?;
+        let Some((current_name, current_is_confirmed)) = current else {
+            transaction.rollback().await?;
+            return Ok(0);
+        };
+
+        let normalize_alias = |value: &str| value.trim().to_lowercase().replace('ё', "е");
+        if !current_name.trim().is_empty()
+            && normalize_alias(&current_name) != normalize_alias(display_name)
+        {
+            // Preserve the label that may already be embedded in persisted summaries. This is
+            // historical identity metadata, not a request to regenerate or rewrite user prose.
+            sqlx::query(
+                "INSERT INTO speaker_aliases \
+                 (speaker_id, alias, normalized_alias, is_confirmed) \
+                 VALUES (?, ?, ?, ?) \
+                 ON CONFLICT(speaker_id, normalized_alias) DO NOTHING",
+            )
+            .bind(speaker_id)
+            .bind(current_name.trim())
+            .bind(normalize_alias(&current_name))
+            .bind(current_is_confirmed)
+            .execute(&mut *transaction)
+            .await?;
+        }
+
         let res =
             sqlx::query("UPDATE speakers SET display_name = ?, is_confirmed = 1 WHERE id = ?")
                 .bind(display_name)
                 .bind(speaker_id)
-                .execute(pool)
+                .execute(&mut *transaction)
                 .await?;
+        transaction.commit().await?;
         Ok(res.rows_affected())
     }
 
@@ -371,6 +408,7 @@ impl SpeakersRepository {
                 )| MeetingSpeaker {
                     id,
                     display_name,
+                    aliases: Vec::new(),
                     is_confirmed: is_confirmed != 0,
                     is_self: is_self != 0,
                     segment_count,
@@ -378,6 +416,27 @@ impl SpeakersRepository {
                 },
             )
             .collect::<Vec<_>>();
+
+        let alias_rows: Vec<(i64, String)> = sqlx::query_as(
+            "SELECT DISTINCT sa.speaker_id, sa.alias \
+             FROM speaker_aliases sa \
+             JOIN transcripts t ON t.speaker_id = sa.speaker_id \
+             WHERE t.meeting_id = ? \
+             ORDER BY sa.speaker_id ASC, sa.id ASC",
+        )
+        .bind(meeting_id)
+        .fetch_all(pool)
+        .await?;
+        let mut aliases_by_speaker: HashMap<i64, Vec<String>> = HashMap::new();
+        for (speaker_id, alias) in alias_rows {
+            aliases_by_speaker
+                .entry(speaker_id)
+                .or_default()
+                .push(alias);
+        }
+        for speaker in &mut speakers {
+            speaker.aliases = aliases_by_speaker.remove(&speaker.id).unwrap_or_default();
+        }
         apply_meeting_local_automatic_names(&mut speakers);
         Ok(speakers)
     }
@@ -504,6 +563,7 @@ mod tests {
             MeetingSpeaker {
                 id: 64,
                 display_name: "Speaker 41".into(),
+                aliases: Vec::new(),
                 is_confirmed: false,
                 is_self: false,
                 segment_count: 72,
@@ -512,6 +572,7 @@ mod tests {
             MeetingSpeaker {
                 id: 60,
                 display_name: "Speaker 37".into(),
+                aliases: Vec::new(),
                 is_confirmed: false,
                 is_self: false,
                 segment_count: 4,
@@ -520,6 +581,7 @@ mod tests {
             MeetingSpeaker {
                 id: 62,
                 display_name: "Андрей".into(),
+                aliases: Vec::new(),
                 is_confirmed: true,
                 is_self: true,
                 segment_count: 20,
@@ -528,6 +590,7 @@ mod tests {
             MeetingSpeaker {
                 id: 61,
                 display_name: "Speaker 38".into(),
+                aliases: Vec::new(),
                 is_confirmed: false,
                 is_self: false,
                 segment_count: 17,
@@ -576,13 +639,95 @@ mod tests {
             "CREATE TABLE transcripts (
                 id TEXT PRIMARY KEY,
                 meeting_id TEXT NOT NULL,
-                speaker_id INTEGER
+                speaker_id INTEGER,
+                audio_start_time REAL,
+                audio_end_time REAL,
+                duration REAL
+            )",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "CREATE TABLE speaker_aliases (
+                id INTEGER PRIMARY KEY,
+                speaker_id INTEGER NOT NULL,
+                alias TEXT NOT NULL,
+                normalized_alias TEXT NOT NULL,
+                source_candidate_id INTEGER,
+                is_confirmed INTEGER NOT NULL DEFAULT 1,
+                UNIQUE(speaker_id, normalized_alias)
             )",
         )
         .execute(&pool)
         .await
         .unwrap();
         pool
+    }
+
+    #[tokio::test]
+    async fn rename_preserves_the_previous_display_name_as_an_alias() {
+        let pool = gc_test_pool().await;
+        sqlx::query("INSERT INTO speakers (id, display_name, is_confirmed) VALUES (7, 'Блин', 0)")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            SpeakersRepository::rename(&pool, 7, "Зуйзуй")
+                .await
+                .unwrap(),
+            1
+        );
+
+        let renamed: (String, i64) =
+            sqlx::query_as("SELECT display_name, is_confirmed FROM speakers WHERE id = 7")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(renamed, ("Зуйзуй".to_string(), 1));
+
+        let alias: (String, String, i64) = sqlx::query_as(
+            "SELECT alias, normalized_alias, is_confirmed \
+             FROM speaker_aliases WHERE speaker_id = 7",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(alias, ("Блин".to_string(), "блин".to_string(), 0));
+    }
+
+    #[tokio::test]
+    async fn meeting_speakers_returns_aliases_for_summary_name_resolution() {
+        let pool = gc_test_pool().await;
+        sqlx::query(
+            "INSERT INTO speakers (id, display_name, is_confirmed) VALUES (7, 'Зуйзуй', 1)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO transcripts \
+             (id, meeting_id, speaker_id, audio_start_time, audio_end_time, duration) \
+             VALUES ('t1', 'm1', 7, 0.0, 1.0, 1.0)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO speaker_aliases \
+             (speaker_id, alias, normalized_alias) VALUES (7, 'Блин', 'блин')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let speakers = SpeakersRepository::meeting_speakers(&pool, "m1")
+            .await
+            .unwrap();
+        assert_eq!(speakers.len(), 1);
+        assert_eq!(speakers[0].display_name, "Зуйзуй");
+        assert_eq!(speakers[0].aliases, vec!["Блин"]);
     }
 
     async fn speaker_ids(pool: &SqlitePool) -> Vec<i64> {

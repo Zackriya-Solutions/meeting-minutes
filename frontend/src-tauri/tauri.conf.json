@@ -15,7 +15,7 @@
                 "title": "Memento",
                 "width": 1100,
                 "height": 700,
-                "minWidth": 1068,
+                "minWidth": 680,
                 "resizable": true,
                 "fullscreen": false,
                 "decorations": true

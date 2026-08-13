@@ -59,14 +59,7 @@
 
 .content { position: relative; }
 .morphLine { display: block; }
-.logoStack {
-  position: relative;
-  transition: transform 150ms ease;
-}
-
-.root[data-expanded="false"] .logoStack {
-  transform: translateY(6px);
-}
+.logoStack { position: relative; }
 
 .logoFront { position: relative; z-index: 2; }
 .logoBehind { position: absolute; inset: 0; z-index: 1; }

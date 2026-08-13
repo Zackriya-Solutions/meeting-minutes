@@ -4,7 +4,7 @@ import type { ComponentType, ReactNode } from 'react';
 import { useT } from '@/lib/i18n';
 import type { AnalyticsNumberRow } from '@/hooks/meeting-details/useMeetingAnalyticsSections';
 import Table from '@/vendor/deslop/mini-app/components/Table';
-import { MomentLink, SectionHeading, SectionPlaceholder } from './primitives';
+import { MomentLink, SectionHeading } from './primitives';
 
 /**
  * Every figure the meeting quoted, with the moment it was said. The moment jumps into the
@@ -27,32 +27,34 @@ export function MeetingNumbersPanel({
 }) {
   const t = useT();
 
+  // Do not leave an empty heading or placeholder in the feed while the report
+  // has no numeric claims yet (for example, when generation failed or is still
+  // being populated). The section becomes visible as soon as rows arrive.
+  if (numbers.length === 0) return null;
+
   return (
     <div className="mx-auto flex max-w-[720px] flex-col gap-3 pb-10 pt-1.5">
       <SectionHeading>
         {t('Meeting numbers')}
       </SectionHeading>
 
-      {numbers.length === 0 ? (
-        <SectionPlaceholder>{t('No numeric claims found.')}</SectionPlaceholder>
-      ) : (
-        <div className="apple" data-mini-app>
-          <DeslopTable
-            head={[t('Metric'), t('Figure'), t('Moment')]}
-            rows={numbers.map((row) => [
-              row.metric,
-              <span key="value" className="mm-numeric">{row.value}</span>,
-              <MomentLink
-                key="moment"
-                atSeconds={row.at_seconds}
-                onSeek={onSeek}
-                label={t('Open this moment')}
-              />,
-            ])}
-            align={['left', 'left', 'left']}
-          />
-        </div>
-      )}
+      <div className="apple" data-mini-app>
+        <DeslopTable
+          className="meeting-numbers-table"
+          head={[t('Metric'), t('Figure'), t('Moment')]}
+          rows={numbers.map((row) => [
+            row.metric,
+            <span key="value">{row.value}</span>,
+            <MomentLink
+              key="moment"
+              atSeconds={row.at_seconds}
+              onSeek={onSeek}
+              label={t('Open this moment')}
+            />,
+          ])}
+          align={['left', 'left', 'left']}
+        />
+      </div>
     </div>
   );
 }
