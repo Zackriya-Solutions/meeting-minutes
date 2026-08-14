@@ -81,6 +81,36 @@ impl CoreAudioCapture {
         let device_name = output_device.name().unwrap_or_else(|_| cf::String::from_str("Unknown"));
         info!("✅ CoreAudio: Default output device: '{}' (UID: {:?})", device_name, output_uid);
 
+        // Determine the main_sub_device UID for the aggregate device.
+        // Bluetooth devices use a different hardware clock domain and can cause the IO proc
+        // to receive no data. Prefer the built-in speakers as the clock anchor; the global
+        // process tap captures ALL system audio regardless of which device anchors the clock.
+        let tap_anchor_uid = {
+            use cidre::core_audio::DeviceTransportType;
+            let is_bluetooth = output_device
+                .transport_type()
+                .map(|t| {
+                    t == DeviceTransportType::BLUETOOTH || t == DeviceTransportType::BLUETOOTH_LE
+                })
+                .unwrap_or(false);
+
+            if is_bluetooth {
+                info!("🎧 CoreAudio: Bluetooth output '{}' detected — searching for built-in speaker as stable aggregate anchor...", device_name);
+                match find_builtin_output_uid() {
+                    Some(uid) => {
+                        info!("✅ CoreAudio: Using built-in speaker as aggregate main_sub_device (global tap still captures Bluetooth audio)");
+                        uid
+                    }
+                    None => {
+                        warn!("⚠️ CoreAudio: No built-in output found — using Bluetooth as anchor (may affect reliability)");
+                        output_uid
+                    }
+                }
+            } else {
+                output_uid
+            }
+        };
+
         // IMPORTANT: We do NOT create a sub_device dictionary here
         // When using a tap, the tap provides all the audio we need
         // Including both the tap AND the device creates duplicate audio (echo issue)
@@ -137,7 +167,7 @@ impl CoreAudioCapture {
                 cf::Boolean::value_false(),
                 cf::Boolean::value_true(),
                 cf::str!(c"meetily-audio-tap").as_type_ref(),
-                &output_uid,
+                &tap_anchor_uid,
                 &cf::Uuid::new().to_cf_string(),
                 // REMOVED: sub_device array (was causing echo)
                 &cf::ArrayOf::from_slice(&[sub_tap.as_ref()]),
@@ -295,6 +325,35 @@ impl CoreAudioCapture {
     }
 }
 
+/// Find the UID of the first built-in output device for use as a stable aggregate-device anchor.
+///
+/// When the default output is Bluetooth, the aggregate device's `main_sub_device` must point
+/// to a device with a stable hardware clock. Bluetooth devices use a different clock domain
+/// and cause the IO proc to receive no data. Built-in speakers share the Core Audio hardware
+/// clock and are always reliable.
+///
+/// The global process tap captures ALL system audio regardless of which device is the anchor,
+/// so Bluetooth-routed audio is still captured correctly.
+///
+/// Returns `None` on headless machines (e.g. Mac Pro) that have no built-in speakers.
+#[cfg(target_os = "macos")]
+fn find_builtin_output_uid() -> Option<arc::Retained<cf::String>> {
+    use cidre::core_audio::hardware::System;
+    use cidre::core_audio::DeviceTransportType;
+
+    let devices = System::devices().ok()?;
+    for device in devices.iter() {
+        if let Ok(transport) = device.transport_type() {
+            if transport == DeviceTransportType::BUILT_IN {
+                if let Ok(uid) = device.uid() {
+                    return Some(uid);
+                }
+            }
+        }
+    }
+    None
+}
+
 /// Process audio data from the IO proc callback
 #[cfg(target_os = "macos")]
 fn process_audio_data(ctx: &mut AudioContext, data: &[f32]) {
@@ -420,6 +479,27 @@ impl Stream for CoreAudioStream {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn test_find_builtin_output_uid_returns_option() {
+        // Type-level test: verifies the function exists, compiles, and returns Option.
+        // On headless CI environments there is no audio hardware, so None is acceptable.
+        let _result: Option<_> = find_builtin_output_uid();
+        // Reaching this line means the function compiled and ran without panicking.
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    #[ignore] // Run manually with Bluetooth headphones connected as default output
+    fn test_core_audio_capture_with_bluetooth_output() {
+        let capture = CoreAudioCapture::new();
+        assert!(
+            capture.is_ok(),
+            "CoreAudioCapture::new() must succeed when Bluetooth is default output: {:?}",
+            capture.err()
+        );
+    }
 
     #[tokio::test]
     #[cfg(target_os = "macos")]
