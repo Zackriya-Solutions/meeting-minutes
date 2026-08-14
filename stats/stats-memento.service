@@ -15,8 +15,11 @@ WorkingDirectory=/srv/stats/memento/app
 Environment=STATS_PORT=9901
 Environment=STATS_DB=/srv/stats/memento/data/events.db
 # Секреты — только через drop-in: /etc/systemd/system/stats-memento.service.d/env.conf
-# (там server-to-server STATS_INGEST_TOKEN и, только для legacy-миграции,
-# read-only POSTHOG_PERSONAL_API_KEY + POSTHOG_PROJECT_ID).
+# (там server-to-server STATS_INGEST_TOKEN, read-only
+# STATS_GATEWAY_PRODUCT_STATS_SECRET для панели трат DeepSeek и, только для
+# legacy-миграции, read-only POSTHOG_PERSONAL_API_KEY + POSTHOG_PROJECT_ID).
+# STATS_GATEWAY_PRODUCT_STATS_SECRET — это НЕ админский секрет шлюза: он
+# открывает ровно один роут с агрегатом одного продукта.
 # Desktop-клиенты используют проверяемый per-install gateway JWT.
 # PostHog sync выключен, если один из двух POSTHOG_* параметров отсутствует.
 # EnvironmentFile переопределяет Environment.
