@@ -57,13 +57,30 @@ interface CalendarMeeting {
   date: Date | null;
   timeRange: string;
   description: string | null;
-  isCurrent?: boolean;
+}
+
+/**
+ * The in-progress recording shown at the top of today's history. It deliberately
+ * carries no `meeting` object: there is no persisted row for it yet, so a synthetic
+ * id could reach delete/open handlers that expect a real database id. Keeping it a
+ * separate shape makes that impossible rather than merely unlikely.
+ */
+interface LiveRecordingRow {
+  liveKey: string;
+  title: string;
+  description: string | null;
+}
+
+type HistoryRow = CalendarMeeting | LiveRecordingRow;
+
+function isLiveRecordingRow(row: HistoryRow): row is LiveRecordingRow {
+  return 'liveKey' in row;
 }
 
 interface CalendarMeetingGroup {
   key: string;
   label: string;
-  meetings: CalendarMeeting[];
+  meetings: HistoryRow[];
 }
 
 interface FluidMeetingRect {
@@ -445,16 +462,10 @@ export function HomeMeetingList({ animateOnMount = true }: { animateOnMount?: bo
         title: currentTitle,
         createdAt: today.toISOString(),
       }, lang);
-      const currentMeeting: CalendarMeeting = {
-        meeting: {
-          id: 'current-recording',
-          title: currentTitle,
-        },
+      const currentMeeting: LiveRecordingRow = {
+        liveKey: 'current-recording',
         title: currentDisplay.title,
-        date: today,
-        timeRange: '',
         description: t('Current meeting'),
-        isCurrent: true,
       };
       const todayGroup = groups.get(todayKey);
 
@@ -573,9 +584,9 @@ export function HomeMeetingList({ animateOnMount = true }: { animateOnMount?: bo
                   <section key={group.key} className="home-history__group" aria-label={group.label}>
                     <h3>{group.label}</h3>
                     <FluidMeetingList itemCount={group.meetings.length}>
-                      {group.meetings.map((item, itemIndex) => item.isCurrent ? (
+                      {group.meetings.map((item, itemIndex) => isLiveRecordingRow(item) ? (
                         <Cell
-                          key={item.meeting.id}
+                          key={item.liveKey}
                           type="button"
                           className="home-history-cell no-drag"
                           data-fluid-meeting-index={itemIndex}
