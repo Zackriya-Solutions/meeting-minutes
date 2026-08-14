@@ -2,7 +2,6 @@ import { ModelConfig } from "@/components/ModelSettingsModal";
 import { PreferenceSettings } from "@/components/PreferenceSettings";
 import { DeviceSelection } from "@/components/DeviceSelection";
 import { LanguageSelection } from "@/components/LanguageSelection";
-import { TranscriptSettings } from "@/components/TranscriptSettings";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
@@ -10,7 +9,7 @@ import { useConfig } from "@/contexts/ConfigContext";
 import { useRecordingState } from "@/contexts/RecordingStateContext";
 import { useT } from "@/lib/i18n";
 
-type modalType = "modelSettings" | "deviceSettings" | "languageSettings" | "modelSelector" | "errorAlert" | "chunkDropWarning";
+type modalType = "modelSettings" | "deviceSettings" | "languageSettings" | "errorAlert" | "chunkDropWarning";
 
 /**
  * SettingsModals Component
@@ -24,14 +23,12 @@ interface SettingsModalsProps {
     modelSettings: boolean;
     deviceSettings: boolean;
     languageSettings: boolean;
-    modelSelector: boolean;
     errorAlert: boolean;
     chunkDropWarning: boolean;
   };
   messages: {
     errorAlert: string;
     chunkDropWarning: string;
-    modelSelector: string;
   };
   onClose: (name: modalType) => void;
 }
@@ -53,9 +50,6 @@ export function SettingsModals({
     selectedLanguage,
     setSelectedLanguage,
     transcriptModelConfig,
-    setTranscriptModelConfig,
-    showConfidenceIndicator,
-    toggleConfidenceIndicator,
   } = useConfig();
 
   const { isRecording } = useRecordingState();
@@ -208,54 +202,6 @@ export function SettingsModals({
               className="px-4 py-2 text-sm font-medium text-primary-foreground bg-primary rounded-md hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-offset-2 ring-ring"
             >
               {t('Done')}
-            </button>
-          </div>
-        </DialogContent>
-    </Dialog>
-
-    {/* Model Selection Modal */}
-    <Dialog open={modals.modelSelector} onOpenChange={(open) => !open && onClose('modelSelector')}>
-        <DialogContent size="lg" className="max-w-4xl max-h-[90vh] flex flex-col p-0">
-          {/* Fixed Header */}
-          <div className="flex justify-between items-center p-6 pb-4 border-b border-border">
-            <DialogTitle>
-              {messages.modelSelector ? t('Speech Recognition Setup Required') : t('Transcription Model Settings')}
-            </DialogTitle>
-          </div>
-
-          {/* Scrollable Content */}
-          <div className="flex-1 overflow-y-auto p-6 pt-4">
-            <TranscriptSettings
-              transcriptModelConfig={transcriptModelConfig}
-              setTranscriptModelConfig={setTranscriptModelConfig}
-              onModelSelect={() => onClose('modelSelector')}
-            />
-          </div>
-
-          {/* Fixed Footer */}
-          <div className="p-6 pt-4 border-t border-border flex items-center justify-between">
-            {/* Confidence Indicator Toggle */}
-            <div className="flex items-center gap-3">
-              <label className="relative inline-flex items-center cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={showConfidenceIndicator}
-                  onChange={(e) => toggleConfidenceIndicator(e.target.checked)}
-                  className="sr-only peer"
-                />
-                <div className="w-11 h-6 bg-muted peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-ring rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-primary-foreground after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-background after:border-border after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
-              </label>
-              <div>
-                <p className="text-sm font-medium text-muted-foreground">{t('Show Confidence Indicators')}</p>
-                <p className="text-xs text-muted-foreground">{t('Display colored dots showing transcription confidence quality')}</p>
-              </div>
-            </div>
-
-            <button
-              onClick={() => onClose('modelSelector')}
-              className="px-4 py-2 text-sm font-medium text-muted-foreground bg-muted rounded-md hover:brightness-125 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-ring"
-            >
-              {messages.modelSelector ? t('Cancel') : t('Done')}
             </button>
           </div>
         </DialogContent>

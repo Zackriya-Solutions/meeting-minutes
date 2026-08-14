@@ -65,8 +65,9 @@ function ScrollEdgesObserver({ onChange }: { onChange: (edges: ScrollEdges) => v
  * scrolls as a whole. Clicking a citation expands the transcript pin and scrolls
  * it to the cited segment (by start_ms) in place, instead of routing away.
  *
- * Three tabs: the summary with its analytical blocks, the transcript, and the
- * meeting chat. All report material comes from one completed run (see
+ * The summary with its analytical blocks and the transcript are always available. The
+ * meeting chat tab appears after the first user message and stays restored from the
+ * persisted session. All report material comes from one completed run (see
  * `useMeetingAnalyticsSections`), so nothing here re-analyses a meeting; moment links jump
  * into the transcript tab, and «Открыть отчёт» opens that run's full HTML.
  */
@@ -195,6 +196,11 @@ export function MeetingConversation({
   const refinement = useMeetingRefinement(meetingId, onRefetchTranscripts);
   const chat = useMeetingChat({ scope: 'meeting', collectionId: null, meetingId, enabled: true });
   const { messages, input, setInput, sending, loadingHistory, send, onKeyDown, inputRef } = chat;
+  const latestUserMessageIndex = messages.reduce(
+    (latestIndex, message, index) => message.role === 'user' ? index : latestIndex,
+    -1,
+  );
+  const hasChatMessages = latestUserMessageIndex >= 0;
   const meetingSuggestions = useMemo(
     () => buildMeetingPromptSuggestions({
       title: meetingTitle || meeting.title,
@@ -208,6 +214,7 @@ export function MeetingConversation({
     seekToSeconds == null ? 'summary' : 'transcript',
   );
   const summaryInputRef = useRef<HTMLTextAreaElement>(null);
+  const openChatAfterSendRef = useRef(false);
   const [tabScrollEdges, setTabScrollEdges] = useState(NO_SCROLL_EDGES);
 
   // One report pipeline per meeting screen: the "⋯" menu drives it, and the persisted
@@ -324,17 +331,35 @@ export function MeetingConversation({
     setSeekTarget(seconds + Math.random() * 0.02);
   }, []);
 
+  useEffect(() => {
+    if (!hasChatMessages && activeTab === 'chat') {
+      setActiveTab('summary');
+    }
+  }, [activeTab, hasChatMessages]);
+
+  useEffect(() => {
+    if (!hasChatMessages || !openChatAfterSendRef.current) return;
+    openChatAfterSendRef.current = false;
+    setActiveTab('chat');
+  }, [hasChatMessages]);
+
   const focusComposer = useCallback(() => {
+    if (!hasChatMessages) {
+      summaryInputRef.current?.focus();
+      summaryInputRef.current?.scrollIntoView({ block: 'nearest' });
+      return;
+    }
+
     setActiveTab('chat');
     window.requestAnimationFrame(() => {
       inputRef.current?.focus();
       inputRef.current?.scrollIntoView({ block: 'nearest' });
     });
-  }, [inputRef]);
+  }, [hasChatMessages, inputRef]);
 
   const sendFromSummary = useCallback((text: string) => {
     if (!text.trim() || sending || loadingHistory) return;
-    setActiveTab('chat');
+    openChatAfterSendRef.current = true;
     void send(text);
   }, [loadingHistory, send, sending]);
 
@@ -350,7 +375,8 @@ export function MeetingConversation({
     [input, onKeyDown, sendFromSummary],
   );
 
-  // Route the summary's "Discuss" action to this meeting's Chat tab and focus its composer.
+  // Route the summary's "Discuss" action to the appropriate composer. Before the first
+  // question, the summary composer is the only visible entry point for meeting chat.
   const summaryProps = useMemo<ComponentProps<typeof SummaryPanel>>(
     () => ({ ...summaryPanelProps, onDiscussSummary: focusComposer }),
     [summaryPanelProps, focusComposer],
@@ -364,11 +390,6 @@ export function MeetingConversation({
     || !!summaryPanelProps.summaryLoadError;
 
   const meetingTitleFor = useCallback(() => meetingTitle || meeting.title, [meetingTitle, meeting.title]);
-  const latestUserMessageIndex = messages.reduce(
-    (latestIndex, message, index) => message.role === 'user' ? index : latestIndex,
-    -1,
-  );
-
   const actualDurationSeconds = useMemo(() => {
     const durationSource = segments && segments.length > 0
       ? segments.map((s) => s.endTime ?? s.timestamp)
@@ -471,7 +492,10 @@ export function MeetingConversation({
 
       <FluidTabs
         value={activeTab}
-        onValueChange={(value) => setActiveTab(value as MeetingTab)}
+        onValueChange={(value) => {
+          if (value === 'chat' && !hasChatMessages) return;
+          setActiveTab(value as MeetingTab);
+        }}
         onScrollCapture={handleThreadScrollCapture}
         className="flex min-h-0 flex-1 flex-col"
       >
@@ -479,9 +503,11 @@ export function MeetingConversation({
           <FluidTabsTrigger value="summary" className="whitespace-nowrap px-2.5 shadow-none">
             {t('Summary tab')}
           </FluidTabsTrigger>
-          <FluidTabsTrigger value="chat" className="whitespace-nowrap px-2.5 shadow-none">
-            {t('Chat tab')}
-          </FluidTabsTrigger>
+          {hasChatMessages && (
+            <FluidTabsTrigger value="chat" className="whitespace-nowrap px-2.5 shadow-none">
+              {t('Chat tab')}
+            </FluidTabsTrigger>
+          )}
           <FluidTabsTrigger value="transcript" className="whitespace-nowrap px-2.5 shadow-none">
             {t('Transcript tab')}
           </FluidTabsTrigger>

@@ -34,6 +34,9 @@ import {
 } from '@/components/ui/context-menu';
 import { PromptInput } from '@/components/ui/prompt-input';
 import { useSidebar, type CurrentMeeting } from '@/components/Sidebar/SidebarProvider';
+import { useTranscripts } from '@/contexts/TranscriptContext';
+import { useRecordingState } from '@/contexts/RecordingStateContext';
+import { isRecordingSessionBusy } from '@/lib/recordingNavigation';
 import { useLanguage } from '@/lib/i18n';
 import Analytics from '@/lib/analytics';
 import { clearMarkedMoments } from '@/lib/markedMoments';
@@ -54,6 +57,7 @@ interface CalendarMeeting {
   date: Date | null;
   timeRange: string;
   description: string | null;
+  isCurrent?: boolean;
 }
 
 interface CalendarMeetingGroup {
@@ -316,7 +320,10 @@ export function HomeMeetingList({ animateOnMount = true }: { animateOnMount?: bo
     setCurrentMeeting,
     stopSummaryPolling,
   } = useSidebar();
+  const { meetingTitle } = useTranscripts();
+  const { isRecording, status } = useRecordingState();
   const { t, lang } = useLanguage();
+  const hasActiveRecording = isRecordingSessionBusy(isRecording, status);
   const visibleMeetings = useMemo(
     () => meetings.filter((meeting) => (
       meeting.durationSeconds == null
@@ -430,8 +437,50 @@ export function HomeMeetingList({ animateOnMount = true }: { animateOnMount?: bo
       });
     });
 
-    return Array.from(groups.values());
-  }, [calendarMeetings, locale, t]);
+    if (hasActiveRecording) {
+      const today = new Date();
+      const todayKey = historyDateKey(today);
+      const currentTitle = meetingTitle !== '+ New Call' ? meetingTitle : t('Current meeting');
+      const currentDisplay = getMeetingDisplayInfo({
+        title: currentTitle,
+        createdAt: today.toISOString(),
+      }, lang);
+      const currentMeeting: CalendarMeeting = {
+        meeting: {
+          id: 'current-recording',
+          title: currentTitle,
+        },
+        title: currentDisplay.title,
+        date: today,
+        timeRange: '',
+        description: t('Current meeting'),
+        isCurrent: true,
+      };
+      const todayGroup = groups.get(todayKey);
+
+      if (todayGroup) {
+        // The live meeting is intentionally the first row in Today's history.
+        todayGroup.meetings.unshift(currentMeeting);
+      } else {
+        groups.set(todayKey, {
+          key: todayKey,
+          label: formatRelativeMeetingDate(today, locale, t),
+          meetings: [currentMeeting],
+        });
+      }
+    }
+
+    const grouped = Array.from(groups.values());
+    if (hasActiveRecording) {
+      const todayKey = historyDateKey(new Date());
+      const todayIndex = grouped.findIndex((group) => group.key === todayKey);
+      if (todayIndex > 0) {
+        const [todayGroup] = grouped.splice(todayIndex, 1);
+        grouped.unshift(todayGroup);
+      }
+    }
+    return grouped;
+  }, [calendarMeetings, hasActiveRecording, locale, meetingTitle, t]);
 
   const archiveSuggestions = useMemo(
     () => buildArchivePromptSuggestions(
@@ -447,6 +496,11 @@ export function HomeMeetingList({ animateOnMount = true }: { animateOnMount?: bo
     rememberHomeScrollPosition(event.currentTarget);
     setCurrentMeeting(meeting);
     router.push(`/meeting-details?id=${encodeURIComponent(meeting.id)}`);
+  };
+
+  const openCurrentRecording = (event: MouseEvent<HTMLButtonElement>) => {
+    rememberHomeScrollPosition(event.currentTarget);
+    router.push('/recording');
   };
 
   const openUpcomingMeeting = (meeting: LocalOutlookMeeting, event: MouseEvent<HTMLButtonElement>) => {
@@ -512,14 +566,25 @@ export function HomeMeetingList({ animateOnMount = true }: { animateOnMount?: bo
         <main className="home-screen__content">
           <CalendarSettings variant="home" onOpenMeeting={openUpcomingMeeting} />
 
-          {calendarMeetings.length > 0 ? (
-            <section className="home-history" aria-label={t('Earlier')}>
+          {calendarMeetingGroups.length > 0 ? (
+            <section className="home-history" aria-label={t('Meetings')}>
               <div className="home-history__groups">
                 {calendarMeetingGroups.map((group) => (
                   <section key={group.key} className="home-history__group" aria-label={group.label}>
                     <h3>{group.label}</h3>
                     <FluidMeetingList itemCount={group.meetings.length}>
-                      {group.meetings.map((item, itemIndex) => (
+                      {group.meetings.map((item, itemIndex) => item.isCurrent ? (
+                        <Cell
+                          key={item.meeting.id}
+                          type="button"
+                          className="home-history-cell no-drag"
+                          data-fluid-meeting-index={itemIndex}
+                          data-separator={itemIndex < group.meetings.length - 1}
+                          onClick={openCurrentRecording}
+                        >
+                          <CellText title={item.title} description={item.description} bold />
+                        </Cell>
+                      ) : (
                         <ContextMenu key={item.meeting.id}>
                           <ContextMenuTrigger asChild>
                             <div className="contents">

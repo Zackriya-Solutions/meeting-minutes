@@ -3,7 +3,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
 import { useRecordingState } from '@/contexts/RecordingStateContext';
-import { useConfig } from '@/contexts/ConfigContext';
 import Analytics from '@/lib/analytics';
 import { SettingsModals } from './_components/SettingsModal';
 import { HomePanel } from './_components/HomePanel';
@@ -20,17 +19,16 @@ export default function Home() {
   const [isRecording, setIsRecordingState] = useState(false);
 
   // Use contexts for state management
-  const { transcriptModelConfig } = useConfig();
   const recordingState = useRecordingState();
 
   // Hooks
   const t = useT();
   const { setIsMeetingActive } = useSidebar();
-  const { modals, messages, showModal, hideModal } = useModalState(transcriptModelConfig);
+  const { modals, messages, showModal, hideModal } = useModalState();
   const { setIsRecordingDisabled } = useRecordingStateSync(isRecording, setIsRecordingState, setIsMeetingActive);
   // Home starts no recording of its own, but this hook owns the sidebar/auto-listening
   // start listeners, which must stay registered while home is the active route.
-  useRecordingStart(isRecording, setIsRecordingState, showModal);
+  useRecordingStart(isRecording, setIsRecordingState);
 
   // Get handleRecordingStop function and setIsStopping (state comes from global context)
   const { handleRecordingStop, setIsStopping } = useRecordingStop(
@@ -71,7 +69,7 @@ export default function Home() {
   // longer rendered. They must stay registered so a fatal transcription error
   // still tears the recording down (parity with the old behavior). The
   // structured `transcription-error` event is additionally surfaced to the user
-  // (toast / model selector) by useModalState, so here we only stop recording;
+  // (toast) by useModalState, so here we only stop recording;
   // the plain `transcript-error` string event is surfaced via the error alert.
   // Per-chunk transcription failures (e.g. a cloud provider erroring mid-meeting)
   // only emit 'transcription-warning' from the Rust worker — the recording keeps
