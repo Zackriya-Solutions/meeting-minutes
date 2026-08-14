@@ -1,0 +1,1 @@
+ALTER TABLE settings ADD COLUMN autoDetectTeamsEnabled INTEGER NOT NULL DEFAULT 0;
