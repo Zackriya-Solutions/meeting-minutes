@@ -2,6 +2,8 @@
 
 import {
   type ComponentProps,
+  type KeyboardEvent,
+  type MouseEvent,
   type ReactNode,
   useCallback,
   useEffect,
@@ -59,14 +61,33 @@ function ParticipantAvatar({ userId, name }: { userId: number; name: string }) {
   return <InitialsAvatar size={32} userId={userId} name={firstWord} />;
 }
 
-function RenameHint({ children }: { children: ReactNode }) {
+function RenameHint({ children, onClick }: { children: ReactNode; onClick: () => void }) {
   const t = useT();
+
+  const handleClick = (event: MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+    onClick();
+  };
+
+  const handleKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    event.preventDefault();
+    event.stopPropagation();
+    onClick();
+  };
+
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <span className="speaker-rename-underline">
+        <button
+          type="button"
+          className="speaker-rename-underline cursor-pointer bg-transparent p-0 text-left font-inherit hover:text-[var(--deslop-primary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary-20)]"
+          onClick={handleClick}
+          onKeyDown={handleKeyDown}
+          data-participant-name="true"
+        >
           {children}
-        </span>
+        </button>
       </TooltipTrigger>
       <TooltipContent>{t('Rename')}</TooltipContent>
     </Tooltip>
@@ -163,6 +184,22 @@ export function SummaryMessage({
     );
     return speaker ? roleForSpeaker(speaker, participantRoles) : undefined;
   };
+  const openParticipantRenameDialog = useCallback((participant: string) => {
+    if (!onRenameSpeaker) return;
+    const speaker = speakers.find(
+      ({ display_name }) => normalizedSpeakerName(display_name) === normalizedSpeakerName(participant),
+    );
+    if (speaker) setRenamingSpeaker(speaker);
+  }, [onRenameSpeaker, speakers]);
+  const handleParticipantCellClick = useCallback((
+    participant: string,
+    event: MouseEvent<HTMLButtonElement>,
+  ) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement) || !target.closest('[data-participant-name="true"]')) return;
+    event.stopPropagation();
+    openParticipantRenameDialog(participant);
+  }, [openParticipantRenameDialog]);
   const linkedAgreements = useMemo(
     () => linkAgreementSpeakers(content.agreements, speakers, t),
     [content.agreements, speakers, t],
@@ -197,11 +234,17 @@ export function SummaryMessage({
                         />
                       </Cell>
                       <Cell
+                        as="div"
                         type="button"
+                        onClick={(event) => handleParticipantCellClick(participants[0], event)}
                         start={<ParticipantAvatar userId={0} name={participants[0]} />}
                       >
                         <CellText
-                          title={<RenameHint>{participants[0]}</RenameHint>}
+                          title={(
+                            <RenameHint onClick={() => openParticipantRenameDialog(participants[0])}>
+                              {participants[0]}
+                            </RenameHint>
+                          )}
                           description={roleFor(participants[0])}
                         />
                       </Cell>
@@ -209,11 +252,17 @@ export function SummaryMessage({
                     {participants.slice(1).map((participant, index) => (
                       <Cell
                         key={participant}
+                        as="div"
                         type="button"
+                        onClick={(event) => handleParticipantCellClick(participant, event)}
                         start={<ParticipantAvatar userId={index + 1} name={participant} />}
                       >
                         <CellText
-                          title={<RenameHint>{participant}</RenameHint>}
+                          title={(
+                            <RenameHint onClick={() => openParticipantRenameDialog(participant)}>
+                              {participant}
+                            </RenameHint>
+                          )}
                           description={roleFor(participant)}
                         />
                       </Cell>
