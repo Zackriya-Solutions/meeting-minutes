@@ -26,13 +26,13 @@ import { loadBetaFeatures } from '@/types/betaFeatures'
 import { DownloadProgressToastProvider } from '@/components/shared/DownloadProgressToast'
 import { UpdateCheckProvider } from '@/components/UpdateCheckProvider'
 import { RecordingPostProcessingProvider } from '@/contexts/RecordingPostProcessingProvider'
+import { LocalOutlookCalendarProvider } from '@/contexts/LocalOutlookCalendarContext'
 import { ImportAudioDialog, ImportDropOverlay } from '@/components/ImportAudio'
 import { ImportDialogProvider } from '@/contexts/ImportDialogContext'
 import { isAudioExtension, getAudioFormatsDisplayList } from '@/constants/audioFormats'
 import { ManagedDefaultsMigrationDialog } from '@/components/ManagedDefaultsMigrationDialog'
 import { AutoMeetingDetection } from '@/components/AutoMeetingDetection'
 import { ThemeProvider, useTheme } from 'next-themes'
-import { GlobalRecordingPill } from '@/components/GlobalRecordingPill'
 import { usePathname } from 'next/navigation'
 import { useBaseWindowConstraint } from '@/hooks/useRouteDrawerWindowConstraint'
 
@@ -344,6 +344,7 @@ function ProductRuntime({
                             <NativeWindowLayoutConstraint />
                             <ImportDialogProvider onOpen={handleOpenImportDialog}>
                               <OnboardingGate>
+                              <LocalOutlookCalendarProvider>
                               <ShadcnSidebarProvider defaultOpen>
                                 <AppSidebar />
                                 <SidebarInset className="min-w-0 bg-transparent">
@@ -353,8 +354,6 @@ function ProductRuntime({
                                   <DownloadProgressToastProvider />
                                   <ManagedDefaultsMigrationDialog />
                                   <AutoMeetingDetection />
-                                  <GlobalRecordingPill />
-
                                   <MainContent>{children}</MainContent>
                                   {/* Import audio overlay and dialog */}
                                   <ImportDropOverlay visible={showDropOverlay} />
@@ -367,6 +366,7 @@ function ProductRuntime({
                               </TooltipProvider>
                                 </SidebarInset>
                               </ShadcnSidebarProvider>
+                              </LocalOutlookCalendarProvider>
                               </OnboardingGate>
                             </ImportDialogProvider>
                           </SidebarProvider>

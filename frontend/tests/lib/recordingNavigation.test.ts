@@ -1,10 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { RecordingStatus } from "../../src/contexts/RecordingStateContext";
 import {
-  RECORDING_ROUTE,
   canStartRecordingNow,
   isRecordingSessionBusy,
-  shouldShowRecordingPill,
 } from "../../src/lib/recordingNavigation";
 
 const BUSY_STATUSES = [
@@ -47,41 +45,6 @@ describe("canStartRecordingNow", () => {
           expect(canStartRecordingNow(isRecording, status)).toBe(false);
         }
       }
-    }
-  });
-});
-
-describe("shouldShowRecordingPill", () => {
-  test("shows off-route while the recorder is busy, capture or teardown", () => {
-    // Teardown matters most: `isRecording` is already false while the meeting saves,
-    // and dropping the pill there would look like the recording vanished.
-    for (const status of BUSY_STATUSES) {
-      expect(shouldShowRecordingPill("/settings", false, status)).toBe(true);
-      expect(shouldShowRecordingPill("/meeting-details", false, status)).toBe(true);
-    }
-  });
-
-  test("shows off-route whenever a recording is live", () => {
-    for (const status of Object.values(RecordingStatus)) {
-      expect(shouldShowRecordingPill("/", true, status)).toBe(true);
-    }
-  });
-
-  test("stays hidden on the recording route, which has its own controls", () => {
-    for (const status of Object.values(RecordingStatus)) {
-      for (const isRecording of [true, false]) {
-        expect(shouldShowRecordingPill(RECORDING_ROUTE, isRecording, status)).toBe(false);
-      }
-    }
-  });
-
-  test("stays hidden when no session is running", () => {
-    for (const status of [
-      RecordingStatus.IDLE,
-      RecordingStatus.COMPLETED,
-      RecordingStatus.ERROR,
-    ]) {
-      expect(shouldShowRecordingPill("/settings", false, status)).toBe(false);
     }
   });
 });

@@ -35,8 +35,8 @@ import {
   waitForRouteDrawerBackgroundMotion,
 } from "@/hooks/useRouteDrawerLifecycle"
 import {
-  MAIN_CONTENT_MIN_WIDTH,
   ROUTE_DRAWER_LAYOUT_GAP,
+  ROUTE_DRAWER_MAIN_CONTENT_WIDTH,
   useRouteDrawerWindowConstraint,
 } from "@/hooks/useRouteDrawerWindowConstraint"
 import { useT } from "@/lib/i18n"
@@ -52,7 +52,7 @@ function clampDrawerWidth(width: number, sidebarWidth: number) {
     DRAWER_MIN_WIDTH,
     window.innerWidth
       - sidebarWidth
-      - MAIN_CONTENT_MIN_WIDTH
+      - ROUTE_DRAWER_MAIN_CONTENT_WIDTH
       - ROUTE_DRAWER_LAYOUT_GAP * 2
       - DRAWER_INSET
   )

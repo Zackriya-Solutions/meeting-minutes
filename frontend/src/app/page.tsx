@@ -149,15 +149,13 @@ export default function Home() {
       <div className="flex flex-1 overflow-hidden">
         <HomePanel showModal={showModal} />
 
-        {/* No in-place recording controls here: <GlobalRecordingPill> owns the
-            off-route recording affordance (return + Finish) on every screen. This
+        {/* No in-place recording controls here: the persistent sidebar button owns
+            the off-route recording action and becomes Finish during capture. This
             used to render its own RecordOverlay, which was unreachable while the
             navigation guard pinned recording to /recording. With navigation free,
             it would have been a second Finish button backed by a second
             useRecordingStop instance — whose duplicate-stop guard cannot see the
-            provider's in-flight stop. The floating "Record meeting" button that
-            used to sit here belonged to the old full-page transcript screen; the
-            archive header's "New meeting" action starts one now. */}
+            provider's in-flight stop. */}
 
       </div>
     </div>

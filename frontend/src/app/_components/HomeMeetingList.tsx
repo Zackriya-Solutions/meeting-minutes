@@ -327,6 +327,13 @@ export function HomeMeetingList({ animateOnMount = true }: { animateOnMount?: bo
   const [question, setQuestion] = useState('');
   const [meetingToDelete, setMeetingToDelete] = useState<CalendarMeeting | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+
+  useEffect(() => {
+    // Warm the route-owned shell before the first cell press. Meeting data is
+    // still loaded after navigation, inside the already visible drawer.
+    router.prefetch('/meeting-details');
+  }, [router]);
+
   // Route drawers render the same archive behind the panel. On route hand-off,
   // seed the replacement list synchronously from that warmed cache so row
   // descriptions never disappear for a frame and reflow the whole screen.

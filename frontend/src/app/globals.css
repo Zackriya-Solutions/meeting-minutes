@@ -663,11 +663,9 @@ svg.animate-spin {
     background: var(--elevation-1);
     pointer-events: none;
   }
-  /* Treat the route drawer like a right sidebar. The home column needs to
-     resize as the drawer releases its space, but every geometric value must
-     interpolate from the same frame. In particular, do not toggle the
-     inherited --home-column-gutter token: untyped custom properties change
-     discretely in WebKit and made the cards snap 84px narrower before growing. */
+  /* Treat the route drawer like a right sidebar. Keep the archive geometry
+     fixed while it moves: resizing the cards during the exit makes text and
+     separators reflow on different frames and reads as a full-screen jerk. */
   @media (min-width: 1024px) {
     .route-drawer-background {
       --route-drawer-reserved-width: 462px;
@@ -676,24 +674,13 @@ svg.animate-spin {
       will-change: auto;
     }
     .route-drawer-background .home-screen__inner {
-      transition:
-        width 450ms cubic-bezier(.22, 1, .36, 1),
-        transform 450ms cubic-bezier(.22, 1, .36, 1);
+      transition: transform 450ms cubic-bezier(.22, 1, .36, 1);
       will-change: transform;
     }
     .route-drawer-background .home-ask-dock {
-      transition:
-        width 450ms cubic-bezier(.22, 1, .36, 1),
-        transform 450ms cubic-bezier(.22, 1, .36, 1);
+      transition: transform 450ms cubic-bezier(.22, 1, .36, 1);
     }
     .route-drawer-background[data-route-drawer-open] .home-screen__inner {
-      width: min(
-        var(--home-column-width),
-        calc(
-          100% - var(--route-drawer-reserved-width) - 48px +
-          var(--home-column-gutter) + var(--home-column-gutter)
-        )
-      );
       transform: translate3d(
         calc(var(--route-drawer-reserved-width) / -2),
         0,
@@ -701,13 +688,6 @@ svg.animate-spin {
       );
     }
     .route-drawer-background[data-route-drawer-open] .home-ask-dock {
-      width: min(
-        calc(
-          100vw - var(--sidebar-width, 0px) - var(--route-drawer-reserved-width) - 48px +
-          var(--home-column-gutter) + var(--home-column-gutter)
-        ),
-        var(--home-column-width)
-      );
       transform: translate3d(
         calc(-50% - var(--route-drawer-reserved-width) / 2),
         0,

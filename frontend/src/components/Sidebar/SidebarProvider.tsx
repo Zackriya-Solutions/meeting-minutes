@@ -4,9 +4,10 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import Analytics from '@/lib/analytics';
 import { invoke } from '@tauri-apps/api/core';
-import { useRecordingState } from '@/contexts/RecordingStateContext';
+import { RecordingStatus, useRecordingState } from '@/contexts/RecordingStateContext';
 import { translate, useT } from '@/lib/i18n';
 import { prefetchMeetingSummary } from '@/lib/meetingSummaryCache';
+import { canStartRecordingNow } from '@/lib/recordingNavigation';
 
 
 interface SidebarItem {
@@ -129,7 +130,7 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
   const meetingsRequestRef = React.useRef<Promise<boolean> | null>(null);
 
   // Use recording state from RecordingStateContext (single source of truth)
-  const { isRecording } = useRecordingState();
+  const { isRecording, status, setStatus } = useRecordingState();
 
   const pathname = usePathname();
   const router = useRouter();
@@ -282,7 +283,11 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
 
   // Function to handle recording toggle from sidebar
   const handleRecordingToggle = () => {
-    if (!isRecording) {
+    if (canStartRecordingNow(isRecording, status)) {
+      // Reflect the press immediately in every recording control. The home
+      // route will reset this to IDLE if readiness validation cannot start.
+      setStatus(RecordingStatus.STARTING, 'Initializing recording...');
+
       // Check if already on home page
       if (pathname === '/') {
         // Already on home - trigger recording directly via custom event
@@ -298,7 +303,8 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
       // Track recording initiation from sidebar
       Analytics.trackButtonClick('start_recording', 'sidebar');
     }
-    // The actual recording start/stop is handled in the Home component
+    // The actual recording start is handled in the Home component. Stopping
+    // is owned by RecordingPostProcessingProvider so finalization stays single-instance.
   };
 
   // Function to search through meeting transcripts

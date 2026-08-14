@@ -30,7 +30,6 @@ import * as Production028 from '../components/EditableTitle';
 import * as Production029 from '../components/EmbeddingModelSettings';
 import * as Production030 from '../components/EmptyStateSummary';
 import * as Production031 from '../components/GigaamModelManager';
-import * as Production032 from '../components/GlobalRecordingPill';
 import * as Production033 from '../components/GlobalSettingsButton';
 import * as Production034 from '../components/ImportAudio/ImportAudioDialog';
 import * as Production035 from '../components/ImportAudio/ImportDropOverlay';
@@ -202,7 +201,6 @@ export const productionComponentModules = {
   'embedding-model-settings': Production029,
   'empty-state-summary': Production030,
   'gigaam-model-manager': Production031,
-  'global-recording-pill': Production032,
   'global-settings-button': Production033,
   'import-audio-import-audio-dialog': Production034,
   'import-audio-import-drop-overlay': Production035,

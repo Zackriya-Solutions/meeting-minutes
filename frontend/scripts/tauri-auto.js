@@ -3,7 +3,7 @@
  * Auto-detect GPU and run Tauri with appropriate features
  */
 
-const { execSync } = require('child_process');
+const { execFileSync, execSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -76,6 +76,54 @@ console.log(''); // Empty line for spacing
 // Platform-specific environment variables
 const platform = os.platform();
 const env = { ...process.env };
+
+if (platform === 'darwin' && command === 'dev') {
+  const runnerPath = path.join(process.cwd(), 'src-tauri', 'scripts', 'run-signed-dev.sh');
+  let availableIdentities = '';
+  try {
+    availableIdentities = execFileSync(
+      '/usr/bin/security',
+      ['find-identity', '-v', '-p', 'codesigning'],
+      { encoding: 'utf8' },
+    );
+  } catch (_) {
+    // A clean development machine may have no signing identity. The warning
+    // below explains why Keychain grants will then remain build-specific.
+  }
+
+  let signingIdentity =
+    process.env.MEMENTO_DEV_SIGNING_IDENTITY || process.env.APPLE_SIGNING_IDENTITY || '';
+  if (!signingIdentity) {
+    const appleDevelopment = availableIdentities.match(/"(Apple Development:[^"]+)"/);
+    const developerId = availableIdentities.match(/"(Developer ID Application:[^"]+)"/);
+    signingIdentity = appleDevelopment?.[1] || developerId?.[1] || '';
+  }
+
+  if (signingIdentity && !availableIdentities.includes(`"${signingIdentity}"`)) {
+    console.error(`Configured dev signing identity is not available: ${signingIdentity}`);
+    process.exit(1);
+  }
+
+  if (signingIdentity && fs.existsSync(runnerPath)) {
+    const runnerVariable =
+      os.arch() === 'arm64'
+        ? 'CARGO_TARGET_AARCH64_APPLE_DARWIN_RUNNER'
+        : os.arch() === 'x64'
+          ? 'CARGO_TARGET_X86_64_APPLE_DARWIN_RUNNER'
+          : '';
+    if (!runnerVariable) {
+      console.error(`Unsupported macOS development architecture: ${os.arch()}`);
+      process.exit(1);
+    }
+
+    env.MEMENTO_DEV_SIGNING_IDENTITY = signingIdentity;
+    env[runnerVariable] = runnerPath;
+    console.log(`🔏 Dev builds use stable signing identity: ${signingIdentity}`);
+  } else {
+    console.warn('⚠️  No Apple code-signing identity found for this macOS dev build.');
+    console.warn('   Rebuilds may ask again for access to existing Keychain items.');
+  }
+}
 
 if (platform === 'linux' && feature === 'cuda') {
   console.log('🐧 Linux/CUDA detected: Setting CMAKE flags for NVIDIA GPU');
