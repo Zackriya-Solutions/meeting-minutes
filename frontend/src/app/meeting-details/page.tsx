@@ -6,12 +6,11 @@ import PageContent from "./page-content";
 import { useRouter, useSearchParams } from "next/navigation";
 import Analytics from "@/lib/analytics";
 import { invoke } from "@tauri-apps/api/core";
-import { FluidSpinner } from '@/components/ui/fluid-spinner';
 import { usePaginatedTranscripts } from "@/hooks/usePaginatedTranscripts";
 import { useMeetingSpeakers } from "@/hooks/useMeetingSpeakers";
 import { useLanguage, useT } from "@/lib/i18n";
 import { useMeetingDrawer } from "@/contexts/MeetingDrawerContext";
-import { MeetingDrawerShell } from "./meeting-drawer-shell";
+import { MeetingDrawerLoading } from "./loading";
 import { requestAutoStart } from "@/lib/autoStartRecording";
 import { findLocalOutlookMeeting } from "@/lib/localOutlookCalendar";
 import { useRecordingState } from "@/contexts/RecordingStateContext";
@@ -469,9 +468,7 @@ function MeetingDetailsContent() {
 
   // Show loading spinner while initial data loads
   if ((isLoading || isLoadingTranscripts) || !meetingDetails) {
-    return <div className="flex h-full items-center justify-center">
-      <FluidSpinner className="size-6 text-[var(--primary-50)]" />
-    </div>;
+    return <MeetingDrawerLoading />;
   }
 
   return <PageContent
@@ -514,15 +511,9 @@ function MeetingDetailsContent() {
 
 export default function MeetingDetails() {
   return (
-    <MeetingDrawerShell>
-      <Suspense fallback={
-        <div className="flex h-full items-center justify-center">
-          <FluidSpinner className="size-6 text-[var(--primary-50)]" />
-        </div>
-      }>
-        <MeetingDetailsRoute />
-      </Suspense>
-    </MeetingDrawerShell>
+    <Suspense fallback={<MeetingDrawerLoading />}>
+      <MeetingDetailsRoute />
+    </Suspense>
   );
 }
 

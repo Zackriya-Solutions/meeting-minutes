@@ -540,6 +540,7 @@ export const RU: Record<string, string> = {
   "Live meeting transcript": "Расшифровка встречи в реальном времени",
   "Starting recording…": "Запускаем запись…",
   "Return to recording": "Вернуться к записи",
+  "Saving meeting": "Сохраняем...",
   "Saving meeting…": "Сохраняем встречу…",
   "Assistant is typing": "Ассистент печатает",
   "Paused": "Пауза",

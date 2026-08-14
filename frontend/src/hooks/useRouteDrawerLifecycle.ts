@@ -13,6 +13,8 @@ const CLOSE_COMPLETION_FALLBACK_MS = 700
 const BACKGROUND_MOTION_FALLBACK_MS = 550
 const BACKGROUND_MOTION_TARGETS = ".home-screen__inner, .home-ask-dock"
 
+export const REQUEST_ROUTE_DRAWER_CLOSE_EVENT = "memento:request-route-drawer-close"
+
 /**
  * Waits for the archive geometry to settle before its route-owned copy is
  * replaced by the home route. The drawer popup and the archive background
@@ -135,6 +137,14 @@ export function useRouteDrawerLifecycle({
       clearCloseFallback()
     }
   }, [clearCloseFallback])
+
+  useEffect(() => {
+    const handleCloseRequest = () => requestClose()
+    window.addEventListener(REQUEST_ROUTE_DRAWER_CLOSE_EVENT, handleCloseRequest)
+    return () => {
+      window.removeEventListener(REQUEST_ROUTE_DRAWER_CLOSE_EVENT, handleCloseRequest)
+    }
+  }, [requestClose])
 
   return {
     open,

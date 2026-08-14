@@ -168,11 +168,14 @@ export function SummaryMessage({
     [content.agreements, speakers, t],
   );
   return (
-    <div>
+    <div className={isGenerating ? 'flex min-h-full flex-1 flex-col' : undefined}>
       {isGenerating ? (
-        <div className="flex items-center gap-2 py-4 text-sm text-muted-foreground">
-          <FluidSpinner className="h-4 w-4 text-primary" />
-          {p.getSummaryStatusMessage(p.summaryStatus)}
+        <div
+          className="flex min-h-0 flex-1 items-center justify-center"
+          role="status"
+          aria-label={p.getSummaryStatusMessage(p.summaryStatus)}
+        >
+          <FluidSpinner className="h-10 w-10 text-[var(--primary-10)]" />
         </div>
       ) : hasSummary ? (
         <div className="flex flex-col gap-6">

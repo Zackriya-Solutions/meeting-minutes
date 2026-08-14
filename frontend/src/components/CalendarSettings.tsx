@@ -1,48 +1,21 @@
 'use client';
 
-import { type MouseEvent, useCallback, useEffect, useState } from 'react';
-import { toast } from 'sonner';
+import { type MouseEvent } from 'react';
 import { Calendar } from '@/components/deslop-icons';
 import { Button as FluidButton } from '@/components/ui/fluid-button';
 import { Switch } from '@/components/ui/switch';
+import { useLocalOutlookCalendar } from '@/contexts/LocalOutlookCalendarContext';
 import { useLanguage } from '@/lib/i18n';
 import {
   canReadOutlookCalendar,
-  getLocalOutlookCalendarStatus,
-  getUpcomingLocalOutlookMeetings,
-  isLocalOutlookCalendarEnabled,
-  LOCAL_OUTLOOK_SETTING_CHANGED_EVENT,
-  OUTLOOK_CALENDAR_REFRESH_INTERVAL_MS,
   type LocalOutlookMeeting,
-  LocalOutlookCalendarStatus,
   needsOutlookPermission,
-  requestOutlookCalendarPermission,
-  setLocalOutlookCalendarEnabled,
 } from '@/lib/localOutlookCalendar';
 import { IconCross } from '@/vendor/deslop/primitives/material-symbols-react';
 
 interface CalendarSettingsProps {
   variant?: 'settings' | 'home';
   onOpenMeeting?: (meeting: LocalOutlookMeeting, event: MouseEvent<HTMLButtonElement>) => void;
-}
-
-const HOME_MEETING_LIMIT = 2;
-const MEETING_END_REFRESH_PADDING_MS = 500;
-
-function selectCurrentMeetings(
-  meetings: LocalOutlookMeeting[],
-  now = Date.now(),
-): LocalOutlookMeeting[] {
-  return meetings
-    .filter((meeting) => {
-      const start = new Date(meeting.start_at).getTime();
-      const end = new Date(meeting.end_at).getTime();
-      return Number.isFinite(start) && Number.isFinite(end) && end > now;
-    })
-    .sort((left, right) => (
-      new Date(left.start_at).getTime() - new Date(right.start_at).getTime()
-    ))
-    .slice(0, HOME_MEETING_LIMIT);
 }
 
 function capitalize(value: string): string {
@@ -66,142 +39,16 @@ const RUSSIAN_MONTHS_GENITIVE = [
 
 export function CalendarSettings({ variant = 'settings', onOpenMeeting }: CalendarSettingsProps) {
   const { t, lang } = useLanguage();
-  const [status, setStatus] = useState<LocalOutlookCalendarStatus | null>(null);
-  const [enabled, setEnabled] = useState(false);
-  const [upcomingMeetings, setUpcomingMeetings] = useState<LocalOutlookMeeting[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [homeCardVisible, setHomeCardVisible] = useState(false);
-
-  const refreshStatus = useCallback(async () => {
-    const nextStatus = await getLocalOutlookCalendarStatus();
-    setStatus(nextStatus);
-    return nextStatus;
-  }, []);
-
-  const loadCalendarState = useCallback(async (force = false) => {
-    const [nextStatus, nextEnabled] = await Promise.all([
-      getLocalOutlookCalendarStatus(),
-      isLocalOutlookCalendarEnabled(),
-    ]);
-    const connected = nextEnabled && canReadOutlookCalendar(nextStatus);
-    setStatus(nextStatus);
-    setEnabled(connected);
-
-    if (variant === 'home' && connected) {
-      const meetings = await getUpcomingLocalOutlookMeetings(7, { force });
-      setUpcomingMeetings(selectCurrentMeetings(meetings));
-    } else if (variant === 'home') {
-      setUpcomingMeetings([]);
-    }
-  }, [variant]);
-
-  useEffect(() => {
-    let active = true;
-
-    loadCalendarState()
-      .catch((error) => {
-        if (!active) return;
-        toast.error(t('Could not check the local Outlook calendar'), {
-          description: String(error),
-        });
-      })
-      .finally(() => {
-        if (active) setLoading(false);
-      });
-
-    const handleFocus = () => {
-      void loadCalendarState(true).catch(() => undefined);
-    };
-    const handleSettingChange = () => {
-      void loadCalendarState(true).catch(() => undefined);
-    };
-    window.addEventListener('focus', handleFocus);
-    window.addEventListener(LOCAL_OUTLOOK_SETTING_CHANGED_EVENT, handleSettingChange);
-    return () => {
-      active = false;
-      window.removeEventListener('focus', handleFocus);
-      window.removeEventListener(LOCAL_OUTLOOK_SETTING_CHANGED_EVENT, handleSettingChange);
-    };
-  }, [loadCalendarState, t]);
-
-  useEffect(() => {
-    if (variant !== 'home' || !enabled) return;
-
-    const refresh = () => {
-      void loadCalendarState(true).catch(() => undefined);
-    };
-    const interval = window.setInterval(refresh, OUTLOOK_CALENDAR_REFRESH_INTERVAL_MS);
-
-    return () => window.clearInterval(interval);
-  }, [enabled, loadCalendarState, variant]);
-
-  useEffect(() => {
-    if (variant !== 'home' || !enabled || upcomingMeetings.length === 0) return;
-
-    const now = Date.now();
-    const nextEnd = upcomingMeetings.reduce((nearest, meeting) => {
-      const end = new Date(meeting.end_at).getTime();
-      if (!Number.isFinite(end) || end <= now) return nearest;
-      return Math.min(nearest, end);
-    }, Number.POSITIVE_INFINITY);
-
-    if (!Number.isFinite(nextEnd)) return;
-
-    const timer = window.setTimeout(() => {
-      void loadCalendarState(true).catch(() => undefined);
-    }, Math.max(MEETING_END_REFRESH_PADDING_MS, nextEnd - now + MEETING_END_REFRESH_PADDING_MS));
-
-    return () => window.clearTimeout(timer);
-  }, [enabled, loadCalendarState, upcomingMeetings, variant]);
-
-  useEffect(() => {
-    if (variant !== 'home' || loading) return;
-
-    if (!enabled) {
-      setHomeCardVisible(true);
-      return;
-    }
-
-    if (saving) return;
-
-    const hideTimer = window.setTimeout(() => setHomeCardVisible(false), 1_000);
-    return () => window.clearTimeout(hideTimer);
-  }, [enabled, loading, saving, variant]);
-
-  const toggleEnabled = async (next: boolean) => {
-    const previous = enabled;
-    setEnabled(next);
-    setSaving(true);
-    if (variant === 'home') setHomeCardVisible(true);
-
-    try {
-      if (next) {
-        let nextStatus = status ?? await refreshStatus();
-        if (needsOutlookPermission(nextStatus)) {
-          nextStatus = await requestOutlookCalendarPermission();
-          setStatus(nextStatus);
-        }
-        if (!canReadOutlookCalendar(nextStatus)) {
-          throw new Error(nextStatus.detail || t('Local Outlook is unavailable'));
-        }
-        const meetings = await getUpcomingLocalOutlookMeetings(7, { force: true });
-        if (variant === 'home') setUpcomingMeetings(selectCurrentMeetings(meetings));
-      } else if (variant === 'home') {
-        setUpcomingMeetings([]);
-      }
-
-      await setLocalOutlookCalendarEnabled(next);
-      toast.success(t(next ? 'Local Outlook calendar enabled' : 'Local Outlook calendar disabled'));
-    } catch (error) {
-      setEnabled(previous);
-      toast.error(t('Could not change the local Outlook calendar setting'), {
-        description: String(error),
-      });
-    } finally {
-      setSaving(false);
-    }
-  };
+  const {
+    status,
+    enabled,
+    upcomingMeetings,
+    loading,
+    saving,
+    homeCardVisible,
+    setHomeCardVisible,
+    toggleEnabled,
+  } = useLocalOutlookCalendar();
 
   if (loading && variant === 'settings') {
     return <div className="text-sm text-muted-foreground">{t('Loading…')}</div>;

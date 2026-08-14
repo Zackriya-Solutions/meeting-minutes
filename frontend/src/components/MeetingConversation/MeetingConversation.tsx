@@ -355,9 +355,10 @@ export function MeetingConversation({
     () => ({ ...summaryPanelProps, onDiscussSummary: focusComposer }),
     [summaryPanelProps, focusComposer],
   );
+  const isSummaryGenerating = ['processing', 'summarizing', 'regenerating'].includes(summaryPanelProps.summaryStatus);
   const showSummaryContent = hasSummary
     || summaryPanelProps.summaryLoadStatus === 'loading'
-    || ['processing', 'summarizing', 'regenerating'].includes(summaryPanelProps.summaryStatus)
+    || isSummaryGenerating
     // A run that produced nothing still has to be reportable — with a way to try again.
     || !!summaryPanelProps.summaryError
     || !!summaryPanelProps.summaryLoadError;
@@ -506,7 +507,10 @@ export function MeetingConversation({
                 <MessageScrollerViewport className="scroll-pb-28 px-[var(--drawer-content-inset)] pb-28 pt-1.5">
                   <MessageScrollerContent className="mx-auto max-w-[720px] gap-6 pb-4">
                     {showSummaryContent && (
-                      <MessageScrollerItem messageId={`${meetingId}-summary`}>
+                      <MessageScrollerItem
+                        messageId={`${meetingId}-summary`}
+                        className={isSummaryGenerating ? 'flex min-h-full flex-1 flex-col' : undefined}
+                      >
                         <SummaryMessage
                           summaryPanelProps={summaryProps}
                           speakers={speakers}

@@ -16,10 +16,23 @@ pub async fn initialize_database_on_startup(
         .await
         .map_err(|e| format!("Failed to check first launch status: {}", e))?;
 
+    // The onboarding commands need a ready AppState so they can read the empty meetings table
+    // and persist the selected providers when setup finishes. The old first-launch branch left
+    // the state unregistered, which made `onboarding_should_run` fail and the UI fall through to
+    // the main app instead of showing onboarding.
+    let db_manager =
+        DatabaseManager::new_from_app_handle_with_background_jobs(app, start_background_jobs)
+            .await
+            .map_err(|e| format!("Failed to initialize database manager: {}", e))?;
+
+    app.manage(AppState { db_manager });
+    info!("Database initialized successfully");
+
     if is_first_launch && defer_first_launch_setup {
         info!("First launch detected - will notify window when ready");
 
-        // Delay event emission to ensure window is ready and React listeners are registered
+        // Delay event emission to ensure window is ready and React listeners are registered.
+        // The database is already initialized above so onboarding commands can run safely.
         let app_handle = app.clone();
         tauri::async_runtime::spawn(async move {
             tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
@@ -28,15 +41,6 @@ pub async fn initialize_database_on_startup(
                 .expect("Failed to emit first-launch-detected event");
             info!("Emitted first-launch-detected after delay");
         });
-    } else {
-        // Normal flow - initialize database immediately
-        let db_manager =
-            DatabaseManager::new_from_app_handle_with_background_jobs(app, start_background_jobs)
-                .await
-                .map_err(|e| format!("Failed to initialize database manager: {}", e))?;
-
-        app.manage(AppState { db_manager });
-        info!("Database initialized successfully");
     }
 
     Ok(())

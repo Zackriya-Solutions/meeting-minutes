@@ -45,7 +45,7 @@ export function RecordingDrawerShell({ children }: { children: ReactNode }) {
   }, [router])
 
   // Closable while recording: dismissing the drawer hands off to the home screen and
-  // the recording keeps running, with <GlobalRecordingPill> carrying the way back.
+  // the recording keeps running, with the persistent sidebar button carrying Finish.
   const {
     open,
     onOpenChange,

@@ -43,22 +43,3 @@ export function canStartRecordingNow(
   return !isRecordingSessionBusy(isRecording, status)
     && STARTABLE_STATUSES.has(status);
 }
-
-export const RECORDING_ROUTE = '/recording';
-
-/**
- * Whether the floating "recording in progress" pill belongs on screen.
- *
- * The pill is how a user gets back to a session — and stops it — once navigation is
- * free, so it shows for teardown statuses too: `isRecording` drops before saving and
- * transcript processing finish, and vanishing mid-finalize would read as a lost meeting.
- * It stays hidden on the recording route itself, which already has the live controls.
- */
-export function shouldShowRecordingPill(
-  pathname: string,
-  isRecording: boolean,
-  status: RecordingStatus,
-): boolean {
-  if (pathname === RECORDING_ROUTE) return false;
-  return isRecordingSessionBusy(isRecording, status);
-}

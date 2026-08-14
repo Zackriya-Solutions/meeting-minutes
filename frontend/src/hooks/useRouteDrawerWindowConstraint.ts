@@ -6,6 +6,7 @@ import { isTauri } from "@tauri-apps/api/core"
 import { getCurrentWindow } from "@tauri-apps/api/window"
 
 export const MAIN_CONTENT_MIN_WIDTH = 480
+export const ROUTE_DRAWER_MAIN_CONTENT_WIDTH = 600
 export const ROUTE_DRAWER_LAYOUT_GAP = 24
 const DRAWER_INSET = 12
 
@@ -20,7 +21,7 @@ export function getRouteDrawerWindowMinWidth(
   return Math.ceil(
     sidebarWidth
       + ROUTE_DRAWER_LAYOUT_GAP
-      + MAIN_CONTENT_MIN_WIDTH
+      + ROUTE_DRAWER_MAIN_CONTENT_WIDTH
       + ROUTE_DRAWER_LAYOUT_GAP
       + drawerWidth
       + DRAWER_INSET

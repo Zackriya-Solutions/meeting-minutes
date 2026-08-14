@@ -19,7 +19,7 @@ import { HomeMeetingList } from './HomeMeetingList';
  * `/recording` route drawer, which floats as a right-hand panel over this list.
  * Rendering it on home as well meant that dismissing the drawer mid-recording
  * handed the whole window to the transcript and hid the archive behind it,
- * while returning through <GlobalRecordingPill> showed the same transcript as a
+ * while returning through the recording affordance showed the same transcript as a
  * panel. Keeping this view list-only also makes it identical to the background
  * the recording/meeting drawers render, so the hand-off has nothing to redraw.
  */
