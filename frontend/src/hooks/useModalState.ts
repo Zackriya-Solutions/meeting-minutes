@@ -1,14 +1,11 @@
 import { useState, useEffect, useCallback } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { toast } from 'sonner';
-import { TranscriptModelProps } from '@/components/TranscriptSettings';
-import { useT } from '@/lib/i18n';
 
 export type ModalType =
   | 'modelSettings'
   | 'deviceSettings'
   | 'languageSettings'
-  | 'modelSelector'
   | 'errorAlert'
   | 'chunkDropWarning';
 
@@ -16,7 +13,6 @@ interface ModalState {
   modelSettings: boolean;
   deviceSettings: boolean;
   languageSettings: boolean;
-  modelSelector: boolean;
   errorAlert: boolean;
   chunkDropWarning: boolean;
 }
@@ -24,7 +20,6 @@ interface ModalState {
 interface ModalMessages {
   errorAlert: string;
   chunkDropWarning: string;
-  modelSelector: string;
 }
 
 interface UseModalStateReturn {
@@ -37,22 +32,18 @@ interface UseModalStateReturn {
 
 /**
  * Custom hook for managing all modal state and event listeners.
- * Consolidates 9 useState calls and 3 event listeners from page.tsx.
+ * Consolidates modal state and recording-related event listeners from page.tsx.
  *
  * Features:
  * - Unified modal state management
- * - Event listeners for chunk drops, transcription errors, model downloads
- * - Auto-close on model download completion
+ * - Event listeners for chunk drops and transcription errors
  */
-export function useModalState(transcriptModelConfig?: TranscriptModelProps): UseModalStateReturn {
-  const t = useT();
-
+export function useModalState(): UseModalStateReturn {
   // Modal visibility state
   const [modals, setModals] = useState<ModalState>({
     modelSettings: false,
     deviceSettings: false,
     languageSettings: false,
-    modelSelector: false,
     errorAlert: false,
     chunkDropWarning: false,
   });
@@ -61,7 +52,6 @@ export function useModalState(transcriptModelConfig?: TranscriptModelProps): Use
   const [messages, setMessages] = useState<ModalMessages>({
     errorAlert: '',
     chunkDropWarning: '',
-    modelSelector: '',
   });
 
   // Show modal with optional message
@@ -69,7 +59,7 @@ export function useModalState(transcriptModelConfig?: TranscriptModelProps): Use
     setModals(prev => ({ ...prev, [name]: true }));
 
     // Set message if provided
-    if (message && (name === 'errorAlert' || name === 'chunkDropWarning' || name === 'modelSelector')) {
+    if (message && (name === 'errorAlert' || name === 'chunkDropWarning')) {
       setMessages(prev => ({ ...prev, [name]: message }));
     }
   }, []);
@@ -79,7 +69,7 @@ export function useModalState(transcriptModelConfig?: TranscriptModelProps): Use
     setModals(prev => ({ ...prev, [name]: false }));
 
     // Clear message when closing
-    if (name === 'errorAlert' || name === 'chunkDropWarning' || name === 'modelSelector') {
+    if (name === 'errorAlert' || name === 'chunkDropWarning') {
       setMessages(prev => ({ ...prev, [name]: '' }));
     }
   }, []);
@@ -90,14 +80,12 @@ export function useModalState(transcriptModelConfig?: TranscriptModelProps): Use
       modelSettings: false,
       deviceSettings: false,
       languageSettings: false,
-      modelSelector: false,
       errorAlert: false,
       chunkDropWarning: false,
     });
     setMessages({
       errorAlert: '',
       chunkDropWarning: '',
-      modelSelector: '',
     });
   }, []);
 
@@ -139,16 +127,12 @@ export function useModalState(transcriptModelConfig?: TranscriptModelProps): Use
           console.log('Transcription error received:', event.payload);
           const { userMessage, actionable } = event.payload;
 
-          if (actionable) {
-            // This is a model-related error that requires user action
-            showModal('modelSelector', userMessage);
-          } else {
-            // Show toast instead of modal for non-actionable errors (consistent with sidebar)
-            toast.error('', {
-              description: userMessage,
-              duration: 5000,
-            });
-          }
+          // Keep model failures non-blocking: the user can open Settings → Transcription
+          // when needed, without an unexpected modal taking over the current screen.
+          toast.error('', {
+            description: userMessage,
+            duration: actionable ? 7000 : 5000,
+          });
         });
         console.log('Transcription error listener setup complete');
       } catch (error) {
@@ -164,33 +148,7 @@ export function useModalState(transcriptModelConfig?: TranscriptModelProps): Use
         unlistenFn();
       }
     };
-  }, [showModal]);
-
-  // Listen for model download completion to auto-close modal
-  useEffect(() => {
-    const setupDownloadListeners = async () => {
-      const unlisteners: (() => void)[] = [];
-
-      // Listen for Whisper model download complete
-      const unlistenWhisper = await listen<{ modelName: string }>('model-download-complete', (event) => {
-        const { modelName } = event.payload;
-        console.log('[useModalState] Whisper model download complete:', modelName);
-
-        // Auto-close modal if the downloaded model matches the selected one
-        if (transcriptModelConfig?.provider === 'localWhisper' && transcriptModelConfig?.model === modelName) {
-          toast.success(t('Model ready! Closing window...'), { duration: 1500 });
-          setTimeout(() => hideModal('modelSelector'), 1500);
-        }
-      });
-      unlisteners.push(unlistenWhisper);
-
-      return () => {
-        unlisteners.forEach(unsub => unsub());
-      };
-    };
-
-    setupDownloadListeners();
-  }, [transcriptModelConfig, hideModal]);
+  }, []);
 
   return {
     modals,

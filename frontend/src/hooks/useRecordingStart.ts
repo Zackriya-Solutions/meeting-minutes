@@ -40,7 +40,6 @@ interface UseRecordingStartReturn {
 export function useRecordingStart(
   isRecording: boolean,
   setIsRecording: (value: boolean) => void,
-  showModal?: (name: 'modelSelector', message?: string) => void
 ): UseRecordingStartReturn {
   const t = useT();
   const [isAutoStarting, setIsAutoStarting] = useState(false);
@@ -153,7 +152,7 @@ export function useRecordingStart(
       return isDownloading;
     } catch (error) {
       console.error('Failed to check model download status:', error);
-      return false; // Default to not downloading (will show error + modal)
+      return false; // Default to not downloading (will show an error toast)
     }
   }, []);
 
@@ -182,10 +181,9 @@ export function useRecordingStart(
         description: t('Please download a transcription model before recording.'),
         duration: 5000,
       });
-      showModal?.('modelSelector', t('Transcription model setup required'));
       Analytics.trackButtonClick('start_recording_blocked_missing', analyticsLocation);
     }
-  }, [checkIfModelDownloading, showModal, t]);
+  }, [checkIfModelDownloading, t]);
 
   // Handle manual recording start (from button click)
   const handleRecordingStart = useCallback(async (calendarMeetingTitle?: string) => {
@@ -263,6 +261,7 @@ export function useRecordingStart(
           try {
             // Name the meeting after whoever requested the start, or stamp it
             const generatedMeetingTitle = await takeMeetingTitle();
+            setMeetingTitle(generatedMeetingTitle);
 
             // Set STARTING status before initiating backend recording
             setStatus(RecordingStatus.STARTING, 'Initializing recording...');
@@ -277,7 +276,6 @@ export function useRecordingStart(
 
             // Update UI state after successful backend start
             // Note: RECORDING status will be set by RecordingStateContext event listener
-            setMeetingTitle(generatedMeetingTitle);
             setIsRecording(true);
             clearTranscripts();
             setIsMeetingActive(true);
@@ -337,6 +335,7 @@ export function useRecordingStart(
       try {
         // Name the meeting after whoever requested the start, or stamp it
         const generatedMeetingTitle = await takeMeetingTitle();
+        setMeetingTitle(generatedMeetingTitle);
 
         // Set STARTING status before initiating backend recording
         setStatus(RecordingStatus.STARTING, 'Initializing recording...');
@@ -351,7 +350,6 @@ export function useRecordingStart(
 
         // Update UI state after successful backend start
         // Note: RECORDING status will be set by RecordingStateContext event listener
-        setMeetingTitle(generatedMeetingTitle);
         setIsRecording(true);
         clearTranscripts();
         setIsMeetingActive(true);
