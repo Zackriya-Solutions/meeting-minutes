@@ -41,8 +41,12 @@ ALLOWED_GATEWAY_IDENTITY_HOSTS = frozenset({
 })
 
 
-def _gateway_identity_urls(raw: str) -> tuple[str, ...]:
-    """Return exact managed `/me` URLs or fail closed at process startup."""
+def _gateway_urls(raw: str, path: str, env_name: str) -> tuple[str, ...]:
+    """Return exact managed gateway URLs for `path`, or fail closed at startup.
+
+    The env var supplies bases only; the path is appended by this code, so a
+    configured value can never redirect a credential to another endpoint.
+    """
     result = []
     for value in raw.split(","):
         value = value.strip().rstrip("/")
@@ -52,9 +56,7 @@ def _gateway_identity_urls(raw: str) -> tuple[str, ...]:
         try:
             port = parsed.port
         except ValueError as error:
-            raise RuntimeError(
-                f"untrusted STATS_GATEWAY_IDENTITY_URLS entry: {value!r}"
-            ) from error
+            raise RuntimeError(f"untrusted {env_name} entry: {value!r}") from error
         if (
             parsed.scheme != "https"
             or parsed.hostname not in ALLOWED_GATEWAY_IDENTITY_HOSTS
@@ -65,15 +67,39 @@ def _gateway_identity_urls(raw: str) -> tuple[str, ...]:
             or parsed.query
             or parsed.fragment
         ):
-            raise RuntimeError(f"untrusted STATS_GATEWAY_IDENTITY_URLS entry: {value!r}")
-        result.append(f"https://{parsed.hostname}/me")
+            raise RuntimeError(f"untrusted {env_name} entry: {value!r}")
+        result.append(f"https://{parsed.hostname}{path}")
     return tuple(dict.fromkeys(result))
+
+
+def _gateway_identity_urls(raw: str) -> tuple[str, ...]:
+    """Return exact managed `/me` URLs or fail closed at process startup."""
+    return _gateway_urls(raw, "/me", "STATS_GATEWAY_IDENTITY_URLS")
+
+
+def _gateway_product_stats_urls(raw: str) -> tuple[str, ...]:
+    """Return exact managed `/product-stats/memento` URLs, or fail closed."""
+    return _gateway_urls(
+        raw, "/product-stats/memento", "STATS_GATEWAY_PRODUCT_STATS_URLS"
+    )
 
 
 GATEWAY_IDENTITY_URLS = _gateway_identity_urls(os.environ.get(
     "STATS_GATEWAY_IDENTITY_URLS",
     "https://gw.multitool.works,https://gw2.multitool.works",
 ))
+# Managed DeepSeek spend for THIS product. Both hosts are queried and summed:
+# an install fails over between them, and each host meters only what it served,
+# so the two are disjoint halves of one bill.
+GATEWAY_PRODUCT_STATS_URLS = _gateway_product_stats_urls(os.environ.get(
+    "STATS_GATEWAY_PRODUCT_STATS_URLS",
+    "https://gw.multitool.works,https://gw2.multitool.works",
+))
+# Read-only, Memento-scoped gateway secret (PRODUCT_STATS_SECRET_MEMENTO on the
+# gateway). Deliberately NOT the gateway admin secret, which would also open
+# conversation traces and every product's install leaderboard. Unset = the
+# spend panel stays off, which is the state on any box without the drop-in.
+GATEWAY_PRODUCT_STATS_SECRET = os.environ.get("STATS_GATEWAY_PRODUCT_STATS_SECRET", "")
 INSTALL_AUTH_CACHE_SECONDS = max(
     0, min(int(os.environ.get("STATS_INSTALL_AUTH_CACHE_SECONDS", "60")), 60)
 )
@@ -85,6 +111,15 @@ AUTH_VALIDATION_RATE_LIMIT_PER_MINUTE = max(
 )
 STATIC_RATE_LIMIT_PER_MINUTE = max(
     1, int(os.environ.get("STATS_STATIC_RATE_LIMIT_PER_MINUTE", "60"))
+)
+# The spend panel is a slow-moving number behind an unauthenticated GET, so it
+# is cached hard and independently rate limited — the dashboard must not be
+# usable as an amplifier against the gateway's admin surface.
+GATEWAY_SPEND_CACHE_SECONDS = max(
+    30, min(int(os.environ.get("STATS_GATEWAY_SPEND_CACHE_SECONDS", "300")), 3600)
+)
+GATEWAY_SPEND_RATE_LIMIT_PER_MINUTE = max(
+    1, int(os.environ.get("STATS_GATEWAY_SPEND_RATE_LIMIT_PER_MINUTE", "20"))
 )
 RETENTION_DAYS = max(1, int(os.environ.get("STATS_RETENTION_DAYS", "365")))
 VERSION_FILE = HERE / "VERSION"
@@ -113,6 +148,9 @@ _install_auth_cache: dict[str, tuple[float, str]] = {}
 _install_request_times: dict[str, deque[float]] = defaultdict(deque)
 _auth_validation_times: deque[float] = deque()
 _static_request_times: deque[float] = deque()
+_gateway_spend_times: deque[float] = deque()
+# days -> (monotonic_expiry, payload)
+_gateway_spend_cache: dict[int, tuple[float, dict[str, Any]]] = {}
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -213,6 +251,117 @@ def _static_rate_limited() -> bool:
     return False
 
 
+def _gateway_spend_rate_limited() -> bool:
+    now = time.monotonic()
+    while _gateway_spend_times and _gateway_spend_times[0] <= now - 60:
+        _gateway_spend_times.popleft()
+    if len(_gateway_spend_times) >= GATEWAY_SPEND_RATE_LIMIT_PER_MINUTE:
+        return True
+    _gateway_spend_times.append(now)
+    return False
+
+
+def _fetch_product_stats(url: str, secret: str, days: int) -> dict[str, Any] | None:
+    """One gateway host's Memento usage aggregate, or None when unavailable.
+
+    Returns None for every failure — unreachable host, non-200, unparseable or
+    wrong-shaped body. The caller distinguishes "no host answered" from "a host
+    answered zero", which matters: a silent zero would read as "we spent
+    nothing today" during an outage.
+    """
+    request = urllib.request.Request(
+        f"{url}?days={days}",
+        headers={"x-product-stats-secret": secret, "accept": "application/json"},
+        method="GET",
+    )
+    try:
+        opener = urllib.request.build_opener(_NoRedirect)
+        with opener.open(request, timeout=6) as response:
+            payload = json.loads(response.read(MAX_BODY_BYTES))
+    except (urllib.error.HTTPError, OSError, ValueError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict) or payload.get("product") != "memento":
+        return None
+    return payload
+
+
+def _num(value: Any) -> float:
+    return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else 0.0
+
+
+def _merge_product_stats(parts: list[dict[str, Any]]) -> dict[str, Any]:
+    """Sum the gateway hosts' aggregates into one Memento bill.
+
+    Usage rows live on exactly the host that served them, so spend, requests
+    and tokens add up cleanly. Install counts deliberately do NOT: an install
+    that re-registered after a failover exists in both registries, so summing
+    them would overstate the fleet. They are reported per host instead.
+    """
+    totals = {"requests": 0.0, "inputTokens": 0.0, "outputTokens": 0.0, "costUsd": 0.0}
+    today = {"requests": 0.0, "costUsd": 0.0}
+    daily: dict[str, dict[str, float]] = {}
+    for part in parts:
+        part_totals = part.get("totals") or {}
+        for key in totals:
+            totals[key] += _num(part_totals.get(key))
+        part_today = part.get("todayTotals") or {}
+        for key in today:
+            today[key] += _num(part_today.get(key))
+        for row in part.get("daily") or []:
+            if not isinstance(row, dict) or not isinstance(row.get("day"), str):
+                continue
+            bucket = daily.setdefault(
+                row["day"],
+                {"requests": 0.0, "inputTokens": 0.0, "outputTokens": 0.0, "costUsd": 0.0},
+            )
+            for key in bucket:
+                bucket[key] += _num(row.get(key))
+    return {
+        "totals": totals,
+        "todayTotals": today,
+        "daily": [
+            {"day": day, **values}
+            for day, values in sorted(daily.items(), key=lambda kv: kv[0], reverse=True)
+        ],
+    }
+
+
+def _gateway_spend(days: int) -> dict[str, Any] | None:
+    """Memento's managed DeepSeek spend, merged across gateway hosts.
+
+    None when nothing is configured or no host answered — the panel then stays
+    hidden rather than drawing a confident zero.
+    """
+    if not GATEWAY_PRODUCT_STATS_SECRET or not GATEWAY_PRODUCT_STATS_URLS:
+        return None
+    parts = []
+    hosts = []
+    for url in GATEWAY_PRODUCT_STATS_URLS:
+        payload = _fetch_product_stats(url, GATEWAY_PRODUCT_STATS_SECRET, days)
+        host = urllib.parse.urlsplit(url).hostname or url
+        if payload is None:
+            hosts.append({"host": host, "ok": False})
+            continue
+        parts.append(payload)
+        hosts.append({
+            "host": host,
+            "ok": True,
+            "installs": int(_num(payload.get("installs"))),
+            "activeToday": int(_num(payload.get("activeToday"))),
+            "costUsd": _num((payload.get("totals") or {}).get("costUsd")),
+        })
+    if not parts:
+        return None
+    merged = _merge_product_stats(parts)
+    merged["days"] = days
+    merged["hosts"] = hosts
+    # True when at least one host failed: the numbers are then a floor, not a
+    # total, and the dashboard says so rather than quietly under-reporting.
+    merged["partial"] = any(not h["ok"] for h in hosts)
+    merged["updated_at"] = datetime.now(timezone.utc).isoformat()
+    return merged
+
+
 async def _posthog_sync_loop() -> None:
     interval = max(30, int(os.environ.get("POSTHOG_SYNC_INTERVAL_SECONDS", "300")))
     while True:
@@ -251,6 +400,30 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
+
+# --- Traction observer mode --------------------------------------------------
+# The Traction hub proxies this dashboard to external observers and stamps
+# every such request with X-Traction-Observer. Product metrics are fair game
+# for them; infrastructure cost is not — DeepSeek spend is our commercial data,
+# not a product KPI. The header only ever REMOVES access, so a direct caller
+# setting it gains nothing. Mirrors the same guard in the MultiTool module.
+_OBSERVER_BLOCKED_PREFIXES = ("/gateway-spend",)
+
+
+@app.middleware("http")
+async def _observer_guard(request: Request, call_next):  # noqa: ANN001, ANN201
+    if request.headers.get("x-traction-observer"):
+        if request.method not in ("GET", "HEAD"):
+            return JSONResponse({"error": "observer mode is read-only"}, status_code=403)
+        path = request.url.path
+        if any(
+            path == prefix or path.startswith(prefix + "/")
+            for prefix in _OBSERVER_BLOCKED_PREFIXES
+        ):
+            return JSONResponse(
+                {"error": "not available in observer mode"}, status_code=403
+            )
+    return await call_next(request)
 
 
 def _day_index(timestamp: float) -> int:
@@ -392,6 +565,7 @@ async def health() -> dict[str, Any]:
         "ingest_authenticated": bool(INGEST_TOKEN or GATEWAY_IDENTITY_URLS),
         "install_auth": bool(GATEWAY_IDENTITY_URLS),
         "static_auth": bool(INGEST_TOKEN),
+        "gateway_spend": bool(GATEWAY_PRODUCT_STATS_SECRET and GATEWAY_PRODUCT_STATS_URLS),
         "retention_days": RETENTION_DAYS,
         "posthog_sync": bool(os.environ.get("POSTHOG_PERSONAL_API_KEY")),
         "posthog_backfill_complete": not bool(page_state),
@@ -796,6 +970,43 @@ def summary(days: float = 1.0) -> JSONResponse:
 @app.get("/product")
 def product(days: float = 30.0) -> JSONResponse:
     return JSONResponse(compute_product(days), headers={"Cache-Control": "no-store"})
+
+
+@app.get("/gateway-spend")
+async def gateway_spend(days: float = 30.0) -> JSONResponse:
+    """Memento's managed DeepSeek spend on the shared gateway.
+
+    Owner-only: blocked in observer mode above. 503 when unconfigured or when
+    no gateway host answered — the dashboard hides the panel rather than
+    showing a zero that would read as "this costs nothing".
+    """
+    window = max(1, min(int(float(days) + 0.999999), 365))
+    cached = _gateway_spend_cache.get(window)
+    if cached and cached[0] > time.monotonic():
+        return JSONResponse(cached[1], headers={"Cache-Control": "no-store"})
+    if _gateway_spend_rate_limited():
+        return JSONResponse(
+            {"error": "rate limited"}, status_code=429, headers={"Retry-After": "60"}
+        )
+    payload = await asyncio.to_thread(_gateway_spend, window)
+    if payload is None:
+        return JSONResponse(
+            {"error": "gateway spend unavailable"},
+            status_code=503,
+            headers={"Cache-Control": "no-store"},
+        )
+    # Bounded: the route is unauthenticated and `days` is caller-supplied, so a
+    # sweep of distinct windows would otherwise accumulate one entry per value.
+    # Evict the oldest insertion rather than clearing everything — a sweep past
+    # the ceiling must not throw away the still-valid windows the dashboard is
+    # actually using and force them to be re-fetched from the gateway.
+    while len(_gateway_spend_cache) >= 16:
+        _gateway_spend_cache.pop(next(iter(_gateway_spend_cache)), None)
+    _gateway_spend_cache[window] = (
+        time.monotonic() + GATEWAY_SPEND_CACHE_SECONDS,
+        payload,
+    )
+    return JSONResponse(payload, headers={"Cache-Control": "no-store"})
 
 
 @app.get("/dashboard-data")

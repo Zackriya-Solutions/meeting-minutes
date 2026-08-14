@@ -11,6 +11,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 from starlette.requests import Request
+from starlette.responses import JSONResponse
 
 _TEMP = tempfile.TemporaryDirectory()
 os.environ["STATS_DB"] = str(Path(_TEMP.name) / "events.db")
@@ -32,6 +33,8 @@ class StatsModuleTests(unittest.TestCase):
         server._install_request_times.clear()
         server._auth_validation_times.clear()
         server._static_request_times.clear()
+        server._gateway_spend_times.clear()
+        server._gateway_spend_cache.clear()
 
     @staticmethod
     def request(body: object, headers: dict[str, str] | None = None) -> Request:
@@ -256,6 +259,159 @@ class StatsModuleTests(unittest.TestCase):
         ):
             with self.subTest(value=value), self.assertRaises(RuntimeError):
                 server._gateway_identity_urls(value)
+
+    def test_gateway_product_stats_urls_are_exact_managed_https_hosts(self) -> None:
+        self.assertEqual(
+            server._gateway_product_stats_urls(
+                "https://gw.multitool.works/,https://gw2.multitool.works"
+            ),
+            (
+                "https://gw.multitool.works/product-stats/memento",
+                "https://gw2.multitool.works/product-stats/memento",
+            ),
+        )
+        # Same hostile table as the identity URLs: this one carries a secret in
+        # a header, so a value that steered it off-host would leak it.
+        for value in (
+            "http://gw.multitool.works",
+            "https://gw.multitool.works.attacker.invalid",
+            "https://attacker.invalid",
+            "https://user@gw.multitool.works",
+            "https://gw.multitool.works/redirect",
+            "https://gw.multitool.works:notaport",
+        ):
+            with self.subTest(value=value), self.assertRaises(RuntimeError):
+                server._gateway_product_stats_urls(value)
+
+    def test_gateway_spend_sums_hosts_and_merges_daily(self) -> None:
+        primary = {
+            "product": "memento",
+            "installs": 400,
+            "activeToday": 5,
+            "totals": {"requests": 1500, "inputTokens": 900, "outputTokens": 90, "costUsd": 4.10},
+            "todayTotals": {"requests": 20, "costUsd": 0.13},
+            "daily": [{"day": "2026-08-14", "requests": 20, "inputTokens": 10, "outputTokens": 1, "costUsd": 0.13}],
+        }
+        secondary = {
+            "product": "memento",
+            "installs": 12,
+            "activeToday": 1,
+            "totals": {"requests": 19, "inputTokens": 5, "outputTokens": 2, "costUsd": 0.02},
+            "todayTotals": {"requests": 1, "costUsd": 0.01},
+            "daily": [{"day": "2026-08-14", "requests": 1, "inputTokens": 2, "outputTokens": 1, "costUsd": 0.01}],
+        }
+        with (
+            patch.object(server, "GATEWAY_PRODUCT_STATS_SECRET", "product-secret"),
+            patch.object(server, "GATEWAY_PRODUCT_STATS_URLS", (
+                "https://gw.multitool.works/product-stats/memento",
+                "https://gw2.multitool.works/product-stats/memento",
+            )),
+            patch.object(server, "_fetch_product_stats", side_effect=[primary, secondary]),
+        ):
+            payload = server._gateway_spend(30)
+
+        # Usage rows live on exactly the host that served them, so the halves add up.
+        self.assertAlmostEqual(payload["totals"]["costUsd"], 4.12, places=6)
+        self.assertAlmostEqual(payload["todayTotals"]["costUsd"], 0.14, places=6)
+        self.assertEqual(payload["totals"]["requests"], 1519)
+        self.assertEqual(len(payload["daily"]), 1)
+        self.assertAlmostEqual(payload["daily"][0]["costUsd"], 0.14, places=6)
+        self.assertFalse(payload["partial"])
+        # Installs are reported per host, never summed: one install that
+        # re-registered after a failover exists in both registries.
+        self.assertEqual([host["installs"] for host in payload["hosts"]], [400, 12])
+
+    def test_gateway_spend_reports_a_floor_when_one_host_is_down(self) -> None:
+        primary = {
+            "product": "memento",
+            "totals": {"requests": 10, "inputTokens": 1, "outputTokens": 1, "costUsd": 1.0},
+            "todayTotals": {"requests": 1, "costUsd": 0.5},
+            "daily": [],
+        }
+        with (
+            patch.object(server, "GATEWAY_PRODUCT_STATS_SECRET", "product-secret"),
+            patch.object(server, "GATEWAY_PRODUCT_STATS_URLS", (
+                "https://gw.multitool.works/product-stats/memento",
+                "https://gw2.multitool.works/product-stats/memento",
+            )),
+            patch.object(server, "_fetch_product_stats", side_effect=[primary, None]),
+        ):
+            payload = server._gateway_spend(30)
+        self.assertTrue(payload["partial"])
+        self.assertEqual([host["ok"] for host in payload["hosts"]], [True, False])
+
+    def test_gateway_spend_is_unavailable_rather_than_zero(self) -> None:
+        # Nothing configured, and every host failing, must both refuse to
+        # answer — a confident $0 would read as "this costs nothing".
+        with patch.object(server, "GATEWAY_PRODUCT_STATS_SECRET", ""):
+            self.assertIsNone(server._gateway_spend(30))
+        with (
+            patch.object(server, "GATEWAY_PRODUCT_STATS_SECRET", "product-secret"),
+            patch.object(server, "GATEWAY_PRODUCT_STATS_URLS", (
+                "https://gw.multitool.works/product-stats/memento",
+            )),
+            patch.object(server, "_fetch_product_stats", return_value=None),
+        ):
+            self.assertIsNone(server._gateway_spend(30))
+            response = asyncio.run(server.gateway_spend(30))
+        self.assertEqual(response.status_code, 503)
+
+    def test_gateway_spend_caches_and_rate_limits(self) -> None:
+        payload = {"totals": {"costUsd": 1.0}, "todayTotals": {}, "daily": []}
+        with (
+            patch.object(server, "GATEWAY_PRODUCT_STATS_SECRET", "product-secret"),
+            patch.object(server, "_gateway_spend", return_value=payload) as fetch,
+        ):
+            asyncio.run(server.gateway_spend(30))
+            asyncio.run(server.gateway_spend(30))
+            # Second call is served from cache — the gateway is hit once.
+            self.assertEqual(fetch.call_count, 1)
+
+            server._gateway_spend_cache.clear()
+            with patch.object(server, "GATEWAY_SPEND_RATE_LIMIT_PER_MINUTE", 1):
+                server._gateway_spend_times.clear()
+                asyncio.run(server.gateway_spend(7))
+                server._gateway_spend_cache.clear()
+                limited = asyncio.run(server.gateway_spend(7))
+        self.assertEqual(limited.status_code, 429)
+        self.assertEqual(limited.headers["retry-after"], "60")
+
+    def test_gateway_spend_cache_is_bounded(self) -> None:
+        # `days` is caller-supplied on an unauthenticated route, so a sweep of
+        # distinct windows must not grow the cache without bound.
+        payload = {"totals": {"costUsd": 1.0}, "todayTotals": {}, "daily": []}
+        with (
+            patch.object(server, "GATEWAY_PRODUCT_STATS_SECRET", "product-secret"),
+            patch.object(server, "GATEWAY_SPEND_RATE_LIMIT_PER_MINUTE", 10_000),
+            patch.object(server, "_gateway_spend", return_value=payload),
+        ):
+            asyncio.run(server.gateway_spend(30))  # the window the dashboard opens on
+            for day in range(1, 60):
+                asyncio.run(server.gateway_spend(day))
+        self.assertLessEqual(len(server._gateway_spend_cache), 16)
+        # Eviction is oldest-first, not clear-all: a sweep must not throw away
+        # the recently-served windows and force them back through the gateway.
+        self.assertEqual(sorted(server._gateway_spend_cache), list(range(44, 60)))
+
+    def test_observer_mode_cannot_read_gateway_spend(self) -> None:
+        async def call(path: str, method: str = "GET", observer: bool = True):
+            headers = [(b"x-traction-observer", b"1")] if observer else []
+            request = Request({
+                "type": "http", "method": method, "path": path, "headers": headers,
+            })
+
+            async def call_next(_request):
+                return JSONResponse({"reached": True})
+
+            return await server._observer_guard(request, call_next)
+
+        # Infrastructure cost is ours, not a product KPI an observer may read.
+        self.assertEqual(asyncio.run(call("/gateway-spend")).status_code, 403)
+        # Product metrics stay open to observers, and ingest stays closed.
+        self.assertEqual(asyncio.run(call("/product")).status_code, 200)
+        self.assertEqual(asyncio.run(call("/events", method="POST")).status_code, 403)
+        # Without the header nothing is blocked — the stamp only removes access.
+        self.assertEqual(asyncio.run(call("/gateway-spend", observer=False)).status_code, 200)
 
     def test_health_distinguishes_static_and_install_auth(self) -> None:
         with (

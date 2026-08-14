@@ -117,10 +117,52 @@ Configuration:
 - `STATS_STATIC_RATE_LIMIT_PER_MINUTE` — accepted batches authenticated with
   the trusted server-to-server ingest token, default `60`.
 - `STATS_RETENTION_DAYS` — event retention, default `365` days.
+- `STATS_GATEWAY_PRODUCT_STATS_SECRET` — read-only, Memento-scoped gateway
+  secret enabling the DeepSeek spend panel (see below). Unset = panel off.
+- `STATS_GATEWAY_PRODUCT_STATS_URLS` — managed gateway bases for the spend
+  lookup; defaults to `gw.multitool.works` and its fallback.
+- `STATS_GATEWAY_SPEND_CACHE_SECONDS` — spend cache, default `300`, clamped to
+  30…3600.
+- `STATS_GATEWAY_SPEND_RATE_LIMIT_PER_MINUTE` — global cap on outbound spend
+  lookups, default `20`.
 
 Store credentials only in
 `/etc/systemd/system/stats-memento.service.d/env.conf` (mode `0600`). Never
 commit them or pass them through `deploy.sh` arguments.
+
+## Managed DeepSeek spend
+
+Memento's cloud summaries run through the shared gateway, which funds several
+products (MultiTool, Memento, GigaType) from one DeepSeek account. The gateway
+attributes every usage row to the product that spent it, and `GET
+/gateway-spend` renders Memento's slice here.
+
+Two properties are deliberate:
+
+- **The secret is not the gateway admin secret.** It authenticates against the
+  gateway's `PRODUCT_STATS_SECRET_MEMENTO` and opens exactly one route
+  returning one product's aggregate. The admin secret would also open
+  conversation traces and every product's install leaderboard — far more
+  authority than a spend tile needs on an analytics box.
+- **Owner-only.** `/gateway-spend` is in `_OBSERVER_BLOCKED_PREFIXES`, so the
+  Traction hub's external observers get 403 and the panel hides itself.
+  Infrastructure cost is commercial data, not a product KPI.
+
+Both gateway hosts are queried and **summed** — an install fails over between
+them and each host meters only what it served, so the two are disjoint halves
+of one bill. Install counts are reported per host rather than summed: an
+install that re-registered after a failover exists in both registries. If a
+host does not answer, the response is marked `partial` and the dashboard says
+the numbers are a floor; if none answers, the route returns 503 and the panel
+stays hidden rather than showing a `$0` that would read as "this costs
+nothing".
+
+Enable it by putting the secret in the systemd drop-in and restarting:
+
+```
+[Service]
+Environment=STATS_GATEWAY_PRODUCT_STATS_SECRET=<PRODUCT_STATS_SECRET_MEMENTO from the gateway>
+```
 
 ## Internal/test device exclusion
 

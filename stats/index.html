@@ -134,6 +134,11 @@
         <div class="caption">Distinct observed devices; unknown includes legacy events</div>
         <div class="versions" id="versions"></div>
       </section>
+      <section class="panel wide" id="spend-panel" hidden>
+        <h2>Managed DeepSeek spend</h2>
+        <div class="caption" id="spend-caption">Memento's share of the shared gateway bill</div>
+        <div class="quality" id="spend"></div>
+      </section>
       <section class="panel wide">
         <h2>Data contract and coverage</h2>
         <div class="caption" id="coverage"></div>
@@ -206,7 +211,39 @@
     document.getElementById('versions').innerHTML = rows.length ? rows.map(row => `<div class="version"><span title="${esc(row.version)}">${esc(row.version)}</span><span class="bar"><i style="width:${row.devices/max*100}%"></i></span><span>${number(row.devices)}</span></div>`).join('') : '<div class="empty">No version property yet.</div>';
   }
 
+  const usd = value => value == null ? '—' : `$${Number(value).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2})}`;
+
+  // Owner-only: the gateway route is blocked in Traction observer mode and the
+  // secret is absent on any box without the drop-in, so a non-200 means "not
+  // for this viewer" or "not configured" — hide the panel rather than draw a
+  // zero, which would read as "this costs nothing".
+  async function refreshSpend() {
+    const panel = document.getElementById('spend-panel');
+    try {
+      const response = await fetch(`gateway-spend?days=${days}`, {cache:'no-store'});
+      if (!response.ok) { panel.hidden = true; return; }
+      const data = await response.json();
+      const totals = data.totals || {}, today = data.todayTotals || {};
+      const rows = [
+        ['Spend · all-time', usd(totals.costUsd), ''],
+        ['Spend · today', usd(today.costUsd), ''],
+        [`Spend · last ${data.days}d`, usd((data.daily || []).reduce((sum, row) => sum + Number(row.costUsd || 0), 0)), ''],
+        ['Gateway requests · all-time', number(totals.requests), ''],
+        ['Input tokens', number(totals.inputTokens), ''],
+        ['Output tokens', number(totals.outputTokens), ''],
+      ];
+      document.getElementById('spend').innerHTML = rows.map(row => `<div>${esc(row[0])}</div><div class="${row[2]}">${esc(row[1])}</div>`).join('');
+      const hosts = (data.hosts || []).map(host => `${esc(host.host)} ${host.ok ? usd(host.costUsd) : 'unreachable'}`).join(' · ');
+      document.getElementById('spend-caption').textContent =
+        `Memento's share of the shared gateway bill, summed across hosts${data.partial ? ' — PARTIAL, a host did not answer, so these are a floor' : ''} · ${hosts}`;
+      panel.hidden = false;
+    } catch (error) {
+      panel.hidden = true;
+    }
+  }
+
   async function refresh() {
+    refreshSpend();
     try {
       const data = await fetch(`product?days=${days}`, {cache:'no-store'}).then(response => { if (!response.ok) throw new Error(`HTTP ${response.status}`); return response.json(); });
       document.getElementById('sub').textContent = `Updated ${data.updated_at} · ${number(data.identity.observed_devices)} analytics-enabled devices in ${data.window_label}`;
