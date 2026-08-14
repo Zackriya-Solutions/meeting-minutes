@@ -8,11 +8,22 @@ import {
 
 import styles from './Cell.module.css';
 
-interface CellProps extends ButtonHTMLAttributes<HTMLButtonElement> {
-  as?: 'button' | 'div';
+interface CellOwnProps {
   start?: ReactNode;
   end?: ReactNode;
+  children?: ReactNode;
+  className?: string;
 }
+
+/**
+ * A cell renders as a `<button>` by default. `as="div"` is for cells that carry their own
+ * interactive children — a button inside a button is invalid HTML — and it only accepts div
+ * attributes, so button-only props (`type`, `disabled`) fail to compile instead of reaching
+ * the DOM as stray attributes.
+ */
+type CellProps =
+  | (CellOwnProps & Omit<ButtonHTMLAttributes<HTMLButtonElement>, keyof CellOwnProps> & { as?: 'button' })
+  | (CellOwnProps & Omit<HTMLAttributes<HTMLDivElement>, keyof CellOwnProps> & { as: 'div' });
 
 interface CellTextProps {
   title: ReactNode;
@@ -25,10 +36,8 @@ interface CellTextProps {
  * The source package is not currently published, so Memento vendors the
  * component beside the Deslop primitives it already consumes.
  */
-const CellRoot = forwardRef<HTMLButtonElement, CellProps>(function Cell(
-  { as = 'button', start, end, children, className = '', ...props },
-  ref,
-) {
+const CellRoot = forwardRef<HTMLElement, CellProps>(function Cell(props, ref) {
+  const { start, end, children, className = '' } = props;
   const content = (
     <>
       {start ? <span className={styles.start}>{start}</span> : null}
@@ -37,21 +46,18 @@ const CellRoot = forwardRef<HTMLButtonElement, CellProps>(function Cell(
     </>
   );
 
-  if (as === 'div') {
-    const { type: _type, ...divProps } = props;
+  if (props.as === 'div') {
+    const { as: _as, start: _start, end: _end, children: _children, className: _className, ...divProps } = props;
     return (
-      <div
-        ref={ref as Ref<HTMLDivElement>}
-        className={`${styles.root} ${className}`}
-        {...(divProps as HTMLAttributes<HTMLDivElement>)}
-      >
+      <div ref={ref as Ref<HTMLDivElement>} className={`${styles.root} ${className}`} {...divProps}>
         {content}
       </div>
     );
   }
 
+  const { as: _as, start: _start, end: _end, children: _children, className: _className, ...buttonProps } = props;
   return (
-    <button ref={ref} className={`${styles.root} ${className}`} {...props}>
+    <button ref={ref as Ref<HTMLButtonElement>} className={`${styles.root} ${className}`} {...buttonProps}>
       {content}
     </button>
   );

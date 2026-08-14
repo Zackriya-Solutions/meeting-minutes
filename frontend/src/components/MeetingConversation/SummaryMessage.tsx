@@ -2,7 +2,6 @@
 
 import {
   type ComponentProps,
-  type KeyboardEvent,
   type MouseEvent,
   type ReactNode,
   useCallback,
@@ -64,14 +63,9 @@ function ParticipantAvatar({ userId, name }: { userId: number; name: string }) {
 function RenameHint({ children, onClick }: { children: ReactNode; onClick: () => void }) {
   const t = useT();
 
+  // The name sits inside CellStack, whose root toggles the stack on any click.
+  // Renaming is the name's own action, so it must not also fold the card.
   const handleClick = (event: MouseEvent<HTMLButtonElement>) => {
-    event.stopPropagation();
-    onClick();
-  };
-
-  const handleKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
-    if (event.key !== 'Enter' && event.key !== ' ') return;
-    event.preventDefault();
     event.stopPropagation();
     onClick();
   };
@@ -83,8 +77,6 @@ function RenameHint({ children, onClick }: { children: ReactNode; onClick: () =>
           type="button"
           className="speaker-rename-underline cursor-pointer bg-transparent p-0 text-left font-inherit hover:text-[var(--deslop-primary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary-20)]"
           onClick={handleClick}
-          onKeyDown={handleKeyDown}
-          data-participant-name="true"
         >
           {children}
         </button>
@@ -191,15 +183,6 @@ export function SummaryMessage({
     );
     if (speaker) setRenamingSpeaker(speaker);
   }, [onRenameSpeaker, speakers]);
-  const handleParticipantCellClick = useCallback((
-    participant: string,
-    event: MouseEvent<HTMLButtonElement>,
-  ) => {
-    const target = event.target;
-    if (!(target instanceof HTMLElement) || !target.closest('[data-participant-name="true"]')) return;
-    event.stopPropagation();
-    openParticipantRenameDialog(participant);
-  }, [openParticipantRenameDialog]);
   const linkedAgreements = useMemo(
     () => linkAgreementSpeakers(content.agreements, speakers, t),
     [content.agreements, speakers, t],
@@ -235,8 +218,6 @@ export function SummaryMessage({
                       </Cell>
                       <Cell
                         as="div"
-                        type="button"
-                        onClick={(event) => handleParticipantCellClick(participants[0], event)}
                         start={<ParticipantAvatar userId={0} name={participants[0]} />}
                       >
                         <CellText
@@ -253,8 +234,6 @@ export function SummaryMessage({
                       <Cell
                         key={participant}
                         as="div"
-                        type="button"
-                        onClick={(event) => handleParticipantCellClick(participant, event)}
                         start={<ParticipantAvatar userId={index + 1} name={participant} />}
                       >
                         <CellText
