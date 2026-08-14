@@ -376,6 +376,19 @@ class StatsModuleTests(unittest.TestCase):
         self.assertEqual(limited.status_code, 429)
         self.assertEqual(limited.headers["retry-after"], "60")
 
+    def test_gateway_spend_cache_is_bounded(self) -> None:
+        # `days` is caller-supplied on an unauthenticated route, so a sweep of
+        # distinct windows must not grow the cache without bound.
+        payload = {"totals": {"costUsd": 1.0}, "todayTotals": {}, "daily": []}
+        with (
+            patch.object(server, "GATEWAY_PRODUCT_STATS_SECRET", "product-secret"),
+            patch.object(server, "GATEWAY_SPEND_RATE_LIMIT_PER_MINUTE", 10_000),
+            patch.object(server, "_gateway_spend", return_value=payload),
+        ):
+            for day in range(1, 60):
+                asyncio.run(server.gateway_spend(day))
+        self.assertLessEqual(len(server._gateway_spend_cache), 16)
+
     def test_observer_mode_cannot_read_gateway_spend(self) -> None:
         async def call(path: str, method: str = "GET", observer: bool = True):
             headers = [(b"x-traction-observer", b"1")] if observer else []

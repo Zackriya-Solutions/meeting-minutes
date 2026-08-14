@@ -995,6 +995,12 @@ async def gateway_spend(days: float = 30.0) -> JSONResponse:
             status_code=503,
             headers={"Cache-Control": "no-store"},
         )
+    # Bounded like _install_auth_cache: the route is unauthenticated, and
+    # `days` is caller-supplied, so a sweep of distinct windows would otherwise
+    # accumulate one entry per value. Clear-all rather than LRU — refilling the
+    # three windows the dashboard actually uses costs three lookups.
+    if len(_gateway_spend_cache) >= 16:
+        _gateway_spend_cache.clear()
     _gateway_spend_cache[window] = (
         time.monotonic() + GATEWAY_SPEND_CACHE_SECONDS,
         payload,
