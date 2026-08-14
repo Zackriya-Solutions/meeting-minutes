@@ -385,9 +385,13 @@ class StatsModuleTests(unittest.TestCase):
             patch.object(server, "GATEWAY_SPEND_RATE_LIMIT_PER_MINUTE", 10_000),
             patch.object(server, "_gateway_spend", return_value=payload),
         ):
+            asyncio.run(server.gateway_spend(30))  # the window the dashboard opens on
             for day in range(1, 60):
                 asyncio.run(server.gateway_spend(day))
         self.assertLessEqual(len(server._gateway_spend_cache), 16)
+        # Eviction is oldest-first, not clear-all: a sweep must not throw away
+        # the recently-served windows and force them back through the gateway.
+        self.assertEqual(sorted(server._gateway_spend_cache), list(range(44, 60)))
 
     def test_observer_mode_cannot_read_gateway_spend(self) -> None:
         async def call(path: str, method: str = "GET", observer: bool = True):
