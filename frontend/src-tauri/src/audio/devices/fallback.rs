@@ -81,7 +81,10 @@ pub fn get_safe_recording_devices_macos() -> Result<(Option<AudioDevice>, Option
             // Try to find built-in microphone as fallback
             match find_builtin_input_device()? {
                 Some(builtin_mic) => {
-                    info!("→ ✅ Overriding to stable built-in microphone: '{}'", builtin_mic.name);
+                    info!(
+                        "→ ✅ Overriding to stable built-in microphone: '{}'",
+                        builtin_mic.name
+                    );
                     info!("   Built-in provides consistent sample rates for reliable mixing");
                     Some(builtin_mic)
                 }
@@ -94,7 +97,10 @@ pub fn get_safe_recording_devices_macos() -> Result<(Option<AudioDevice>, Option
             }
         } else {
             // Not Bluetooth - use as-is
-            info!("✅ Using wired/built-in microphone: '{}' (device type: {:?})", mic.name, device_kind);
+            info!(
+                "✅ Using wired/built-in microphone: '{}' (device type: {:?})",
+                mic.name, device_kind
+            );
             Some(mic.clone())
         }
     } else {
@@ -121,7 +127,10 @@ pub fn get_safe_recording_devices_macos() -> Result<(Option<AudioDevice>, Option
             info!("   Keeping Bluetooth speaker - captures from active output (pristine quality)");
             Some(speaker.clone())
         } else {
-            info!("✅ Using wired/built-in speaker: '{}' (device type: {:?})", speaker.name, device_kind);
+            info!(
+                "✅ Using wired/built-in speaker: '{}' (device type: {:?})",
+                speaker.name, device_kind
+            );
             Some(speaker.clone())
         }
     } else {
@@ -142,7 +151,10 @@ pub fn get_safe_recording_devices_macos() -> Result<(Option<AudioDevice>, Option
         }
         (None, Some(speaker)) => {
             warn!("📋 [macOS] Recording device selection complete:");
-            warn!("   System Audio: '{}' (microphone unavailable)", speaker.name);
+            warn!(
+                "   System Audio: '{}' (microphone unavailable)",
+                speaker.name
+            );
         }
         (None, None) => {
             warn!("❌ No recording devices available - cannot start recording");

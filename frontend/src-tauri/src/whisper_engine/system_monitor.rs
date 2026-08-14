@@ -1,9 +1,9 @@
-use sysinfo::System;
-use std::sync::Arc;
-use tokio::sync::RwLock;
 use anyhow::Result;
-use log::{info, warn, debug};
-use serde::{Serialize, Deserialize};
+use log::{debug, info, warn};
+use serde::{Deserialize, Serialize};
+use std::sync::Arc;
+use sysinfo::System;
+use tokio::sync::RwLock;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SystemResources {
@@ -82,9 +82,8 @@ impl SystemMonitor {
         let memory_used_percent = (used_memory as f32 / total_memory as f32) * 100.0;
 
         // Get average CPU usage across all cores
-        let cpu_usage_percent = system.cpus().iter()
-            .map(|cpu| cpu.cpu_usage())
-            .sum::<f32>() / system.cpus().len() as f32;
+        let cpu_usage_percent = system.cpus().iter().map(|cpu| cpu.cpu_usage()).sum::<f32>()
+            / system.cpus().len() as f32;
 
         // Try to get CPU temperature from components
         let cpu_temperature_celsius = self.get_cpu_temperature(&system).await;
@@ -98,10 +97,12 @@ impl SystemMonitor {
             cpu_cores: system.cpus().len(),
         };
 
-        debug!("Current resources: Memory: {:.1}%, CPU: {:.1}%, Temp: {:?}°C",
-               resources.memory_used_percent,
-               resources.cpu_usage_percent,
-               resources.cpu_temperature_celsius);
+        debug!(
+            "Current resources: Memory: {:.1}%, CPU: {:.1}%, Temp: {:?}°C",
+            resources.memory_used_percent,
+            resources.cpu_usage_percent,
+            resources.cpu_temperature_celsius
+        );
 
         Ok(resources)
     }
@@ -131,10 +132,12 @@ impl SystemMonitor {
             status.memory_ok = false;
             status.warnings.push(format!(
                 "Memory usage too high: {:.1}% > {:.1}%",
-                resources.memory_used_percent,
-                self.limits.max_memory_percent
+                resources.memory_used_percent, self.limits.max_memory_percent
             ));
-            warn!("Memory constraint violated: {:.1}%", resources.memory_used_percent);
+            warn!(
+                "Memory constraint violated: {:.1}%",
+                resources.memory_used_percent
+            );
         }
 
         // Check CPU constraints
@@ -143,10 +146,12 @@ impl SystemMonitor {
             status.cpu_ok = false;
             status.warnings.push(format!(
                 "CPU usage too high: {:.1}% > {:.1}%",
-                resources.cpu_usage_percent,
-                self.limits.max_cpu_percent
+                resources.cpu_usage_percent, self.limits.max_cpu_percent
             ));
-            warn!("CPU constraint violated: {:.1}%", resources.cpu_usage_percent);
+            warn!(
+                "CPU constraint violated: {:.1}%",
+                resources.cpu_usage_percent
+            );
         }
 
         // Check temperature constraints
@@ -156,8 +161,7 @@ impl SystemMonitor {
                 status.temperature_ok = false;
                 status.warnings.push(format!(
                     "CPU temperature too high: {:.1}°C > {:.1}°C",
-                    temp,
-                    self.limits.max_cpu_temperature
+                    temp, self.limits.max_cpu_temperature
                 ));
                 warn!("Temperature constraint violated: {:.1}°C", temp);
             }
@@ -170,20 +174,22 @@ impl SystemMonitor {
         let resources = self.get_current_resources().await?;
 
         // Calculate based on available memory
-        let available_memory_mb = resources.available_memory_mb as f32 * (self.limits.max_memory_percent / 100.0);
-        let memory_based_workers = (available_memory_mb / self.limits.worker_memory_budget_mb as f32) as usize;
+        let available_memory_mb =
+            resources.available_memory_mb as f32 * (self.limits.max_memory_percent / 100.0);
+        let memory_based_workers =
+            (available_memory_mb / self.limits.worker_memory_budget_mb as f32) as usize;
 
         // Calculate based on CPU cores (never exceed CPU count)
         let cpu_based_workers = resources.cpu_cores;
 
         // Take the minimum and cap at 4 workers max (as per safety plan)
-        let safe_workers = std::cmp::min(
-            std::cmp::min(memory_based_workers, cpu_based_workers),
-            4
-        ).max(1); // Always allow at least 1 worker
+        let safe_workers =
+            std::cmp::min(std::cmp::min(memory_based_workers, cpu_based_workers), 4).max(1); // Always allow at least 1 worker
 
-        info!("Calculated safe worker count: {} (memory: {}, cpu: {}, capped at 4)",
-              safe_workers, memory_based_workers, cpu_based_workers);
+        info!(
+            "Calculated safe worker count: {} (memory: {}, cpu: {}, capped at 4)",
+            safe_workers, memory_based_workers, cpu_based_workers
+        );
 
         Ok(safe_workers)
     }
@@ -202,8 +208,10 @@ impl SystemMonitor {
     }
 
     pub fn update_limits(&mut self, limits: ResourceLimits) {
-        info!("Updating resource limits: memory: {:.1}%, cpu: {:.1}%, temp: {:.1}°C",
-               limits.max_memory_percent, limits.max_cpu_percent, limits.max_cpu_temperature);
+        info!(
+            "Updating resource limits: memory: {:.1}%, cpu: {:.1}%, temp: {:.1}°C",
+            limits.max_memory_percent, limits.max_cpu_percent, limits.max_cpu_temperature
+        );
         self.limits = limits;
     }
 }

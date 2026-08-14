@@ -1,9 +1,9 @@
-use serde::{Deserialize, Serialize};
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
+use dirs;
 use log::info as log_info;
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use tauri::{AppHandle, Runtime};
-use dirs;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NotificationSettings {
@@ -112,8 +112,8 @@ impl<R: Runtime> ConsentManager<R> {
 
     /// Get the path where notification settings are stored
     fn get_settings_path() -> Result<PathBuf> {
-        let mut path = dirs::config_dir()
-            .ok_or_else(|| anyhow!("Could not find config directory"))?;
+        let mut path =
+            dirs::config_dir().ok_or_else(|| anyhow!("Could not find config directory"))?;
 
         path.push("meetily");
         path.push("notifications.json");
@@ -251,8 +251,11 @@ pub fn get_default_settings() -> NotificationSettings {
 pub fn validate_settings(settings: &NotificationSettings) -> Result<()> {
     // Validate meeting reminder minutes
     for &minutes in &settings.notification_preferences.meeting_reminder_minutes {
-        if minutes > 1440 { // More than 24 hours
-            return Err(anyhow!("Meeting reminder cannot be more than 24 hours (1440 minutes)"));
+        if minutes > 1440 {
+            // More than 24 hours
+            return Err(anyhow!(
+                "Meeting reminder cannot be more than 24 hours (1440 minutes)"
+            ));
         }
     }
 

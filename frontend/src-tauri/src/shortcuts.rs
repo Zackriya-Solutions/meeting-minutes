@@ -13,10 +13,7 @@ pub fn normalize_shortcut(s: &str) -> String {
     }
     let last = parts.pop().unwrap();
     parts.sort();
-    let mut sorted: Vec<String> = parts
-        .into_iter()
-        .map(|p| normalize_modifier(&p))
-        .collect();
+    let mut sorted: Vec<String> = parts.into_iter().map(|p| normalize_modifier(&p)).collect();
     sorted.push(last);
     sorted.join("+")
 }
@@ -82,7 +79,12 @@ pub async fn register_shortcut<R: Runtime>(
                 });
             }
         })
-        .map_err(|e| format!("Failed to register shortcut '{}': {}", shortcut_str_owned, e))?;
+        .map_err(|e| {
+            format!(
+                "Failed to register shortcut '{}': {}",
+                shortcut_str_owned, e
+            )
+        })?;
     log::info!("Registered global shortcut: {}", shortcut_str_owned);
     Ok(())
 }
@@ -119,9 +121,7 @@ pub fn check_accessibility_permission() -> bool {
 }
 
 #[tauri::command]
-pub async fn get_recording_shortcut<R: Runtime>(
-    app: AppHandle<R>,
-) -> Result<String, String> {
+pub async fn get_recording_shortcut<R: Runtime>(app: AppHandle<R>) -> Result<String, String> {
     Ok(load_shortcut(&app).await)
 }
 

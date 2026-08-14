@@ -1,9 +1,9 @@
 use super::defaults;
 use super::types::Template;
-use std::path::PathBuf;
-use tracing::{debug, info, warn};
 use once_cell::sync::Lazy;
+use std::path::PathBuf;
 use std::sync::RwLock;
+use tracing::{debug, info, warn};
 
 // Global storage for the bundled templates directory path
 static BUNDLED_TEMPLATES_DIR: Lazy<RwLock<Option<PathBuf>>> = Lazy::new(|| RwLock::new(None));
@@ -44,7 +44,10 @@ fn load_bundled_template(template_id: &str) -> Option<String> {
 
     match std::fs::read_to_string(&template_path) {
         Ok(content) => {
-            info!("Loaded bundled template '{}' from {:?}", template_id, template_path);
+            info!(
+                "Loaded bundled template '{}' from {:?}",
+                template_id, template_path
+            );
             Some(content)
         }
         Err(e) => {
@@ -69,7 +72,10 @@ fn load_custom_template(template_id: &str) -> Option<String> {
 
     match std::fs::read_to_string(&template_path) {
         Ok(content) => {
-            info!("Loaded custom template '{}' from {:?}", template_id, template_path);
+            info!(
+                "Loaded custom template '{}' from {:?}",
+                template_id, template_path
+            );
             Some(content)
         }
         Err(e) => {

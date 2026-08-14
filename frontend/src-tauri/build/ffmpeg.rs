@@ -10,7 +10,10 @@ pub fn ensure_ffmpeg_binary() {
         .or_else(|_| std::env::var("HOST"))
         .expect("Neither TARGET nor HOST environment variable set");
 
-    println!("cargo:warning=🎬 Checking FFmpeg binary for target: {}", target);
+    println!(
+        "cargo:warning=🎬 Checking FFmpeg binary for target: {}",
+        target
+    );
 
     let binary_name = if target.contains("windows") {
         format!("ffmpeg-{}.exe", target)
@@ -25,9 +28,15 @@ pub fn ensure_ffmpeg_binary() {
 
     // Cache check: Skip download if binary exists and works
     if binary_path.exists() {
-        println!("cargo:warning=🔍 Found cached FFmpeg binary: {}", binary_name);
+        println!(
+            "cargo:warning=🔍 Found cached FFmpeg binary: {}",
+            binary_name
+        );
         if verify_ffmpeg_binary(&binary_path) {
-            println!("cargo:warning=✅ FFmpeg binary already cached and verified: {}", binary_name);
+            println!(
+                "cargo:warning=✅ FFmpeg binary already cached and verified: {}",
+                binary_name
+            );
             return;
         } else {
             println!("cargo:warning=⚠️  Cached FFmpeg binary appears corrupted, re-downloading...");
@@ -35,18 +44,23 @@ pub fn ensure_ffmpeg_binary() {
         }
     }
 
-    println!("cargo:warning=📥 FFmpeg binary not found, downloading for {}", target);
+    println!(
+        "cargo:warning=📥 FFmpeg binary not found, downloading for {}",
+        target
+    );
 
     // Create binaries directory if it doesn't exist
     if !binaries_dir.exists() {
-        std::fs::create_dir_all(&binaries_dir)
-            .expect("Failed to create binaries directory");
+        std::fs::create_dir_all(&binaries_dir).expect("Failed to create binaries directory");
     }
 
     // Download and extract
     match download_and_extract_ffmpeg(&target, &binary_path) {
         Ok(()) => {
-            println!("cargo:warning=✅ FFmpeg binary downloaded successfully: {}", binary_name);
+            println!(
+                "cargo:warning=✅ FFmpeg binary downloaded successfully: {}",
+                binary_name
+            );
 
             // Verify downloaded binary works
             if !verify_ffmpeg_binary(&binary_path) {
@@ -66,7 +80,10 @@ fn download_and_extract_ffmpeg(
 ) -> Result<(), String> {
     use std::io::Write;
 
-    println!("cargo:warning=🌐 Fetching FFmpeg download URL for {}", target);
+    println!(
+        "cargo:warning=🌐 Fetching FFmpeg download URL for {}",
+        target
+    );
 
     // Get platform-specific download URL
     let url = get_ffmpeg_url_for_target(target)?;
@@ -89,7 +106,10 @@ fn download_and_extract_ffmpeg(
     }
 
     let total_size = response.content_length().unwrap_or(0);
-    println!("cargo:warning=📦 Download size: {:.1} MB", total_size as f64 / 1_048_576.0);
+    println!(
+        "cargo:warning=📦 Download size: {:.1} MB",
+        total_size as f64 / 1_048_576.0
+    );
 
     // Download to temp file
     let temp_dir = std::env::temp_dir();
@@ -100,7 +120,8 @@ fn download_and_extract_ffmpeg(
         let mut file = std::fs::File::create(&archive_path)
             .map_err(|e| format!("Failed to create temp file: {}", e))?;
 
-        let content = response.bytes()
+        let content = response
+            .bytes()
             .map_err(|e| format!("Failed to read response: {}", e))?;
 
         file.write_all(&content)
@@ -209,14 +230,15 @@ fn extract_zip(
 ) -> Result<(), String> {
     use std::io::Read;
 
-    let file = std::fs::File::open(archive_path)
-        .map_err(|e| format!("Failed to open ZIP: {}", e))?;
+    let file =
+        std::fs::File::open(archive_path).map_err(|e| format!("Failed to open ZIP: {}", e))?;
 
-    let mut archive = zip::ZipArchive::new(file)
-        .map_err(|e| format!("Failed to read ZIP archive: {}", e))?;
+    let mut archive =
+        zip::ZipArchive::new(file).map_err(|e| format!("Failed to read ZIP archive: {}", e))?;
 
     for i in 0..archive.len() {
-        let mut file = archive.by_index(i)
+        let mut file = archive
+            .by_index(i)
             .map_err(|e| format!("Failed to read ZIP entry {}: {}", i, e))?;
 
         // Use enclosed_name() to prevent Zip Slip path traversal attacks
@@ -224,7 +246,10 @@ fn extract_zip(
             Some(name) => extract_dir.join(name),
             None => {
                 // Skip entries with path traversal sequences (e.g., "../")
-                println!("cargo:warning=⚠️  Skipping suspicious ZIP entry: {}", file.name());
+                println!(
+                    "cargo:warning=⚠️  Skipping suspicious ZIP entry: {}",
+                    file.name()
+                );
                 continue;
             }
         };
@@ -252,8 +277,7 @@ fn extract_zip(
         {
             use std::os::unix::fs::PermissionsExt;
             if let Some(mode) = file.unix_mode() {
-                std::fs::set_permissions(&outpath, std::fs::Permissions::from_mode(mode))
-                    .ok();
+                std::fs::set_permissions(&outpath, std::fs::Permissions::from_mode(mode)).ok();
             }
         }
     }
@@ -266,15 +290,16 @@ fn extract_tar_xz(
     archive_path: &std::path::Path,
     extract_dir: &std::path::Path,
 ) -> Result<(), String> {
-    let file = std::fs::File::open(archive_path)
-        .map_err(|e| format!("Failed to open TAR.XZ: {}", e))?;
+    let file =
+        std::fs::File::open(archive_path).map_err(|e| format!("Failed to open TAR.XZ: {}", e))?;
 
     // Decompress XZ
     let decompressor = xz2::read::XzDecoder::new(file);
 
     // Extract TAR
     let mut archive = tar::Archive::new(decompressor);
-    archive.unpack(extract_dir)
+    archive
+        .unpack(extract_dir)
         .map_err(|e| format!("Failed to extract TAR: {}", e))?;
 
     Ok(())
@@ -293,8 +318,8 @@ fn find_ffmpeg_in_extracted_dir(
 
     // Search patterns (in priority order)
     let search_patterns = [
-        extract_dir.join(executable_name),                    // Flat: ffmpeg
-        extract_dir.join("bin").join(executable_name),        // Nested: bin/ffmpeg
+        extract_dir.join(executable_name),             // Flat: ffmpeg
+        extract_dir.join("bin").join(executable_name), // Nested: bin/ffmpeg
     ];
 
     // Try direct paths first
@@ -305,8 +330,8 @@ fn find_ffmpeg_in_extracted_dir(
     }
 
     // Recursive search for nested directories (e.g., ffmpeg-6.0-full_build/bin/ffmpeg.exe)
-    for entry in std::fs::read_dir(extract_dir)
-        .map_err(|e| format!("Failed to read extract dir: {}", e))?
+    for entry in
+        std::fs::read_dir(extract_dir).map_err(|e| format!("Failed to read extract dir: {}", e))?
     {
         let entry = entry.map_err(|e| format!("Failed to read entry: {}", e))?;
         let path = entry.path();
@@ -326,20 +351,23 @@ fn find_ffmpeg_in_extracted_dir(
         }
     }
 
-    Err(format!("FFmpeg binary '{}' not found in extracted archive", executable_name))
+    Err(format!(
+        "FFmpeg binary '{}' not found in extracted archive",
+        executable_name
+    ))
 }
 
 /// Verify FFmpeg binary is functional (runs -version successfully)
 fn verify_ffmpeg_binary(path: &std::path::PathBuf) -> bool {
-    match std::process::Command::new(path)
-        .arg("-version")
-        .output()
-    {
+    match std::process::Command::new(path).arg("-version").output() {
         Ok(output) => {
             if output.status.success() {
                 let stdout = String::from_utf8_lossy(&output.stdout);
                 if let Some(version_line) = stdout.lines().next() {
-                    println!("cargo:warning=✅ FFmpeg verification passed: {}", version_line);
+                    println!(
+                        "cargo:warning=✅ FFmpeg verification passed: {}",
+                        version_line
+                    );
                 }
                 true
             } else {

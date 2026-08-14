@@ -50,7 +50,7 @@ pub struct SummaryProcess {
     pub end_time: Option<chrono::DateTime<chrono::Utc>>,
     pub chunk_count: i64,
     pub processing_time: f64,
-    pub metadata: Option<String>, // JSON
+    pub metadata: Option<String>,      // JSON
     pub result_backup: Option<String>, // Backup of result before regeneration
     pub result_backup_timestamp: Option<chrono::DateTime<chrono::Utc>>, // When backup was created
 }
@@ -102,9 +102,9 @@ pub struct Setting {
 impl Setting {
     /// Parse the custom OpenAI config from JSON string
     pub fn get_custom_openai_config(&self) -> Option<crate::summary::CustomOpenAIConfig> {
-        self.custom_openai_config.as_ref().and_then(|json| {
-            serde_json::from_str(json).ok()
-        })
+        self.custom_openai_config
+            .as_ref()
+            .and_then(|json| serde_json::from_str(json).ok())
     }
 }
 

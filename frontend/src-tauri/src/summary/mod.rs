@@ -6,7 +6,6 @@
 /// - Service layer for orchestrating summary generation
 /// - Templates for structured meeting summary generation
 /// - Tauri commands for frontend integration
-
 use serde::{Deserialize, Serialize};
 
 /// Custom OpenAI-compatible endpoint configuration
@@ -49,8 +48,8 @@ pub use commands::{
     __cmd__api_save_meeting_summary_language, __tauri_command_name_api_cancel_summary,
     __tauri_command_name_api_detect_transcript_summary_language,
     __tauri_command_name_api_get_meeting_detected_summary_language,
-    __tauri_command_name_api_get_meeting_summary_language,
-    __tauri_command_name_api_get_summary, __tauri_command_name_api_process_transcript,
+    __tauri_command_name_api_get_meeting_summary_language, __tauri_command_name_api_get_summary,
+    __tauri_command_name_api_process_transcript,
     __tauri_command_name_api_save_meeting_detected_summary_language,
     __tauri_command_name_api_save_meeting_summary,
     __tauri_command_name_api_save_meeting_summary_language, api_cancel_summary,
@@ -64,8 +63,8 @@ pub use commands::{
 pub use template_commands::{
     __cmd__api_get_template_details, __cmd__api_list_templates, __cmd__api_validate_template,
     __tauri_command_name_api_get_template_details, __tauri_command_name_api_list_templates,
-    __tauri_command_name_api_validate_template,
-    api_get_template_details, api_list_templates, api_validate_template,
+    __tauri_command_name_api_validate_template, api_get_template_details, api_list_templates,
+    api_validate_template,
 };
 
 // Re-export commonly used items

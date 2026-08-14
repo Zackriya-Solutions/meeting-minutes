@@ -103,7 +103,10 @@ pub async fn api_get_template_details<R: Runtime>(
     _app: tauri::AppHandle<R>,
     template_id: String,
 ) -> Result<TemplateDetails, String> {
-    info!("api_get_template_details called for template_id: {}", template_id);
+    info!(
+        "api_get_template_details called for template_id: {}",
+        template_id
+    );
 
     let template = templates::get_template(&template_id)?;
 
@@ -161,7 +164,10 @@ pub async fn api_get_template_full<R: Runtime>(
     _app: tauri::AppHandle<R>,
     template_id: String,
 ) -> Result<TemplateFullDetails, String> {
-    info!("api_get_template_full called for template_id: {}", template_id);
+    info!(
+        "api_get_template_full called for template_id: {}",
+        template_id
+    );
 
     let template = templates::get_template(&template_id)?;
 
@@ -196,7 +202,10 @@ pub async fn api_save_custom_template<R: Runtime>(
     template_id: String,
     template_json: String,
 ) -> Result<(), String> {
-    info!("api_save_custom_template called for template_id: {}", template_id);
+    info!(
+        "api_save_custom_template called for template_id: {}",
+        template_id
+    );
 
     if template_id.contains('/') || template_id.contains('\\') || template_id.contains("..") {
         return Err("Invalid template_id: must not contain path separators or '..'".to_string());
@@ -215,7 +224,10 @@ pub async fn api_save_custom_template<R: Runtime>(
     fs::write(&template_path, template_json.as_bytes())
         .map_err(|e| format!("Failed to write template file: {}", e))?;
 
-    info!("Saved custom template '{}' to {:?}", template_id, template_path);
+    info!(
+        "Saved custom template '{}' to {:?}",
+        template_id, template_path
+    );
 
     // Notify all windows that the templates list has changed
     let _ = app.emit("templates-changed", ());
@@ -233,7 +245,10 @@ pub async fn api_delete_custom_template<R: Runtime>(
     app: tauri::AppHandle<R>,
     template_id: String,
 ) -> Result<bool, String> {
-    info!("api_delete_custom_template called for template_id: {}", template_id);
+    info!(
+        "api_delete_custom_template called for template_id: {}",
+        template_id
+    );
 
     if template_id.contains('/') || template_id.contains('\\') || template_id.contains("..") {
         return Err("Invalid template_id: must not contain path separators or '..'".to_string());
@@ -254,7 +269,10 @@ pub async fn api_delete_custom_template<R: Runtime>(
 
         Ok(true)
     } else {
-        info!("No custom override found for '{}', nothing to delete", template_id);
+        info!(
+            "No custom override found for '{}', nothing to delete",
+            template_id
+        );
         Ok(false)
     }
 }
@@ -307,8 +325,11 @@ mod tests {
         assert!(result.is_ok());
         let tmpl = result.unwrap();
         for section in &tmpl.sections {
-            assert!(!section.instruction.is_empty(),
-                "Section '{}' has empty instruction", section.title);
+            assert!(
+                !section.instruction.is_empty(),
+                "Section '{}' has empty instruction",
+                section.title
+            );
         }
     }
 
@@ -342,6 +363,10 @@ mod tests {
         let result = templates::validate_and_parse_template(json);
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert!(err.contains("invalid format"), "Expected invalid format error, got: {}", err);
+        assert!(
+            err.contains("invalid format"),
+            "Expected invalid format error, got: {}",
+            err
+        );
     }
 }
