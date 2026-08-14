@@ -10,7 +10,9 @@ pub const PRIMARY_GATEWAY_HOST: &str = "gw.multitool.works";
 pub const FALLBACK_GATEWAY_HOST: &str = "gw2.multitool.works";
 pub const PRIMARY_GATEWAY: &str = "https://gw.multitool.works";
 pub const FALLBACK_GATEWAY: &str = "https://gw2.multitool.works";
-pub const PRIMARY_DEEPSEEK_BASE_URL: &str = "https://gw.multitool.works/deepseek/v1";
+// The gateway's DeepSeek allowlist exposes /deepseek/chat/completions (no /v1
+// prefix) since GigaTool commit ff36ccda; /deepseek/v1/* returns 404.
+pub const PRIMARY_DEEPSEEK_BASE_URL: &str = "https://gw.multitool.works/deepseek";
 const SERVICE: &str = "meetily.gateway";
 static DEVICE_ID_CACHE: OnceCell<String> = OnceCell::new();
 static ANALYTICS_DEVICE_ID_ATTEMPT: Lazy<std::sync::Mutex<Option<RetryFailure>>> =
@@ -534,7 +536,7 @@ mod tests {
     fn deepseek_base_url_is_scoped_to_the_primary_gateway() {
         assert_managed_https_url(PRIMARY_DEEPSEEK_BASE_URL, PRIMARY_GATEWAY_HOST);
         let url = Url::parse(PRIMARY_DEEPSEEK_BASE_URL).unwrap();
-        assert_eq!(url.path(), "/deepseek/v1");
+        assert_eq!(url.path(), "/deepseek");
     }
 
     #[test]

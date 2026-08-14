@@ -22,7 +22,7 @@ pub struct DeepSeekTransport {
 }
 
 fn managed_deepseek_base_url(gateway_base: &str) -> String {
-    format!("{}/deepseek/v1", gateway_base.trim_end_matches('/'))
+    format!("{}/deepseek", gateway_base.trim_end_matches('/'))
 }
 
 /// Read one `app_settings_kv` value (empty strings treated as unset).
@@ -141,7 +141,7 @@ mod tests {
     fn managed_deepseek_keeps_the_gateway_that_accepted_the_token() {
         assert_eq!(
             managed_deepseek_base_url("https://gw2.gigatool.app/"),
-            "https://gw2.gigatool.app/deepseek/v1"
+            "https://gw2.gigatool.app/deepseek"
         );
     }
 
