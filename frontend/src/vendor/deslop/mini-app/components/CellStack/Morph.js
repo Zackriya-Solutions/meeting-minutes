@@ -64,6 +64,7 @@ function Morph({ children }) {
 
     return (
         <Cell
+            as="div"
             start={
                 <div className={styles.logoStack}>
                     <m.div
