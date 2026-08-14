@@ -1,17 +1,17 @@
 // Core Audio implementation for macOS system audio capture
 
+use anyhow::Result;
+use futures_util::Stream;
+use log::{error, info, warn};
+use ringbuf::{
+    traits::{Consumer, Producer, Split},
+    HeapCons, HeapProd, HeapRb,
+};
 #[cfg(target_os = "macos")]
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll, Waker};
-use anyhow::Result;
-use futures_util::Stream;
-use ringbuf::{
-    traits::{Consumer, Producer, Split},
-    HeapCons, HeapProd, HeapRb,
-};
-use log::{error, info, warn};
 
 #[cfg(target_os = "macos")]
 use cidre::{arc, av, cat, cf, core_audio as ca, os};
@@ -63,23 +63,56 @@ impl CoreAudioCapture {
 
         // Get default output device
         info!("🎙️ CoreAudio: Getting default output device...");
-        let output_device = ca::System::default_output_device()
-            .map_err(|e| {
-                error!("❌ CoreAudio: Failed to get default output device: {:?}", e);
-                anyhow::anyhow!("Failed to get default output device: {:?}", e)
-            })?;
+        let output_device = ca::System::default_output_device().map_err(|e| {
+            error!("❌ CoreAudio: Failed to get default output device: {:?}", e);
+            anyhow::anyhow!("Failed to get default output device: {:?}", e)
+        })?;
 
         info!("✅ CoreAudio: Got default output device");
 
-        let output_uid = output_device.uid()
-            .map_err(|e| {
-                error!("❌ CoreAudio: Failed to get device UID: {:?}", e);
-                anyhow::anyhow!("Failed to get device UID: {:?}", e)
-            })?;
+        let output_uid = output_device.uid().map_err(|e| {
+            error!("❌ CoreAudio: Failed to get device UID: {:?}", e);
+            anyhow::anyhow!("Failed to get device UID: {:?}", e)
+        })?;
 
         // Get device name for better debugging
-        let device_name = output_device.name().unwrap_or_else(|_| cf::String::from_str("Unknown"));
-        info!("✅ CoreAudio: Default output device: '{}' (UID: {:?})", device_name, output_uid);
+        let device_name = output_device
+            .name()
+            .unwrap_or_else(|_| cf::String::from_str("Unknown"));
+        info!(
+            "✅ CoreAudio: Default output device: '{}' (UID: {:?})",
+            device_name, output_uid
+        );
+
+        // Determine the main_sub_device UID for the aggregate device.
+        // Bluetooth devices use a different hardware clock domain and can cause the IO proc
+        // to receive no data. Prefer the built-in speakers as the clock anchor; the global
+        // process tap captures ALL system audio regardless of which device anchors the clock.
+        let tap_anchor_uid = {
+            use cidre::core_audio::DeviceTransportType;
+            let is_bluetooth = output_device
+                .transport_type()
+                .map(|t| {
+                    t == DeviceTransportType::BLUETOOTH || t == DeviceTransportType::BLUETOOTH_LE
+                })
+                .unwrap_or(false);
+
+            if is_bluetooth {
+                info!("🎧 CoreAudio: Bluetooth output '{}' detected — searching for built-in speaker as stable aggregate anchor...", device_name);
+                match find_builtin_output_uid() {
+                    Some(uid) => {
+                        info!("✅ CoreAudio: Using built-in speaker as aggregate main_sub_device (global tap still captures Bluetooth audio)");
+                        uid
+                    }
+                    None => {
+                        warn!("⚠️ CoreAudio: No built-in output found — using Bluetooth as anchor (may affect reliability)");
+                        output_uid
+                    }
+                }
+            } else {
+                output_uid
+            }
+        };
 
         // IMPORTANT: We do NOT create a sub_device dictionary here
         // When using a tap, the tap provides all the audio we need
@@ -88,12 +121,12 @@ impl CoreAudioCapture {
         // Create process tap with mono global tap, excluding no processes
         // Note: Mono tap is more reliable for system audio capture on macOS
         info!("🎙️ CoreAudio: Creating process tap (global mono tap)...");
-        let tap_desc = ca::TapDesc::with_mono_global_tap_excluding_processes(&cidre::ns::Array::new());
-        let tap = tap_desc.create_process_tap()
-            .map_err(|e| {
-                error!("❌ CoreAudio: Failed to create process tap: {:?}", e);
-                anyhow::anyhow!("Failed to create process tap: {:?}", e)
-            })?;
+        let tap_desc =
+            ca::TapDesc::with_mono_global_tap_excluding_processes(&cidre::ns::Array::new());
+        let tap = tap_desc.create_process_tap().map_err(|e| {
+            error!("❌ CoreAudio: Failed to create process tap: {:?}", e);
+            anyhow::anyhow!("Failed to create process tap: {:?}", e)
+        })?;
 
         // Get tap information
         let tap_uid = tap.uid().unwrap_or_else(|_| cf::Uuid::new().to_cf_string());
@@ -102,11 +135,16 @@ impl CoreAudioCapture {
         match tap_asbd {
             Ok(asbd) => {
                 info!("✅ CoreAudio: Process tap created - UID: {:?}", tap_uid);
-                info!("📊 CoreAudio: Tap format - sample_rate: {} Hz, channels: {}",
-                      asbd.sample_rate, asbd.channels_per_frame);
+                info!(
+                    "📊 CoreAudio: Tap format - sample_rate: {} Hz, channels: {}",
+                    asbd.sample_rate, asbd.channels_per_frame
+                );
             }
             Err(e) => {
-                warn!("⚠️ CoreAudio: Tap created but couldn't get format info: {:?}", e);
+                warn!(
+                    "⚠️ CoreAudio: Tap created but couldn't get format info: {:?}",
+                    e
+                );
             }
         }
 
@@ -137,7 +175,7 @@ impl CoreAudioCapture {
                 cf::Boolean::value_false(),
                 cf::Boolean::value_true(),
                 cf::str!(c"meetily-audio-tap").as_type_ref(),
-                &output_uid,
+                &tap_anchor_uid,
                 &cf::Uuid::new().to_cf_string(),
                 // REMOVED: sub_device array (was causing echo)
                 &cf::ArrayOf::from_slice(&[sub_tap.as_ref()]),
@@ -202,17 +240,17 @@ impl CoreAudioCapture {
 
         // Create aggregate device
         info!("🎙️ CoreAudio: Creating aggregate device...");
-        let agg_device = ca::AggregateDevice::with_desc(&self.agg_desc)
-            .map_err(|e| {
-                error!("❌ CoreAudio: Failed to create aggregate device: {:?}", e);
-                anyhow::anyhow!("Failed to create aggregate device: {:?}", e)
-            })?;
+        let agg_device = ca::AggregateDevice::with_desc(&self.agg_desc).map_err(|e| {
+            error!("❌ CoreAudio: Failed to create aggregate device: {:?}", e);
+            anyhow::anyhow!("Failed to create aggregate device: {:?}", e)
+        })?;
 
         info!("✅ CoreAudio: Aggregate device created");
 
         // Create IO proc ID for audio processing
         info!("🎙️ CoreAudio: Creating IO proc...");
-        let proc_id = agg_device.create_io_proc_id(audio_proc, Some(ctx))
+        let proc_id = agg_device
+            .create_io_proc_id(audio_proc, Some(ctx))
             .map_err(|e| {
                 error!("❌ CoreAudio: Failed to create IO proc: {:?}", e);
                 anyhow::anyhow!("Failed to create IO proc: {:?}", e)
@@ -222,18 +260,20 @@ impl CoreAudioCapture {
 
         // Start the device
         info!("🎙️ CoreAudio: Starting audio device...");
-        let started_device = ca::device_start(agg_device, Some(proc_id))
-            .map_err(|e| {
-                error!("❌ CoreAudio: Failed to start device: {:?}", e);
-                anyhow::anyhow!("Failed to start device: {:?}", e)
-            })?;
+        let started_device = ca::device_start(agg_device, Some(proc_id)).map_err(|e| {
+            error!("❌ CoreAudio: Failed to start device: {:?}", e);
+            anyhow::anyhow!("Failed to start device: {:?}", e)
+        })?;
 
         info!("✅ CoreAudio: Audio device started successfully!");
 
         // Get device sample rate
         let device_ref = started_device.as_ref();
         let sample_rate = device_ref.nominal_sample_rate().unwrap_or(0.0);
-        info!("📊 CoreAudio: Aggregate device sample_rate: {} Hz", sample_rate);
+        info!(
+            "📊 CoreAudio: Aggregate device sample_rate: {} Hz",
+            sample_rate
+        );
 
         Ok(started_device)
     }
@@ -243,19 +283,20 @@ impl CoreAudioCapture {
         info!("🎙️ CoreAudio: Creating CoreAudioStream...");
 
         // Get tap audio format
-        let asbd = self.tap.asbd()
-            .map_err(|e| {
-                error!("❌ CoreAudio: Failed to get tap ASBD: {:?}", e);
-                anyhow::anyhow!("Failed to get tap ASBD: {:?}", e)
-            })?;
+        let asbd = self.tap.asbd().map_err(|e| {
+            error!("❌ CoreAudio: Failed to get tap ASBD: {:?}", e);
+            anyhow::anyhow!("Failed to get tap ASBD: {:?}", e)
+        })?;
 
-        let format = av::AudioFormat::with_asbd(&asbd)
-            .ok_or_else(|| {
-                error!("❌ CoreAudio: Failed to create audio format");
-                anyhow::anyhow!("Failed to create audio format")
-            })?;
+        let format = av::AudioFormat::with_asbd(&asbd).ok_or_else(|| {
+            error!("❌ CoreAudio: Failed to create audio format");
+            anyhow::anyhow!("Failed to create audio format")
+        })?;
 
-        info!("✅ CoreAudio: Tap audio format: {} Hz, {} channels", asbd.sample_rate, asbd.channels_per_frame);
+        info!(
+            "✅ CoreAudio: Tap audio format: {} Hz, {} channels",
+            asbd.sample_rate, asbd.channels_per_frame
+        );
 
         // Create ring buffer for lock-free audio transfer
         let buffer_size = 1024 * 128; // 128KB buffer
@@ -293,6 +334,35 @@ impl CoreAudioCapture {
             current_sample_rate,
         })
     }
+}
+
+/// Find the UID of the first built-in output device for use as a stable aggregate-device anchor.
+///
+/// When the default output is Bluetooth, the aggregate device's `main_sub_device` must point
+/// to a device with a stable hardware clock. Bluetooth devices use a different clock domain
+/// and cause the IO proc to receive no data. Built-in speakers share the Core Audio hardware
+/// clock and are always reliable.
+///
+/// The global process tap captures ALL system audio regardless of which device is the anchor,
+/// so Bluetooth-routed audio is still captured correctly.
+///
+/// Returns `None` on headless machines (e.g. Mac Pro) that have no built-in speakers.
+#[cfg(target_os = "macos")]
+fn find_builtin_output_uid() -> Option<arc::Retained<cf::String>> {
+    use cidre::core_audio::hardware::System;
+    use cidre::core_audio::DeviceTransportType;
+
+    let devices = System::devices().ok()?;
+    for device in devices.iter() {
+        if let Ok(transport) = device.transport_type() {
+            if transport == DeviceTransportType::BUILT_IN {
+                if let Ok(uid) = device.uid() {
+                    return Some(uid);
+                }
+            }
+        }
+    }
+    None
 }
 
 /// Process audio data from the IO proc callback
@@ -343,10 +413,7 @@ impl CoreAudioStream {
 impl Stream for CoreAudioStream {
     type Item = f32;
 
-    fn poll_next(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Option<Self::Item>> {
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         // Try to pop a sample from the ring buffer
         if let Some(sample) = self.consumer.try_pop() {
             return Poll::Ready(Some(sample));
@@ -409,10 +476,7 @@ impl CoreAudioStream {
 impl Stream for CoreAudioStream {
     type Item = f32;
 
-    fn poll_next(
-        self: Pin<&mut Self>,
-        _cx: &mut Context<'_>,
-    ) -> Poll<Option<Self::Item>> {
+    fn poll_next(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         Poll::Ready(None)
     }
 }
@@ -420,6 +484,27 @@ impl Stream for CoreAudioStream {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn test_find_builtin_output_uid_returns_option() {
+        // Type-level test: verifies the function exists, compiles, and returns Option.
+        // On headless CI environments there is no audio hardware, so None is acceptable.
+        let _result: Option<_> = find_builtin_output_uid();
+        // Reaching this line means the function compiled and ran without panicking.
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    #[ignore] // Run manually with Bluetooth headphones connected as default output
+    fn test_core_audio_capture_with_bluetooth_output() {
+        let capture = CoreAudioCapture::new();
+        assert!(
+            capture.is_ok(),
+            "CoreAudioCapture::new() must succeed when Bluetooth is default output: {:?}",
+            capture.err()
+        );
+    }
 
     #[tokio::test]
     #[cfg(target_os = "macos")]
@@ -434,7 +519,8 @@ mod tests {
 
         // Collect some samples
         let mut sample_count = 0;
-        while sample_count < 48000 { // 1 second at 48kHz
+        while sample_count < 48000 {
+            // 1 second at 48kHz
             if let Some(_sample) = stream.next().await {
                 sample_count += 1;
             }
