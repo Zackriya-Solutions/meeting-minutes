@@ -2,6 +2,7 @@ import { useState, useCallback } from 'react';
 import { invoke as invokeTauri } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
 import Analytics from '@/lib/analytics';
+import { isDefaultTitle } from '@/lib/title-utils';
 
 interface AutoNameResult {
   meeting_id: string;
@@ -29,18 +30,28 @@ export function useAutoNaming({ meetingId, onTitleUpdated }: UseAutoNamingProps)
   /**
    * Check if the current title looks like a default timestamp.
    * Returns true if the title should be auto-renamed.
+   *
+   * If `currentTitle` is provided, the decision is made locally (no backend
+   * round-trip) using the same heuristic as the Rust backend. Otherwise the
+   * Rust `api_should_auto_name` command is consulted.
    */
-  const shouldAutoName = useCallback(async (): Promise<boolean> => {
-    try {
-      const result = await invokeTauri<boolean>('api_should_auto_name', {
-        meetingId,
-      });
-      return result;
-    } catch (error) {
-      console.error('[useAutoNaming] Error checking auto-name:', error);
-      return false;
-    }
-  }, [meetingId]);
+  const shouldAutoName = useCallback(
+    async (currentTitle?: string): Promise<boolean> => {
+      if (currentTitle !== undefined) {
+        return isDefaultTitle(currentTitle);
+      }
+      try {
+        const result = await invokeTauri<boolean>('api_should_auto_name', {
+          meetingId,
+        });
+        return result;
+      } catch (error) {
+        console.error('[useAutoNaming] Error checking auto-name:', error);
+        return false;
+      }
+    },
+    [meetingId],
+  );
 
   /**
    * Trigger auto-naming for the current meeting.
@@ -66,7 +77,23 @@ export function useAutoNaming({ meetingId, onTitleUpdated }: UseAutoNamingProps)
       return result;
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
-      console.error('[useAutoNaming] Error:', errorMessage);
+      console.error('[useAutoNaming] LLM title generation failed, using fallback:', errorMessage);
+
+      // Fallback: generate a heuristic title locally via Rust (no LLM).
+      try {
+        const fallback = await invokeTauri<AutoNameResult>('api_generate_title_fallback', {
+          meetingId,
+        });
+        if (fallback.success) {
+          toast.success(`Meeting renamed to: "${fallback.title}" (offline fallback)`);
+          onTitleUpdated?.(fallback.title);
+          return fallback;
+        }
+      } catch (fbError) {
+        const fbMessage = fbError instanceof Error ? fbError.message : String(fbError);
+        console.error('[useAutoNaming] Fallback title generation also failed:', fbMessage);
+      }
+
       setAutoNameError(errorMessage);
       toast.error(`Auto-naming failed: ${errorMessage}`);
       return null;

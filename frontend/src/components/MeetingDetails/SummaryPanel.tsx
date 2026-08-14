@@ -6,7 +6,7 @@ import { BlockNoteSummaryView, BlockNoteSummaryViewRef } from '@/components/AISu
 import { EmptyStateSummary } from '@/components/EmptyStateSummary';
 import { ModelConfig } from '@/components/ModelSettingsModal';
 import { SummaryGeneratorButtonGroup } from './SummaryGeneratorButtonGroup';
-import { SummaryUpdaterButtonGroup } from './SummaryUpdaterButtonGroup';
+import { SummaryUpdaterButtonGroup, type ExportSection } from './SummaryUpdaterButtonGroup';
 import Analytics from '@/lib/analytics';
 import { useEffect, useRef, useState, RefObject } from 'react';
 import { toast } from 'sonner';
@@ -61,7 +61,11 @@ interface SummaryPanelProps {
   isModelConfigLoading?: boolean;
   onOpenModelSettings?: (openFn: () => void) => void;
   // Export props
-  onExportToFile: () => Promise<any>;
+  onExportToFile: (section?: ExportSection) => Promise<any>;
+  onExportToHtml?: (section?: ExportSection) => Promise<any>;
+  onExportToPdf?: (section?: ExportSection) => Promise<any>;
+  onExportAllToFile?: (section?: ExportSection) => Promise<any>;
+  onExportAllToHtml?: (section?: ExportSection) => Promise<any>;
   isExporting?: boolean;
 }
 
@@ -100,6 +104,10 @@ export function SummaryPanel({
   isModelConfigLoading = false,
   onOpenModelSettings,
   onExportToFile,
+  onExportToHtml,
+  onExportToPdf,
+  onExportAllToFile,
+  onExportAllToHtml,
   isExporting = false,
 }: SummaryPanelProps) {
   const [summaryLang, setSummaryLang] = useState<string | null>(null);
@@ -307,6 +315,10 @@ export function SummaryPanel({
                 onOpenFolder={onOpenFolder}
                 hasSummary={!!aiSummary}
                 onExportToFile={onExportToFile}
+                onExportToHtml={onExportToHtml}
+                onExportToPdf={onExportToPdf}
+                onExportAllToFile={onExportAllToFile}
+                onExportAllToHtml={onExportAllToHtml}
                 isExporting={isExporting}
               />
             </div>

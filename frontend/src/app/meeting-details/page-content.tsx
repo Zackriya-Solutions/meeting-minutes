@@ -214,6 +214,8 @@ export default function PageContent({
           // Export props
           isExporting={exportOperations.isExporting}
           onExportToFile={exportOperations.exportToFile}
+          onExportToHtml={exportOperations.exportToHtml}
+          onExportToPdf={exportOperations.exportToPdf}
           onCopyMarkdown={exportOperations.copyMarkdown}
         />
         <SummaryPanel
@@ -231,6 +233,10 @@ export default function PageContent({
           onOpenFolder={meetingOperations.handleOpenMeetingFolder}
           // Export props
           onExportToFile={exportOperations.exportToFile}
+          onExportToHtml={exportOperations.exportToHtml}
+          onExportToPdf={exportOperations.exportToPdf}
+          onExportAllToFile={exportOperations.exportAllToFile}
+          onExportAllToHtml={exportOperations.exportAllToHtml}
           isExporting={exportOperations.isExporting}
           aiSummary={meetingData.aiSummary}
           summaryStatus={summaryGeneration.summaryStatus}

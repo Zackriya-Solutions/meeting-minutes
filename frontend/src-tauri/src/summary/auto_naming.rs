@@ -117,7 +117,7 @@ Examples:
         .get_custom_openai_config()
         .map(|c| c.endpoint);
 
-    let response = generate_summary(
+    let response = match generate_summary(
         &reqwest::Client::new(),
         &provider,
         &model,
@@ -133,7 +133,17 @@ Examples:
         None,    // cancellation_token
     )
     .await
-    .map_err(|e| format!("LLM title generation failed: {}", e))?;
+    {
+        Ok(resp) => resp,
+        Err(e) => {
+            log_error!(
+                "LLM title generation failed for {}: {}. Falling back to heuristic title.",
+                meeting_id,
+                e
+            );
+            return generate_fallback_title(pool, &meeting_id).await;
+        }
+    };
 
     // 4. Clean up the title (remove quotes, extra whitespace, markdown)
     let title = response
@@ -166,6 +176,155 @@ Examples:
         title,
         success: true,
     })
+}
+
+/// Extract transcript text for a meeting (chunk text first, then individual
+/// segments). Shared by both the LLM path and the heuristic fallback.
+async fn fetch_transcript_text(
+    pool: &sqlx::SqlitePool,
+    meeting_id: &str,
+) -> Result<String, String> {
+    let chunk_text: Option<String> = sqlx::query_scalar(
+        "SELECT transcript_text FROM transcript_chunks WHERE meeting_id = ? LIMIT 1",
+    )
+    .bind(meeting_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| format!("Failed to fetch transcript chunks: {}", e))?;
+
+    if let Some(text) = chunk_text {
+        return Ok(text);
+    }
+
+    let rows: Vec<(String,)> = sqlx::query_as(
+        "SELECT transcript FROM transcripts WHERE meeting_id = ? ORDER BY timestamp ASC",
+    )
+    .bind(meeting_id)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| format!("Failed to fetch transcripts: {}", e))?;
+
+    if rows.is_empty() {
+        return Err("No transcript data available for auto-naming".to_string());
+    }
+    Ok(rows.into_iter().map(|(t,)| t).collect::<Vec<_>>().join("\n"))
+}
+
+/// Generate (and persist) a non-LLM heuristic title for a meeting.
+/// Shared implementation used by `api_generate_title_fallback` and by the
+/// automatic fallback inside `api_auto_generate_title` when the LLM call fails.
+async fn generate_fallback_title(
+    pool: &sqlx::SqlitePool,
+    meeting_id: &str,
+) -> Result<AutoNameResponse, String> {
+    log_info!("Generating fallback (non-LLM) title for meeting: {}", meeting_id);
+
+    let combined = fetch_transcript_text(pool, meeting_id).await?;
+    let title = build_heuristic_title(&combined);
+
+    sqlx::query("UPDATE meetings SET title = ?, updated_at = datetime('now') WHERE id = ?")
+        .bind(&title)
+        .bind(meeting_id)
+        .execute(pool)
+        .await
+        .map_err(|e| format!("Failed to save title: {}", e))?;
+
+    log_info!("Fallback title for meeting {}: '{}'", meeting_id, title);
+
+    Ok(AutoNameResponse {
+        meeting_id: meeting_id.to_string(),
+        title,
+        success: true,
+    })
+}
+
+/// Generate a fallback title from transcript content WITHOUT calling an LLM.
+///
+/// Used when `api_auto_generate_title` fails (no model configured, API error,
+/// offline, etc.). The heuristic takes the most content-bearing sentence from
+/// the transcript and truncates it to a readable length. The result is saved
+/// to the database so the meeting never stays on a default timestamp title.
+#[tauri::command]
+pub async fn api_generate_title_fallback<R: Runtime>(
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    meeting_id: String,
+) -> Result<AutoNameResponse, String> {
+    generate_fallback_title(state.db_manager.pool(), &meeting_id).await
+}
+
+/// Pick the most representative sentence from a transcript and trim it to a
+/// reasonable title length. Pure, deterministic, no network/LLM.
+fn build_heuristic_title(transcript: &str) -> String {
+    // Split into sentences, ignore very short or empty ones.
+    let sentences: Vec<&str> = transcript
+        .split(['.', '!', '?', '\n'])
+        .map(|s| s.trim())
+        .filter(|s| s.len() >= 12)
+        .collect();
+
+    let base = if let Some(longest) = sentences
+        .iter()
+        .max_by_key(|s| s.split_whitespace().count())
+    {
+        *longest
+    } else {
+        transcript.trim()
+    };
+
+    // Collapse whitespace and cap to 70 chars at a word boundary.
+    let collapsed: String = base.split_whitespace().collect::<Vec<_>>().join(" ");
+    if collapsed.len() <= 70 {
+        if collapsed.is_empty() {
+            "Untitled Meeting".to_string()
+        } else {
+            collapsed
+        }
+    } else {
+        let mut cut = &collapsed[..70];
+        // Extend to the next space so we don't split a word.
+        if let Some(sp) = cut.rfind(' ') {
+            cut = &cut[..sp];
+        }
+        format!("{}…", cut)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn heuristic_title_picks_longest_sentence() {
+        let transcript = "Hi. Let's sync about the payment integration on staging tomorrow morning. Short bit. We also need to review the API contract.";
+        let title = build_heuristic_title(transcript);
+        // The longest sentence by word count is the payment integration one.
+        assert!(title.contains("payment integration"));
+        assert!(title.len() <= 70);
+    }
+
+    #[test]
+    fn heuristic_title_collapses_whitespace_and_truncates() {
+        let transcript = "This is an extremely long sentence that should be trimmed down to a reasonable title length because otherwise it would overflow the UI element and look broken when displayed in the sidebar of the application window";
+        let title = build_heuristic_title(transcript);
+        assert!(title.len() <= 71); // 70 + ellipsis
+        assert!(title.ends_with('…'));
+        assert!(!title.contains("application window"));
+    }
+
+    #[test]
+    fn heuristic_title_handles_empty_input() {
+        assert_eq!(build_heuristic_title(""), "Untitled Meeting");
+        assert_eq!(build_heuristic_title("   "), "Untitled Meeting");
+    }
+
+    #[test]
+    fn heuristic_title_handles_only_short_sentences() {
+        // No sentence reaches the >=12 char filter, falls back to trimmed full text.
+        let transcript = "ok.\nhi.\nyo.";
+        let title = build_heuristic_title(transcript);
+        assert_eq!(title, "ok. hi. yo.");
+    }
 }
 
 /// Check if a meeting title is still the default timestamp format.

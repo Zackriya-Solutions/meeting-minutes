@@ -670,9 +670,16 @@ pub fn run() {
             // Auto-naming commands
             summary::auto_naming::api_auto_generate_title,
             summary::auto_naming::api_should_auto_name,
+            summary::auto_naming::api_generate_title_fallback,
             // Export commands
             summary::export_markdown::api_export_meeting_markdown,
             summary::export_markdown::api_get_meeting_markdown,
+            summary::export_markdown::api_export_meeting_html,
+            summary::export_markdown::api_get_meeting_html,
+            summary::export_markdown::api_export_meetings_markdown,
+            summary::export_markdown::api_get_meetings_markdown,
+            summary::export_markdown::api_export_meetings_html,
+            summary::export_markdown::api_get_meetings_html,
             // Template commands
             summary::template_commands::api_list_templates,
             summary::template_commands::api_get_template_details,
