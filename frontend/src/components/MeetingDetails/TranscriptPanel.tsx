@@ -28,6 +28,15 @@ interface TranscriptPanelProps {
   meetingId?: string;
   meetingFolderPath?: string | null;
   onRefetchTranscripts?: () => Promise<void>;
+
+  // Auto-naming props
+  isAutoNaming?: boolean;
+  onAutoRename?: () => Promise<any>;
+
+  // Export props
+  isExporting?: boolean;
+  onExportToFile?: () => Promise<any>;
+  onCopyMarkdown?: () => Promise<void>;
 }
 
 export function TranscriptPanel({
@@ -48,6 +57,11 @@ export function TranscriptPanel({
   meetingId,
   meetingFolderPath,
   onRefetchTranscripts,
+  isAutoNaming,
+  onAutoRename,
+  isExporting,
+  onExportToFile,
+  onCopyMarkdown,
 }: TranscriptPanelProps) {
   // Convert transcripts to segments if pagination is not used but we want virtualization
   const convertedSegments = useMemo(() => {
@@ -75,6 +89,11 @@ export function TranscriptPanel({
           meetingId={meetingId}
           meetingFolderPath={meetingFolderPath}
           onRefetchTranscripts={onRefetchTranscripts}
+          isAutoNaming={isAutoNaming}
+          onAutoRename={onAutoRename}
+          isExporting={isExporting}
+          onExportToFile={onExportToFile}
+          onCopyMarkdown={onCopyMarkdown}
         />
       </div>
 

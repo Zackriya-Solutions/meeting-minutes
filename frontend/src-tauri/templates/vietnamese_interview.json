@@ -1,0 +1,42 @@
+{
+  "name": "Phiên Phỏng Vấn (Vietnamese Interview)",
+  "description": "Mẫu cho buổi phỏng vấn, đánh giá ứng viên và ghi nhận quyết định.",
+  "sections": [
+    {
+      "title": "Thông Tin Ứng Viên",
+      "instruction": "Tên, vị trí ứng tuyển, ngày phỏng vấn",
+      "format": "string"
+    },
+    {
+      "title": "Người Phỏng Vấn",
+      "instruction": "Danh sách người phỏng vấn",
+      "format": "list"
+    },
+    {
+      "title": "Đánh Giá Kỹ Năng",
+      "instruction": "Đánh giá từng kỹ năng được phỏng vấn (điểm 1-5, nhận xét ngắn)",
+      "format": "list",
+      "item_format": "| **Kỹ năng** | **Điểm (1-5)** | **Nhận xét** |\n| --- | --- | --- |"
+    },
+    {
+      "title": "Điểm Mạnh",
+      "instruction": "Các điểm mạnh nổi bật của ứng viên",
+      "format": "list"
+    },
+    {
+      "title": "Điểm Yếu / Lo Ngại",
+      "instruction": "Các điểm yếu hoặc lo ngại cần xem xét",
+      "format": "list"
+    },
+    {
+      "title": "Câu Hỏi Đáng Chú Ý",
+      "instruction": "Các câu hỏi hay và câu trả lời đáng chú ý từ ứng viên",
+      "format": "paragraph"
+    },
+    {
+      "title": "Quyết Định",
+      "instruction": "Quyết định cuối cùng: Tuyển / Từ chối / Cần phỏng vấn thêm. Kèm lý do.",
+      "format": "paragraph"
+    }
+  ]
+}

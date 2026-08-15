@@ -1,0 +1,39 @@
+{
+  "name": "Điểm Danh Hàng Ngày (Vietnamese Standup)",
+  "description": "Cập nhật hàng ngày cho các đội ngũ kỹ thuật/sản phẩm, theo định dạng standup.",
+  "sections": [
+    {
+      "title": "Ngày",
+      "instruction": "YYYY-MM-DD",
+      "format": "string"
+    },
+    {
+      "title": "Thành Viên Tham Gia",
+      "instruction": "Danh sách những người tham dự",
+      "format": "list"
+    },
+    {
+      "title": "Hôm Qua",
+      "instruction": "Những công việc đã hoàn thành hôm qua (bullet ngắn)",
+      "format": "list",
+      "example_item_format": "| **Người phụ trách** | **Công việc đã hoàn thành** |\n| --- | --- |"
+    },
+    {
+      "title": "Hôm Nay",
+      "instruction": "Kế hoạch làm việc hôm nay (bullet ngắn)",
+      "format": "list",
+      "example_item_format": "| **Người phụ trách** | **Kế hoạch** |\n| --- | --- |"
+    },
+    {
+      "title": "Vướng Mắc",
+      "instruction": "Các trở ngại và người phụ trách (nếu biết)",
+      "format": "list",
+      "item_format": "| **Người phụ trách** | **Vướng mắc** | Tác động |\n| --- | --- | --- |"
+    },
+    {
+      "title": "Ghi Chú",
+      "instruction": "Thông báo hoặc ghi chú bổ sung (không bắt buộc)",
+      "format": "paragraph"
+    }
+  ]
+}

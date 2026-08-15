@@ -30,6 +30,8 @@ pub struct CustomOpenAIConfig {
     pub top_p: Option<f32>,
 }
 
+pub mod auto_naming;
+pub mod export_markdown;
 pub mod commands;
 pub(crate) mod language_detection;
 pub mod llm_client;
@@ -66,6 +68,20 @@ pub use template_commands::{
     __tauri_command_name_api_get_template_details, __tauri_command_name_api_list_templates,
     __tauri_command_name_api_validate_template,
     api_get_template_details, api_list_templates, api_validate_template,
+};
+
+// Re-export auto-naming commands
+pub use auto_naming::{
+    __cmd__api_auto_generate_title, __cmd__api_should_auto_name,
+    __tauri_command_name_api_auto_generate_title, __tauri_command_name_api_should_auto_name,
+    api_auto_generate_title, api_should_auto_name,
+};
+
+// Re-export export commands
+pub use export_markdown::{
+    __cmd__api_export_meeting_markdown, __cmd__api_get_meeting_markdown,
+    __tauri_command_name_api_export_meeting_markdown, __tauri_command_name_api_get_meeting_markdown,
+    api_export_meeting_markdown, api_get_meeting_markdown,
 };
 
 // Re-export commonly used items

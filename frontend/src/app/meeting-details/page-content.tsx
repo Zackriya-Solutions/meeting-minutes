@@ -17,6 +17,8 @@ import { useTemplates } from '@/hooks/meeting-details/useTemplates';
 import { useCopyOperations } from '@/hooks/meeting-details/useCopyOperations';
 import { useMeetingOperations } from '@/hooks/meeting-details/useMeetingOperations';
 import { useConfig } from '@/contexts/ConfigContext';
+import { useAutoNaming } from '@/hooks/meeting-details/useAutoNaming';
+import { useExportOperations } from '@/hooks/meeting-details/useExportOperations';
 
 export default function PageContent({
   meeting,
@@ -70,6 +72,21 @@ export default function PageContent({
   // Custom hooks
   const meetingData = useMeetingData({ meeting, summaryData, onMeetingUpdated });
   const templates = useTemplates();
+
+  // Auto-naming hook
+  const autoNaming = useAutoNaming({
+    meetingId: meeting.id,
+    onTitleUpdated: (newTitle) => {
+      meetingData.setMeetingTitle(newTitle);
+      onMeetingUpdated?.();
+    },
+  });
+
+  // Export operations hook
+  const exportOperations = useExportOperations({
+    meetingId: meeting.id,
+    meetingTitle: meetingData.meetingTitle,
+  });
 
   // Callback to register the modal open function
   const handleRegisterModalOpen = (openFn: () => void) => {
@@ -191,6 +208,15 @@ export default function PageContent({
           meetingId={meeting.id}
           meetingFolderPath={meeting.folder_path}
           onRefetchTranscripts={onRefetchTranscripts}
+          // Auto-naming props
+          isAutoNaming={autoNaming.isAutoNaming}
+          onAutoRename={autoNaming.triggerAutoNaming}
+          // Export props
+          isExporting={exportOperations.isExporting}
+          onExportToFile={exportOperations.exportToFile}
+          onExportToHtml={exportOperations.exportToHtml}
+          onExportToPdf={exportOperations.exportToPdf}
+          onCopyMarkdown={exportOperations.copyMarkdown}
         />
         <SummaryPanel
           meeting={meeting}
@@ -205,6 +231,13 @@ export default function PageContent({
           onSaveAll={meetingData.saveAllChanges}
           onCopySummary={copyOperations.handleCopySummary}
           onOpenFolder={meetingOperations.handleOpenMeetingFolder}
+          // Export props
+          onExportToFile={exportOperations.exportToFile}
+          onExportToHtml={exportOperations.exportToHtml}
+          onExportToPdf={exportOperations.exportToPdf}
+          onExportAllToFile={exportOperations.exportAllToFile}
+          onExportAllToHtml={exportOperations.exportAllToHtml}
+          isExporting={exportOperations.isExporting}
           aiSummary={meetingData.aiSummary}
           summaryStatus={summaryGeneration.summaryStatus}
           transcripts={meetingData.transcripts}

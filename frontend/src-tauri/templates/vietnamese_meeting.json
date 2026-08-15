@@ -1,0 +1,27 @@
+{
+  "name": "Cuộc Họp Tiếng Việt",
+  "description": "Mẫu chuẩn cho cuộc họp tiếng Việt, tập trung vào kết quả chính và hành động.",
+  "sections": [
+    {
+      "title": "Tóm Tắt",
+      "instruction": "Viết một đoạn tóm tắt ngắn gọn toàn bộ nội dung cuộc họp.",
+      "format": "paragraph"
+    },
+    {
+      "title": "Quyết Định Chính",
+      "instruction": "Liệt kê các quyết định quan trọng nhất được đưa ra trong cuộc họp.",
+      "format": "list"
+    },
+    {
+      "title": "Hành Động",
+      "instruction": "Liệt kê tất cả các công việc được giao kèm người phụ trách và hạn chót. Luôn thêm đoạn tham chiếu và thời gian từ bản ghi.",
+      "format": "list",
+      "item_format": "| **Người phụ trách** | Công việc | Hạn chót | Đoạn tham chiếu | Thời gian |\n| --- | --- | --- | --- | --- |"
+    },
+    {
+      "title": "Nội Dung Thảo Luận",
+      "instruction": "Tóm tắt các chủ đề chính được thảo luận, các ý kiến quan trọng và thông tin đáng chú ý.",
+      "format": "paragraph"
+    }
+  ]
+}
