@@ -474,49 +474,80 @@ fn visible_bullet_chars(lines: &[String]) -> usize {
     bullet_chars + lines.len().saturating_sub(1)
 }
 
+/// A failed output rule. Some rules protect the report's structure — a missing section
+/// means the reader loses content. Others cap length, and breaking one costs nothing but
+/// tidiness. Keeping them apart is what lets a finished report survive a bullet that ran
+/// 37 characters long instead of being thrown away.
+#[derive(Debug, Clone)]
+struct Violation {
+    message: String,
+    /// True when the report cannot be delivered as it stands.
+    blocking: bool,
+}
+
+impl Violation {
+    fn structural(message: String) -> Self {
+        Self {
+            message,
+            blocking: true,
+        }
+    }
+
+    fn cosmetic(message: String) -> Self {
+        Self {
+            message,
+            blocking: false,
+        }
+    }
+}
+
+fn violation_messages(violations: &[Violation]) -> Vec<String> {
+    violations.iter().map(|v| v.message.clone()).collect()
+}
+
 fn validate_generated_list(
     section: &GeneratedMarkdownSection,
     label: &str,
     allow_empty: bool,
     max_items: Option<usize>,
     max_chars: Option<usize>,
-) -> Vec<String> {
+) -> Vec<Violation> {
     if section.lines.is_empty() {
         return if allow_empty {
             Vec::new()
         } else {
-            vec![format!(
+            vec![Violation::structural(format!(
                 "The '{label}' section must contain at least one bullet."
-            )]
+            ))]
         };
     }
 
     let mut violations = Vec::new();
     if section.lines.iter().any(|line| bullet_text(line).is_none()) {
-        violations.push(format!(
+        violations.push(Violation::structural(format!(
             "Every non-empty line in the '{label}' section must be a Markdown bullet starting with '- '."
-        ));
+        )));
     }
     if let Some(max_items) = max_items {
         if section.lines.len() > max_items {
-            violations.push(format!(
+            violations.push(Violation::cosmetic(format!(
                 "The '{label}' section has {} items; it may have at most {max_items}.",
                 section.lines.len()
-            ));
+            )));
         }
     }
     if let Some(max_chars) = max_chars {
         let visible_chars = visible_bullet_chars(&section.lines);
         if visible_chars > max_chars {
-            violations.push(format!(
+            violations.push(Violation::cosmetic(format!(
                 "The '{label}' bullet text has {visible_chars} visible characters; it must have at most {max_chars}."
-            ));
+            )));
         }
     }
     violations
 }
 
-fn compact_standard_meeting_violations(markdown: &str) -> Vec<String> {
+fn compact_standard_meeting_violations(markdown: &str) -> Vec<Violation> {
     let sections = generated_markdown_sections(markdown);
     let mut violations = Vec::new();
 
@@ -529,7 +560,9 @@ fn compact_standard_meeting_violations(markdown: &str) -> Vec<String> {
             None,
         )),
         None => {
-            violations.push("The report is missing the mandatory 'Attendees' section.".to_string())
+            violations.push(Violation::structural(
+                "The report is missing the mandatory 'Attendees' section.".to_string(),
+            ))
         }
     }
 
@@ -551,7 +584,9 @@ fn compact_standard_meeting_violations(markdown: &str) -> Vec<String> {
             Some(500),
         )),
         None => {
-            violations.push("The report is missing the mandatory 'Summary' section.".to_string())
+            violations.push(Violation::structural(
+                "The report is missing the mandatory 'Summary' section.".to_string(),
+            ))
         }
     }
 
@@ -565,7 +600,9 @@ fn compact_standard_meeting_violations(markdown: &str) -> Vec<String> {
             Some(150),
         )),
         None => {
-            violations.push("The report is missing the mandatory 'Agreements' section.".to_string())
+            violations.push(Violation::structural(
+                "The report is missing the mandatory 'Agreements' section.".to_string(),
+            ))
         }
     }
 
@@ -914,11 +951,11 @@ pub async fn generate_meeting_summary(
             info!(
                 "Compact standard-meeting validation failed on attempt {}: {}",
                 repair_attempt,
-                violations.join("; ")
+                violation_messages(&violations).join("; ")
             );
             let repair_prompt = format!(
                 "{final_user_prompt}\n\n<report_to_revise>\n{final_markdown}\n</report_to_revise>\n\nThe draft report above failed mandatory output validation:\n- {}\n\nReturn the complete corrected Markdown report. Preserve factual meaning and all other sections, but rewrite the invalid sections so every requirement is satisfied. Summary may contain any number of bullets, but their combined visible text must have at most 500 Unicode characters. Agreements may remain empty when nothing was agreed; otherwise it may contain at most 3 bullets and 150 visible Unicode characters in total. Do not truncate text or use ellipses.",
-                violations.join("\n- ")
+                violation_messages(&violations).join("\n- ")
             );
             let repaired = generate_summary(
                 client,
@@ -941,12 +978,25 @@ pub async fn generate_meeting_summary(
                 localize_generated_markdown(&clean_llm_markdown_output(&repaired), output_language);
         }
 
+        // What survives three repair attempts decides between two losses. A missing
+        // section means the reader never sees content that was in the meeting, so the
+        // report is not worth delivering. A section that ran past its length cap has
+        // everything in it — refusing it there would throw a whole meeting's summary
+        // away over tidiness.
         let violations = compact_standard_meeting_violations(&final_markdown);
-        if !violations.is_empty() {
+        let (blocking, cosmetic): (Vec<_>, Vec<_>) =
+            violations.into_iter().partition(|v| v.blocking);
+        if !blocking.is_empty() {
             return Err(format!(
                 "Summary did not satisfy compact-section requirements after repair: {}",
-                violations.join("; ")
+                violation_messages(&blocking).join("; ")
             ));
+        }
+        if !cosmetic.is_empty() {
+            log::warn!(
+                "Delivering the summary with compact-section limits exceeded: {}",
+                violation_messages(&cosmetic).join("; ")
+            );
         }
     }
 
@@ -1052,10 +1102,38 @@ mod tests {
         let markdown = format!(
             "**Краткое содержание**\n- {long_summary}\n\n**Договорённости**\nТекст без буллита"
         );
-        let violations = compact_standard_meeting_violations(&markdown).join(" ");
+        let found = compact_standard_meeting_violations(&markdown);
+        let violations = violation_messages(&found).join(" ");
         assert!(violations.contains("Attendees"));
         assert!(violations.contains("501 visible characters"));
         assert!(violations.contains("Markdown bullet"));
+    }
+
+    /// A missing section and an overlong one are not the same failure. One costs the
+    /// reader content, the other costs nothing but tidiness — and only the first is
+    /// worth throwing a finished report away over.
+    #[test]
+    fn only_structural_violations_block_delivery() {
+        let missing = compact_standard_meeting_violations("**Краткое содержание**\n- Что-то");
+        assert!(
+            missing.iter().any(|v| v.blocking),
+            "a report with no Attendees section cannot be delivered"
+        );
+
+        let long_agreements = format!(
+            "**Участники**\n- Вы\n\n**Краткое содержание**\n- Обсудили статус.\n\n\
+             **Договорённости**\n- {}\n\n**Ключевые решения**\n- Решений нет",
+            "а".repeat(187)
+        );
+        let over_limit = compact_standard_meeting_violations(&long_agreements);
+        assert!(
+            !over_limit.is_empty(),
+            "the length cap is still reported so the repair pass runs"
+        );
+        assert!(
+            over_limit.iter().all(|v| !v.blocking),
+            "an overlong bullet must not throw the whole summary away"
+        );
     }
 
     #[test]
