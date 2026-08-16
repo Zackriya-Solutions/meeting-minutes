@@ -268,4 +268,4 @@ MIT License - Feel free to use this project for your own purposes.
 
 ## Star History
 
-[![Star History Chart](https://api.star-history.com/chart?repos=Zackriya-Solutions/meetily&type=date&legend=top-left)](https://www.star-history.com/?repos=Zackriya-Solutions%2Fmeetily&type=date&legend=bottom-right)
+[![Star History Chart](https://star-history.dera.page/svg?repos=Zackriya-Solutions/meetily&type=date&legend=top-left)](https://star-history.dera.page/#Zackriya-Solutions/meetily&type=date&legend=bottom-right)
