@@ -63,7 +63,17 @@ pub fn whisper_context_acceleration_for(
     runtime_detected_gpu: GpuType,
     performance_tier: PerformanceTier,
 ) -> WhisperContextAcceleration {
-    let use_gpu = !matches!(compiled_backend, WhisperCompiledBackend::Cpu);
+    // Metal is a native macOS framework and is always safe to request. The other
+    // GPU backends depend on a real driver/ICD being present at runtime; requesting
+    // them without one causes whisper.cpp's GPU backend to hard-abort the process
+    // during context initialization, so require runtime GPU detection to agree.
+    let use_gpu = match compiled_backend {
+        WhisperCompiledBackend::Cpu => false,
+        WhisperCompiledBackend::Metal => true,
+        WhisperCompiledBackend::Cuda
+        | WhisperCompiledBackend::Vulkan
+        | WhisperCompiledBackend::HipBlas => runtime_detected_gpu != GpuType::None,
+    };
     let fast_tier = matches!(performance_tier, PerformanceTier::High | PerformanceTier::Ultra);
     let flash_attn = match compiled_backend {
         WhisperCompiledBackend::Metal | WhisperCompiledBackend::Cuda => fast_tier,
@@ -98,14 +108,17 @@ mod tests {
     }
 
     #[test]
-    fn acceleration_vulkan_backend_keeps_gpu_without_runtime_gpu_detection() {
+    fn acceleration_vulkan_backend_falls_back_to_cpu_without_runtime_gpu_detection() {
+        // Regression test: a Vulkan-compiled build with no runtime-detected GPU
+        // must not request GPU init, since whisper.cpp aborts the process when
+        // no Vulkan device is available.
         let params = whisper_context_acceleration_for(
             WhisperCompiledBackend::Vulkan,
             GpuType::None,
             PerformanceTier::Low,
         );
 
-        assert!(params.use_gpu);
+        assert!(!params.use_gpu);
         assert!(!params.flash_attn);
     }
 
@@ -126,6 +139,31 @@ mod tests {
         assert!(high.flash_attn);
         assert!(ultra.use_gpu);
         assert!(ultra.flash_attn);
+    }
+
+    #[test]
+    fn acceleration_cuda_backend_falls_back_to_cpu_without_runtime_gpu_detection() {
+        let params = whisper_context_acceleration_for(
+            WhisperCompiledBackend::Cuda,
+            GpuType::None,
+            PerformanceTier::Ultra,
+        );
+
+        assert!(!params.use_gpu);
+        assert!(!params.flash_attn);
+    }
+
+    #[test]
+    fn acceleration_metal_backend_ignores_runtime_gpu_detection() {
+        // Metal is a native macOS framework, so it's always safe to request
+        // regardless of what runtime GPU detection reports.
+        let params = whisper_context_acceleration_for(
+            WhisperCompiledBackend::Metal,
+            GpuType::None,
+            PerformanceTier::Ultra,
+        );
+
+        assert!(params.use_gpu);
     }
 
     #[test]
