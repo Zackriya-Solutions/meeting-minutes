@@ -167,20 +167,69 @@ pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
     dot / (na.sqrt() * nb.sqrt())
 }
 
-/// Assign a segment to the cluster with maximum time-overlap. Returns `None` when the
-/// diarizer covered less than [`MIN_ATTRIBUTION_COVERAGE`] of the segment (too little
-/// evidence) or when the best cluster owns less than `min_overlap_ratio` of the covered
-/// time (contested between speakers). Dominance is measured against the turn-covered
-/// portion, not the raw duration — see [`MIN_OVERLAP_RATIO`] for why.
-pub fn assign_segment(
+/// Why a segment was not attributed, and the numbers behind it.
+///
+/// The thresholds decline for two different reasons, and the fix for each is different:
+/// a segment the diarizer barely saw needs better audio or a second look, while a segment
+/// three people share needs splitting, not a louder guess. Nothing recorded which one
+/// happened, so every proposal about unattributed lines was an argument about an unmeasured
+/// population. [`SegmentAttribution`] carries the evidence out of the decision.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RefusalReason {
+    /// No diarized turn touches the segment at all.
+    NoCoverage,
+    /// Turns cover less than [`MIN_ATTRIBUTION_COVERAGE`] of the segment.
+    LowCoverage,
+    /// Well covered, but no cluster owns enough of the covered time: shared by speakers.
+    Contested,
+}
+
+impl RefusalReason {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            RefusalReason::NoCoverage => "no_coverage",
+            RefusalReason::LowCoverage => "low_coverage",
+            RefusalReason::Contested => "contested",
+        }
+    }
+}
+
+/// The full outcome of scoring one segment against the diarized turns.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SegmentAttribution {
+    /// The winning cluster when the thresholds were met.
+    pub cluster_id: Option<i64>,
+    /// Why not, when they were not.
+    pub refusal: Option<RefusalReason>,
+    /// Share of the segment covered by any turn, 0..=1.
+    pub coverage_ratio: f32,
+    /// Share of the *covered* time owned by the leading cluster, 0..=1.
+    pub top_ratio: f32,
+    /// Same for the runner-up; 0 when only one cluster overlaps.
+    pub runner_up_ratio: f32,
+}
+
+/// Score a segment against the diarized turns: which cluster owns it, and if none does, why.
+///
+/// Dominance is measured against the turn-covered portion, not the raw duration — see
+/// [`MIN_OVERLAP_RATIO`] for why.
+pub fn score_segment(
     seg_start_ms: i64,
     seg_end_ms: i64,
     turns: &[SpeakerTurn],
     min_overlap_ratio: f32,
-) -> Option<i64> {
+) -> SegmentAttribution {
+    let refused = |reason, coverage, top, runner_up| SegmentAttribution {
+        cluster_id: None,
+        refusal: Some(reason),
+        coverage_ratio: coverage,
+        top_ratio: top,
+        runner_up_ratio: runner_up,
+    };
+
     let seg_len = (seg_end_ms - seg_start_ms).max(0);
     if seg_len == 0 {
-        return None;
+        return refused(RefusalReason::NoCoverage, 0.0, 0.0, 0.0);
     }
     // Sum overlap per cluster, and collect the overlapping intervals for union coverage.
     let mut overlap_by_cluster: std::collections::HashMap<i64, i64> =
@@ -195,10 +244,13 @@ pub fn assign_segment(
             intervals.push((start, end));
         }
     }
-    let (best_cluster, best_overlap) = overlap_by_cluster
-        .into_iter()
-        // Deterministic tie-break: larger overlap, then smaller cluster id.
-        .max_by(|a, b| a.1.cmp(&b.1).then(b.0.cmp(&a.0)))?;
+    let mut ranked: Vec<(i64, i64)> = overlap_by_cluster.into_iter().collect();
+    // Deterministic tie-break: larger overlap, then smaller cluster id.
+    ranked.sort_unstable_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+    let Some(&(best_cluster, best_overlap)) = ranked.first() else {
+        return refused(RefusalReason::NoCoverage, 0.0, 0.0, 0.0);
+    };
+    let runner_up_overlap = ranked.get(1).map_or(0, |entry| entry.1);
 
     // Union of turn coverage over the segment (crosstalk must not double-count).
     intervals.sort_unstable();
@@ -209,13 +261,53 @@ pub fn assign_segment(
         reach = reach.max(e);
     }
 
-    if (covered as f32) >= MIN_ATTRIBUTION_COVERAGE * (seg_len as f32)
-        && (best_overlap as f32) >= min_overlap_ratio * (covered as f32)
-    {
-        Some(best_cluster)
-    } else {
-        None
+    let coverage_ratio = covered as f32 / seg_len as f32;
+    let share = |overlap: i64| {
+        if covered > 0 {
+            overlap as f32 / covered as f32
+        } else {
+            0.0
+        }
+    };
+    let top_ratio = share(best_overlap);
+    let runner_up_ratio = share(runner_up_overlap);
+
+    if coverage_ratio < MIN_ATTRIBUTION_COVERAGE {
+        return refused(
+            RefusalReason::LowCoverage,
+            coverage_ratio,
+            top_ratio,
+            runner_up_ratio,
+        );
     }
+    if top_ratio < min_overlap_ratio {
+        return refused(
+            RefusalReason::Contested,
+            coverage_ratio,
+            top_ratio,
+            runner_up_ratio,
+        );
+    }
+    SegmentAttribution {
+        cluster_id: Some(best_cluster),
+        refusal: None,
+        coverage_ratio,
+        top_ratio,
+        runner_up_ratio,
+    }
+}
+
+/// Assign a segment to the cluster with maximum time-overlap. Returns `None` when the
+/// diarizer covered less than [`MIN_ATTRIBUTION_COVERAGE`] of the segment (too little
+/// evidence) or when the best cluster owns less than `min_overlap_ratio` of the covered
+/// time (contested between speakers). See [`score_segment`] for the reason behind a `None`.
+pub fn assign_segment(
+    seg_start_ms: i64,
+    seg_end_ms: i64,
+    turns: &[SpeakerTurn],
+    min_overlap_ratio: f32,
+) -> Option<i64> {
+    score_segment(seg_start_ms, seg_end_ms, turns, min_overlap_ratio).cluster_id
 }
 
 /// Match a cluster's mean embedding against known speaker profiles. Returns the id of the
@@ -829,6 +921,14 @@ pub struct DiarizationParams {
     /// Clusters below this total speaking time are folded into a major cluster during
     /// consolidation. See [`DEFAULT_MIN_MAJOR_CLUSTER_MS`].
     pub min_major_cluster_ms: i64,
+    /// How many half-window-offset segmentation grids to run (1 or 2).
+    ///
+    /// Two grids see each speaker change with different context and their union finds more
+    /// boundaries than either alone (measured on the 31-min reference meeting: 68% at grid
+    /// 0, 72% at grid +5 s, 77% for the union). The second grid also doubles the
+    /// segmentation work and the number of turns to embed, which is where the pass spends
+    /// its time — so it is a knob, benchmarked rather than assumed.
+    pub segmentation_grids: usize,
 }
 
 impl Default for DiarizationParams {
@@ -844,6 +944,7 @@ impl Default for DiarizationParams {
             centroid_merge_min_similarity: DEFAULT_CENTROID_MERGE_MIN_SIM,
             num_speakers: None,
             min_major_cluster_ms: DEFAULT_MIN_MAJOR_CLUSTER_MS,
+            segmentation_grids: 2,
         }
     }
 }
@@ -876,7 +977,7 @@ impl DiarizerConfig {
 pub struct Diarizer {
     #[allow(dead_code)]
     config: DiarizerConfig,
-    params: DiarizationParams,
+    pub params: DiarizationParams,
     seg_session: Mutex<ort::session::Session>,
     emb_session: Mutex<ort::session::Session>,
     seg_output_name: String,
@@ -993,9 +1094,8 @@ impl Diarizer {
         const MAX_TURNS_PER_SPEAKER: usize = 8;
         const MAX_AUDIO_MS_PER_SPEAKER: i64 = 60_000;
 
-        let decoded = crate::audio::decoder::decode_audio_file(audio_path)
+        let waveform = crate::audio::decoder::decode_16k_mono(audio_path)
             .map_err(|e| anyhow!("speaker embedding: decode {}: {e}", audio_path.display()))?;
-        let waveform = decoded.to_whisper_format();
         if waveform.is_empty() {
             return Ok(Vec::new());
         }
@@ -1057,10 +1157,21 @@ impl Diarizer {
     /// speaker run are carved out of their containing turns so replies split at speaker
     /// changes.
     pub fn diarize(&self, audio_path: &std::path::Path) -> Result<DiarizationResult> {
-        // 1) Decode to 16 kHz mono f32 in [-1, 1] (reuses the shared audio decoder).
-        let decoded = crate::audio::decoder::decode_audio_file(audio_path)
+        // Phase timings. A pass over an hour of audio takes minutes, and until they were
+        // measured the only honest answer to "why is this slow" was a guess — the same
+        // reason the refusal reasons are recorded rather than argued about.
+        let started = std::time::Instant::now();
+        let mut mark = started;
+        let mut lap = |label: &str, mark: &mut std::time::Instant| {
+            let elapsed = mark.elapsed();
+            *mark = std::time::Instant::now();
+            log::info!("[diarize] {label}: {:.1}s", elapsed.as_secs_f64());
+        };
+
+        // 1) Decode to 16 kHz mono f32 in [-1, 1] — FFmpeg resamples while decoding, which
+        //    is where most of this pass's wall clock used to go (see `decode_16k_mono`).
+        let waveform = crate::audio::decoder::decode_16k_mono(audio_path)
             .map_err(|e| anyhow!("diarize: decode {}: {e}", audio_path.display()))?;
-        let waveform = decoded.to_whisper_format(); // 16 kHz mono
         if waveform.is_empty() {
             return Ok(DiarizationResult {
                 turns: Vec::new(),
@@ -1068,6 +1179,7 @@ impl Diarizer {
             });
         }
         let total_ms = (waveform.len() as f64 / SEG_SAMPLE_RATE as f64) * 1000.0;
+        lap("decode", &mut mark);
 
         // 2) Slide TWO half-window-offset grids of non-overlapping 10 s windows; the final
         //    window of each grid is zero-padded. A single grid misses speaker changes that
@@ -1081,9 +1193,10 @@ impl Diarizer {
         //    reported ≥2 simultaneous speakers) so blended-voice turns can be kept out of
         //    cluster formation.
         const GRID_OFFSETS: [usize; 2] = [0, SEG_WINDOW_SAMPLES / 2];
+        let grid_offsets = &GRID_OFFSETS[..self.params.segmentation_grids.clamp(1, 2)];
         let mut raw_turns: Vec<(i64, i64, f32)> = Vec::new(); // (start_ms, end_ms, overlap_frac)
         let mut window_buf = vec![0f32; SEG_WINDOW_SAMPLES];
-        for &grid_offset in &GRID_OFFSETS {
+        for &grid_offset in grid_offsets {
             let mut win_start = grid_offset;
             while win_start < waveform.len() {
                 let end = (win_start + SEG_WINDOW_SAMPLES).min(waveform.len());
@@ -1135,6 +1248,8 @@ impl Diarizer {
             });
         }
 
+        lap("segmentation", &mut mark);
+
         // 3) One speaker embedding per raw turn (drop ones too short to featurize).
         struct Emb {
             start_ms: i64,
@@ -1143,24 +1258,96 @@ impl Diarizer {
             overlap_frac: f32,
             embedding: Vec<f32>,
         }
-        let mut embs: Vec<Emb> = Vec::with_capacity(raw_turns.len());
-        for (s, e, ov) in raw_turns {
-            let start_sample = ((s as f64 / 1000.0) * SEG_SAMPLE_RATE as f64) as usize;
-            let end_sample =
-                (((e as f64 / 1000.0) * SEG_SAMPLE_RATE as f64) as usize).min(waveform.len());
-            if end_sample <= start_sample {
-                continue;
+        // One forward pass per turn, spread across cores. Each worker owns a session
+        // because `Session::run` needs `&mut self`; sharing one would put every turn back
+        // in the same queue. Results are identical to the serial path — see
+        // [`Self::embed_turn_with`].
+        use rayon::prelude::*;
+        let workers = std::env::var("MEETILY_DIARIZATION_WORKERS")
+            .ok()
+            .and_then(|value| value.parse::<usize>().ok())
+            .unwrap_or_else(|| {
+                std::thread::available_parallelism()
+                    .map(|n| n.get().saturating_sub(1).clamp(1, 4))
+                    .unwrap_or(1)
+            })
+            .max(1);
+        let embs: Vec<Emb> = if workers > 1 {
+            let pool = rayon::ThreadPoolBuilder::new()
+                .num_threads(workers)
+                .build()
+                .map_err(|e| anyhow!("diarize: embedding pool: {e}"))?;
+            pool.install(|| {
+                raw_turns
+                    .par_iter()
+                    .map_init(
+                        || {
+                            // Falling back to the shared session is safe but serialises
+                            // the work, so a failure here looks exactly like "parallelism
+                            // didn't help" unless it says so out loud.
+                            build_session(&self.config.embedding_path())
+                                .map_err(|error| {
+                                    log::warn!(
+                                        "[diarize] worker could not load its own embedding \
+                                         session, falling back to the shared one: {error}"
+                                    );
+                                })
+                                .ok()
+                        },
+                        |session, &(s, e, ov)| {
+                            let start_sample =
+                                ((s as f64 / 1000.0) * SEG_SAMPLE_RATE as f64) as usize;
+                            let end_sample = (((e as f64 / 1000.0) * SEG_SAMPLE_RATE as f64)
+                                as usize)
+                                .min(waveform.len());
+                            if end_sample <= start_sample {
+                                return Ok(None);
+                            }
+                            let samples = &waveform[start_sample..end_sample];
+                            // A worker whose session failed to load falls back to the
+                            // shared one rather than dropping the turn.
+                            let embedding = match session {
+                                Some(session) => self.embed_turn_with(session, samples)?,
+                                None => self.embed_turn(samples)?,
+                            };
+                            Ok(embedding.map(|embedding| Emb {
+                                start_ms: s,
+                                end_ms: e,
+                                dur_ms: e - s,
+                                overlap_frac: ov,
+                                embedding,
+                            }))
+                        },
+                    )
+                    .collect::<Result<Vec<Option<Emb>>>>()
+            })?
+            .into_iter()
+            .flatten()
+            .collect()
+        } else {
+            let mut embs = Vec::with_capacity(raw_turns.len());
+            for &(s, e, ov) in &raw_turns {
+                let start_sample = ((s as f64 / 1000.0) * SEG_SAMPLE_RATE as f64) as usize;
+                let end_sample =
+                    (((e as f64 / 1000.0) * SEG_SAMPLE_RATE as f64) as usize).min(waveform.len());
+                if end_sample <= start_sample {
+                    continue;
+                }
+                if let Some(embedding) = self.embed_turn(&waveform[start_sample..end_sample])? {
+                    embs.push(Emb {
+                        start_ms: s,
+                        end_ms: e,
+                        dur_ms: e - s,
+                        overlap_frac: ov,
+                        embedding,
+                    });
+                }
             }
-            if let Some(embedding) = self.embed_turn(&waveform[start_sample..end_sample])? {
-                embs.push(Emb {
-                    start_ms: s,
-                    end_ms: e,
-                    dur_ms: e - s,
-                    overlap_frac: ov,
-                    embedding,
-                });
-            }
-        }
+            embs
+        };
+        // Rayon's indexed collect preserves input order, so `embs` is in exactly the order
+        // the serial loop produced — which later stages depend on: turn order decides
+        // cluster first-seen labels, and re-sorting here would quietly renumber speakers.
 
         if embs.is_empty() {
             return Ok(DiarizationResult {
@@ -1168,6 +1355,8 @@ impl Diarizer {
                 cluster_embeddings: Vec::new(),
             });
         }
+
+        lap("embeddings", &mut mark);
 
         // 4) Formation set: long, low-overlap turns. Short / heavily-overlapped turns are
         //    attached afterward (never form a cluster). If nothing qualifies (e.g. every turn
@@ -1283,6 +1472,8 @@ impl Diarizer {
         // pre-carve; after carving the survivors are adjacent again — fuse them.
         let turns = merge_same_cluster(turns, self.params.merge_gap_ms);
 
+        lap("clustering", &mut mark);
+
         // 7) Final duration-weighted identity embedding per cluster, over every turn assigned
         //    to it (formation + attached).
         let final_centroids = duration_weighted_centroids(
@@ -1298,6 +1489,11 @@ impl Diarizer {
             .map(|(label, emb)| (label as i64, emb))
             .collect();
 
+        log::info!(
+            "[diarize] cascade total: {:.1}s for {:.0}s of audio",
+            started.elapsed().as_secs_f64(),
+            total_ms / 1000.0
+        );
         Ok(DiarizationResult {
             turns,
             cluster_embeddings,
@@ -1348,6 +1544,23 @@ impl Diarizer {
     /// root cause of one meeting diarizing into 15 "speakers". See
     /// [`crate::pipeline::kaldi_fbank`] module docs for the full analysis.
     fn embed_turn(&self, samples: &[f32]) -> Result<Option<Vec<f32>>> {
+        let mut sess = self.emb_session.lock().unwrap();
+        self.embed_turn_with(&mut sess, samples)
+    }
+
+    /// [`Self::embed_turn`] against a caller-owned session.
+    ///
+    /// Every turn is one forward pass, and on an hour of audio that is the whole cost of
+    /// the pass — 186 s of 211 s measured. One shared session serialises them behind a
+    /// mutex no matter how many cores are free, so the parallel path hands each worker its
+    /// own session. The arithmetic per turn is identical either way: this buys time, not a
+    /// different answer, which matters because the clustering thresholds are calibrated
+    /// against these exact numbers.
+    fn embed_turn_with(
+        &self,
+        sess: &mut ort::session::Session,
+        samples: &[f32],
+    ) -> Result<Option<Vec<f32>>> {
         use ort::value::TensorRef;
 
         let scaled: Vec<f32> = samples
@@ -1364,7 +1577,6 @@ impl Diarizer {
         }
         let feats = feats.insert_axis(ndarray::Axis(0)); // [1, num_frames, 80]
 
-        let mut sess = self.emb_session.lock().unwrap();
         let input = TensorRef::from_array_view(feats.view())
             .map_err(|e| anyhow!("ort embedding input: {e}"))?;
         let outputs = sess
@@ -1385,6 +1597,11 @@ impl Diarizer {
 fn build_session(model_path: &std::path::Path) -> Result<ort::session::Session> {
     use ort::execution_providers::CPUExecutionProvider;
     use ort::session::{builder::GraphOptimizationLevel, Session};
+    // CoreML was measured as an option and rejected on cost of ownership, not on speed:
+    // `ort`'s `coreml` feature switches ort-sys from the prebuilt dynamic runtime to
+    // linking a static `onnxruntime`, which every developer and CI machine would then have
+    // to build from source. The embedding work is parallel across cores instead (see
+    // `Diarizer::diarize`), which needed no new dependency.
     Session::builder()
         .map_err(|e| anyhow!("ort builder: {e}"))?
         .with_optimization_level(GraphOptimizationLevel::Level3)
@@ -1490,6 +1707,38 @@ mod tests {
             cluster_id: 1,
         }];
         assert_eq!(assign_segment(0, 1000, &turns, MIN_OVERLAP_RATIO), None);
+    }
+
+    /// The three ways a line goes unattributed are told apart, with the numbers behind each.
+    /// A line three people share and a line the diarizer barely heard both end up NULL, and
+    /// nothing downstream could tell them apart — so nobody knew which population to fix.
+    #[test]
+    fn a_refusal_says_which_of_the_three_reasons_it_was() {
+        let contested = score_segment(
+            0,
+            1000,
+            &[turn(0, 500, 1), turn(500, 1000, 2)],
+            MIN_OVERLAP_RATIO,
+        );
+        assert_eq!(contested.refusal, Some(RefusalReason::Contested));
+        assert_eq!(contested.coverage_ratio, 1.0);
+        assert_eq!(contested.top_ratio, 0.5);
+        assert_eq!(contested.runner_up_ratio, 0.5);
+
+        let barely_seen = score_segment(0, 1000, &[turn(0, 200, 1)], MIN_OVERLAP_RATIO);
+        assert_eq!(barely_seen.refusal, Some(RefusalReason::LowCoverage));
+        assert_eq!(barely_seen.coverage_ratio, 0.2);
+        // The one cluster that was heard owned all of the little that was heard.
+        assert_eq!(barely_seen.top_ratio, 1.0);
+        assert_eq!(barely_seen.runner_up_ratio, 0.0);
+
+        let silence = score_segment(0, 1000, &[turn(2_000, 3_000, 1)], MIN_OVERLAP_RATIO);
+        assert_eq!(silence.refusal, Some(RefusalReason::NoCoverage));
+        assert_eq!(silence.coverage_ratio, 0.0);
+
+        let assigned = score_segment(0, 1000, &[turn(0, 800, 1)], MIN_OVERLAP_RATIO);
+        assert_eq!(assigned.cluster_id, Some(1));
+        assert_eq!(assigned.refusal, None);
     }
 
     #[test]
@@ -2066,6 +2315,229 @@ mod tests {
             );
             assert!(!emb.is_empty(), "cluster {id} embedding empty");
         }
+    }
+
+    /// Benchmark the cascade on real recordings, reporting time AND what the time bought.
+    ///
+    /// Speed and quality are one trade here — every cheap idea (fewer segmentation grids,
+    /// a different execution provider, shorter embedding windows) buys seconds and risks
+    /// attribution — so measuring one without the other decides nothing. This runs the real
+    /// cascade over real meetings, then scores its turns against those meetings' real
+    /// transcript rows with the same [`score_segment`] the product uses, and prints both
+    /// halves per meeting: wall clock by phase, and how many rows would end up with a voice.
+    ///
+    /// Reads the app's own database, so a run measures the archive it will ship against.
+    ///
+    ///   MEETILY_DIARIZATION_MODEL_DIR=~/Library/Application\ Support/com.meetily.ai/models/diarization \
+    ///   MEETILY_BENCH_DB=~/Library/Application\ Support/com.meetily.ai/meeting_minutes.sqlite \
+    ///   MEETILY_BENCH_LIMIT=3 \
+    ///     cargo test -p meetily --lib bench_diarization -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn bench_diarization() {
+        let Ok(model_dir) = std::env::var("MEETILY_DIARIZATION_MODEL_DIR") else {
+            eprintln!("skip: MEETILY_DIARIZATION_MODEL_DIR not set");
+            return;
+        };
+        let Ok(db_path) = std::env::var("MEETILY_BENCH_DB") else {
+            eprintln!("skip: MEETILY_BENCH_DB not set");
+            return;
+        };
+        let config = DiarizerConfig {
+            model_dir: std::path::PathBuf::from(model_dir),
+        };
+        if !config.is_available() {
+            eprintln!("skip: models not present at {}", config.model_dir.display());
+            return;
+        }
+        let limit: usize = std::env::var("MEETILY_BENCH_LIMIT")
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(3);
+
+        let runtime = tokio::runtime::Runtime::new().expect("runtime");
+        let meetings = runtime.block_on(bench_meetings(&db_path, limit));
+        if meetings.is_empty() {
+            eprintln!("skip: no meeting in {db_path} has both a recording and timed rows");
+            return;
+        }
+
+        let mut diarizer = Diarizer::load(config).expect("load diarizer");
+        // A/B knob: MEETILY_BENCH_GRIDS=1 halves the segmentation work and the number of
+        // turns to embed. Whether it also costs attribution is exactly what this measures.
+        if let Some(grids) = std::env::var("MEETILY_BENCH_GRIDS")
+            .ok()
+            .and_then(|value| value.parse::<usize>().ok())
+        {
+            diarizer.params.segmentation_grids = grids;
+            eprintln!("segmentation grids: {grids}");
+        }
+        let diarizer = diarizer;
+        let mut totals = (0.0f64, 0.0f64, 0usize, 0usize);
+        eprintln!(
+            "\n{:<28} {:>7} {:>7} {:>6} {:>8} {:>7} {:>9}",
+            "meeting", "audio", "wall", "xRT", "rows", "voices", "refused"
+        );
+        for meeting in &meetings {
+            let started = std::time::Instant::now();
+            let result = match diarizer.diarize(&meeting.audio) {
+                Ok(result) => result,
+                Err(error) => {
+                    eprintln!("{:<28} FAILED: {error}", meeting.title);
+                    continue;
+                }
+            };
+            let wall = started.elapsed().as_secs_f64();
+
+            let mut attributed = 0usize;
+            let mut refusals: std::collections::BTreeMap<&str, usize> =
+                std::collections::BTreeMap::new();
+            for row in &meeting.rows {
+                let scored =
+                    score_segment(row.0, row.1, &result.turns, MIN_OVERLAP_RATIO);
+                match scored.refusal {
+                    None => attributed += 1,
+                    Some(reason) => *refusals.entry(reason.as_str()).or_default() += 1,
+                }
+            }
+            let audio = meeting.audio_seconds;
+            totals.0 += audio;
+            totals.1 += wall;
+            totals.2 += attributed;
+            totals.3 += meeting.rows.len();
+
+            let refused = refusals
+                .iter()
+                .map(|(reason, count)| format!("{reason}={count}"))
+                .collect::<Vec<_>>()
+                .join(" ");
+            eprintln!(
+                "{:<28} {:>6.0}s {:>6.1}s {:>5.0}x {:>4}/{:<3} {:>7} {:>9}",
+                meeting.title.chars().take(28).collect::<String>(),
+                audio,
+                wall,
+                audio / wall.max(0.001),
+                attributed,
+                meeting.rows.len(),
+                result.cluster_embeddings.len(),
+                if refused.is_empty() { "-".into() } else { refused },
+            );
+        }
+        eprintln!(
+            "\nTOTAL  {:.0}s audio in {:.0}s ({:.0}x real time) · {}/{} rows attributed ({:.1}%)\n",
+            totals.0,
+            totals.1,
+            totals.0 / totals.1.max(0.001),
+            totals.2,
+            totals.3,
+            100.0 * totals.2 as f64 / totals.3.max(1) as f64,
+        );
+    }
+
+    struct BenchMeeting {
+        title: String,
+        audio: std::path::PathBuf,
+        audio_seconds: f64,
+        /// Timed transcript rows as (start_ms, end_ms).
+        rows: Vec<(i64, i64)>,
+    }
+
+    /// The longest meetings that still have both a recording on disk and timed rows.
+    async fn bench_meetings(db_path: &str, limit: usize) -> Vec<BenchMeeting> {
+        let pool = match sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect(&format!("sqlite:{db_path}?mode=ro"))
+            .await
+        {
+            Ok(pool) => pool,
+            Err(error) => {
+                eprintln!("skip: cannot open {db_path}: {error}");
+                return Vec::new();
+            }
+        };
+        // `MEETILY_BENCH_MEETINGS=id,id` targets specific meetings; otherwise the longest.
+        let wanted: Vec<String> = std::env::var("MEETILY_BENCH_MEETINGS")
+            .map(|value| {
+                value
+                    .split(',')
+                    .map(|id| id.trim().to_string())
+                    .filter(|id| !id.is_empty())
+                    .collect()
+            })
+            .unwrap_or_default();
+        let candidates: Vec<(String, String, Option<String>)> = sqlx::query_as(
+            "SELECT m.id, m.title, m.folder_path FROM meetings m \
+             WHERE m.folder_path IS NOT NULL \
+             ORDER BY (SELECT COUNT(*) FROM transcripts t WHERE t.meeting_id = m.id) DESC \
+             LIMIT 40",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap_or_default();
+        // Targeted ids are fetched directly: the list above is capped, and a meeting worth
+        // investigating is rarely one of the longest.
+        let candidates: Vec<_> = if wanted.is_empty() {
+            candidates
+        } else {
+            let mut targeted = Vec::new();
+            for id in &wanted {
+                if let Ok(Some(row)) = sqlx::query_as::<_, (String, String, Option<String>)>(
+                    "SELECT id, title, folder_path FROM meetings WHERE id = ?",
+                )
+                .bind(id)
+                .fetch_optional(&pool)
+                .await
+                {
+                    targeted.push(row);
+                }
+            }
+            targeted
+        };
+
+        let mut meetings = Vec::new();
+        for (id, title, folder) in candidates {
+            if meetings.len() >= limit {
+                break;
+            }
+            let Some(folder) = folder else { continue };
+            // Recordings are audio.mp4, but imported meetings keep whatever the import
+            // wrote — audio.mp3 among them. Looking for one name only silently skipped a
+            // whole class of meetings, which for a benchmark is worse than failing loudly.
+            let Some(audio) = ["audio.mp4", "audio.mp3", "audio.wav", "audio.m4a"]
+                .iter()
+                .map(|name| std::path::Path::new(&folder).join(name))
+                .find(|path| path.exists())
+            else {
+                continue;
+            };
+            let rows: Vec<(f64, f64)> = sqlx::query_as(
+                "SELECT audio_start_time, audio_end_time FROM transcripts \
+                 WHERE meeting_id = ? AND audio_start_time IS NOT NULL \
+                   AND audio_end_time IS NOT NULL ORDER BY audio_start_time",
+            )
+            .bind(&id)
+            .fetch_all(&pool)
+            .await
+            .unwrap_or_default();
+            if rows.len() < 20 {
+                continue;
+            }
+            let audio_seconds = rows.last().map(|row| row.1).unwrap_or(0.0);
+            meetings.push(BenchMeeting {
+                title,
+                audio,
+                audio_seconds,
+                rows: rows
+                    .into_iter()
+                    .map(|(start, end)| (secs_to_ms(start), secs_to_ms(end)))
+                    .collect(),
+            });
+        }
+        meetings
+    }
+
+    fn secs_to_ms(seconds: f64) -> i64 {
+        (seconds * 1000.0).round() as i64
     }
 
     // Probe embedding stability: determinism, same-utterance halves, and pure-clip matrix.

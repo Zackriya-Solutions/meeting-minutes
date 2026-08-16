@@ -166,6 +166,10 @@ const MenuItem = forwardRef<HTMLDivElement, MenuItemProps>(
             weight={400}
             className={cn(
               "shrink-0 transition-colors duration-80",
+              // The one icon that means "working" has to look like it: a still
+              // progress_activity glyph reads as a stuck action, which is exactly the
+              // moment the user is deciding whether anything is happening at all.
+              iconName === "progress_activity" && "animate-spin",
               isActive || checked
                 ? "text-foreground"
                 : "text-muted-foreground"

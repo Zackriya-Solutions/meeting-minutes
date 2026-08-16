@@ -11,9 +11,14 @@ const invocations: Array<{ command: string; args: Record<string, unknown> | unde
 
 const {
   PENDING_PARTICIPANTS_KEY,
+  PENDING_ROSTER_KEY,
+  SOURCE_MANUAL_ROSTER,
+  readMeetingRoster,
   rememberMeetingParticipants,
   saveMeetingParticipants,
   takeMeetingParticipants,
+  takeMeetingRoster,
+  writeMeetingRoster,
 } = await import("../../src/lib/meetingParticipants");
 
 /** Minimal in-memory stand-in for `sessionStorage`. */
@@ -91,5 +96,44 @@ describe("saveMeetingParticipants", () => {
     await saveMeetingParticipants("meeting-1", ["   "]);
 
     expect(invocations).toEqual([]);
+  });
+});
+
+describe("the roster typed during a recording", () => {
+  test("survives a reload and keeps the order the user typed", () => {
+    const storage = fakeStorage();
+    writeMeetingRoster(storage, ["Миша", "Андрей"]);
+
+    expect(readMeetingRoster(storage)).toEqual(["Миша", "Андрей"]);
+    // Reading is not consuming: the recorder shows the roster back while it runs.
+    expect(readMeetingRoster(storage)).toEqual(["Миша", "Андрей"]);
+  });
+
+  test("drops blanks and repeats, and clears the slot when emptied", () => {
+    const storage = fakeStorage();
+    writeMeetingRoster(storage, ["Миша", "  ", "миша", "Андрей"]);
+    expect(readMeetingRoster(storage)).toEqual(["Миша", "Андрей"]);
+
+    writeMeetingRoster(storage, []);
+    expect(storage.getItem(PENDING_ROSTER_KEY)).toBeNull();
+  });
+
+  test("is handed over once, so it cannot follow the next recording", () => {
+    const storage = fakeStorage();
+    writeMeetingRoster(storage, ["Ксюша"]);
+
+    expect(takeMeetingRoster(storage)).toEqual(["Ксюша"]);
+    expect(takeMeetingRoster(storage)).toEqual([]);
+  });
+
+  test("reaches the backend as a roster, not as a calendar invitation", async () => {
+    invocations.length = 0;
+    await saveMeetingParticipants("meeting-1", ["Миша"], SOURCE_MANUAL_ROSTER);
+
+    expect(invocations[0]!.args).toEqual({
+      meetingId: "meeting-1",
+      participants: ["Миша"],
+      source: "manual_roster",
+    });
   });
 });

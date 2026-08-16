@@ -3,8 +3,10 @@
 import {
   createContext,
   forwardRef,
+  useCallback,
   useContext,
   useEffect,
+  useRef,
   useState,
   type ComponentPropsWithoutRef,
   type HTMLAttributes,
@@ -14,6 +16,7 @@ import { motion } from "framer-motion";
 import { X } from "@/components/deslop-icons";
 import { Button as FluidButton } from "@/components/ui/fluid-button";
 import { cn } from "@/lib/utils";
+import { useDialogEscapeGuard } from "@/lib/dialog-escape";
 import { spring, exitFallbackMs } from "@/lib/springs";
 import { useShape } from "@/lib/shape-context";
 import { SurfaceProvider, useSurface } from "@/lib/surface-context";
@@ -21,6 +24,7 @@ import { surfaceClasses } from "@/lib/surface-classes";
 
 const DIALOG_OFFSET = 4;
 const DialogOpenContext = createContext(false);
+const DialogCloseContext = createContext<(() => void) | null>(null);
 
 function Dialog({
   children,
@@ -36,12 +40,15 @@ function Dialog({
     setUncontrolledOpen(next);
     onOpenChange?.(next);
   };
+  const close = useCallback(() => handleOpenChange(false), [onOpenChange]);
 
   return (
     <DialogOpenContext.Provider value={open}>
-      <DialogPrimitive.Root open={open} onOpenChange={handleOpenChange} {...props}>
-        {children}
-      </DialogPrimitive.Root>
+      <DialogCloseContext.Provider value={close}>
+        <DialogPrimitive.Root open={open} onOpenChange={handleOpenChange} {...props}>
+          {children}
+        </DialogPrimitive.Root>
+      </DialogCloseContext.Provider>
     </DialogOpenContext.Provider>
   );
 }
@@ -58,10 +65,16 @@ interface DialogContentProps
 const DialogContent = forwardRef<HTMLDivElement, DialogContentProps>(
   ({ className, children, size = "sm", container, ...props }, ref) => {
     const open = useContext(DialogOpenContext);
+    const close = useContext(DialogCloseContext);
     const shape = useShape();
     const substrate = useSurface();
     const dialogLevel = Math.min(substrate + DIALOG_OFFSET, 8);
     const [mounted, setMounted] = useState(false);
+    const popupRef = useDialogEscapeGuard({
+      open,
+      close,
+      onEscapeKeyDown: props.onEscapeKeyDown,
+    });
 
     useEffect(() => {
       if (open) setMounted(true);
@@ -91,6 +104,7 @@ const DialogContent = forwardRef<HTMLDivElement, DialogContentProps>(
 
         <DialogPrimitive.Content ref={ref} asChild forceMount {...props}>
           <motion.div
+            ref={popupRef}
             className={cn(
               container ? "absolute" : "fixed",
               "left-1/2 top-1/2 z-[1001] w-[calc(100%-2rem)] p-6 focus:outline-none",

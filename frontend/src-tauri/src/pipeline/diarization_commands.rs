@@ -23,8 +23,8 @@ use tauri::{AppHandle, Emitter, Manager, Runtime};
 use crate::database::repositories::meeting::MeetingsRepository;
 use crate::database::repositories::speaker::SpeakersRepository;
 use crate::pipeline::diarization::{
-    assign_segment, DiarizationParams, Diarizer, DiarizerConfig, SpeakerTurn, EMBEDDING_FILE,
-    MIN_OVERLAP_RATIO, SEGMENTATION_FILE,
+    assign_segment, score_segment, DiarizationParams, Diarizer, DiarizerConfig, SpeakerTurn,
+    EMBEDDING_FILE, MIN_OVERLAP_RATIO, SEGMENTATION_FILE,
 };
 use crate::state::AppState;
 
@@ -308,20 +308,142 @@ fn assign_segments_to_speakers(
     turns: &[SpeakerTurn],
     cluster_to_speaker: &HashMap<i64, i64>,
 ) -> Vec<(String, i64)> {
+    assign_segments_with_diagnostics(segments, turns, cluster_to_speaker).0
+}
+
+/// One unattributed line, with the numbers that explain it.
+struct UnattributedSegment {
+    transcript_id: String,
+    reason: &'static str,
+    coverage_ratio: f32,
+    top_ratio: f32,
+    runner_up_ratio: f32,
+    duration_ms: i64,
+}
+
+/// [`assign_segments_to_speakers`], plus the refusals it did not report before.
+///
+/// A segment can go unattributed in three distinguishable ways, and they call for opposite
+/// remedies (see [`crate::pipeline::diarization::RefusalReason`]). Collecting them here
+/// keeps the decision and its explanation in one pass over the same turns, so the record
+/// cannot drift from what actually happened.
+fn assign_segments_with_diagnostics(
+    segments: &[(String, Option<f64>, Option<f64>)],
+    turns: &[SpeakerTurn],
+    cluster_to_speaker: &HashMap<i64, i64>,
+) -> (Vec<(String, i64)>, Vec<UnattributedSegment>) {
     let mut out = Vec::new();
+    let mut refused = Vec::new();
     for (id, start_s, end_s) in segments {
         let (Some(start_s), Some(end_s)) = (start_s, end_s) else {
             continue;
         };
         let start_ms = secs_to_ms(*start_s);
         let end_ms = secs_to_ms(*end_s);
-        if let Some(cluster_id) = assign_segment(start_ms, end_ms, turns, MIN_OVERLAP_RATIO) {
-            if let Some(speaker_id) = cluster_to_speaker.get(&cluster_id) {
-                out.push((id.clone(), *speaker_id));
-            }
+        let scored = score_segment(start_ms, end_ms, turns, MIN_OVERLAP_RATIO);
+        if let Some(speaker_id) = scored
+            .cluster_id
+            .and_then(|cluster_id| cluster_to_speaker.get(&cluster_id))
+        {
+            out.push((id.clone(), *speaker_id));
+            continue;
+        }
+        // Scoring picked a cluster, but the resolver produced no speaker row for it. The
+        // line ends up unattributed all the same, so it belongs in the diagnostics under
+        // its own name: leaving it out was measuring the population minus the cases the
+        // measurement was built to find.
+        if scored.refusal.is_none() && scored.cluster_id.is_some() {
+            refused.push(UnattributedSegment {
+                transcript_id: id.clone(),
+                reason: "unmapped_cluster",
+                coverage_ratio: scored.coverage_ratio,
+                top_ratio: scored.top_ratio,
+                runner_up_ratio: scored.runner_up_ratio,
+                duration_ms: end_ms - start_ms,
+            });
+            continue;
+        }
+        if let Some(reason) = scored.refusal {
+            refused.push(UnattributedSegment {
+                transcript_id: id.clone(),
+                reason: reason.as_str(),
+                coverage_ratio: scored.coverage_ratio,
+                top_ratio: scored.top_ratio,
+                runner_up_ratio: scored.runner_up_ratio,
+                duration_ms: (end_ms - start_ms).max(0),
+            });
         }
     }
-    out
+    (out, refused)
+}
+
+/// Replace this meeting's refusal record and log what the run could not attribute.
+///
+/// Diagnostics must never fail a diarization run: a meeting whose speakers were resolved is
+/// a success even if we could not write down what we missed.
+async fn record_unattributed_segments(
+    pool: &SqlitePool,
+    meeting_id: &str,
+    refused: &[UnattributedSegment],
+    total_segments: i64,
+) {
+    // One transaction: a run interrupted between the clear and the last insert would
+    // otherwise leave a half-written record, which under-reports exactly the population
+    // this table exists to size.
+    let written = async {
+        let mut transaction = pool.begin().await?;
+        sqlx::query("DELETE FROM unattributed_segments WHERE meeting_id = ?")
+            .bind(meeting_id)
+            .execute(&mut *transaction)
+            .await?;
+        for segment in refused {
+            sqlx::query(
+                "INSERT OR REPLACE INTO unattributed_segments \
+                 (meeting_id, transcript_id, reason, coverage_ratio, top_ratio, \
+                  runner_up_ratio, duration_ms) VALUES(?, ?, ?, ?, ?, ?, ?)",
+            )
+            .bind(meeting_id)
+            .bind(&segment.transcript_id)
+            .bind(segment.reason)
+            .bind(segment.coverage_ratio)
+            .bind(segment.top_ratio)
+            .bind(segment.runner_up_ratio)
+            .bind(segment.duration_ms)
+            .execute(&mut *transaction)
+            .await?;
+        }
+        transaction.commit().await
+    }
+    .await;
+    if let Err(error) = written {
+        log::warn!("[diarize] could not record unattributed-segment diagnostics: {error}");
+    }
+
+    let count = |reason: &str| {
+        refused
+            .iter()
+            .filter(|segment| segment.reason == reason)
+            .count()
+    };
+    let seconds = |reason: &str| {
+        refused
+            .iter()
+            .filter(|segment| segment.reason == reason)
+            .map(|segment| segment.duration_ms)
+            .sum::<i64>() as f64
+            / 1000.0
+    };
+    log::info!(
+        "[diarize] meeting {meeting_id}: {} of {total_segments} line(s) unattributed — \
+         contested {} ({:.0}s), low coverage {} ({:.0}s), no coverage {} ({:.0}s)",
+        refused.len(),
+        count("contested"),
+        seconds("contested"),
+        count("low_coverage"),
+        seconds("low_coverage"),
+        count("no_coverage"),
+        seconds("no_coverage"),
+    );
 }
 
 fn should_preserve_existing_assignments(
@@ -725,7 +847,8 @@ pub async fn attribute_transcripts<R: Runtime>(
         .await
         .map_err(|e| DiarizeError::Other(e.into()))?;
     let total_segments = segments.len() as i64;
-    let assignments = assign_segments_to_speakers(&segments, turns, cluster_to_speaker);
+    let (assignments, refused) =
+        assign_segments_with_diagnostics(&segments, turns, cluster_to_speaker);
     let had_existing_assignments = sqlx::query_scalar::<_, bool>(
         "SELECT EXISTS(SELECT 1 FROM transcripts WHERE meeting_id = ? AND speaker_id IS NOT NULL)",
     )
@@ -760,6 +883,7 @@ pub async fn attribute_transcripts<R: Runtime>(
             .await
             .map_err(|e| DiarizeError::Other(e.into()))?;
     }
+    record_unattributed_segments(pool, meeting_id, &refused, total_segments).await;
     for (segment_id, start_s, end_s) in &segments {
         let (Some(start_s), Some(end_s)) = (start_s, end_s) else {
             continue;
@@ -966,6 +1090,73 @@ pub async fn rename_speaker(
     Ok(())
 }
 
+/// Attach one transcript line to a voice the user picked.
+///
+/// Diarization refuses a line it cannot attribute confidently — the line is shared by
+/// several voices, or the diarizer barely heard it — and until now that refusal was final:
+/// the line showed no name and there was no way to give it one, because renaming acts on a
+/// speaker and an unattributed line has no speaker behind it. The user watching the
+/// transcript usually knows perfectly well who said it.
+///
+/// The speaker must already belong to this meeting: attribution picks among the voices that
+/// were in the room, and cannot invent a participant.
+/// A voice belongs to a meeting if it still holds a line here, or if this meeting's
+/// diarization produced it. The second half matters: moving a voice's only line away
+/// leaves it with no rows, and a membership test that counted rows alone would then
+/// refuse to move that line back — a one-way door out of a mistake.
+const MEMBERSHIP_SQL: &str = concat!(
+    "SELECT EXISTS(SELECT 1 FROM transcripts WHERE meeting_id=?1 AND speaker_id=?2) ",
+    "OR EXISTS(SELECT 1 FROM speaker_clusters WHERE meeting_id=?1 ",
+    "AND (operational_speaker_id=?2 OR placeholder_speaker_id=?2))",
+);
+
+#[tauri::command]
+pub async fn assign_segment_speaker(
+    state: tauri::State<'_, AppState>,
+    meeting_id: String,
+    transcript_id: String,
+    speaker_id: i64,
+) -> Result<(), String> {
+    let pool = state.db_manager.pool();
+    let belongs: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM transcripts WHERE id=? AND meeting_id=?)",
+    )
+    .bind(&transcript_id)
+    .bind(&meeting_id)
+    .fetch_one(pool)
+    .await
+    .map_err(|error| error.to_string())?;
+    if !belongs {
+        return Err("This line does not belong to the meeting".to_string());
+    }
+
+    // A voice belongs to this meeting if it still holds a line here, or if this meeting's
+    // diarization produced it. The second half matters: moving a voice's only line away
+    // leaves it with no rows, and a membership test that counted rows alone would then
+    // refuse to move that line back — a one-way door out of a mistake.
+    let speaker_in_meeting: bool = sqlx::query_scalar(MEMBERSHIP_SQL)
+    .bind(&meeting_id)
+    .bind(speaker_id)
+    .fetch_one(pool)
+    .await
+    .map_err(|error| error.to_string())?;
+    if !speaker_in_meeting {
+        return Err("That speaker did not speak in this meeting".to_string());
+    }
+
+    SpeakersRepository::set_segment_speaker(pool, &transcript_id, speaker_id)
+        .await
+        .map_err(|error| format!("Failed to attribute the line: {error}"))?;
+    // The refusal record described a decision that a person has now overruled.
+    sqlx::query("DELETE FROM unattributed_segments WHERE transcript_id=?")
+        .bind(&transcript_id)
+        .execute(pool)
+        .await
+        .map_err(|error| error.to_string())?;
+    log::info!("[diarize] line {transcript_id} attributed to speaker {speaker_id} by the user");
+    Ok(())
+}
+
 /// Persist whether a diarized voice profile belongs to the local user.
 /// The repository clears any previous owner assignment in the same transaction.
 #[tauri::command]
@@ -985,6 +1176,86 @@ pub async fn set_self_speaker(
 
 #[cfg(test)]
 mod tests {
+
+    /// The membership gate behind "Кто это сказал?" uses numbered placeholders and two
+    /// binds; it decides every manual attribution. This pins the binding and the rule:
+    /// a voice belongs to the meeting if it holds a line here, or if this meeting's
+    /// diarization produced it.
+    #[tokio::test]
+    async fn a_voice_belongs_to_the_meeting_by_line_or_by_cluster() {
+        use sqlx::sqlite::SqlitePoolOptions;
+
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+
+        for id in ["m-here", "m-elsewhere"] {
+            sqlx::query("INSERT INTO meetings (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)")
+                .bind(id)
+                .bind("meeting")
+                .bind("2026-01-01T00:00:00Z")
+                .bind("2026-01-01T00:00:00Z")
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+        for (id, name) in [(1, "Speaks"), (2, "Clustered"), (3, "Stranger")] {
+            sqlx::query("INSERT INTO speakers (id, display_name) VALUES (?, ?)")
+                .bind(id)
+                .bind(name)
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+        sqlx::query(concat!(
+            "INSERT INTO transcripts (id, meeting_id, transcript, timestamp, speaker_id) ",
+            "VALUES (?,?,?,?,?)"
+        ))
+            .bind("t-1")
+            .bind("m-here")
+            .bind("hello")
+            .bind("2026-01-01T00:00:00Z")
+            .bind(1)
+            .execute(&pool)
+            .await
+            .unwrap();
+        // A voice this meeting's diarization produced that holds no line of its own —
+        // exactly what is left behind once its only line moves to someone else.
+        sqlx::query(concat!(
+            "INSERT INTO speaker_clusters ",
+            "(meeting_id, diarization_run_id, local_cluster_id, operational_speaker_id, ",
+            "model_version) VALUES (?,?,?,?,?)"
+        ))
+        .bind("m-here")
+        .bind("run-1")
+        .bind(0_i64)
+        .bind(2)
+        .bind("test")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let belongs = |meeting: &'static str, speaker: i64| {
+            let pool = pool.clone();
+            async move {
+                sqlx::query_scalar::<_, bool>(MEMBERSHIP_SQL)
+                    .bind(meeting)
+                    .bind(speaker)
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap()
+            }
+        };
+
+        assert!(belongs("m-here", 1).await, "holds a line here");
+        assert!(belongs("m-here", 2).await, "this meeting's diarization made it");
+        assert!(!belongs("m-here", 3).await, "never part of this meeting");
+        assert!(!belongs("m-elsewhere", 1).await, "spoke, but in another meeting");
+        assert!(!belongs("m-elsewhere", 2).await, "clustered, but in another meeting");
+    }
     use super::*;
 
     fn turn(start_ms: i64, end_ms: i64, cluster_id: i64) -> SpeakerTurn {

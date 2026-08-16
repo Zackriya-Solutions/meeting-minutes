@@ -18,7 +18,8 @@
 //! original `text` byte-for-byte — zero behavior change.
 //!
 //! ## Label resolution (mirrors the UI's `resolveSpeakerLabel`, frontend/src/types/index.ts)
-//!   1. A diarized profile explicitly marked `is_self` resolves to "You".
+//!   1. A diarized profile explicitly marked `is_self` resolves to its own display name
+//!      once it has one, and to "You" while it is still an automatic placeholder.
 //!   2. Another `speaker_id` resolving to a non-empty display name uses that name.
 //!   3. A remote `system` channel without identity resolves to "Others".
 //!   4. A `mic` channel is identity evidence only as a last resort — see below.
@@ -64,10 +65,26 @@ fn stable_text_fingerprint(text: &str) -> String {
 /// falling through to the channel tag — matching the frontend exactly.
 pub fn resolve_segment_label(seg: &TranscriptSpeakerSegment) -> Option<String> {
     if seg.speaker_id.is_some() {
+        let name = seg
+            .display_name
+            .as_deref()
+            .map(str::trim)
+            .filter(|name| !name.is_empty());
+        // A named owner voice is labeled by name, not by "You". The summary is prose in
+        // the user's language: an English pronoun leaks into it verbatim ("You сделает
+        // презентацию"), and the owner then reads as somebody other than the person the
+        // participant list shows. "You" stays the fallback while the owner voice still
+        // carries an automatic placeholder.
         if seg.is_self {
-            return Some("You".to_string());
+            return Some(
+                name.filter(|name| {
+                    !crate::database::repositories::speaker::is_automatic_speaker_name(name)
+                })
+                .unwrap_or("You")
+                .to_string(),
+            );
         }
-        if let Some(name) = seg.display_name.as_deref().filter(|n| !n.is_empty()) {
+        if let Some(name) = name {
             return Some(name.to_string());
         }
     }
@@ -256,9 +273,16 @@ mod tests {
 
     #[test]
     fn resolve_label_uses_confirmed_self_identity_instead_of_channel() {
+        // A named owner voice is a person with a name; "You" is only the stand-in while
+        // that voice is still an automatic placeholder. The summary is written in the
+        // user's language, and an English pronoun ends up in it verbatim.
         let mut own = seg("hi", "t", Some(0.0), Some("system"), Some(1), Some("Миша"));
         own.is_self = true;
-        assert_eq!(resolve_segment_label(&own), Some("You".to_string()));
+        assert_eq!(resolve_segment_label(&own), Some("Миша".to_string()));
+
+        let mut unnamed_own = seg("hi", "t", Some(0.0), Some("system"), Some(1), Some("Speaker 2"));
+        unnamed_own.is_self = true;
+        assert_eq!(resolve_segment_label(&unnamed_own), Some("You".to_string()));
 
         let mic_guest = seg("hello", "t", Some(1.0), Some("mic"), Some(2), Some("Анна"));
         assert_eq!(resolve_segment_label(&mic_guest), Some("Анна".to_string()));
@@ -483,7 +507,26 @@ mod tests {
 
     #[test]
     fn speaker_attribution_fingerprint_changes_when_owner_identity_changes() {
-        let guest = seg(
+        // A voice that is still a placeholder is labeled "You" once it becomes the owner,
+        // so the model reads a different transcript and the saved summary is stale.
+        let unnamed = seg(
+            "реплика",
+            "00:00:01",
+            Some(0.0),
+            Some("mic"),
+            Some(7),
+            Some("Speaker 1"),
+        );
+        let mut unnamed_owner = unnamed.clone();
+        unnamed_owner.is_self = true;
+        assert_ne!(
+            speaker_attribution_fingerprint(&[unnamed]),
+            speaker_attribution_fingerprint(&[unnamed_owner])
+        );
+
+        // A voice that already carries a name keeps that label either way: nothing the
+        // model sees changed, so there is no summary to invalidate.
+        let named = seg(
             "реплика",
             "00:00:01",
             Some(0.0),
@@ -491,12 +534,11 @@ mod tests {
             Some(7),
             Some("Миша"),
         );
-        let mut owner = guest.clone();
-        owner.is_self = true;
-
-        assert_ne!(
-            speaker_attribution_fingerprint(&[guest]),
-            speaker_attribution_fingerprint(&[owner])
+        let mut named_owner = named.clone();
+        named_owner.is_self = true;
+        assert_eq!(
+            speaker_attribution_fingerprint(&[named]),
+            speaker_attribution_fingerprint(&[named_owner])
         );
     }
 

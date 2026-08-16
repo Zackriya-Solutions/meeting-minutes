@@ -132,6 +132,23 @@ function ParticipantPreview({ participants }: { participants: readonly string[] 
 
 const NON_NAMES = new Set(['ну', 'вот', 'сказали']);
 
+/**
+ * Speech a voice must hold before it counts as somebody who was at the meeting.
+ *
+ * Diarization deliberately leaves stranded fragments as their own cluster rather than risk
+ * folding two people into one, so a meeting of three can end up with five voices, the extras
+ * holding a few seconds each. They belong in the transcript — the words were said by
+ * somebody — but listing them as participants turns a passing noise into a person. Measured
+ * on this archive: 20 of 191 voices hold under 15 seconds, on 17 of 68 meetings.
+ */
+const PARTICIPANT_MIN_SPEECH_SECONDS = 15;
+
+function isMeetingParticipant(speaker: SpeakerInfo): boolean {
+  // A voice the user named or claimed is a person by assertion, however briefly it spoke.
+  if (speaker.is_confirmed || speaker.is_self) return true;
+  return (speaker.speech_duration_seconds ?? 0) >= PARTICIPANT_MIN_SPEECH_SECONDS;
+}
+
 function isResolvedParticipantName(name: string): boolean {
   const normalized = name.trim().toLocaleLowerCase('ru-RU');
   return !isUnresolvedSpeakerLabel(name) && !NON_NAMES.has(normalized);
@@ -162,6 +179,7 @@ export function SummaryMessage({
 
   const participants = useMemo(
     () => speakers
+      .filter(isMeetingParticipant)
       .map((speaker) => speaker.display_name.trim())
       .filter(isResolvedParticipantName)
       .filter((name, index, names) => names.indexOf(name) === index),

@@ -26,6 +26,8 @@ interface UseMeetingSpeakersReturn {
     refetchSpeakers: () => Promise<void>;
     /** Persist a new name via `rename_speaker` and update the local map so labels re-render. */
     renameSpeaker: (speakerId: number, displayName: string) => Promise<void>;
+    /** Attribute a single unattributed transcript line to a voice the user picked. */
+    assignSegmentSpeaker: (transcriptId: string, speakerId: number) => Promise<void>;
     /** Persist the owner identity on the voice profile, never on an audio channel. */
     setSelfSpeaker: (speakerId: number, isSelf: boolean) => Promise<void>;
 }
@@ -77,6 +79,14 @@ export function useMeetingSpeakers({
     useEffect(() => {
         refetchSpeakers();
     }, [refetchSpeakers]);
+
+    // Attributing one line is not renaming a voice: the speaker already exists and keeps its
+    // name, and only this row's `speaker_id` changes. The transcript is refetched by the
+    // caller, which owns the rows.
+    const assignSegmentSpeaker = useCallback(async (transcriptId: string, speakerId: number) => {
+        if (!meetingId) return;
+        await invoke("assign_segment_speaker", { meetingId, transcriptId, speakerId });
+    }, [meetingId]);
 
     const renameSpeaker = useCallback(async (speakerId: number, displayName: string) => {
         const trimmed = displayName.trim();
@@ -165,6 +175,7 @@ export function useMeetingSpeakers({
         speakersById,
         selfSpeakerIds,
         refetchSpeakers,
+        assignSegmentSpeaker,
         renameSpeaker,
         setSelfSpeaker,
     };

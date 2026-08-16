@@ -109,6 +109,13 @@ pub fn plan_changes(
         if is_automatic_speaker_name(name) {
             continue;
         }
+        // The same floor the transcript-derived pass clears. A model reading a transcript
+        // full of «Бля, …» and «Назови, …» can hand those back with high confidence, and
+        // an unattended pass has nobody to catch it.
+        if !crate::pipeline::person_names::is_plausible_person_name(name) {
+            log::info!("[speaker-naming] dropped implausible name for speaker {}", guess.speaker_id);
+            continue;
+        }
         plan.renames.push((guess.speaker_id, name.to_string()));
     }
 
@@ -430,6 +437,20 @@ mod tests {
         };
         let plan = plan_changes(&roster(), &guesses, DEFAULT_MIN_CONFIDENCE);
         assert_eq!(plan.renames, vec![(1, "Андрей".to_string())]);
+    }
+
+    /// A model reading a transcript full of «Бля, …» and «Назови, …» can hand those back
+    /// as names, with confidence. Nothing downstream reviews an unattended pass, so the
+    /// same plausibility gate the transcript-derived pass clears applies here.
+    #[test]
+    fn a_confident_guess_that_is_not_a_name_is_dropped() {
+        let guesses = SpeakerGuesses {
+            names: vec![guess(1, "Бля", 0.99), guess(2, "Назови", 0.97)],
+            merges: vec![],
+        };
+        assert!(plan_changes(&roster(), &guesses, DEFAULT_MIN_CONFIDENCE)
+            .renames
+            .is_empty());
     }
 
     #[test]

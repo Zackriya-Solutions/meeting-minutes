@@ -732,9 +732,11 @@ mod tests {
         let (artifacts, html) = build_report(&pool, "06.08.2026")
             .await
             .expect("report builds");
+        // Assert against TITLE rather than a word copied out of it: the previous literal
+        // ("Компас") outlived the title it was quoting and left this red on main.
         assert!(
-            html.contains("Компас"),
-            "the rendered report mentions the meeting"
+            html.contains(TITLE),
+            "the rendered report mentions the meeting by its title"
         );
 
         let (dyn_segments, _, texts) = crate::report::pipeline::build_segment_views(&segments);

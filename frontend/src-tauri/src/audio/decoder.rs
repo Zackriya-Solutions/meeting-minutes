@@ -46,6 +46,28 @@ pub struct WhisperAudio {
     pub duration_seconds: f64,
 }
 
+/// Decode to the shape every local model actually wants: 16 kHz mono float in [-1, 1].
+///
+/// FFmpeg resamples during decoding, in C, for free. The in-process path instead
+/// materialises the file at its native rate and then runs the high-quality sinc resampler
+/// over it — measured on a 68-minute recording: 29 s to decode, then **2 m 33 s** to
+/// resample 197 M samples, more than a third of the whole diarization pass. Sinc quality
+/// buys nothing here: the consumer is an ONNX model whose input is 16 kHz mono.
+///
+/// The in-process decoder stays as the fallback for anything FFmpeg cannot open.
+pub fn decode_16k_mono(path: &Path) -> Result<Vec<f32>> {
+    match decode_audio_file_to_whisper(path) {
+        Ok(audio) => Ok(audio.samples),
+        Err(error) => {
+            log::warn!(
+                "direct FFmpeg decode failed for {}; falling back to the in-process decoder: {error}",
+                path.display()
+            );
+            Ok(decode_audio_file(path)?.to_whisper_format())
+        }
+    }
+}
+
 /// Decode directly to mono 16 kHz signed 16-bit PCM through the bundled FFmpeg.
 ///
 /// Cloud diarization uploads this exact format. Producing it directly avoids retaining
@@ -750,6 +772,12 @@ mod tests {
         let pcm = decode_audio_file_to_pcm16(&input).unwrap();
         assert_eq!(pcm.len(), 1_600 * std::mem::size_of::<i16>());
         assert!(pcm.iter().all(|byte| *byte == 0));
+
+        // The float path the local models read lands on the same 16 kHz mono timeline.
+        // 4800 stereo frames at 48 kHz = 0.1 s = 1600 samples at 16 kHz.
+        let mono = decode_16k_mono(&input).unwrap();
+        assert_eq!(mono.len(), 1_600);
+        assert!(mono.iter().all(|sample| sample.abs() < 1e-6));
     }
 
     #[test]

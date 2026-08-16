@@ -510,15 +510,30 @@ impl SpeakersRepository {
     /// by `idx_speakers_single_self`, and [`Self::set_self`] / [`Self::merge_meeting_speakers`]
     /// are the only ways the flag moves — so this cannot accumulate.
     pub async fn delete_orphaned_unconfirmed(pool: &SqlitePool) -> Result<u64, SqlxError> {
-        let res = sqlx::query(
-            "DELETE FROM speakers \
+        const ORPHANS: &str = "SELECT id FROM speakers \
              WHERE is_confirmed = 0 \
                AND is_self = 0 \
                AND id NOT IN (SELECT DISTINCT speaker_id FROM transcripts \
-                              WHERE speaker_id IS NOT NULL)",
-        )
-        .execute(pool)
+                              WHERE speaker_id IS NOT NULL)";
+
+        let mut transaction = pool.begin().await?;
+        // `action_items.owner_speaker_id` is the one reference to a speaker that was
+        // declared without an ON DELETE rule, so a single action item owned by a phantom
+        // voice made this DELETE fail — and, being one statement, it took every other
+        // orphan down with it. Observed live: "orphaned-speaker GC failed (non-fatal):
+        // FOREIGN KEY constraint failed" while 7 orphans survived. The item itself is the
+        // user's, so it stays; what goes is the pointer to a voice that no longer exists.
+        sqlx::query(&format!(
+            "UPDATE action_items SET owner_speaker_id = NULL \
+             WHERE owner_speaker_id IN ({ORPHANS})"
+        ))
+        .execute(&mut *transaction)
         .await?;
+
+        let res = sqlx::query(&format!("DELETE FROM speakers WHERE id IN ({ORPHANS})"))
+            .execute(&mut *transaction)
+            .await?;
+        transaction.commit().await?;
         Ok(res.rows_affected())
     }
 }
@@ -662,7 +677,69 @@ mod tests {
         .execute(&pool)
         .await
         .unwrap();
+        // Declared exactly as the real migration declares it: a reference to a speaker with
+        // no ON DELETE rule. That omission is what broke the collector in production, so a
+        // test pool without it would prove nothing.
+        sqlx::query(
+            "CREATE TABLE action_items (
+                id INTEGER PRIMARY KEY,
+                meeting_id TEXT NOT NULL,
+                text TEXT NOT NULL,
+                owner_speaker_id INTEGER REFERENCES speakers(id)
+            )",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query("PRAGMA foreign_keys = ON")
+            .execute(&pool)
+            .await
+            .unwrap();
         pool
+    }
+
+    /// One action item owned by a phantom voice used to fail the whole collection — a
+    /// single DELETE, so every other orphan survived with it. Observed live as
+    /// "orphaned-speaker GC failed (non-fatal): FOREIGN KEY constraint failed" while seven
+    /// phantom profiles stayed in the archive.
+    #[tokio::test]
+    async fn an_action_item_owned_by_a_phantom_voice_no_longer_blocks_the_collection() {
+        let pool = gc_test_pool().await;
+        sqlx::query(
+            "INSERT INTO speakers (id, display_name, is_confirmed) \
+             VALUES (1, 'Speaker 1', 0), (2, 'Speaker 2', 0), (3, 'Анна', 1)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO action_items (id, meeting_id, text, owner_speaker_id) \
+             VALUES (1, 'm1', 'прислать отчёт', 1)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        assert_eq!(
+            SpeakersRepository::delete_orphaned_unconfirmed(&pool)
+                .await
+                .unwrap(),
+            2
+        );
+        // The item is the user's and stays; only the pointer to a voice that no longer
+        // exists is dropped.
+        let owner: (String, Option<i64>) =
+            sqlx::query_as("SELECT text, owner_speaker_id FROM action_items WHERE id = 1")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(owner, ("прислать отчёт".to_string(), None));
+        // A confirmed speaker is never an orphan, however unreferenced.
+        let left: Vec<i64> = sqlx::query_scalar("SELECT id FROM speakers ORDER BY id")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+        assert_eq!(left, vec![3]);
     }
 
     #[tokio::test]

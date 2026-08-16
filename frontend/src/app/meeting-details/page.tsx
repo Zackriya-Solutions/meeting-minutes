@@ -182,6 +182,7 @@ function MeetingDetailsContent() {
     speakersById,
     selfSpeakerIds,
     refetchSpeakers,
+    assignSegmentSpeaker,
     renameSpeaker,
     setSelfSpeaker,
   } = useMeetingSpeakers({
@@ -203,6 +204,13 @@ function MeetingDetailsContent() {
     await refetchSpeakers();
     await refetch();
   }, [refetchSpeakers, refetch]);
+
+  // Attributing a refused line changes who the transcript quotes, so the rows have to come
+  // back from the database — the label is derived from `speaker_id`, not held in the row.
+  const handleAssignSegmentSpeaker = useCallback(async (transcriptId: string, speakerId: number) => {
+    await assignSegmentSpeaker(transcriptId, speakerId);
+    await refetch();
+  }, [assignSegmentSpeaker, refetch]);
 
   const handleRenameSpeaker = useCallback(async (speakerId: number, displayName: string) => {
     await renameSpeaker(speakerId, displayName);
@@ -504,6 +512,7 @@ function MeetingDetailsContent() {
     selfSpeakerIds={selfSpeakerIds}
     speakerCount={speakers.length}
     onRenameSpeaker={handleRenameSpeaker}
+    onAssignSegmentSpeaker={handleAssignSegmentSpeaker}
     onSetSelfSpeaker={handleSetSelfSpeaker}
     onSpeakersDetected={handleSpeakersDetected}
   />;

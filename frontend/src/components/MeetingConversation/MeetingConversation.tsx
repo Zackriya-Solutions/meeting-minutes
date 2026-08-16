@@ -150,6 +150,7 @@ interface MeetingConversationProps {
   speakerCount?: number;
   onRenameSpeaker?: (speakerId: number, displayName: string) => Promise<void> | void;
   onSetSelfSpeaker?: (speakerId: number, isSelf: boolean) => Promise<void> | void;
+  onAssignSegmentSpeaker?: (transcriptId: string, speakerId: number) => Promise<void> | void;
   onSpeakersDetected?: () => Promise<void> | void;
 }
 
@@ -187,6 +188,7 @@ export function MeetingConversation({
   speakerCount = 0,
   onRenameSpeaker,
   onSetSelfSpeaker,
+  onAssignSegmentSpeaker,
   onSpeakersDetected,
 }: MeetingConversationProps) {
   const { t, lang } = useLanguage();
@@ -471,6 +473,7 @@ export function MeetingConversation({
           )}
           <MeetingOverflowMenu
             meetingId={meetingId}
+            onSpeakersChanged={onSpeakersDetected}
             report={report}
             canOpenReport={!!analytics.sections}
             hasSummary={hasSummary}
@@ -603,6 +606,7 @@ export function MeetingConversation({
             speakerCount={speakerCount}
             onRenameSpeaker={onRenameSpeaker}
             onSetSelfSpeaker={onSetSelfSpeaker}
+            onAssignSegmentSpeaker={onAssignSegmentSpeaker}
             onSpeakersDetected={onSpeakersDetected}
             transcriptViewportClassName="px-[var(--drawer-content-inset)]"
           />

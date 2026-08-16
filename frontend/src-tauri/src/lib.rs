@@ -646,6 +646,19 @@ pub fn run() {
                                 log::warn!("Could not recover interrupted summaries: {error}")
                             }
                         }
+                        // Before naming anything new, take back the names an earlier build
+                        // applied from evidence today's gate rejects.
+                        match pipeline::speaker_names::repair_implausible_automatic_names(&pool)
+                            .await
+                        {
+                            Ok(0) => {}
+                            Ok(repaired) => log::info!(
+                                "Took back {repaired} implausible automatic speaker name(s)"
+                            ),
+                            Err(error) => {
+                                log::warn!("Could not repair automatic speaker names: {error}")
+                            }
+                        }
                         match pipeline::speaker_names::backfill_existing_speaker_names(&pool).await {
                             Ok((checked, 0)) => log::info!(
                                 "Checked automatic speaker names for {checked} diarized meeting(s)"
@@ -758,6 +771,7 @@ pub fn run() {
             audio::refinement::rerun_meeting_refinement,
             pipeline::diarization_commands::get_meeting_speakers,
             pipeline::diarization_commands::rename_speaker,
+            pipeline::diarization_commands::assign_segment_speaker,
             pipeline::diarization_commands::set_self_speaker,
             pipeline::diarization_commands::set_meeting_diarization_prefs,
             learning::identity::get_identity_review,

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { invoke } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
@@ -26,6 +26,8 @@ interface Candidate {
   evidence_start_ms?: number | null;
   confidence: number;
   occurrence_count: number;
+  /** The word is a name we recognise — these lead the list. */
+  is_recognized_name?: boolean;
 }
 
 const EVIDENCE_LABELS: Record<string, string> = {
@@ -36,22 +38,41 @@ const EVIDENCE_LABELS: Record<string, string> = {
   meeting_title: 'Name mentioned in the meeting title',
 };
 
-export function SpeakerNameCandidatesButton({
+/**
+ * The review surface for transcript-derived name evidence, controlled by its caller.
+ *
+ * Split out of the button below so the "⋯" menu can open it: the redesigned meeting screen
+ * dropped the transcript toolbar, which was this flow's only entry point, and the candidates
+ * kept accumulating in the database with nobody able to look at them.
+ */
+export function SpeakerNameCandidatesDialog({
   meetingId,
+  open,
+  onOpenChange,
   onApplied,
 }: {
   meetingId?: string;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
   onApplied?: () => Promise<void> | void;
 }) {
   const t = useT();
   const router = useRouter();
-  const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [busyId, setBusyId] = useState<number | null>(null);
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [speakers, setSpeakers] = useState<SpeakerInfo[]>([]);
   const [targets, setTargets] = useState<Record<number, number | ''>>({});
   const [rename, setRename] = useState<Record<number, boolean>>({});
+  const [showRest, setShowRest] = useState(false);
+
+  // A transcript's address slot holds far more particles and verbs than names, so the
+  // full list buries the one or two candidates worth acting on. Lead with the words we
+  // recognise as names; the rest stays one click away rather than gone, because the
+  // lexicon is finite and somebody's name will be missing from it.
+  const recognized = candidates.filter((candidate) => candidate.is_recognized_name);
+  const rest = candidates.filter((candidate) => !candidate.is_recognized_name);
+  const visible = showRest || recognized.length === 0 ? candidates : recognized;
 
   const load = async () => {
     if (!meetingId) return;
@@ -63,6 +84,7 @@ export function SpeakerNameCandidatesButton({
         invoke<SpeakerInfo[]>('get_meeting_speakers', { meetingId }),
       ]);
       setCandidates(nextCandidates);
+      setShowRest(false);
       setSpeakers(nextSpeakers);
       setTargets(Object.fromEntries(nextCandidates.map((candidate) => [
         candidate.id,
@@ -77,9 +99,14 @@ export function SpeakerNameCandidatesButton({
   };
 
   const handleOpen = (value: boolean) => {
-    setOpen(value);
-    if (value) void load();
+    onOpenChange(value);
   };
+
+  useEffect(() => {
+    if (open) void load();
+    // Re-scanning on every render would hammer the transcript; the open edge is the trigger.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, meetingId]);
 
   const review = async (candidate: Candidate, status: 'accepted' | 'rejected') => {
     const speakerId = targets[candidate.id];
@@ -94,7 +121,7 @@ export function SpeakerNameCandidatesButton({
           candidateId: candidate.id,
           status,
           speakerId: speakerId === '' ? null : speakerId,
-          setAsDisplayName: status === 'accepted' && Boolean(rename[candidate.id]),
+          setAsDisplayName: status === 'accepted' && (rename[candidate.id] ?? true),
         },
       });
       setCandidates((current) => current.filter((item) => item.id !== candidate.id));
@@ -111,10 +138,6 @@ export function SpeakerNameCandidatesButton({
 
   return (
     <>
-      <Button size="sm" variant="outline" onClick={() => handleOpen(true)} title={t('Find names used in the transcript')}>
-        <Tag size={18} />
-        <span className="hidden lg:inline">{t('Names')}</span>
-      </Button>
       <Dialog open={open} onOpenChange={handleOpen}>
         <DialogContent className="max-h-[80vh] overflow-y-auto sm:max-w-[640px]">
           <DialogHeader>
@@ -132,7 +155,7 @@ export function SpeakerNameCandidatesButton({
             <p className="py-6 text-center text-sm text-muted-foreground">{t('No safe name candidates found')}</p>
           ) : (
             <div className="space-y-3">
-              {candidates.map((candidate) => {
+              {visible.map((candidate) => {
                 const seconds = Math.floor((candidate.evidence_start_ms ?? 0) / 1000);
                 return (
                   <div key={candidate.id} className="rounded-lg border border-border p-3">
@@ -148,7 +171,7 @@ export function SpeakerNameCandidatesButton({
                         type="button"
                         className="text-xs text-primary hover:underline"
                         onClick={() => {
-                          setOpen(false);
+                          onOpenChange(false);
                           router.push(`/meeting-details?id=${encodeURIComponent(meetingId)}&t=${seconds}`);
                         }}
                       >
@@ -177,7 +200,7 @@ export function SpeakerNameCandidatesButton({
                       <label className="flex items-center gap-2 text-xs text-muted-foreground">
                         <input
                           type="checkbox"
-                          checked={Boolean(rename[candidate.id])}
+                          checked={rename[candidate.id] ?? true}
                           onChange={(event) => setRename((current) => ({
                             ...current,
                             [candidate.id]: event.target.checked,
@@ -197,10 +220,53 @@ export function SpeakerNameCandidatesButton({
                   </div>
                 );
               })}
+              {rest.length > 0 && !showRest && (
+                <button
+                  type="button"
+                  className="w-full rounded-lg border border-dashed border-border py-2 text-sm text-muted-foreground hover:text-foreground"
+                  onClick={() => setShowRest(true)}
+                >
+                  {t('Show weaker evidence')} ({rest.length})
+                </button>
+              )}
             </div>
           )}
         </DialogContent>
       </Dialog>
+    </>
+  );
+}
+
+/** The transcript-toolbar entry point. Kept for the legacy meeting layout. */
+export function SpeakerNameCandidatesButton({
+  meetingId,
+  onApplied,
+}: {
+  meetingId?: string;
+  onApplied?: () => Promise<void> | void;
+}) {
+  const t = useT();
+  const [open, setOpen] = useState(false);
+
+  if (!meetingId) return null;
+
+  return (
+    <>
+      <Button
+        size="sm"
+        variant="outline"
+        onClick={() => setOpen(true)}
+        title={t('Find names used in the transcript')}
+      >
+        <Tag size={18} />
+        <span className="hidden lg:inline">{t('Names')}</span>
+      </Button>
+      <SpeakerNameCandidatesDialog
+        meetingId={meetingId}
+        open={open}
+        onOpenChange={setOpen}
+        onApplied={onApplied}
+      />
     </>
   );
 }

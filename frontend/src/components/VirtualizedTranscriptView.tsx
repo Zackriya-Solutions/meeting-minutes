@@ -66,6 +66,8 @@ export interface VirtualizedTranscriptViewProps {
     onRenameSpeaker?: (speakerId: number, displayName: string) => Promise<void> | void;
     /** Mark or unmark a diarized voice profile as the local user. */
     onSetSelfSpeaker?: (speakerId: number, isSelf: boolean) => Promise<void> | void;
+    /** Attribute a line diarization could not attribute to a voice the user picks. */
+    onAssignSegmentSpeaker?: (transcriptId: string, speakerId: number) => Promise<void> | void;
 
     /** Play the saved recording from a transcript-relative timestamp. */
     onPlayTimestamp?: (seconds: number) => void;
@@ -217,6 +219,7 @@ const TranscriptSegment = memo(function TranscriptSegment({
     speakerId = null,
     speakerRenamable = false,
     onSpeakerClick,
+    onAssignClick,
     playbackActive = false,
     isOwn = false,
 }: {
@@ -229,6 +232,8 @@ const TranscriptSegment = memo(function TranscriptSegment({
     speakerId?: number | null;
     speakerRenamable?: boolean;
     onSpeakerClick?: (speakerId: number) => void;
+    /** Present when this line has no speaker and the meeting has voices to choose from. */
+    onAssignClick?: () => void;
     playbackActive?: boolean;
     isOwn?: boolean;
 }) {
@@ -237,8 +242,16 @@ const TranscriptSegment = memo(function TranscriptSegment({
     const recognitionTime = formatRecognitionTime(recognizedAt);
 
     const align = isOwn ? 'end' : 'start';
-    const avatarLabel = speakerLabel ?? t('Speaker');
-    const avatarInitials = speakerInitials(avatarLabel);
+    // A line diarization never attributed has no name to show. It used to borrow the word
+    // "Speaker", which reads as a name — and as the one name in the transcript that cannot
+    // be renamed, because there is no speaker row behind it. Say what is actually true
+    // instead: the voice was not recognised. The row keeps a caption either way, so the
+    // reader never loses track of who the transcript is quoting.
+    const avatarLabel = speakerLabel ?? t('Unrecognized voice');
+    const visibleSpeakerLabel = avatarLabel;
+    // "Сп" from the word "Спикер" read as somebody's initials. A voice we did not recognise
+    // has no initials, and the question mark says so.
+    const avatarInitials = speakerLabel == null ? '?' : speakerInitials(avatarLabel);
     // IlyaGrshin/wallet_animations InitialsAvatar assigns one of seven colors by
     // `userId % 7`. Diarized speaker ids preserve that mapping; channel-only
     // transcripts use stable ids for the local and remote sides.
@@ -303,9 +316,31 @@ const TranscriptSegment = memo(function TranscriptSegment({
                                         </TooltipTrigger>
                                         <TooltipContent>{t('Rename')}</TooltipContent>
                                     </Tooltip>
+                                ) : onAssignClick ? (
+                                    // Diarization refused this line; the person reading the
+                                    // transcript usually knows who said it.
+                                    <Tooltip>
+                                        <TooltipTrigger asChild>
+                                            <button
+                                                type="button"
+                                                onClick={onAssignClick}
+                                                className="speaker-rename-underline text-xs font-normal italic leading-4 text-[var(--deslop-primary-50)] hover:text-[var(--deslop-primary)] focus:outline-none"
+                                            >
+                                                {visibleSpeakerLabel}
+                                            </button>
+                                        </TooltipTrigger>
+                                        <TooltipContent>{t('Choose who said this')}</TooltipContent>
+                                    </Tooltip>
                                 ) : (
-                                    <span className="text-xs font-normal leading-4 text-[var(--deslop-primary-60)]">
-                                        {avatarLabel}
+                                    <span
+                                        className={cn(
+                                            'text-xs font-normal leading-4',
+                                            speakerLabel == null
+                                                ? 'italic text-[var(--deslop-primary-50)]'
+                                                : 'text-[var(--deslop-primary-60)]',
+                                        )}
+                                    >
+                                        {visibleSpeakerLabel}
                                     </span>
                                 )
                             )}
@@ -350,6 +385,8 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
     speakersById = null,
     selfSpeakerIds = null,
     onRenameSpeaker,
+    onSetSelfSpeaker,
+    onAssignSegmentSpeaker,
     onPlayTimestamp,
     playbackTime = null,
     onCorrectTranscript,
@@ -359,6 +396,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
     const [highlightedId, setHighlightedId] = useState<string | null>(null);
     // Diarized speaker being renamed (null when the rename dialog is closed).
     const [renamingSpeaker, setRenamingSpeaker] = useState<{ id: number; name: string } | null>(null);
+    const [assigningSegmentId, setAssigningSegmentId] = useState<string | null>(null);
     const [editingSegment, setEditingSegment] = useState<{ id: string; text: string } | null>(null);
     const [isSavingCorrection, setIsSavingCorrection] = useState(false);
     const [showRollCallTip, setShowRollCallTip] = useState(false);
@@ -539,6 +577,13 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                             !!speakersById?.has(segment.speaker_id)
                                         }
                                         onSpeakerClick={handleSpeakerClick}
+                                        onAssignClick={
+                                            onAssignSegmentSpeaker
+                                            && segment.speaker_id == null
+                                            && (speakersById?.size ?? 0) > 0
+                                                ? () => setAssigningSegmentId(segment.id)
+                                                : undefined
+                                        }
                                         playbackActive={activePlaybackIds.has(segment.id)}
                                         isOwn={isOwnSegment}
                                     />
@@ -572,6 +617,34 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
         </MessageScroller>
         </MessageScrollerProvider>
 
+            {/* A line diarization refused, handed to the person who was in the room. */}
+            <Dialog
+                open={assigningSegmentId != null}
+                onOpenChange={(open) => { if (!open) setAssigningSegmentId(null); }}
+            >
+                <DialogContent className="sm:max-w-[420px]">
+                    <DialogHeader>
+                        <DialogTitle>{t('Who said this?')}</DialogTitle>
+                    </DialogHeader>
+                    <div className="flex flex-col gap-1">
+                        {[...(speakersById?.entries() ?? [])].map(([id, name]) => (
+                            <button
+                                key={id}
+                                type="button"
+                                className="rounded-lg px-3 py-2 text-left text-sm hover:bg-[var(--primary-5)]"
+                                onClick={async () => {
+                                    const segmentId = assigningSegmentId;
+                                    setAssigningSegmentId(null);
+                                    if (segmentId) await onAssignSegmentSpeaker?.(segmentId, id);
+                                }}
+                            >
+                                {localizeSpeakerLabel(name, t)}
+                            </button>
+                        ))}
+                    </div>
+                </DialogContent>
+            </Dialog>
+
             {/* Rename affordance for diarized speakers (saved meetings only). */}
             {onRenameSpeaker && renamingSpeaker && (
                 <SpeakerRenameDialog
@@ -579,6 +652,12 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                     currentName={renamingSpeaker.name}
                     onOpenChange={(o) => { if (!o) setRenamingSpeaker(null); }}
                     onRename={(name) => onRenameSpeaker(renamingSpeaker.id, name)}
+                    isSelf={selfSpeakerIds?.has(renamingSpeaker.id) ?? false}
+                    onSetSelf={
+                        onSetSelfSpeaker
+                            ? (isSelf) => onSetSelfSpeaker(renamingSpeaker.id, isSelf)
+                            : undefined
+                    }
                 />
             )}
             <Dialog open={editingSegment != null} onOpenChange={(open) => { if (!open && !isSavingCorrection) setEditingSegment(null); }}>

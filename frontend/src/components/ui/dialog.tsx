@@ -3,6 +3,7 @@
 import {
   createContext,
   forwardRef,
+  useCallback,
   useContext,
   useEffect,
   useState,
@@ -15,6 +16,7 @@ import { motion } from "framer-motion";
 import { Button as FluidButton } from "@/components/ui/fluid-button";
 import { useIcon } from "@/lib/icon-context";
 import { cn } from "@/lib/utils";
+import { useDialogEscapeGuard } from "@/lib/dialog-escape";
 import { spring, exitFallbackMs } from "@/lib/springs";
 import { useShape } from "@/lib/shape-context";
 import { useSize, useSizeVariant } from "@/lib/size-context";
@@ -26,6 +28,7 @@ const DIALOG_OVERLAY_Z = "z-[2000]";
 const DIALOG_CONTENT_Z = "z-[2001]";
 
 const DialogOpenContext = createContext(false);
+const DialogCloseContext = createContext<(() => void) | null>(null);
 
 function Dialog({
   children,
@@ -42,11 +45,15 @@ function Dialog({
     onOpenChange?.(next);
   };
 
+  const close = useCallback(() => handleOpenChange(false), [onOpenChange]);
+
   return (
     <DialogOpenContext.Provider value={open}>
-      <DialogPrimitive.Root open={open} onOpenChange={handleOpenChange} {...props}>
-        {children}
-      </DialogPrimitive.Root>
+      <DialogCloseContext.Provider value={close}>
+        <DialogPrimitive.Root open={open} onOpenChange={handleOpenChange} {...props}>
+          {children}
+        </DialogPrimitive.Root>
+      </DialogCloseContext.Provider>
     </DialogOpenContext.Provider>
   );
 }
@@ -92,6 +99,12 @@ const DialogContent = forwardRef<HTMLDivElement, DialogContentProps>(
   ) => {
     const XIcon = useIcon("x");
     const open = useContext(DialogOpenContext);
+    const close = useContext(DialogCloseContext);
+    const popupRef = useDialogEscapeGuard({
+      open,
+      close,
+      onEscapeKeyDown: props.onEscapeKeyDown,
+    });
     const shape = useShape();
     const substrate = useSurface();
     const dialogLevel = Math.min(substrate + DIALOG_OFFSET, 8);
@@ -128,6 +141,7 @@ const DialogContent = forwardRef<HTMLDivElement, DialogContentProps>(
 
         <DialogPrimitive.Content ref={ref} asChild forceMount {...props}>
           <motion.div
+            ref={popupRef}
             className={cn(
               container ? "absolute" : "fixed",
               "left-1/2 top-1/2 w-[calc(100%-2rem)]",

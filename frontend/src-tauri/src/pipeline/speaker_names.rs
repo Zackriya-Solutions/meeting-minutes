@@ -226,6 +226,14 @@ pub struct SpeakerNameCandidateRow {
     pub confidence: f64,
     pub occurrence_count: i64,
     pub status: String,
+    /// Whether the word is a name we recognise (see
+    /// [`crate::pipeline::person_names::is_known_given_name`]). Not persisted — it is
+    /// computed per read so the lexicon can grow without a migration. The review screen
+    /// leads with these: on this archive they are one or two per meeting, while the rest
+    /// of the address slot is filled by particles and verbs a reviewer should not have to
+    /// wade through to find them.
+    #[sqlx(default)]
+    pub is_recognized_name: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -312,6 +320,13 @@ fn validate_candidate(value: &str) -> Result<String, &'static str> {
             repeated = 0;
             previous = Some(character);
         }
+    }
+    // The shared gate runs last so the specific reasons above keep their labels: profanity
+    // truncations, discourse markers, hesitation noise and verb morphology that the lists
+    // in this file predate. Both automatic writers clear the same bar — see
+    // [`crate::pipeline::person_names`].
+    if !crate::pipeline::person_names::is_plausible_person_name(trimmed) {
+        return Err("not_name_like");
     }
     Ok(normalized)
 }
@@ -751,8 +766,25 @@ pub async fn infer_and_apply_names(pool: &SqlitePool, meeting_id: &str) -> Resul
     let eligible = rows
         .into_iter()
         .filter(|row| match row.4.as_str() {
+            // «Меня зовут Гурген» says what the word is. Rare and foreign names must
+            // survive that, so recognition is not required here.
             "self_introduction" => row.5 >= 0.90,
-            "direct_address" => row.5 >= 0.80,
+            // Being addressed is inference, not statement: the name belongs to whoever
+            // answered next, which is only probably the person meant — an echo, an
+            // interruption or somebody else answering all land it on the wrong voice.
+            // Two independent addresses converging on the same voice is what makes it a
+            // fact rather than a guess, and the word still has to be a name we recognise.
+            // A single address is not lost: it stays a pending candidate for review and
+            // for the context-aware LLM pass.
+            // `occurrence_count` counts occurrences per (name, speaker, evidence kind) —
+            // see the grouping key in `scan_candidates` and the table's UNIQUE constraint —
+            // so two here means two addresses that landed on the SAME voice, not two
+            // people who happen to share a first name.
+            "direct_address" => {
+                row.5 >= 0.80
+                    && row.6 >= 2
+                    && crate::pipeline::person_names::is_known_given_name(&row.3)
+            }
             _ => false,
         })
         .collect::<Vec<_>>();
@@ -900,6 +932,76 @@ pub async fn backfill_existing_speaker_names(pool: &SqlitePool) -> Result<(usize
     Ok((meeting_ids.len(), applied))
 }
 
+/// Take back the names the gate would refuse today.
+///
+/// Archives recorded before [`crate::pipeline::person_names`] existed carry speakers called
+/// *Назови* or *Бля* — an imperative and a swear word that the address patterns accepted.
+/// They are automatic names, so nothing the user chose is at risk: reset them to their
+/// placeholder and drop the alias that would otherwise keep the word alive in prose. A
+/// speaker the user confirmed is never touched, whatever it is called.
+///
+/// Returns how many names were taken back.
+pub async fn repair_implausible_automatic_names(pool: &SqlitePool) -> Result<usize, String> {
+    let rows: Vec<(i64, String)> =
+        sqlx::query_as("SELECT id, display_name FROM speakers WHERE is_confirmed=0")
+            .fetch_all(pool)
+            .await
+            .map_err(|error| error.to_string())?;
+
+    let junk: Vec<i64> = rows
+        .into_iter()
+        .filter(|(_, display_name)| {
+            !crate::database::repositories::speaker::is_automatic_speaker_name(display_name)
+                && !crate::pipeline::person_names::is_plausible_person_name(display_name)
+        })
+        .map(|(speaker_id, _)| speaker_id)
+        .collect();
+    if junk.is_empty() {
+        return Ok(0);
+    }
+
+    // One transaction for the whole repair: this runs inside app startup, and a commit per
+    // speaker would put the launch behind however much junk an archive accumulated.
+    let mut transaction = pool.begin().await.map_err(|error| error.to_string())?;
+    for speaker_id in &junk {
+        sqlx::query("UPDATE speakers SET display_name=? WHERE id=? AND is_confirmed=0")
+            .bind(format!("Speaker {speaker_id}"))
+            .bind(speaker_id)
+            .execute(&mut *transaction)
+            .await
+            .map_err(|error| error.to_string())?;
+        // Only the aliases that are junk themselves. A speaker can carry a second automatic
+        // alias that is a perfectly good name — dropping it along with the bad one would
+        // throw away the evidence that could have named this voice correctly.
+        let aliases: Vec<(i64, String)> = sqlx::query_as(
+            "SELECT id, alias FROM speaker_aliases WHERE speaker_id=? AND is_confirmed=0",
+        )
+        .bind(speaker_id)
+        .fetch_all(&mut *transaction)
+        .await
+        .map_err(|error| error.to_string())?;
+        for (alias_id, alias) in aliases {
+            if crate::pipeline::person_names::is_plausible_person_name(&alias) {
+                continue;
+            }
+            sqlx::query("DELETE FROM speaker_aliases WHERE id=?")
+                .bind(alias_id)
+                .execute(&mut *transaction)
+                .await
+                .map_err(|error| error.to_string())?;
+        }
+    }
+    transaction
+        .commit()
+        .await
+        .map_err(|error| error.to_string())?;
+    log::info!(
+        "[speaker-names] took back {} implausible automatic name(s): {junk:?}",
+        junk.len()
+    );
+    Ok(junk.len())
+}
+
 #[tauri::command]
 pub async fn scan_speaker_name_candidates(
     state: tauri::State<'_, AppState>,
@@ -920,7 +1022,7 @@ async fn list_candidates(
     pool: &SqlitePool,
     meeting_id: &str,
 ) -> Result<Vec<SpeakerNameCandidateRow>, sqlx::Error> {
-    sqlx::query_as(
+    let mut rows: Vec<SpeakerNameCandidateRow> = sqlx::query_as(
         "SELECT id, meeting_id, proposed_speaker_id, candidate_text, evidence_kind, \
                 evidence_quote, evidence_start_ms, confidence, occurrence_count, status \
          FROM speaker_name_candidates WHERE meeting_id=? AND status='pending' \
@@ -928,7 +1030,22 @@ async fn list_candidates(
     )
     .bind(meeting_id)
     .fetch_all(pool)
-    .await
+    .await?;
+    for row in &mut rows {
+        row.is_recognized_name = row
+            .candidate_text
+            .as_deref()
+            .is_some_and(crate::pipeline::person_names::is_known_given_name);
+    }
+    rows.sort_by(|left, right| {
+        right
+            .is_recognized_name
+            .cmp(&left.is_recognized_name)
+            .then(right.confidence.total_cmp(&left.confidence))
+            .then(right.occurrence_count.cmp(&left.occurrence_count))
+            .then(left.id.cmp(&right.id))
+    });
+    Ok(rows)
 }
 
 #[tauri::command]
@@ -1155,8 +1272,8 @@ mod tests {
         }));
     }
 
-    #[tokio::test]
-    async fn automatic_inference_applies_one_unambiguous_provisional_name() {
+    /// The tables the candidate flow touches, for tests that drive it end to end.
+    async fn candidate_pool() -> SqlitePool {
         let pool = sqlx::sqlite::SqlitePoolOptions::new()
             .max_connections(1)
             .connect("sqlite::memory:")
@@ -1174,6 +1291,18 @@ mod tests {
         ] {
             sqlx::query(ddl).execute(&pool).await.unwrap();
         }
+        pool
+    }
+
+    #[tokio::test]
+    /// Two addresses converging on one voice name it; one address does not.
+    ///
+    /// This test used to assert the opposite — a single address applied a name — which is
+    /// what put «Миша» on whoever happened to answer after «Миша, присаживайся». The
+    /// evidence is the same either way; what changed is that being answered next is now
+    /// treated as the guess it is until a second address agrees with it.
+    async fn automatic_inference_applies_one_unambiguous_provisional_name() {
+        let pool = candidate_pool().await;
         sqlx::query("INSERT INTO speakers VALUES(4,'Speaker 4',0)")
             .execute(&pool)
             .await
@@ -1182,6 +1311,28 @@ mod tests {
             "INSERT INTO transcripts VALUES \
              ('t1','m1','Это отличная идея. Андрей, ты нас слышишь?',NULL,21.21), \
              ('t2','m1','Да-да, слышно',4,27.48)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // One address: the name is evidence, not yet a fact. Nothing is applied, and the
+        // candidate stays pending for review.
+        assert_eq!(infer_and_apply_names(&pool, "m1").await.unwrap(), 0);
+        let pending: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM speaker_name_candidates \
+             WHERE meeting_id='m1' AND status='pending' AND normalized_name='андрей'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(pending, 1);
+
+        // A second address to the same voice settles it.
+        sqlx::query(
+            "INSERT INTO transcripts VALUES \
+             ('t3','m1','Хорошо. Андрей, ты посмотришь сборку?',NULL,60.0), \
+             ('t4','m1','Да, посмотрю',4,63.0)",
         )
         .execute(&pool)
         .await
@@ -1200,6 +1351,61 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(alias, ("Андрей".into(), 0));
+    }
+
+    /// Two addresses to two different voices are not two addresses to one voice.
+    ///
+    /// Guards the invariant the auto-apply gate rests on: occurrences are counted per
+    /// (name, speaker), so a meeting with two people sharing a first name cannot pool
+    /// their evidence into one confident-looking name on the wrong voice.
+    #[tokio::test]
+    async fn addresses_landing_on_different_voices_never_pool_into_one_name() {
+        let pool = candidate_pool().await;
+        sqlx::query("INSERT INTO speakers VALUES(4,'Speaker 4',0),(5,'Speaker 5',0)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO transcripts VALUES \
+             ('t1','m1','Саша, ты посмотришь сборку?',NULL,10.0), \
+             ('t2','m1','Да, посмотрю',4,12.0), \
+             ('t3','m1','Саша, а ты что думаешь?',NULL,40.0), \
+             ('t4','m1','Я согласен',5,42.0)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        assert_eq!(infer_and_apply_names(&pool, "m1").await.unwrap(), 0);
+        let counts: Vec<(i64, i64)> = sqlx::query_as(
+            "SELECT proposed_speaker_id, occurrence_count FROM speaker_name_candidates \
+             WHERE meeting_id='m1' AND normalized_name='саша' AND evidence_kind='direct_address' \
+             ORDER BY proposed_speaker_id",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(counts, vec![(4, 1), (5, 1)]);
+
+        // Nor do occurrences pool across meetings: the same voice addressed once here and
+        // once in another meeting is still one address each time.
+        sqlx::query(
+            "INSERT INTO transcripts VALUES \
+             ('t5','m2','Саша, ты посмотришь сборку?',NULL,10.0), \
+             ('t6','m2','Да, посмотрю',4,12.0)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        assert_eq!(infer_and_apply_names(&pool, "m2").await.unwrap(), 0);
+        assert_eq!(infer_and_apply_names(&pool, "m1").await.unwrap(), 0);
+        let still_automatic: String =
+            sqlx::query_scalar("SELECT display_name FROM speakers WHERE id=4")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(still_automatic, "Speaker 4");
     }
 
     #[test]
@@ -1288,6 +1494,96 @@ mod tests {
         assert!(extract_candidates(&rows)
             .iter()
             .all(|candidate| validate_candidate(&candidate.text).is_err()));
+    }
+
+    /// Both lines are transcribed from a real meeting. The imperative and the swear word
+    /// sit exactly where a name sits, are capitalised exactly like a name, and each named
+    /// a speaker before the shared plausibility gate existed.
+    #[test]
+    fn imperatives_and_profanity_never_become_candidates() {
+        let rows = vec![
+            segment("Назови, как тебя зовут", Some(7), 0),
+            segment("Меня зовут Анна", Some(8), 3_000),
+            segment("Бля, что там с архивом", Some(7), 6_000),
+            segment("Проблема в индексе", Some(8), 8_000),
+        ];
+
+        let accepted = extract_candidates(&rows)
+            .into_iter()
+            .filter(|candidate| validate_candidate(&candidate.text).is_ok())
+            .map(|candidate| candidate.text)
+            .collect::<Vec<_>>();
+        assert_eq!(accepted, vec!["Анна".to_string()]);
+    }
+
+    /// Being addressed says who answered next, not who was meant. A word we do not
+    /// recognise as a name may be reviewed, but never applied unattended.
+    #[test]
+    fn only_a_recognised_name_is_applied_from_a_direct_address() {
+        assert!(crate::pipeline::person_names::is_known_given_name("андрей"));
+        assert!(!crate::pipeline::person_names::is_known_given_name("назови"));
+    }
+
+    #[tokio::test]
+    async fn repair_takes_back_junk_names_but_never_a_name_the_user_typed() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        for ddl in [
+            "CREATE TABLE speakers(id INTEGER PRIMARY KEY, display_name TEXT, is_confirmed INTEGER)",
+            "CREATE TABLE speaker_aliases(id INTEGER PRIMARY KEY, speaker_id INTEGER, alias TEXT, normalized_alias TEXT, source_candidate_id INTEGER, is_confirmed INTEGER DEFAULT 1)",
+        ] {
+            sqlx::query(ddl).execute(&pool).await.unwrap();
+        }
+        sqlx::query(
+            "INSERT INTO speakers VALUES(1,'Назови',0),(2,'Бля',0),(3,'Миша',0), \
+             (4,'Speaker 4',0),(5,'Бля',1)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO speaker_aliases(speaker_id, alias, normalized_alias, is_confirmed) \
+             VALUES(1,'Назови','назови',0),(1,'Анна','анна',0),(2,'Бля','бля',1)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        assert_eq!(repair_implausible_automatic_names(&pool).await.unwrap(), 2);
+        let names: Vec<(i64, String)> =
+            sqlx::query_as("SELECT id, display_name FROM speakers ORDER BY id")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            names,
+            vec![
+                (1, "Speaker 1".to_string()),
+                (2, "Speaker 2".to_string()),
+                (3, "Миша".to_string()),
+                (4, "Speaker 4".to_string()),
+                // Whatever the user typed is theirs, including a word this gate rejects.
+                (5, "Бля".to_string()),
+            ]
+        );
+        // The junk alias goes with the junk name. What stays: a confirmed alias, because a
+        // person accepted that word in the review screen and this repair only takes back what
+        // the app decided on its own; and an automatic alias that is a real name, because it
+        // is the evidence that could still name this voice correctly.
+        let aliases: Vec<(i64, String, i64)> =
+            sqlx::query_as("SELECT speaker_id, alias, is_confirmed FROM speaker_aliases ORDER BY id")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            aliases,
+            vec![(1, "Анна".to_string(), 0), (2, "Бля".to_string(), 1)]
+        );
+        // Nothing left to take back: a second pass is a no-op.
+        assert_eq!(repair_implausible_automatic_names(&pool).await.unwrap(), 0);
     }
 
     #[test]

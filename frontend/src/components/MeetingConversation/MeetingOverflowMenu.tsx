@@ -21,6 +21,7 @@ import { useT } from '@/lib/i18n';
 import { useMeetingDrawer } from '@/contexts/MeetingDrawerContext';
 import type { UseAnalyticsReportResult } from '@/hooks/meeting-details/useAnalyticsReport';
 import { AnalyticsReportDialog } from './AnalyticsReportDialog';
+import { SpeakerNameCandidatesDialog } from '@/components/MeetingDetails/SpeakerNameCandidatesButton';
 
 /**
  * The "⋯" menu for the meeting conversation. Composed from Fluid Functionalism's
@@ -55,6 +56,8 @@ interface MeetingOverflowMenuProps {
   onReprocess: () => Promise<void> | void;
   /** Stage of a pass already running, shown next to the item; null when idle. */
   reprocessingLabel?: string | null;
+  /** Reload the meeting's speakers after a name is accepted. */
+  onSpeakersChanged?: () => Promise<void> | void;
 }
 
 export function MeetingOverflowMenu({
@@ -68,6 +71,7 @@ export function MeetingOverflowMenu({
   onSaveModelConfig,
   onReprocess,
   reprocessingLabel = null,
+  onSpeakersChanged,
 }: MeetingOverflowMenuProps) {
   const t = useT();
   const meetingDrawer = useMeetingDrawer();
@@ -75,6 +79,9 @@ export function MeetingOverflowMenu({
   const [reportDialogOpen, setReportDialogOpen] = useState(false);
   const [modelOpen, setModelOpen] = useState(false);
   const [languageOpen, setLanguageOpen] = useState(false);
+  const [namesOpen, setNamesOpen] = useState(false);
+  const [detecting, setDetecting] = useState(false);
+  const [pendingNames, setPendingNames] = useState<number | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [language, setLanguage] = useState<string | null>(null);
 
@@ -86,6 +93,21 @@ export function MeetingOverflowMenu({
       .catch(() => { if (active) setLanguage(null); });
     return () => { active = false; };
   }, [open, meetingId]);
+
+  // How much name evidence is worth a look. Counts only the words we recognise as names,
+  // which is what the review leads with — a badge counting every particle the address
+  // slot collected would promise a queue that isn't there. Listing is a plain read; the
+  // rescan that can produce new candidates belongs to opening the review itself.
+  useEffect(() => {
+    if (!open) return;
+    let active = true;
+    invoke<{ is_recognized_name?: boolean }[]>('list_speaker_name_candidates', { meetingId })
+      .then((rows) => {
+        if (active) setPendingNames(rows.filter((row) => row.is_recognized_name).length);
+      })
+      .catch(() => { if (active) setPendingNames(null); });
+    return () => { active = false; };
+  }, [open, meetingId, namesOpen]);
 
   const closeMenu = () => setOpen(false);
 
@@ -138,6 +160,29 @@ export function MeetingOverflowMenu({
         : report.status === 'failed'
           ? 'error'
           : 'analytics';
+
+  // Re-run speaker attribution over the rows as they stand. Distinct from "Split replies",
+  // which re-transcribes per diarized turn and therefore attributes every row it writes by
+  // construction: this is the pass that can decline a row it cannot attribute, and the only
+  // way back to it for a meeting whose rows came from the silence-cut path.
+  const handleDetectSpeakers = useCallback(async () => {
+    if (detecting) return;
+    setDetecting(true);
+    try {
+      const result = await invoke<{ speaker_count: number; assigned_segments: number; total_segments: number }>(
+        'diarize_meeting',
+        { meetingId },
+      );
+      toast.success(
+        `${t('Found')} ${result.speaker_count} · ${result.assigned_segments}/${result.total_segments} ${t('segments attributed')}`,
+      );
+      await onSpeakersChanged?.();
+    } catch (error) {
+      toast.error(typeof error === 'string' ? error : t('Failed to detect speakers'));
+    } finally {
+      setDetecting(false);
+    }
+  }, [detecting, meetingId, onSpeakersChanged, t]);
 
   const handleAnalyticsReport = () => {
     setReportDialogOpen(true);
@@ -202,6 +247,29 @@ export function MeetingOverflowMenu({
 
           <MenuItem
             index={5}
+            iconName={detecting ? 'progress_activity' : 'record_voice_over'}
+            label={t('Detect speakers')}
+            disabled={!hasTranscript || detecting}
+            closeOnClick={false}
+            onSelect={() => void handleDetectSpeakers()}
+          />
+
+          {/* Names the transcript mentions, waiting to be matched to a voice. The
+              transcript toolbar that used to open this is gone from this layout, and the
+              evidence kept accumulating unseen. */}
+          <MenuItem
+            index={6}
+            iconName="badge"
+            label={t('Names from the transcript')}
+            trailing={pendingNames ? String(pendingNames) : undefined}
+            disabled={!hasTranscript}
+            onSelect={() => setNamesOpen(true)}
+          />
+
+          <DropdownSeparator />
+
+          <MenuItem
+            index={7}
             iconName="language"
             label={t('Results language')}
             trailing={languageLabel}
@@ -209,7 +277,7 @@ export function MeetingOverflowMenu({
           />
 
           <MenuItem
-            index={6}
+            index={8}
             iconName="settings"
             label={t('Model')}
             trailing={modelLabel}
@@ -222,7 +290,7 @@ export function MeetingOverflowMenu({
               its two-minute floor and the `refinement.auto` setting leave a meeting with
               no way back to per-reply rows. */}
           <MenuItem
-            index={7}
+            index={9}
             iconName={reprocessingLabel ? 'progress_activity' : 'refresh'}
             label={t('Split replies')}
             trailing={reprocessingLabel ?? undefined}
@@ -234,7 +302,7 @@ export function MeetingOverflowMenu({
           <DropdownSeparator />
 
           <MenuItem
-            index={8}
+            index={10}
             iconName={deleting ? 'progress_activity' : 'delete'}
             label={t('Delete')}
             disabled={deleting}
@@ -249,6 +317,13 @@ export function MeetingOverflowMenu({
         open={reportDialogOpen}
         onOpenChange={setReportDialogOpen}
         report={report}
+      />
+
+      <SpeakerNameCandidatesDialog
+        meetingId={meetingId}
+        open={namesOpen}
+        onOpenChange={setNamesOpen}
+        onApplied={onSpeakersChanged}
       />
 
       <Dialog open={languageOpen} onOpenChange={setLanguageOpen}>

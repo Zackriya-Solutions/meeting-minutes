@@ -18,6 +18,8 @@ import { takeDiarizationPrefs } from '@/lib/diarizationPrefs';
 import {
   saveMeetingParticipants,
   takeMeetingParticipants,
+  takeMeetingRoster,
+  SOURCE_MANUAL_ROSTER,
 } from '@/lib/meetingParticipants';
 import {
   saveMeetingCalendarSchedule,
@@ -327,6 +329,18 @@ export function useRecordingStop(
               await saveMeetingParticipants(meetingId, invitedParticipants);
             } catch (error) {
               console.warn('Failed to attach the invited participants:', error);
+            }
+          }
+
+          // Who the user said was in the room, typed during the recording. Stored under its
+          // own source: an invitation says who was asked, a roster says who turned up, and
+          // the naming pass is better off knowing which claim it is reading.
+          const roster = takeMeetingRoster(sessionStorage);
+          if (roster.length > 0) {
+            try {
+              await saveMeetingParticipants(meetingId, roster, SOURCE_MANUAL_ROSTER);
+            } catch (error) {
+              console.warn('Failed to attach the meeting roster:', error);
             }
           }
 
