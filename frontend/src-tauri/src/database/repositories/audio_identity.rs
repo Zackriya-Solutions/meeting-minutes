@@ -6,6 +6,9 @@ pub struct ExistingAudioMeeting {
     pub meeting_id: String,
     pub title: String,
     pub created_at: String,
+    /// How that import was processed. `None` means the meeting predates the
+    /// column: unknown, which is not the same as "no".
+    pub denoise_applied: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -19,7 +22,8 @@ pub async fn find_canonical_meeting(
     sha256: &str,
 ) -> Result<Option<ExistingAudioMeeting>, sqlx::Error> {
     sqlx::query_as::<_, ExistingAudioMeeting>(
-        "SELECT m.id AS meeting_id, m.title, CAST(m.created_at AS TEXT) AS created_at \
+        "SELECT m.id AS meeting_id, m.title, CAST(m.created_at AS TEXT) AS created_at, \
+                ai.denoise_applied \
          FROM audio_identities ai \
          JOIN meetings m ON m.id = ai.canonical_meeting_id \
          WHERE ai.sha256 = ?",
@@ -35,6 +39,7 @@ pub async fn register_import_identity(
     sha256: &str,
     byte_size: u64,
     duration_ms: Option<i64>,
+    denoise_applied: Option<bool>,
 ) -> Result<IdentityRegistration, sqlx::Error> {
     let existing_canonical: Option<String> =
         sqlx::query_scalar("SELECT canonical_meeting_id FROM audio_identities WHERE sha256 = ?")
@@ -86,12 +91,14 @@ pub async fn register_import_identity(
 
     sqlx::query(
         "INSERT INTO audio_identities \
-         (sha256, canonical_meeting_id, byte_size, duration_ms) VALUES (?, ?, ?, ?)",
+         (sha256, canonical_meeting_id, byte_size, duration_ms, denoise_applied) \
+         VALUES (?, ?, ?, ?, ?)",
     )
     .bind(sha256)
     .bind(meeting_id)
     .bind(i64::try_from(byte_size).unwrap_or(i64::MAX))
     .bind(duration_ms)
+    .bind(denoise_applied.map(i64::from))
     .execute(&mut **tx)
     .await?;
     sqlx::query(
@@ -117,7 +124,7 @@ pub async fn register_backfilled_identity(
     duration_ms: Option<i64>,
 ) -> Result<IdentityRegistration, sqlx::Error> {
     let registration =
-        register_import_identity(tx, meeting_id, sha256, byte_size, duration_ms).await?;
+        register_import_identity(tx, meeting_id, sha256, byte_size, duration_ms, None).await?;
     let IdentityRegistration::DuplicateCandidate {
         canonical_meeting_id,
     } = registration
@@ -362,7 +369,8 @@ mod tests {
                 byte_size INTEGER NOT NULL,
                 duration_ms INTEGER,
                 verified_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                denoise_applied INTEGER
             )",
             "CREATE TABLE meeting_audio_identities(
                 meeting_id TEXT PRIMARY KEY,
@@ -397,7 +405,7 @@ mod tests {
         let pool = pool().await;
         let mut tx = pool.begin().await.unwrap();
         assert_eq!(
-            register_import_identity(&mut tx, "m1", HASH, 7, Some(1_000))
+            register_import_identity(&mut tx, "m1", HASH, 7, Some(1_000), Some(true))
                 .await
                 .unwrap(),
             IdentityRegistration::Canonical
@@ -406,7 +414,7 @@ mod tests {
 
         let mut tx = pool.begin().await.unwrap();
         assert_eq!(
-            register_import_identity(&mut tx, "m2", HASH, 7, Some(1_000))
+            register_import_identity(&mut tx, "m2", HASH, 7, Some(1_000), Some(false))
                 .await
                 .unwrap(),
             IdentityRegistration::DuplicateCandidate {
@@ -432,7 +440,7 @@ mod tests {
         let pool = pool().await;
         for meeting_id in ["m1", "m2"] {
             let mut tx = pool.begin().await.unwrap();
-            register_import_identity(&mut tx, meeting_id, HASH, 7, None)
+            register_import_identity(&mut tx, meeting_id, HASH, 7, None, None)
                 .await
                 .unwrap();
             tx.commit().await.unwrap();

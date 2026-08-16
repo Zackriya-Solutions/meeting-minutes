@@ -1016,6 +1016,7 @@ async fn start_import<R: Runtime>(
     model: Option<String>,
     provider: Option<String>,
     denoise_audio: bool,
+    force_reimport: bool,
 ) -> Result<ImportRunOutcome> {
     // Acquire guard - ensures flag is cleared even on panic/early return
     let _guard = ImportGuard::acquire().map_err(|e| anyhow!(e))?;
@@ -1033,6 +1034,7 @@ async fn start_import<R: Runtime>(
         provider,
         denoise_audio,
         None,
+        force_reimport,
     )
     .await;
 
@@ -1187,6 +1189,9 @@ pub async fn start_batch_import<R: Runtime>(
             provider.clone(),
             denoise_audio,
             Some(source_sha256.clone()),
+            // Batch import keeps skipping duplicates: a folder of files is not a
+            // deliberate re-run of one of them.
+            false,
         ))
         .catch_unwind()
         .await
@@ -1295,6 +1300,7 @@ async fn run_import<R: Runtime>(
     provider: Option<String>,
     denoise_audio: bool,
     source_sha256: Option<String>,
+    force_reimport: bool,
 ) -> Result<ImportRunOutcome> {
     let source = PathBuf::from(&source_path);
 
@@ -1318,7 +1324,13 @@ async fn run_import<R: Runtime>(
         .try_state::<AppState>()
         .ok_or_else(|| anyhow!("App state not available"))?;
     let pool = app_state.db_manager.pool();
-    if let Some(existing) = find_existing_audio_meeting(pool, &source_sha256).await? {
+    // An explicit re-run means the user changed how this file should be processed and
+    // wants to see the difference. Refusing it as a duplicate would leave deleting the
+    // old meeting as the only way to flip a switch.
+    if let Some(existing) = find_existing_audio_meeting(pool, &source_sha256)
+        .await?
+        .filter(|_| !force_reimport)
+    {
         info!(
             "Audio '{}' is already imported as meeting {}",
             source_path, existing.meeting_id
@@ -1898,6 +1910,8 @@ async fn run_import<R: Runtime>(
         &source_sha256,
         source_size,
         Some((duration_seconds * 1000.0).round().max(0.0) as i64),
+        denoise_sample_rate.is_some(),
+        force_reimport,
     )
     .await?;
     if let CreateMeetingOutcome::AlreadyImported(existing) = create_outcome {
@@ -1985,6 +1999,8 @@ async fn create_meeting_with_transcripts(
     source_sha256: &str,
     source_size: u64,
     duration_ms: Option<i64>,
+    denoise_applied: bool,
+    keep_duplicate: bool,
 ) -> Result<CreateMeetingOutcome> {
     let now = chrono::Utc::now();
 
@@ -2036,10 +2052,15 @@ async fn create_meeting_with_transcripts(
             source_sha256,
             source_size,
             duration_ms,
+            Some(denoise_applied),
         )
         .await;
     match identity_registration {
         Ok(IdentityRegistration::Canonical) => {}
+        // A deliberate re-run of the same file — the user changed how it should be
+        // processed — is a second take, not an accident to be undone. It stays as a
+        // duplicate candidate so both results exist side by side and can be compared.
+        Ok(IdentityRegistration::DuplicateCandidate { .. }) if keep_duplicate => {}
         Ok(IdentityRegistration::DuplicateCandidate { .. }) => {
             tx.rollback()
                 .await
@@ -2567,6 +2588,7 @@ pub async fn start_import_audio_command<R: Runtime>(
     model: Option<String>,
     provider: Option<String>,
     denoise_audio: Option<bool>,
+    force_reimport: Option<bool>,
 ) -> Result<ImportStarted, String> {
     // Check if import is already in progress (guard will be acquired in start_import)
     if IMPORT_IN_PROGRESS.load(Ordering::SeqCst) {
@@ -2583,6 +2605,7 @@ pub async fn start_import_audio_command<R: Runtime>(
             model,
             provider,
             denoise_audio.unwrap_or(false),
+            force_reimport.unwrap_or(false),
         )
         .await;
 
@@ -2719,6 +2742,64 @@ pub async fn is_import_in_progress_command() -> bool {
 
 #[cfg(test)]
 mod tests {
+
+    /// A/B the import decode path on real clips: same audio, same VAD, denoising on and
+    /// off. On the telephone profile the enhanced track is primary and raw only patches
+    /// the gaps it left, so if enhancement mangles the signal there is nothing to fall
+    /// back to — this measures whether that is happening.
+    ///
+    /// MEETILY_AB_CLIPS=/path/a.wav,/path/b.wav MEETILY_DENOISE_MODEL=/path/model.onnx \
+    ///   cargo test --lib -- ab_denoise --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn ab_denoise() {
+        let Ok(clips) = std::env::var("MEETILY_AB_CLIPS") else {
+            println!("skip: set MEETILY_AB_CLIPS");
+            return;
+        };
+        let model = std::env::var("MEETILY_DENOISE_MODEL").ok().map(PathBuf::from);
+        if let Some(model) = &model {
+            assert!(model.exists(), "model not found: {}", model.display());
+        }
+        println!(
+            "{:<16} {:>8} {:>9} {:>8} {:>9}   {}",
+            "clip", "raw seg", "raw sec", "enh seg", "enh sec", "verdict"
+        );
+        for clip in clips.split(',') {
+            let path = PathBuf::from(clip.trim());
+            let name = path
+                .file_stem()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_default();
+            let run = |model: Option<&Path>| {
+                stream_decode_speech_segments(&path, VAD_REDEMPTION_TIME_MS, None, model, |_, _| {
+                    true
+                })
+                .map(|(segments, _)| {
+                    let speech: f64 = segments
+                        .iter()
+                        .map(|s| (s.end_timestamp_ms - s.start_timestamp_ms) / 1000.0)
+                        .sum();
+                    (segments.len(), speech)
+                })
+            };
+            let (raw_n, raw_s) = run(None).expect("raw decode");
+            let (enh_n, enh_s) = match model.as_deref() {
+                Some(model) => run(Some(model)).expect("enhanced decode"),
+                None => (0, 0.0),
+            };
+            let verdict = if enh_s > raw_s * 1.05 {
+                "denoise finds more"
+            } else if enh_s < raw_s * 0.95 {
+                "DENOISE LOSES SPEECH"
+            } else {
+                "same"
+            };
+            println!(
+                "{name:<16} {raw_n:>8} {raw_s:>9.1} {enh_n:>8} {enh_s:>9.1}   {verdict}"
+            );
+        }
+    }
     use super::*;
 
     async fn import_identity_test_pool() -> sqlx::SqlitePool {
@@ -2750,7 +2831,8 @@ mod tests {
                 byte_size INTEGER NOT NULL,
                 duration_ms INTEGER,
                 verified_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                denoise_applied INTEGER
             )",
             "CREATE TABLE meeting_audio_identities(
                 meeting_id TEXT PRIMARY KEY,
@@ -3502,6 +3584,8 @@ mod tests {
             "fe432cb211dac676fcd7d2f05033f82be9fd8325923e6e3a322758fee60e94cf",
             7,
             Some(1_000),
+            false,
+            false,
         )
         .await
         .unwrap();
@@ -3521,6 +3605,85 @@ mod tests {
         assert_eq!(transcripts, 0);
     }
 
+    /// Flipping the denoise switch and importing the same file again has to produce a
+    /// second result to compare against the first. Before this, the only way to change
+    /// how a file was processed was to delete the meeting made from it.
+    #[tokio::test]
+    async fn a_deliberate_rerun_keeps_both_takes() {
+        const HASH: &str = "fe432cb211dac676fcd7d2f05033f82be9fd8325923e6e3a322758fee60e94cf";
+        let pool = import_identity_test_pool().await;
+
+        let first = create_meeting_with_transcripts(
+            &pool,
+            "meeting-raw",
+            "Raw",
+            &[],
+            "/tmp/raw".into(),
+            HASH,
+            7,
+            Some(1_000),
+            false,
+            false,
+        )
+        .await
+        .unwrap();
+        assert!(matches!(first, CreateMeetingOutcome::Created));
+
+        // Same file, denoising now on, asked for on purpose.
+        let second = create_meeting_with_transcripts(
+            &pool,
+            "meeting-denoised",
+            "Denoised",
+            &[],
+            "/tmp/denoised".into(),
+            HASH,
+            7,
+            Some(1_000),
+            true,
+            true,
+        )
+        .await
+        .unwrap();
+        assert!(
+            matches!(second, CreateMeetingOutcome::Created),
+            "a deliberate re-run is a second take, not a refused duplicate"
+        );
+
+        let kept: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM meetings WHERE id IN (?, ?)")
+            .bind("meeting-raw")
+            .bind("meeting-denoised")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(kept, 2, "both takes survive so they can be compared");
+
+        // The first import stays canonical for the file; the re-run is linked to it.
+        let canonical: String =
+            sqlx::query_scalar("SELECT canonical_meeting_id FROM audio_identities WHERE sha256=?")
+                .bind(HASH)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(canonical, "meeting-raw");
+        let role: String = sqlx::query_scalar(
+            "SELECT role FROM meeting_audio_identities WHERE meeting_id='meeting-denoised'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(role, "duplicate_candidate");
+
+        // And how the canonical take was processed is now on record, instead of being
+        // unanswerable after the fact.
+        let denoised: Option<i64> =
+            sqlx::query_scalar("SELECT denoise_applied FROM audio_identities WHERE sha256=?")
+                .bind(HASH)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(denoised, Some(0));
+    }
+
     #[tokio::test]
     async fn duplicate_import_is_rejected_atomically() {
         const HASH: &str = "fe432cb211dac676fcd7d2f05033f82be9fd8325923e6e3a322758fee60e94cf";
@@ -3535,6 +3698,8 @@ mod tests {
             HASH,
             7,
             Some(1_000),
+            false,
+            false,
         )
         .await
         .unwrap();
@@ -3549,6 +3714,8 @@ mod tests {
             HASH,
             7,
             Some(1_000),
+            false,
+            false,
         )
         .await
         .unwrap();

@@ -21,6 +21,8 @@ export interface ExistingAudioMeeting {
   meeting_id: string;
   title: string;
   created_at: string;
+  /** How that import was processed. `null` means it predates the record: unknown, not "no". */
+  denoise_applied: boolean | null;
 }
 
 export interface ImportProgress {
@@ -96,7 +98,8 @@ export interface UseImportAudioReturn {
     title: string,
     language?: string | null,
     model?: string | null,
-    provider?: string | null
+    provider?: string | null,
+    forceReimport?: boolean
   ) => Promise<void>;
   startBatchImport: (
     items: BatchImportItem[],
@@ -364,7 +367,8 @@ export function useImportAudio({
       title: string,
       language?: string | null,
       model?: string | null,
-      provider?: string | null
+      provider?: string | null,
+      forceReimport?: boolean
     ) => {
       isCancelledRef.current = false;
       setStatus('processing');
@@ -389,6 +393,7 @@ export function useImportAudio({
           model: model || null,
           provider: provider || null,
           denoiseAudio: loadBetaFeatures().noisyAudioDenoising,
+          forceReimport: forceReimport ?? false,
         });
       } catch (err: any) {
         setStatus('error');
