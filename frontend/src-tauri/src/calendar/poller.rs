@@ -176,6 +176,13 @@ async fn evaluate_triggers<R: Runtime>(
     start_time: chrono::DateTime<Utc>,
     end_time: chrono::DateTime<Utc>,
 ) {
+    // Only actual meetings (a detected Meet/Zoom/Teams link) are auto-start candidates —
+    // matches the same `is_meeting` classification already used for the manual
+    // "Record now" list, so a plain calendar block (no video link) never triggers.
+    if row.meeting_url.is_none() {
+        return;
+    }
+
     // Re-read the stored row: `upsert_event` doesn't touch triggered_start_at/
     // triggered_stop_at on conflict, so this reflects any prior tick's decision.
     let stored = match CalendarRepository::get_event(pool, &row.id).await {
