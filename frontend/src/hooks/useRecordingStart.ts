@@ -152,6 +152,8 @@ export function useRecordingStart(
           console.log('Auto-starting recording from navigation...');
           setIsAutoStarting(true);
           sessionStorage.removeItem('autoStartRecording'); // Clear the flag
+          const overrideTitle = sessionStorage.getItem('autoStartMeetingTitle');
+          sessionStorage.removeItem('autoStartMeetingTitle');
 
           // Check if Parakeet transcription model is ready before starting
           const parakeetReady = await checkParakeetReady();
@@ -178,8 +180,9 @@ export function useRecordingStart(
 
           // Start the actual backend recording
           try {
-            // Generate meeting title
-            const generatedMeetingTitle = generateMeetingTitle();
+            // Use a calendar-provided title if one was set (e.g. from Settings > Calendar
+            // "Record now"), otherwise fall back to the normal generated title
+            const generatedMeetingTitle = overrideTitle || generateMeetingTitle();
 
             // Set STARTING status before initiating backend recording
             setStatus(RecordingStatus.STARTING, 'Initializing recording...');

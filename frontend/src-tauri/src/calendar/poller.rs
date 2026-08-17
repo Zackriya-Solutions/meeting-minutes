@@ -5,8 +5,8 @@ use crate::state::AppState;
 use chrono::{Duration as ChronoDuration, Utc};
 use std::sync::Mutex as StdMutex;
 use std::time::Duration;
+use tauri::async_runtime::JoinHandle;
 use tauri::{AppHandle, Manager, Runtime};
-use tokio::task::JoinHandle;
 
 const POLL_INTERVAL: Duration = Duration::from_secs(60);
 
