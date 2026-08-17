@@ -119,6 +119,10 @@ pub struct CalendarAccount {
     pub status: String,
     pub connected_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
+    pub auto_start_enabled: bool,
+    /// "ask" | "silent"
+    pub auto_start_mode: String,
+    pub auto_stop_grace_minutes: i64,
 }
 
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize)]

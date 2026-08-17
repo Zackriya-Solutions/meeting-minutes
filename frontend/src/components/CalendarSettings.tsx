@@ -5,11 +5,20 @@ import { useRouter } from 'next/navigation';
 import { invoke } from '@tauri-apps/api/core';
 import { CalendarDays, CheckCircle2, ExternalLink, Play, RefreshCw, XCircle } from 'lucide-react';
 import { toast } from 'sonner';
+import { Switch } from '@/components/ui/switch';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Input } from '@/components/ui/input';
 
 interface CalendarAccountStatus {
   connected: boolean;
   email: string | null;
   status: string; // "connected" | "needs_reauth" | "disconnected"
+}
+
+interface AutoStartSettings {
+  enabled: boolean;
+  mode: string; // "ask" | "silent"
+  graceMinutes: number;
 }
 
 interface CalendarEventDto {
@@ -28,6 +37,8 @@ export function CalendarSettings() {
   const [events, setEvents] = useState<CalendarEventDto[]>([]);
   const [loading, setLoading] = useState(true);
   const [connecting, setConnecting] = useState(false);
+  const [autoStart, setAutoStart] = useState<AutoStartSettings>({ enabled: false, mode: 'ask', graceMinutes: 5 });
+  const [savingAutoStart, setSavingAutoStart] = useState(false);
 
   const loadStatus = useCallback(async () => {
     try {
@@ -47,15 +58,38 @@ export function CalendarSettings() {
     }
   }, []);
 
+  const loadAutoStart = useCallback(async () => {
+    try {
+      const result = await invoke<AutoStartSettings>('calendar_get_auto_start_settings');
+      setAutoStart(result);
+    } catch (error) {
+      console.error('Failed to load auto-start settings:', error);
+    }
+  }, []);
+
   useEffect(() => {
     const load = async () => {
       setLoading(true);
       await loadStatus();
       await loadEvents();
+      await loadAutoStart();
       setLoading(false);
     };
     load();
-  }, [loadStatus, loadEvents]);
+  }, [loadStatus, loadEvents, loadAutoStart]);
+
+  const saveAutoStart = async (next: AutoStartSettings) => {
+    setAutoStart(next);
+    setSavingAutoStart(true);
+    try {
+      await invoke('calendar_update_auto_start_settings', { settings: next });
+    } catch (error) {
+      console.error('Failed to save auto-start settings:', error);
+      toast.error('Failed to save auto-start settings');
+    } finally {
+      setSavingAutoStart(false);
+    }
+  };
 
   const handleConnect = async () => {
     setConnecting(true);
@@ -158,6 +192,64 @@ export function CalendarSettings() {
       </div>
 
       {status.connected && (
+        <div className="bg-white rounded-lg border border-gray-200 p-6 shadow-sm space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-base font-semibold text-gray-900">Auto-start recording</h3>
+              <p className="text-sm text-gray-500 mt-0.5">
+                Automatically start recording when a synced meeting begins, and stop it after it ends.
+              </p>
+            </div>
+            <Switch
+              checked={autoStart.enabled}
+              onCheckedChange={(enabled) => saveAutoStart({ ...autoStart, enabled })}
+              disabled={savingAutoStart}
+            />
+          </div>
+
+          {autoStart.enabled && (
+            <div className="grid grid-cols-2 gap-4 pt-2 border-t border-gray-100">
+              <div>
+                <label className="text-sm font-medium text-gray-700 block mb-1.5">Before starting</label>
+                <Select
+                  value={autoStart.mode}
+                  onValueChange={(mode) => saveAutoStart({ ...autoStart, mode })}
+                  disabled={savingAutoStart}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ask">Ask first (45s to cancel)</SelectItem>
+                    <SelectItem value="silent">Start silently</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <label className="text-sm font-medium text-gray-700 block mb-1.5">Stop after event ends</label>
+                <div className="flex items-center gap-2">
+                  <Input
+                    type="number"
+                    min={0}
+                    max={60}
+                    value={autoStart.graceMinutes}
+                    onChange={(e) => {
+                      const graceMinutes = Math.max(0, Math.min(60, Number(e.target.value) || 0));
+                      setAutoStart({ ...autoStart, graceMinutes });
+                    }}
+                    onBlur={() => saveAutoStart(autoStart)}
+                    disabled={savingAutoStart}
+                    className="w-20"
+                  />
+                  <span className="text-sm text-gray-500">minutes</span>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {status.connected && (
         <div className="bg-white rounded-lg border border-gray-200 p-6 shadow-sm">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-base font-semibold text-gray-900">Upcoming meetings</h3>
@@ -199,12 +291,6 @@ export function CalendarSettings() {
         </div>
       )}
 
-      <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
-        <p className="text-sm text-blue-800">
-          <strong>Note:</strong> Meetily doesn&apos;t auto-start or auto-stop recordings from calendar events yet
-          — that&apos;s coming soon. For now, use &quot;Record now&quot; to start a recording for a synced meeting.
-        </p>
-      </div>
     </div>
   );
 }

@@ -757,6 +757,9 @@ pub fn run() {
             calendar::commands::calendar_disconnect,
             calendar::commands::calendar_get_status,
             calendar::commands::calendar_get_upcoming_events,
+            calendar::commands::calendar_get_auto_start_settings,
+            calendar::commands::calendar_update_auto_start_settings,
+            calendar::commands::calendar_confirm_auto_start,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

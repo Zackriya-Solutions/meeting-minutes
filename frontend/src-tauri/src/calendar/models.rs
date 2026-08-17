@@ -68,6 +68,23 @@ pub struct CalendarAccountStatusDto {
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CalendarAutoStartSettingsDto {
+    pub enabled: bool,
+    /// "ask" | "silent"
+    pub mode: String,
+    pub grace_minutes: i64,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateAutoStartSettingsRequest {
+    pub enabled: bool,
+    pub mode: String,
+    pub grace_minutes: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct CalendarEventDto {
     pub id: String,
     pub title: String,

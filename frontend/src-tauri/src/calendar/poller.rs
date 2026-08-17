@@ -6,11 +6,32 @@ use chrono::{Duration as ChronoDuration, Utc};
 use std::sync::Mutex as StdMutex;
 use std::time::Duration;
 use tauri::async_runtime::JoinHandle;
-use tauri::{AppHandle, Manager, Runtime};
+use tauri::{AppHandle, Emitter, Manager, Runtime};
 
 const POLL_INTERVAL: Duration = Duration::from_secs(60);
+/// Auto-start fires once per event, the first tick where `now` falls in
+/// `[start_time, start_time + AUTO_START_WINDOW)`.
+const AUTO_START_WINDOW: ChronoDuration = ChronoDuration::minutes(5);
 
 static POLL_TASK: StdMutex<Option<JoinHandle<()>>> = StdMutex::new(None);
+
+/// The calendar event id (if any) that the currently-active recording was
+/// auto-started for. Set by the frontend via `calendar_confirm_auto_start` once it has
+/// actually started recording; cleared once that recording ends (for any reason — see
+/// `sync_once`'s self-healing check). This is what lets auto-stop target the *specific*
+/// event's recording rather than stopping whatever happens to be recording when its
+/// end time + grace period arrives.
+static ACTIVE_AUTO_EVENT: StdMutex<Option<String>> = StdMutex::new(None);
+
+pub fn set_active_auto_event(event_id: Option<String>) {
+    if let Ok(mut slot) = ACTIVE_AUTO_EVENT.lock() {
+        *slot = event_id;
+    }
+}
+
+fn active_auto_event() -> Option<String> {
+    ACTIVE_AUTO_EVENT.lock().ok().and_then(|g| g.clone())
+}
 
 /// Starts the background calendar sync loop (idempotent — replaces any previous task).
 /// Safe to call even when no account is connected yet; each tick is a no-op until one is.
@@ -66,10 +87,17 @@ async fn sync_once<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
             }
         }
     } else {
-        account.access_token
+        account.access_token.clone()
     };
 
     let now = Utc::now();
+
+    // Self-healing: if nothing is recording anymore (stopped manually, crashed, whatever),
+    // any event we thought was "the active auto-started one" no longer is.
+    if !crate::is_recording().await {
+        set_active_auto_event(None);
+    }
+
     let time_min = now - ChronoDuration::minutes(5);
     let time_max = now + ChronoDuration::hours(2);
 
@@ -126,8 +154,97 @@ async fn sync_once<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
 
         if let Err(e) = CalendarRepository::upsert_event(pool, &row).await {
             log::warn!("Failed to persist synced calendar event: {}", e);
+            continue;
+        }
+
+        if account.auto_start_enabled {
+            evaluate_triggers(app, pool, &row, &account, now, start_time, end_time).await;
         }
     }
 
     Ok(())
+}
+
+/// Decides whether this event should auto-start or auto-stop recording on this tick.
+/// Idempotent across ticks via `triggered_start_at`/`triggered_stop_at`.
+async fn evaluate_triggers<R: Runtime>(
+    app: &AppHandle<R>,
+    pool: &sqlx::SqlitePool,
+    row: &CalendarEventRow,
+    account: &crate::database::models::CalendarAccount,
+    now: chrono::DateTime<Utc>,
+    start_time: chrono::DateTime<Utc>,
+    end_time: chrono::DateTime<Utc>,
+) {
+    // Re-read the stored row: `upsert_event` doesn't touch triggered_start_at/
+    // triggered_stop_at on conflict, so this reflects any prior tick's decision.
+    let stored = match CalendarRepository::get_event(pool, &row.id).await {
+        Ok(Some(stored)) => stored,
+        _ => return,
+    };
+
+    let title = row
+        .title
+        .clone()
+        .unwrap_or_else(|| "Untitled meeting".to_string());
+
+    if stored.triggered_start_at.is_none() && now >= start_time && now < start_time + AUTO_START_WINDOW {
+        // Mark decided *before* emitting so a slow/unresponded prompt can't re-fire next tick.
+        let _ = CalendarRepository::mark_trigger_started(pool, &row.id).await;
+
+        if crate::is_recording().await {
+            log::info!(
+                "Calendar event '{}' started but a recording is already in progress — skipping auto-start",
+                title
+            );
+        } else {
+            log::info!("Calendar event '{}' entered its auto-start window", title);
+            let payload = serde_json::json!({
+                "eventId": row.id,
+                "title": title,
+                "mode": account.auto_start_mode,
+            });
+            if let Err(e) = app.emit("calendar-auto-start-pending", payload) {
+                log::warn!("Failed to emit calendar-auto-start-pending: {}", e);
+            }
+        }
+        return;
+    }
+
+    let auto_stop_due = stored.triggered_start_at.is_some()
+        && stored.triggered_stop_at.is_none()
+        && active_auto_event().as_deref() == Some(row.id.as_str())
+        && now >= end_time + ChronoDuration::minutes(account.auto_stop_grace_minutes);
+
+    if auto_stop_due && crate::is_recording().await {
+        let _ = CalendarRepository::mark_trigger_stopped(pool, &row.id).await;
+        set_active_auto_event(None);
+
+        let data_dir = match app.path().app_data_dir() {
+            Ok(dir) => dir,
+            Err(e) => {
+                log::error!("Auto-stop: failed to get app data dir: {}", e);
+                return;
+            }
+        };
+        let timestamp = chrono::Local::now().format("%Y-%m-%dT%H-%M-%S").to_string();
+        let save_path = data_dir.join(format!("recording-{}.wav", timestamp));
+
+        log::info!("Auto-stopping recording for calendar event '{}' (ended + grace period elapsed)", title);
+        match crate::audio::recording_commands::stop_recording(
+            app.clone(),
+            crate::audio::recording_commands::RecordingArgs {
+                save_path: save_path.to_string_lossy().to_string(),
+            },
+        )
+        .await
+        {
+            Ok(_) => {
+                if let Err(e) = app.emit("recording-stop-complete", true) {
+                    log::error!("Auto-stop: failed to emit recording-stop-complete: {}", e);
+                }
+            }
+            Err(e) => log::error!("Auto-stop failed for calendar event '{}': {}", row.id, e),
+        }
+    }
 }

@@ -1,4 +1,7 @@
-use super::models::{CalendarAccountStatusDto, CalendarEventDto};
+use super::models::{
+    CalendarAccountStatusDto, CalendarAutoStartSettingsDto, CalendarEventDto,
+    UpdateAutoStartSettingsRequest,
+};
 use super::oauth;
 use crate::database::repositories::calendar::CalendarRepository;
 use crate::state::AppState;
@@ -104,4 +107,55 @@ pub async fn calendar_get_upcoming_events(
             meeting_provider: e.meeting_provider,
         })
         .collect())
+}
+
+#[tauri::command]
+pub async fn calendar_get_auto_start_settings(
+    state: tauri::State<'_, AppState>,
+) -> Result<CalendarAutoStartSettingsDto, String> {
+    let account = CalendarRepository::get_account(state.db_manager.pool())
+        .await
+        .map_err(|e| e.to_string())?;
+
+    Ok(match account {
+        Some(acc) => CalendarAutoStartSettingsDto {
+            enabled: acc.auto_start_enabled,
+            mode: acc.auto_start_mode,
+            grace_minutes: acc.auto_stop_grace_minutes,
+        },
+        // No account connected yet — report the same defaults the migration seeds.
+        None => CalendarAutoStartSettingsDto {
+            enabled: false,
+            mode: "ask".to_string(),
+            grace_minutes: 5,
+        },
+    })
+}
+
+#[tauri::command]
+pub async fn calendar_update_auto_start_settings(
+    state: tauri::State<'_, AppState>,
+    settings: UpdateAutoStartSettingsRequest,
+) -> Result<(), String> {
+    if settings.mode != "ask" && settings.mode != "silent" {
+        return Err(format!("Invalid auto-start mode '{}'", settings.mode));
+    }
+
+    CalendarRepository::update_auto_start_settings(
+        state.db_manager.pool(),
+        settings.enabled,
+        &settings.mode,
+        settings.grace_minutes,
+    )
+    .await
+    .map_err(|e| e.to_string())
+}
+
+/// Called by the frontend right after it actually starts a calendar-triggered recording,
+/// so the poller knows which event the active recording belongs to (for auto-stop) and
+/// doesn't mistake a later, unrelated manual recording for this event's auto-stop target.
+#[tauri::command]
+pub async fn calendar_confirm_auto_start(event_id: String) -> Result<(), String> {
+    super::poller::set_active_auto_event(Some(event_id));
+    Ok(())
 }

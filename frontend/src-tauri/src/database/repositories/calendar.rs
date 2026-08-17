@@ -76,6 +76,25 @@ impl CalendarRepository {
         Ok(())
     }
 
+    pub async fn update_auto_start_settings(
+        pool: &SqlitePool,
+        enabled: bool,
+        mode: &str,
+        grace_minutes: i64,
+    ) -> Result<(), SqlxError> {
+        sqlx::query(
+            "UPDATE calendar_accounts SET auto_start_enabled = ?, auto_start_mode = ?, auto_stop_grace_minutes = ?, updated_at = ? WHERE id = 1",
+        )
+        .bind(enabled)
+        .bind(mode)
+        .bind(grace_minutes)
+        .bind(Utc::now())
+        .execute(pool)
+        .await?;
+
+        Ok(())
+    }
+
     /// Disconnects the account; synced events cascade-delete with it.
     pub async fn disconnect(pool: &SqlitePool) -> Result<(), SqlxError> {
         sqlx::query("DELETE FROM calendar_accounts WHERE id = 1")
@@ -113,6 +132,35 @@ impl CalendarRepository {
         .bind(event.synced_at)
         .execute(pool)
         .await?;
+
+        Ok(())
+    }
+
+    pub async fn get_event(pool: &SqlitePool, event_id: &str) -> Result<Option<CalendarEvent>, SqlxError> {
+        sqlx::query_as::<_, CalendarEvent>("SELECT * FROM calendar_events WHERE id = ?")
+            .bind(event_id)
+            .fetch_optional(pool)
+            .await
+    }
+
+    /// Marks that we've made an auto-start decision for this event (fired or skipped),
+    /// so the poller doesn't re-evaluate it on the next tick.
+    pub async fn mark_trigger_started(pool: &SqlitePool, event_id: &str) -> Result<(), SqlxError> {
+        sqlx::query("UPDATE calendar_events SET triggered_start_at = ? WHERE id = ?")
+            .bind(Utc::now())
+            .bind(event_id)
+            .execute(pool)
+            .await?;
+
+        Ok(())
+    }
+
+    pub async fn mark_trigger_stopped(pool: &SqlitePool, event_id: &str) -> Result<(), SqlxError> {
+        sqlx::query("UPDATE calendar_events SET triggered_stop_at = ? WHERE id = ?")
+            .bind(Utc::now())
+            .bind(event_id)
+            .execute(pool)
+            .await?;
 
         Ok(())
     }
