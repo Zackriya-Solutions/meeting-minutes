@@ -8,6 +8,7 @@ import {
 } from "../ui/fluid-dialog";
 import { Button } from "../ui/fluid-button";
 import { Input } from "../ui/fluid-input";
+import { Switch } from "../ui/switch";
 import { useT } from "@/lib/i18n";
 import { ShapeProvider } from "@/lib/shape-context";
 
@@ -82,26 +83,25 @@ export function SpeakerRenameDialog({
                             has nothing to recognise — and the summary keeps calling the
                             owner "You" instead of a person. */}
                         {onSetSelf && (
-                            <label className="mt-4 flex items-center gap-2 text-sm text-muted-foreground">
-                                <input
-                                    type="checkbox"
-                                    checked={isSelf}
-                                    disabled={saving}
-                                    onChange={async (event) => {
-                                        try {
-                                            await onSetSelf(event.target.checked);
-                                        } catch (error) {
-                                            toast.error(
-                                                typeof error === "string"
-                                                    ? error
-                                                    : (error as any)?.message
-                                                      || t("Failed to save the speaker")
-                                            );
-                                        }
-                                    }}
-                                />
-                                {t('This is me')}
-                            </label>
+                            <Switch
+                                className="mt-4"
+                                checked={isSelf}
+                                disabled={saving}
+                                label={t('This is me')}
+                                aria-label={t('This is me')}
+                                onCheckedChange={async (checked) => {
+                                    try {
+                                        await onSetSelf(checked);
+                                    } catch (error) {
+                                        toast.error(
+                                            typeof error === "string"
+                                                ? error
+                                                : (error as any)?.message
+                                                  || t("Failed to save the speaker")
+                                        );
+                                    }
+                                }}
+                            />
                         )}
                         <DialogFooter>
                             <Button

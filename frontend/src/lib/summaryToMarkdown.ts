@@ -208,11 +208,17 @@ function sectionItems(section: MarkdownSection, kind: 'participant' | 'agreement
   return items;
 }
 
-function uniqueMarkdownList(items: string[]): string {
+function uniqueMarkdownItems(items: string[]): string[] {
   return items.filter((item, index) => {
     const normalized = normalizeSectionTitle(item);
     return normalized && items.findIndex((candidate) => normalizeSectionTitle(candidate) === normalized) === index;
-  }).map((item) => `- ${item}`).join('\n');
+  });
+}
+
+function uniqueMarkdownList(items: string[], singleItemAsParagraph = false): string {
+  const uniqueItems = uniqueMarkdownItems(items);
+  if (singleItemAsParagraph && uniqueItems.length === 1) return uniqueItems[0];
+  return uniqueItems.map((item) => `- ${item}`).join('\n');
 }
 
 /** Return the explicitly identified speakers from the generated attendee section. */
@@ -263,7 +269,7 @@ export function extractSummaryAgreements(markdown: string): string {
   const explicit = classified
     .filter(({ agreement }) => agreement)
     .flatMap(({ section }) => sectionItems(section, 'agreement'));
-  if (explicit.length > 0) return uniqueMarkdownList(explicit);
+  if (explicit.length > 0) return uniqueMarkdownList(explicit, true);
 
   const decisions = classified
     .filter(({ decision }) => decision)
@@ -277,7 +283,7 @@ export function extractSummaryAgreements(markdown: string): string {
     if (actions[index]) combined.push(actions[index]);
   }
 
-  return uniqueMarkdownList(combined);
+  return uniqueMarkdownList(combined, true);
 }
 
 export interface SummaryAgreementRow {

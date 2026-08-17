@@ -51,6 +51,7 @@ export default function PageContent({
   speakerCount = 0,
   onRenameSpeaker,
   onAssignSegmentSpeaker,
+  onAddAndAssignSegmentSpeaker,
   onSetSelfSpeaker,
   onSpeakersDetected,
 }: {
@@ -79,6 +80,7 @@ export default function PageContent({
   speakerCount?: number;
   onRenameSpeaker?: (speakerId: number, displayName: string) => Promise<void> | void;
   onAssignSegmentSpeaker?: (transcriptId: string, speakerId: number) => Promise<void> | void;
+  onAddAndAssignSegmentSpeaker?: (transcriptId: string, displayName: string) => Promise<void> | void;
   onSetSelfSpeaker?: (speakerId: number, isSelf: boolean) => Promise<void> | void;
   onSpeakersDetected?: () => Promise<void> | void;
 }) {
@@ -291,6 +293,7 @@ export default function PageContent({
         speakerCount={speakerCount}
         onRenameSpeaker={onRenameSpeaker}
         onAssignSegmentSpeaker={onAssignSegmentSpeaker}
+        onAddAndAssignSegmentSpeaker={onAddAndAssignSegmentSpeaker}
         onSetSelfSpeaker={onSetSelfSpeaker}
         onSpeakersDetected={onSpeakersDetected}
       />

@@ -15,6 +15,7 @@ pub const FALLBACK_GATEWAY: &str = "https://gw2.multitool.works";
 pub const PRIMARY_DEEPSEEK_BASE_URL: &str = "https://gw.multitool.works/deepseek";
 const SERVICE: &str = "meetily.gateway";
 static DEVICE_ID_CACHE: OnceCell<String> = OnceCell::new();
+#[cfg(not(debug_assertions))]
 static ANALYTICS_DEVICE_ID_ATTEMPT: Lazy<std::sync::Mutex<Option<RetryFailure>>> =
     Lazy::new(|| std::sync::Mutex::new(None));
 static GATEWAY_DEVICE_ID_ATTEMPT: Lazy<std::sync::Mutex<Option<RetryFailure>>> =
@@ -39,12 +40,14 @@ impl RetryFailure {
 
 #[derive(Clone, Copy)]
 enum DeviceIdPurpose {
+    #[cfg(not(debug_assertions))]
     Analytics,
     Gateway,
 }
 
 fn device_id_attempt(purpose: DeviceIdPurpose) -> &'static std::sync::Mutex<Option<RetryFailure>> {
     match purpose {
+        #[cfg(not(debug_assertions))]
         DeviceIdPurpose::Analytics => &ANALYTICS_DEVICE_ID_ATTEMPT,
         DeviceIdPurpose::Gateway => &GATEWAY_DEVICE_ID_ATTEMPT,
     }
@@ -169,6 +172,19 @@ fn device_id(purpose: DeviceIdPurpose) -> Result<String, String> {
     }
 }
 
+#[cfg(debug_assertions)]
+pub(crate) async fn analytics_device_id() -> Result<String, String> {
+    // Tauri dev binaries are unsigned and receive a new code identity on rebuild. Reading
+    // the Keychain from that binary causes a macOS authorization prompt on every restart,
+    // while debug analytics already targets the local collector. Keep a process-local id in
+    // development; release builds below retain the vault-backed authenticated identity.
+    static DEBUG_ANALYTICS_DEVICE_ID: OnceCell<String> = OnceCell::new();
+    Ok(DEBUG_ANALYTICS_DEVICE_ID
+        .get_or_init(|| format!("debug-{}", uuid::Uuid::new_v4()))
+        .clone())
+}
+
+#[cfg(not(debug_assertions))]
 pub(crate) async fn analytics_device_id() -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(|| device_id(DeviceIdPurpose::Analytics))
         .await
@@ -356,6 +372,11 @@ fn after_host(message: &str) -> &str {
 /// Return a valid install JWT and the gateway host that accepted it. Reuses the stored
 /// token while it still validates against `/me`; otherwise mints a fresh one.
 pub async fn install_token() -> Result<(String, String), String> {
+    // Check capability before touching the OS credential vault. Development builds normally
+    // have no registration key; without this guard a startup migration could still prompt for
+    // a missing Keychain item and only then report that the gateway is unavailable.
+    registration_key()?;
+
     if let Some(cached) = INSTALL_TOKEN_CACHE
         .read()
         .await

@@ -1304,18 +1304,22 @@ input, textarea, button, [role='dialog'], [role='menu'], [role='listbox'] { font
   line-height: inherit;
 }
 
-@theme inline {
-  @keyframes spinner-move {
+@keyframes spinner-move {
+  from {
+    stroke-dashoffset: 0;
+  }
+
   to {
     stroke-dashoffset: -100;
-    }
   }
-  @keyframes spinner-dash {
+}
+
+@keyframes spinner-dash {
   0%, 100% {
     stroke-dasharray: 15 85;
-    }
+  }
+
   50% {
     stroke-dasharray: 40 60;
-    }
   }
 }

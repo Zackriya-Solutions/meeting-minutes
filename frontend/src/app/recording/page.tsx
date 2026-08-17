@@ -13,7 +13,6 @@ import { useRecordingStop } from "@/hooks/useRecordingStop"
 import { useLanguage } from "@/lib/i18n"
 import { getMeetingDisplayInfo } from "@/lib/meetingDisplay"
 import { RecordingDrawerShell } from "./recording-drawer-shell"
-import { MeetingRoster } from "@/components/MeetingRoster"
 
 export default function RecordingPage() {
   const { lang, t } = useLanguage()
@@ -72,11 +71,6 @@ export default function RecordingPage() {
           <h1 className="memento-screen-title truncate text-foreground">
             {displayMeetingTitle}
           </h1>
-          {/* Names typed here become the hint list speaker naming reads after the meeting;
-              nothing is attributed live, because no voices exist yet. */}
-          <div className="mt-2">
-            <MeetingRoster />
-          </div>
           <div
             aria-hidden="true"
             className={`absolute inset-x-0 bottom-0 h-px bg-[var(--primary-10)] transition-opacity duration-150 ${

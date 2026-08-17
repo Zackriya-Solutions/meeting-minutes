@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useRef, useEffect, useMemo, useState, memo } from "react";
+import { toast } from "sonner";
 import { useTranscriptStreaming } from "@/hooks/useTranscriptStreaming";
 import { TranscriptSegmentData, localizeSpeakerLabel, resolveSpeakerLabel } from "@/types";
 import { SpeakerRenameDialog } from "./MeetingDetails/SpeakerRenameDialog";
@@ -22,8 +23,13 @@ import { avatarGradients } from "@/vendor/deslop/primitives/tokens.js";
 import StreamingText from "@/vendor/deslop/mini-app/StreamingText";
 import { Icon } from "@/components/memento/Icon";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { RadioGroup, RadioItem } from "@/components/ui/fluid-radio-group";
+import { Input as FluidInput } from "@/components/ui/fluid-input";
+import { Button as FluidButton } from "@/components/ui/fluid-button";
+import { ShapeProvider } from "@/lib/shape-context";
 
 const ROLL_CALL_TIP_DISMISSED_KEY = 'memento:roll-call-tip-dismissed:v1';
+const ADD_NEW_SPEAKER_VALUE = '__add-new-speaker__';
 
 export interface VirtualizedTranscriptViewProps {
     /** Transcript segments to display */
@@ -68,6 +74,8 @@ export interface VirtualizedTranscriptViewProps {
     onSetSelfSpeaker?: (speakerId: number, isSelf: boolean) => Promise<void> | void;
     /** Attribute a line diarization could not attribute to a voice the user picks. */
     onAssignSegmentSpeaker?: (transcriptId: string, speakerId: number) => Promise<void> | void;
+    /** Add a named person and attribute the current line to them. */
+    onAddAndAssignSegmentSpeaker?: (transcriptId: string, displayName: string) => Promise<void> | void;
 
     /** Play the saved recording from a transcript-relative timestamp. */
     onPlayTimestamp?: (seconds: number) => void;
@@ -123,14 +131,8 @@ function cleanStopWords(text: string): string {
 }
 
 function speakerInitials(label: string): string {
-    const words = label.trim().split(/\s+/).filter(Boolean);
-    if (words.length === 0) return '?';
-
-    if (words.length === 1) {
-        return Array.from(words[0]).slice(0, 2).join('');
-    }
-
-    return `${Array.from(words[0])[0] ?? ''}${Array.from(words.at(-1) ?? '')[0] ?? ''}`;
+    const firstCharacter = Array.from(label.trim())[0];
+    return firstCharacter?.toLocaleUpperCase() ?? '?';
 }
 
 function formatRecognitionTime(value?: string | null): string | null {
@@ -242,16 +244,13 @@ const TranscriptSegment = memo(function TranscriptSegment({
     const recognitionTime = formatRecognitionTime(recognizedAt);
 
     const align = isOwn ? 'end' : 'start';
-    // A line diarization never attributed has no name to show. It used to borrow the word
-    // "Speaker", which reads as a name — and as the one name in the transcript that cannot
-    // be renamed, because there is no speaker row behind it. Say what is actually true
-    // instead: the voice was not recognised. The row keeps a caption either way, so the
-    // reader never loses track of who the transcript is quoting.
-    const avatarLabel = speakerLabel ?? t('Unrecognized voice');
+    // A live segment has no diarized profile yet, so there is no stable person name to
+    // render. Reuse the first generated animal label instead of exposing the technical
+    // "unrecognized voice" state; once diarization resolves the line, the real animal
+    // placeholder or confirmed name replaces it through `speakerLabel`.
+    const avatarLabel = speakerLabel ?? localizeSpeakerLabel('Speaker 1', t) ?? t('Unrecognized voice');
     const visibleSpeakerLabel = avatarLabel;
-    // "Сп" from the word "Спикер" read as somebody's initials. A voice we did not recognise
-    // has no initials, and the question mark says so.
-    const avatarInitials = speakerLabel == null ? '?' : speakerInitials(avatarLabel);
+    const avatarInitials = speakerInitials(avatarLabel);
     // IlyaGrshin/wallet_animations InitialsAvatar assigns one of seven colors by
     // `userId % 7`. Diarized speaker ids preserve that mapping; channel-only
     // transcripts use stable ids for the local and remote sides.
@@ -324,7 +323,7 @@ const TranscriptSegment = memo(function TranscriptSegment({
                                             <button
                                                 type="button"
                                                 onClick={onAssignClick}
-                                                className="speaker-rename-underline text-xs font-normal italic leading-4 text-[var(--deslop-primary-50)] hover:text-[var(--deslop-primary)] focus:outline-none"
+                                                className="speaker-rename-underline text-xs font-normal leading-4 text-[var(--deslop-primary-60)] hover:text-[var(--deslop-primary)] focus:outline-none"
                                             >
                                                 {visibleSpeakerLabel}
                                             </button>
@@ -333,12 +332,7 @@ const TranscriptSegment = memo(function TranscriptSegment({
                                     </Tooltip>
                                 ) : (
                                     <span
-                                        className={cn(
-                                            'text-xs font-normal leading-4',
-                                            speakerLabel == null
-                                                ? 'italic text-[var(--deslop-primary-50)]'
-                                                : 'text-[var(--deslop-primary-60)]',
-                                        )}
+                                        className="text-xs font-normal leading-4 text-[var(--deslop-primary-60)]"
                                     >
                                         {visibleSpeakerLabel}
                                     </span>
@@ -387,6 +381,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
     onRenameSpeaker,
     onSetSelfSpeaker,
     onAssignSegmentSpeaker,
+    onAddAndAssignSegmentSpeaker,
     onPlayTimestamp,
     playbackTime = null,
     onCorrectTranscript,
@@ -397,6 +392,9 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
     // Diarized speaker being renamed (null when the rename dialog is closed).
     const [renamingSpeaker, setRenamingSpeaker] = useState<{ id: number; name: string } | null>(null);
     const [assigningSegmentId, setAssigningSegmentId] = useState<string | null>(null);
+    const [assigningChoice, setAssigningChoice] = useState<string | null>(null);
+    const [newSpeakerName, setNewSpeakerName] = useState('');
+    const [isAssigningSpeaker, setIsAssigningSpeaker] = useState(false);
     const [editingSegment, setEditingSegment] = useState<{ id: string; text: string } | null>(null);
     const [isSavingCorrection, setIsSavingCorrection] = useState(false);
     const [showRollCallTip, setShowRollCallTip] = useState(false);
@@ -409,6 +407,59 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
         window.localStorage.setItem(ROLL_CALL_TIP_DISMISSED_KEY, 'true');
         setShowRollCallTip(false);
     }, []);
+
+    const closeAssignDialog = useCallback(() => {
+        if (isAssigningSpeaker) return;
+        setAssigningSegmentId(null);
+        setAssigningChoice(null);
+        setNewSpeakerName('');
+    }, [isAssigningSpeaker]);
+
+    const handleAssignExistingSpeaker = useCallback(async (value: string) => {
+        const segmentId = assigningSegmentId;
+        const speakerId = Number(value);
+        if (!segmentId || !Number.isInteger(speakerId) || !onAssignSegmentSpeaker || isAssigningSpeaker) {
+            return;
+        }
+
+        setIsAssigningSpeaker(true);
+        try {
+            await onAssignSegmentSpeaker(segmentId, speakerId);
+            setAssigningSegmentId(null);
+            setAssigningChoice(null);
+            setNewSpeakerName('');
+        } catch (error) {
+            toast.error(
+                typeof error === 'string'
+                    ? error
+                    : (error as any)?.message || t('Failed to save the speaker')
+            );
+        } finally {
+            setIsAssigningSpeaker(false);
+        }
+    }, [assigningSegmentId, isAssigningSpeaker, onAssignSegmentSpeaker, t]);
+
+    const handleAddNewSpeaker = useCallback(async () => {
+        const segmentId = assigningSegmentId;
+        const name = newSpeakerName.trim();
+        if (!segmentId || !name || !onAddAndAssignSegmentSpeaker || isAssigningSpeaker) return;
+
+        setIsAssigningSpeaker(true);
+        try {
+            await onAddAndAssignSegmentSpeaker(segmentId, name);
+            setAssigningSegmentId(null);
+            setAssigningChoice(null);
+            setNewSpeakerName('');
+        } catch (error) {
+            toast.error(
+                typeof error === 'string'
+                    ? error
+                    : (error as any)?.message || t('Failed to save the speaker')
+            );
+        } finally {
+            setIsAssigningSpeaker(false);
+        }
+    }, [assigningSegmentId, isAssigningSpeaker, newSpeakerName, onAddAndAssignSegmentSpeaker, t]);
 
     // `playbackTime` advances on every `timeupdate` (~4 Hz). Feeding it to each row would
     // rebuild the whole list four times a second for a highlight that moves once per
@@ -578,10 +629,13 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                         }
                                         onSpeakerClick={handleSpeakerClick}
                                         onAssignClick={
-                                            onAssignSegmentSpeaker
+                                            (onAssignSegmentSpeaker || onAddAndAssignSegmentSpeaker)
                                             && segment.speaker_id == null
-                                            && (speakersById?.size ?? 0) > 0
-                                                ? () => setAssigningSegmentId(segment.id)
+                                                ? () => {
+                                                    setAssigningSegmentId(segment.id);
+                                                    setAssigningChoice(null);
+                                                    setNewSpeakerName('');
+                                                }
                                                 : undefined
                                         }
                                         playbackActive={activePlaybackIds.has(segment.id)}
@@ -618,32 +672,74 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
         </MessageScrollerProvider>
 
             {/* A line diarization refused, handed to the person who was in the room. */}
-            <Dialog
-                open={assigningSegmentId != null}
-                onOpenChange={(open) => { if (!open) setAssigningSegmentId(null); }}
-            >
-                <DialogContent className="sm:max-w-[420px]">
-                    <DialogHeader>
-                        <DialogTitle>{t('Who said this?')}</DialogTitle>
-                    </DialogHeader>
-                    <div className="flex flex-col gap-1">
-                        {[...(speakersById?.entries() ?? [])].map(([id, name]) => (
-                            <button
-                                key={id}
-                                type="button"
-                                className="rounded-lg px-3 py-2 text-left text-sm hover:bg-[var(--primary-5)]"
-                                onClick={async () => {
-                                    const segmentId = assigningSegmentId;
-                                    setAssigningSegmentId(null);
-                                    if (segmentId) await onAssignSegmentSpeaker?.(segmentId, id);
+            <ShapeProvider defaultShape="rounded" publishToRoot={false}>
+                <Dialog
+                    open={assigningSegmentId != null}
+                    onOpenChange={(open) => { if (!open) closeAssignDialog(); }}
+                >
+                    <DialogContent className="sm:max-w-[420px]">
+                        <DialogHeader>
+                            <DialogTitle>{t('Who said this?')}</DialogTitle>
+                        </DialogHeader>
+                        <div className="flex flex-col gap-3">
+                            <RadioGroup
+                                value={assigningChoice ?? ''}
+                                onValueChange={(value) => {
+                                    setAssigningChoice(value);
+                                    if (value !== ADD_NEW_SPEAKER_VALUE) {
+                                        void handleAssignExistingSpeaker(value);
+                                    }
                                 }}
+                                className="w-full"
                             >
-                                {localizeSpeakerLabel(name, t)}
-                            </button>
-                        ))}
-                    </div>
-                </DialogContent>
-            </Dialog>
+                                {[...(speakersById?.entries() ?? [])].map(([id, name], index) => (
+                                    <RadioItem
+                                        key={id}
+                                        index={index}
+                                        value={String(id)}
+                                        label={localizeSpeakerLabel(name, t) ?? name}
+                                        className="w-full"
+                                    />
+                                ))}
+                                {onAddAndAssignSegmentSpeaker && (
+                                    <RadioItem
+                                        index={speakersById?.size ?? 0}
+                                        value={ADD_NEW_SPEAKER_VALUE}
+                                        label={t('Add another person')}
+                                        className="w-full"
+                                    />
+                                )}
+                            </RadioGroup>
+
+                            {assigningChoice === ADD_NEW_SPEAKER_VALUE && onAddAndAssignSegmentSpeaker && (
+                                <form
+                                    className="flex items-center gap-2"
+                                    onSubmit={(event) => {
+                                        event.preventDefault();
+                                        void handleAddNewSpeaker();
+                                    }}
+                                >
+                                    <FluidInput
+                                        autoFocus
+                                        value={newSpeakerName}
+                                        onChange={(event) => setNewSpeakerName(event.target.value)}
+                                        placeholder={t('New person name')}
+                                        disabled={isAssigningSpeaker}
+                                    />
+                                    <FluidButton
+                                        type="submit"
+                                        size="sm"
+                                        loading={isAssigningSpeaker}
+                                        disabled={!newSpeakerName.trim()}
+                                    >
+                                        {t('Add person')}
+                                    </FluidButton>
+                                </form>
+                            )}
+                        </div>
+                    </DialogContent>
+                </Dialog>
+            </ShapeProvider>
 
             {/* Rename affordance for diarized speakers (saved meetings only). */}
             {onRenameSpeaker && renamingSpeaker && (

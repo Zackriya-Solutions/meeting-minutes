@@ -1157,6 +1157,76 @@ pub async fn assign_segment_speaker(
     Ok(())
 }
 
+/// Create a named speaker from the user's manual attribution and attach the current line to it.
+///
+/// This is intentionally a separate action from automatic diarization: typing a person's name
+/// is an explicit assertion, so the profile is confirmed immediately, while no voice embedding
+/// is invented from a single ambiguous line. Future diarization may learn a voice for the profile
+/// once the user has confirmed enough examples through the existing rename flow.
+#[tauri::command]
+pub async fn add_and_assign_segment_speaker(
+    state: tauri::State<'_, AppState>,
+    meeting_id: String,
+    transcript_id: String,
+    display_name: String,
+) -> Result<i64, String> {
+    let name = display_name.trim();
+    if name.is_empty() {
+        return Err("Speaker name cannot be empty".to_string());
+    }
+    if name.chars().count() > 120 {
+        return Err("Speaker name is too long".to_string());
+    }
+
+    let pool = state.db_manager.pool();
+    let belongs: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM transcripts WHERE id=? AND meeting_id=?)",
+    )
+    .bind(&transcript_id)
+    .bind(&meeting_id)
+    .fetch_one(pool)
+    .await
+    .map_err(|error| error.to_string())?;
+    if !belongs {
+        return Err("This line does not belong to the meeting".to_string());
+    }
+
+    let mut transaction = pool
+        .begin()
+        .await
+        .map_err(|error| format!("Failed to start speaker attribution: {error}"))?;
+    let speaker_id: i64 = sqlx::query_scalar(
+        "INSERT INTO speakers(display_name, voice_embedding, is_confirmed) \
+         VALUES(?, NULL, 1) RETURNING id",
+    )
+    .bind(name)
+    .fetch_one(&mut *transaction)
+    .await
+    .map_err(|error| format!("Failed to add speaker: {error}"))?;
+
+    sqlx::query("UPDATE transcripts SET speaker_id=? WHERE id=? AND meeting_id=?")
+        .bind(speaker_id)
+        .bind(&transcript_id)
+        .bind(&meeting_id)
+        .execute(&mut *transaction)
+        .await
+        .map_err(|error| format!("Failed to attribute the line: {error}"))?;
+    sqlx::query("DELETE FROM unattributed_segments WHERE transcript_id=?")
+        .bind(&transcript_id)
+        .execute(&mut *transaction)
+        .await
+        .map_err(|error| error.to_string())?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| format!("Failed to save speaker attribution: {error}"))?;
+
+    log::info!(
+        "[diarize] line {transcript_id} attributed to newly added speaker {speaker_id}"
+    );
+    Ok(speaker_id)
+}
+
 /// Persist whether a diarized voice profile belongs to the local user.
 /// The repository clears any previous owner assignment in the same transaction.
 #[tauri::command]

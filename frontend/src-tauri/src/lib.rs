@@ -772,6 +772,7 @@ pub fn run() {
             pipeline::diarization_commands::get_meeting_speakers,
             pipeline::diarization_commands::rename_speaker,
             pipeline::diarization_commands::assign_segment_speaker,
+            pipeline::diarization_commands::add_and_assign_segment_speaker,
             pipeline::diarization_commands::set_self_speaker,
             pipeline::diarization_commands::set_meeting_diarization_prefs,
             learning::identity::get_identity_review,
