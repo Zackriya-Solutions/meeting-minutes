@@ -1,6 +1,8 @@
 use ndarray::{Array, Array1, Array2, Array3, ArrayD, ArrayViewD, IxDyn};
 use once_cell::sync::Lazy;
 use ort::execution_providers::CPUExecutionProvider;
+#[cfg(feature = "cuda")]
+use ort::execution_providers::CUDAExecutionProvider;
 use ort::inputs;
 use ort::session::builder::GraphOptimizationLevel;
 use ort::session::Session;
@@ -98,7 +100,14 @@ impl ParakeetModel {
         intra_threads: Option<usize>,
         try_quantized: bool,
     ) -> Result<Session, ParakeetError> {
-        let providers = vec![CPUExecutionProvider::default().build()];
+        // Try CUDA first; ort silently falls back to the next provider in the
+        // list (CPU) if CUDA/cuDNN aren't available or fail to initialize, so
+        // this is safe on machines without an NVIDIA GPU.
+        #[allow(unused_mut)]
+        let mut providers = Vec::new();
+        #[cfg(feature = "cuda")]
+        providers.push(CUDAExecutionProvider::default().build());
+        providers.push(CPUExecutionProvider::default().build());
 
         // Try quantized version first if requested, fallback to regular version
         let model_filename = if try_quantized {
