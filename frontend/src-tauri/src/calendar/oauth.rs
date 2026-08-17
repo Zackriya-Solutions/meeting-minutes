@@ -6,8 +6,11 @@ use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
-/// Read-only Calendar access — enough to see event times, titles, and conferencing links.
-pub const SCOPE: &str = "https://www.googleapis.com/auth/calendar.events.readonly";
+/// Read-only Calendar access, plus the (non-sensitive, no extra consent-screen config
+/// needed) `userinfo.email` scope — required for the userinfo endpoint to identify which
+/// account connected, otherwise it 401s even with a perfectly valid Calendar-scoped token.
+pub const SCOPE: &str =
+    "https://www.googleapis.com/auth/calendar.events.readonly https://www.googleapis.com/auth/userinfo.email";
 
 const AUTH_ENDPOINT: &str = "https://accounts.google.com/o/oauth2/v2/auth";
 const TOKEN_ENDPOINT: &str = "https://oauth2.googleapis.com/token";
