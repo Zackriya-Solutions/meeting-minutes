@@ -59,10 +59,19 @@ impl Drop for ParakeetModel {
 }
 
 impl ParakeetModel {
+    /// Thread budget for ONNX inference sessions. Left unset, onnxruntime defaults to using
+    /// every available CPU core, which starves the real-time audio capture/mixing threads
+    /// during live transcription. Reserve 2 cores for audio + UI.
+    fn thread_budget() -> usize {
+        let cores = crate::audio::HardwareProfile::detect().cpu_cores as usize;
+        cores.saturating_sub(2).max(2)
+    }
+
     pub fn new<P: AsRef<Path>>(model_dir: P, quantized: bool) -> Result<Self, ParakeetError> {
-        let encoder = Self::init_session(&model_dir, "encoder-model", None, quantized)?;
-        let decoder_joint = Self::init_session(&model_dir, "decoder_joint-model", None, quantized)?;
-        let preprocessor = Self::init_session(&model_dir, "nemo128", None, false)?;
+        let intra_threads = Some(Self::thread_budget());
+        let encoder = Self::init_session(&model_dir, "encoder-model", intra_threads, quantized)?;
+        let decoder_joint = Self::init_session(&model_dir, "decoder_joint-model", intra_threads, quantized)?;
+        let preprocessor = Self::init_session(&model_dir, "nemo128", intra_threads, false)?;
 
         let (vocab, blank_idx) = Self::load_vocab(&model_dir)?;
         let vocab_size = vocab.len();

@@ -397,7 +397,15 @@ impl ParakeetEngine {
 
                 // Load model based on quantization type
                 let quantized = model_info.quantization == QuantizationType::Int8;
-                let model = ParakeetModel::new(&model_info.path, quantized)
+                let model_path = model_info.path.clone();
+                drop(models); // release the read lock before the blocking load
+
+                // ONNX model loading (parsing + session init) is CPU/IO-bound;
+                // run it off the tokio worker pool so it doesn't stall other
+                // async work (chunk dispatch, event emission) while it loads.
+                let model = tokio::task::spawn_blocking(move || ParakeetModel::new(&model_path, quantized))
+                    .await
+                    .map_err(|e| anyhow!("Parakeet model load task panicked: {}", e))?
                     .map_err(|e| anyhow!("Failed to load Parakeet model {}: {}", model_name, e))?;
 
                 // Update current model and model name
@@ -464,9 +472,12 @@ impl ParakeetEngine {
             duration_seconds
         );
 
-        // Transcribe using Parakeet model
-        let result = model
-            .transcribe_samples(audio_data)
+        // Transcribe using Parakeet model. ONNX inference is CPU-bound; run it
+        // via block_in_place (rather than spawn_blocking) since `model` is a
+        // borrow tied to the held RwLock write guard and can't be moved onto
+        // another thread. This still lets tokio move other tasks off this
+        // worker thread while inference runs.
+        let result = tokio::task::block_in_place(|| model.transcribe_samples(audio_data))
             .map_err(|e| anyhow!("Parakeet transcription failed: {}", e))?;
 
         log::debug!("Parakeet transcription result: '{}'", result.text);

@@ -211,6 +211,9 @@ pub struct AudioCapture {
     // EBU R128 normalizer for microphone audio (per-device, stateful)
     normalizer: Arc<std::sync::Mutex<Option<LoudnessNormalizer>>>,
     // Note: Using global recording timestamp for synchronization
+    // Hands raw samples off to a dedicated DSP thread so the cpal real-time
+    // callback thread never runs resampling/noise-suppression/normalization.
+    dsp_sender: std::sync::mpsc::Sender<Vec<f32>>,
 }
 
 impl AudioCapture {
@@ -363,7 +366,9 @@ impl AudioCapture {
             None
         };
 
-        Self {
+        let (dsp_sender, dsp_receiver) = std::sync::mpsc::channel::<Vec<f32>>();
+
+        let capture = Self {
             device,
             state,
             sample_rate,
@@ -378,12 +383,43 @@ impl AudioCapture {
             noise_suppressor: Arc::new(std::sync::Mutex::new(noise_suppressor)),
             high_pass_filter: Arc::new(std::sync::Mutex::new(high_pass_filter)),
             normalizer: Arc::new(std::sync::Mutex::new(normalizer)),
+            dsp_sender,
             // Using global recording time for sync
+        };
+
+        // The resampling/noise-suppression/normalization work in
+        // `process_audio_data_sync` must never run on cpal's real-time callback
+        // thread (see `process_audio_data` below). Do it on a dedicated thread
+        // instead, fed by `dsp_sender`. The thread exits once every sender
+        // clone (held by the stream's callback closures) is dropped.
+        let worker = capture.clone();
+        std::thread::spawn(move || {
+            while let Ok(data) = dsp_receiver.recv() {
+                worker.process_audio_data_sync(&data);
+            }
+        });
+
+        capture
+    }
+
+    /// Callback-safe entry point. Runs directly on cpal's real-time OS audio
+    /// thread (ALSA/WASAPI/CoreAudio), which per cpal's contract must never
+    /// block or do heavy/allocating work. Only copies the samples and hands
+    /// them to the dedicated DSP thread — see `process_audio_data_sync` for
+    /// the actual resampling/noise-suppression/normalization work.
+    pub fn process_audio_data(&self, data: &[f32]) {
+        if !self.state.is_recording() {
+            return;
+        }
+        if self.dsp_sender.send(data.to_vec()).is_err() {
+            warn!("Audio DSP thread has shut down, dropping chunk");
         }
     }
 
-    /// Process audio data directly from callback
-    pub fn process_audio_data(&self, data: &[f32]) {
+    /// Heavy per-chunk DSP: resampling, noise suppression, loudness
+    /// normalization. Runs off the real-time audio thread — see
+    /// `process_audio_data`.
+    fn process_audio_data_sync(&self, data: &[f32]) {
         // Check if still recording
         if !self.state.is_recording() {
             return;
