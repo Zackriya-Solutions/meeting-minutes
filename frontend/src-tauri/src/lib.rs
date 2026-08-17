@@ -38,6 +38,7 @@ pub(crate) use perf_trace;
 pub mod analytics;
 pub mod api;
 pub mod audio;
+pub mod calendar;
 pub mod config;
 pub mod console_utils;
 pub mod database;
@@ -499,6 +500,9 @@ pub fn run() {
             })
             .expect("Failed to initialize database");
 
+            // Start the Google Calendar sync loop (no-op ticks until an account is connected)
+            calendar::poller::start(_app.handle().clone());
+
             // Initialize bundled templates directory for dynamic template discovery
             log::info!("Initializing bundled templates directory...");
             if let Ok(resource_path) = _app.handle().path().resource_dir() {
@@ -748,6 +752,11 @@ pub fn run() {
             audio::import::start_import_audio_command,
             audio::import::cancel_import_command,
             audio::import::is_import_in_progress_command,
+            // Google Calendar integration commands
+            calendar::commands::calendar_connect,
+            calendar::commands::calendar_disconnect,
+            calendar::commands::calendar_get_status,
+            calendar::commands::calendar_get_upcoming_events,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

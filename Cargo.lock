@@ -3615,6 +3615,7 @@ version = "0.4.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "base64 0.22.1",
  "bytemuck",
  "bytes",
  "chrono",
@@ -3653,6 +3654,7 @@ dependencies = [
  "rubato 0.15.0",
  "serde",
  "serde_json",
+ "sha2",
  "silero",
  "sqlx",
  "strsim 0.10.0",

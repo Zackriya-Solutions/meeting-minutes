@@ -59,6 +59,7 @@ which = "6.0.1"
 zip = "2.2"           # ZIP extraction (Windows, macOS)
 tar = "0.4"           # TAR extraction (Linux)
 xz2 = "0.1"           # XZ decompression (Linux)
+serde_json = "1.0"    # Parsing the local (gitignored) Google OAuth client JSON at build time
 
 
 [dependencies]
@@ -122,6 +123,10 @@ dirs = "5.0.1"
 
 # Additional dependencies for notification system
 url = "2.5.0"
+
+# Google Calendar OAuth (PKCE code_challenge)
+sha2 = "0.10"
+base64 = "0.22"
 
 
 # System monitoring for resource management

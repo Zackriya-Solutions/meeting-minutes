@@ -108,6 +108,36 @@ impl Setting {
 }
 
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
+pub struct CalendarAccount {
+    pub id: i64,
+    pub provider: String,
+    pub email: String,
+    pub access_token: String,
+    pub refresh_token: String,
+    pub token_expires_at: chrono::DateTime<chrono::Utc>,
+    pub scope: String,
+    pub status: String,
+    pub connected_at: chrono::DateTime<chrono::Utc>,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
+pub struct CalendarEvent {
+    pub id: String,
+    pub calendar_account_id: i64,
+    pub title: Option<String>,
+    pub start_time: chrono::DateTime<chrono::Utc>,
+    pub end_time: chrono::DateTime<chrono::Utc>,
+    pub meeting_url: Option<String>,
+    pub meeting_provider: Option<String>,
+    pub raw_json: Option<String>,
+    pub triggered_start_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub triggered_stop_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub linked_meeting_id: Option<String>,
+    pub synced_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
 pub struct TranscriptSetting {
     pub id: String,
     pub provider: String,

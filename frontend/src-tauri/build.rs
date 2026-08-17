@@ -1,9 +1,14 @@
 #[path = "build/ffmpeg.rs"]
 mod ffmpeg;
+#[path = "build/google_oauth.rs"]
+mod google_oauth;
 
 fn main() {
     // GPU Acceleration Detection and Build Guidance
     detect_and_report_gpu_capabilities();
+
+    // Embed Google Calendar OAuth client credentials (if configured locally)
+    google_oauth::embed_credentials_if_present();
 
     #[cfg(target_os = "macos")]
     {
