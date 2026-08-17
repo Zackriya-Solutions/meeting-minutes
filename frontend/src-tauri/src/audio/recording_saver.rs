@@ -11,6 +11,10 @@ use super::recording_state::AudioChunk;
 use super::audio_processing::create_meeting_folder;
 use super::incremental_saver::IncrementalAudioSaver;
 
+fn default_transcript_source() -> String {
+    "Audio".to_string()
+}
+
 /// Structured transcript segment for JSON export
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TranscriptSegment {
@@ -22,6 +26,8 @@ pub struct TranscriptSegment {
     pub display_time: String,   // Formatted time for display like "[02:15]"
     pub confidence: f32,
     pub sequence_id: u64,
+    #[serde(default = "default_transcript_source")]
+    pub source: String,
 }
 
 /// Meeting metadata structure
@@ -129,6 +135,7 @@ impl RecordingSaver {
             display_time: "[00:00]".to_string(),
             confidence: 1.0,
             sequence_id: 0,
+            source: "Audio".to_string(),
         };
         self.add_transcript_segment(segment);
     }
@@ -481,5 +488,45 @@ impl RecordingSaver {
 impl Default for RecordingSaver {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn legacy_transcript_json_without_source_defaults_to_audio() {
+        let legacy = r#"{
+            "id": "seg-1",
+            "text": "hello",
+            "audio_start_time": 0.0,
+            "audio_end_time": 1.5,
+            "duration": 1.5,
+            "display_time": "[00:00]",
+            "confidence": 1.0,
+            "sequence_id": 0
+        }"#;
+        let segment: TranscriptSegment =
+            serde_json::from_str(legacy).expect("legacy segment must still deserialize");
+        assert_eq!(segment.source, "Audio");
+    }
+
+    #[test]
+    fn transcript_segment_persists_and_reloads_source() {
+        let segment = TranscriptSegment {
+            id: "seg-2".to_string(),
+            text: "ola".to_string(),
+            audio_start_time: 1.0,
+            audio_end_time: 2.0,
+            duration: 1.0,
+            display_time: "[00:01]".to_string(),
+            confidence: 0.9,
+            sequence_id: 1,
+            source: "Você".to_string(),
+        };
+        let json = serde_json::to_string(&segment).expect("serialize");
+        let reloaded: TranscriptSegment = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(reloaded.source, "Você");
     }
 }

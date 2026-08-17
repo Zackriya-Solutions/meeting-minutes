@@ -11,7 +11,7 @@ use rubato::{Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolat
 use super::devices::AudioDevice;
 use super::recording_state::{AudioChunk, AudioError, RecordingState, DeviceType};
 use super::audio_processing::{audio_to_mono, LoudnessNormalizer, NoiseSuppressionProcessor, HighPassFilter};
-use super::vad::{ContinuousVadProcessor};
+use super::vad::{ContinuousVadProcessor, SpeechSegment};
 
 /// Ring buffer for synchronized audio mixing
 /// Accumulates samples from mic and system streams until we have aligned windows
@@ -682,6 +682,7 @@ pub struct AudioPipeline {
     transcription_sender: mpsc::UnboundedSender<AudioChunk>,
     state: Arc<RecordingState>,
     vad_processor: ContinuousVadProcessor,
+    system_vad_processor: ContinuousVadProcessor,
     sample_rate: u32,
     chunk_id_counter: u64,
     // Performance optimization: reduce logging frequency
@@ -737,6 +738,14 @@ impl AudioPipeline {
             }
         };
 
+        let system_vad_processor = match ContinuousVadProcessor::new(sample_rate, redemption_time) {
+            Ok(processor) => processor,
+            Err(e) => {
+                error!("Failed to create system audio VAD processor: {}", e);
+                panic!("System audio VAD processor creation failed: {}", e);
+            }
+        };
+
         // Initialize professional audio mixing components
         let ring_buffer = AudioMixerRingBuffer::new(sample_rate);
         let mixer = ProfessionalAudioMixer::new(sample_rate);
@@ -749,6 +758,7 @@ impl AudioPipeline {
             transcription_sender,
             state,
             vad_processor,
+            system_vad_processor,
             sample_rate,
             chunk_id_counter: 0,
             // Performance optimization: reduce logging frequency
@@ -831,44 +841,29 @@ impl AudioPipeline {
                             // Previous 2x gain was causing excessive limiting/distortion
                             let mixed_with_gain = mixed_clean;
 
-                            // STEP 3: Send mixed audio for transcription (VAD + Whisper)
-                            match self.vad_processor.process_audio(&mixed_with_gain) {
+                            // STEP 3: Send each channel independently for transcription (VAD + Whisper)
+                            match self.vad_processor.process_audio(&mic_window) {
                                 Ok(speech_segments) => {
-                                    for segment in speech_segments {
-                                        let duration_ms = segment.end_timestamp_ms - segment.start_timestamp_ms;
-
-                                        if segment.samples.len() >= 800 {  // Minimum 50ms at 16kHz - matches Parakeet capability
-                                            info!("📤 Sending VAD segment: {:.1}ms, {} samples",
-                                                  duration_ms, segment.samples.len());
-
-                                            let transcription_chunk = AudioChunk {
-                                                data: segment.samples,
-                                                sample_rate: 16000,
-                                                timestamp: segment.start_timestamp_ms / 1000.0,
-                                                chunk_id: self.chunk_id_counter,
-                                                device_type: DeviceType::Microphone,  // Mixed audio
-                                            };
-
-                                            if let Err(e) = self.transcription_sender.send(transcription_chunk) {
-                                                warn!("Failed to send VAD segment: {}", e);
-                                            } else {
-                                                self.chunk_id_counter += 1;
-                                            }
-                                        } else {
-                                            debug!("⏭️ Dropping short VAD segment: {:.1}ms ({} samples < 800)",
-                                                   duration_ms, segment.samples.len());
-                                        }
-                                    }
+                                    self.send_vad_segments(speech_segments, DeviceType::Microphone, false);
                                 }
                                 Err(e) => {
-                                    warn!("⚠️ VAD error: {}", e);
+                                    warn!("⚠️ Microphone VAD error: {}", e);
+                                }
+                            }
+
+                            match self.system_vad_processor.process_audio(&sys_window) {
+                                Ok(speech_segments) => {
+                                    self.send_vad_segments(speech_segments, DeviceType::System, false);
+                                }
+                                Err(e) => {
+                                    warn!("⚠️ System audio VAD error: {}", e);
                                 }
                             }
 
                             // STEP 4: Send mixed audio for recording (WAV file)
                             if let Some(ref sender) = self.recording_sender_for_mixed {
                                 let recording_chunk = AudioChunk {
-                                    data: mixed_with_gain.clone(),
+                                    data: mixed_with_gain,
                                     sample_rate: self.sample_rate,
                                     timestamp: chunk.timestamp,
                                     chunk_id: self.chunk_id_counter,
@@ -900,42 +895,70 @@ impl AudioPipeline {
     fn flush_remaining_audio(&mut self) -> Result<()> {
         info!("Flushing remaining audio from pipeline (processed {} chunks)", self.processed_chunks);
 
-        // Flush any remaining audio from VAD processor and send segments to transcription
+        // Flush both channel-specific VAD processors and send segments to transcription.
         match self.vad_processor.flush() {
             Ok(final_segments) => {
-                for segment in final_segments {
-                    let duration_ms = segment.end_timestamp_ms - segment.start_timestamp_ms;
-
-                    // Send segments >= 50ms (800 samples at 16kHz) - matches main pipeline filter
-                    if segment.samples.len() >= 800 {
-                        info!("📤 Sending final VAD segment to Whisper: {:.1}ms duration, {} samples",
-                              duration_ms, segment.samples.len());
-
-                        let transcription_chunk = AudioChunk {
-                            data: segment.samples,
-                            sample_rate: 16000,
-                            timestamp: segment.start_timestamp_ms / 1000.0,
-                            chunk_id: self.chunk_id_counter,
-                            device_type: DeviceType::Microphone,
-                        };
-
-                        if let Err(e) = self.transcription_sender.send(transcription_chunk) {
-                            warn!("Failed to send final VAD segment: {}", e);
-                        } else {
-                            self.chunk_id_counter += 1;
-                        }
-                    } else {
-                        info!("⏭️ Skipping short final segment: {:.1}ms ({} samples < 800)",
-                              duration_ms, segment.samples.len());
-                    }
-                }
+                self.send_vad_segments(final_segments, DeviceType::Microphone, true);
             }
             Err(e) => {
-                warn!("Failed to flush VAD processor: {}", e);
+                warn!("Failed to flush microphone VAD processor: {}", e);
+            }
+        }
+
+        match self.system_vad_processor.flush() {
+            Ok(final_segments) => {
+                self.send_vad_segments(final_segments, DeviceType::System, true);
+            }
+            Err(e) => {
+                warn!("Failed to flush system audio VAD processor: {}", e);
             }
         }
 
         Ok(())
+    }
+
+    fn send_vad_segments(
+        &mut self,
+        speech_segments: Vec<SpeechSegment>,
+        device_type: DeviceType,
+        is_final: bool,
+    ) {
+        for segment in speech_segments {
+            let duration_ms = segment.end_timestamp_ms - segment.start_timestamp_ms;
+
+            // Send segments >= 50ms (800 samples at 16kHz) - matches Parakeet capability.
+            if segment.samples.len() < 800 {
+                debug!(
+                    "⏭️ Dropping {}short VAD segment: {:.1}ms ({} samples < 800)",
+                    if is_final { "final " } else { "" },
+                    duration_ms,
+                    segment.samples.len()
+                );
+                continue;
+            }
+
+            info!(
+                "📤 Sending {}VAD segment: {:.1}ms, {} samples ({:?})",
+                if is_final { "final " } else { "" },
+                duration_ms,
+                segment.samples.len(),
+                device_type
+            );
+
+            let transcription_chunk = AudioChunk {
+                data: segment.samples,
+                sample_rate: 16000,
+                timestamp: segment.start_timestamp_ms / 1000.0,
+                chunk_id: self.chunk_id_counter,
+                device_type: device_type.clone(),
+            };
+
+            if let Err(e) = self.transcription_sender.send(transcription_chunk) {
+                warn!("Failed to send {}VAD segment: {}", if is_final { "final " } else { "" }, e);
+            } else {
+                self.chunk_id_counter += 1;
+            }
+        }
     }
 
 }
@@ -1076,5 +1099,180 @@ impl AudioPipelineManager {
 impl Default for AudioPipelineManager {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::audio::device_detection::InputDeviceKind;
+    use crate::audio::recording_state::RecordingState;
+
+    // 16kHz input skips the VAD's internal resampling so Silero sees the exact
+    // signal the vad.rs unit tests already prove it detects. The pipeline logic
+    // under test (per-channel routing, tagging, filtering, flush) is
+    // sample-rate-agnostic.
+    const TEST_SAMPLE_RATE: u32 = 16000;
+
+    /// Speech-like signal for Silero: a 120Hz glottal-style harmonic stack with
+    /// formant emphasis, 4Hz syllabic amplitude modulation, and slow pitch
+    /// drift. Tuned so the VAD detects speech in any 600ms window, not only
+    /// when the signal starts at sample zero.
+    fn speech_like_samples(duration_seconds: f32) -> Vec<f32> {
+        let total = (duration_seconds * TEST_SAMPLE_RATE as f32) as usize;
+        let two_pi = 2.0 * std::f32::consts::PI;
+        (0..total)
+            .map(|i| {
+                let time = i as f32 / TEST_SAMPLE_RATE as f32;
+                let f0 = 120.0 + 15.0 * (two_pi * 0.7 * time).sin();
+                // Syllable envelope: 4 syllables/sec, never fully silent
+                let syllable = 0.55 + 0.45 * (two_pi * 4.0 * time).sin().abs();
+                // Harmonic stack with formant-like emphasis around 700/1200/2600 Hz
+                let mut sample = 0.0f32;
+                for harmonic in 1..=20 {
+                    let freq = f0 * harmonic as f32;
+                    if freq > 4000.0 {
+                        break;
+                    }
+                    let formant_gain = ((-((freq - 700.0) / 350.0).powi(2)).exp()
+                        + 0.7 * (-((freq - 1200.0) / 400.0).powi(2)).exp()
+                        + 0.4 * (-((freq - 2600.0) / 600.0).powi(2)).exp())
+                        + 0.05;
+                    sample += formant_gain * (two_pi * freq * time).sin();
+                }
+                0.25 * syllable * sample / 3.0
+            })
+            .collect()
+    }
+
+    /// Feed mic and system sample streams through a real AudioPipeline (real VAD)
+    /// and return (transcription chunks, mixed recording chunks).
+    async fn run_pipeline_with(mic: Vec<f32>, system: Vec<f32>) -> (Vec<AudioChunk>, Vec<AudioChunk>) {
+        let (input_tx, input_rx) = mpsc::unbounded_channel();
+        let (transcription_tx, mut transcription_rx) = mpsc::unbounded_channel();
+        let (recording_tx, mut recording_rx) = mpsc::unbounded_channel();
+
+        let mut pipeline = AudioPipeline::new(
+            input_rx,
+            transcription_tx,
+            RecordingState::new(),
+            0,
+            TEST_SAMPLE_RATE,
+            "test-mic".to_string(),
+            InputDeviceKind::Wired,
+            "test-system".to_string(),
+            InputDeviceKind::Wired,
+        );
+        pipeline.recording_sender_for_mixed = Some(recording_tx);
+
+        let window = (TEST_SAMPLE_RATE as usize * 600) / 1000;
+        for (i, (mic_chunk, sys_chunk)) in mic.chunks(window).zip(system.chunks(window)).enumerate() {
+            input_tx
+                .send(AudioChunk {
+                    data: mic_chunk.to_vec(),
+                    sample_rate: TEST_SAMPLE_RATE,
+                    timestamp: i as f64 * 0.6,
+                    chunk_id: i as u64,
+                    device_type: DeviceType::Microphone,
+                })
+                .unwrap();
+            input_tx
+                .send(AudioChunk {
+                    data: sys_chunk.to_vec(),
+                    sample_rate: TEST_SAMPLE_RATE,
+                    timestamp: i as f64 * 0.6,
+                    chunk_id: i as u64,
+                    device_type: DeviceType::System,
+                })
+                .unwrap();
+        }
+        drop(input_tx);
+
+        pipeline.run().await.expect("pipeline run failed");
+
+        let mut transcription_chunks = Vec::new();
+        while let Ok(chunk) = transcription_rx.try_recv() {
+            transcription_chunks.push(chunk);
+        }
+        let mut recording_chunks = Vec::new();
+        while let Ok(chunk) = recording_rx.try_recv() {
+            recording_chunks.push(chunk);
+        }
+        (transcription_chunks, recording_chunks)
+    }
+
+    #[tokio::test]
+    async fn microphone_speech_is_tagged_microphone_and_silent_system_stays_quiet() {
+        let mic = speech_like_samples(5.0);
+        let system = vec![0.0f32; mic.len()];
+        let (transcription, recording) = run_pipeline_with(mic, system).await;
+
+        assert!(
+            !transcription.is_empty(),
+            "expected VAD segments from microphone speech"
+        );
+        for chunk in &transcription {
+            assert_eq!(
+                chunk.device_type,
+                DeviceType::Microphone,
+                "silent system channel must not produce transcription chunks"
+            );
+            assert_eq!(chunk.sample_rate, 16000);
+            assert!(
+                chunk.data.len() >= 800,
+                "segment below 800-sample minimum: {}",
+                chunk.data.len()
+            );
+        }
+        let ids: Vec<u64> = transcription.iter().map(|c| c.chunk_id).collect();
+        assert_eq!(
+            ids,
+            (0..ids.len() as u64).collect::<Vec<_>>(),
+            "chunk ids must increment from 0"
+        );
+
+        assert!(
+            !recording.is_empty(),
+            "mixed recording path must still receive audio"
+        );
+        assert!(recording.iter().all(|c| c.sample_rate == TEST_SAMPLE_RATE));
+    }
+
+    #[tokio::test]
+    async fn system_speech_is_tagged_system_when_microphone_is_silent() {
+        let system = speech_like_samples(5.0);
+        let mic = vec![0.0f32; system.len()];
+        let (transcription, _recording) = run_pipeline_with(mic, system).await;
+
+        assert!(
+            !transcription.is_empty(),
+            "expected VAD segments from system speech"
+        );
+        for chunk in &transcription {
+            assert_eq!(
+                chunk.device_type,
+                DeviceType::System,
+                "system speech must be tagged DeviceType::System, not attributed to the microphone"
+            );
+            assert!(chunk.data.len() >= 800);
+        }
+    }
+
+    #[tokio::test]
+    async fn simultaneous_speech_produces_chunks_from_both_channels() {
+        let mic = speech_like_samples(5.0);
+        let system = speech_like_samples(5.0);
+        let (transcription, _recording) = run_pipeline_with(mic, system).await;
+
+        let mic_chunks = transcription
+            .iter()
+            .filter(|c| c.device_type == DeviceType::Microphone)
+            .count();
+        let system_chunks = transcription
+            .iter()
+            .filter(|c| c.device_type == DeviceType::System)
+            .count();
+        assert!(mic_chunks > 0, "expected microphone-tagged segments");
+        assert!(system_chunks > 0, "expected system-tagged segments");
     }
 }

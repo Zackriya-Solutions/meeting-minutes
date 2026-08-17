@@ -307,6 +307,7 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
             id: `${Date.now()}-${transcriptCounter++}`,
             text: update.text,
             timestamp: update.timestamp,
+            source: update.source,
             sequence_id: update.sequence_id,
             chunk_start_time: update.chunk_start_time,
             is_partial: update.is_partial,
@@ -376,6 +377,7 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
             id: segment.id,
             text: segment.text,
             timestamp: segment.display_time, // Use display_time for UI
+            source: segment.source,
             sequence_id: segment.sequence_id,
             chunk_start_time: segment.audio_start_time,
             is_partial: false, // History segments are always final
@@ -417,6 +419,7 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
       id: update.sequence_id ? update.sequence_id.toString() : Date.now().toString(),
       text: update.text,
       timestamp: update.timestamp,
+      source: update.source,
       sequence_id: update.sequence_id || 0,
       chunk_start_time: update.chunk_start_time,
       is_partial: update.is_partial,

@@ -272,6 +272,12 @@ export const TranscriptView: React.FC<TranscriptViewProps> = ({ transcripts, isR
         // Sizer text: use cleaned version for proper sizing, fallback to [Silence] only if original was empty
         const sizerText = cleanStopWords(isStreaming ? streamingTranscript.fullText : transcript.text)
           || (originalWasEmpty && !isStreaming ? '[Silence]' : '');
+        const speakerLabel = transcript.source && transcript.source !== 'Audio'
+          ? transcript.source
+          : null;
+        const speakerLabelClass = speakerLabel === 'Você'
+          ? 'bg-blue-100 text-blue-700'
+          : 'bg-gray-100 text-gray-600';
 
         return (
           <motion.div
@@ -305,6 +311,11 @@ export const TranscriptView: React.FC<TranscriptViewProps> = ({ transcripts, isR
                 </TooltipContent>
               </Tooltip>
               <div className="flex-1">
+                {speakerLabel && (
+                  <span className={`mb-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-medium ${speakerLabelClass}`}>
+                    {speakerLabel}
+                  </span>
+                )}
                 {isStreaming ? (
                   // Streaming transcript - show in bubble (full width)
                   <div className="bg-gray-100 border border-gray-200 rounded-lg px-3 py-2">

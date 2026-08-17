@@ -166,6 +166,7 @@ export function useTranscriptRecovery(): UseTranscriptRecoveryReturn {
         id: t.id?.toString() || `${Date.now()}-${index}`,
         text: t.text,
         timestamp: t.timestamp,
+        source: (t as { source?: string }).source,
         sequence_id: t.sequenceId || index,
         chunk_start_time: (t as any).chunk_start_time,
         is_partial: (t as any).is_partial || false,

@@ -7,10 +7,17 @@ use crate::audio::devices::configuration::{AudioDevice, DeviceType};
 pub fn configure_linux_audio(host: &cpal::Host) -> Result<Vec<AudioDevice>> {
     let mut devices = Vec::new();
 
-    // Add input devices
+    // Add input devices. The virtual "meetily_system" ALSA device captures the
+    // default output monitor; expose it only in the System (Output) slot so the
+    // microphone and system audio can be recorded as separate, labeled streams.
     for device in host.input_devices()? {
         if let Ok(name) = device.name() {
-            devices.push(AudioDevice::new(name, DeviceType::Input));
+            let device_type = if name.contains("meetily_system") {
+                DeviceType::Output
+            } else {
+                DeviceType::Input
+            };
+            devices.push(AudioDevice::new(name, device_type));
         }
     }
 
