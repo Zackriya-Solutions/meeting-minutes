@@ -209,7 +209,7 @@ class StatsModuleTests(unittest.TestCase):
         self.assertEqual(overview["dau"], 1)
         self.assertEqual(overview["sessions_per_dau"], 0.0)
 
-    def test_overview_uses_moscow_day_iso_week_and_rolling_30_day_mau(self) -> None:
+    def test_overview_uses_moscow_day_and_rolling_7_and_30_day_windows(self) -> None:
         now = datetime(2026, 7, 8, 12, 0, tzinfo=timezone.utc).timestamp()
         events = [
             {"ts": datetime(2026, 7, 7, 21, 1, tzinfo=timezone.utc).timestamp(),
@@ -231,7 +231,9 @@ class StatsModuleTests(unittest.TestCase):
             growth = server.compute_product(1)["growth"]
 
         self.assertEqual(growth["dau"], 1)
-        self.assertEqual(growth["wau"], 2)
+        # Устройство "month" активно в воскресенье 05.07 — прошлая ISO-неделя,
+        # но внутри скользящих семи дат (решение флота 17.08.2026).
+        self.assertEqual(growth["wau"], 3)
         self.assertEqual(growth["mau"], 4)
 
     def test_ingest_requires_a_per_install_credential(self) -> None:
