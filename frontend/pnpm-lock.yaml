@@ -95,9 +95,6 @@ importers:
       '@tauri-apps/api':
         specifier: ^2.6.0
         version: 2.11.0
-      '@tauri-apps/plugin-fs':
-        specifier: ^2.4.0
-        version: 2.5.1
       '@tauri-apps/plugin-notification':
         specifier: ~2.3.1
         version: 2.3.3
@@ -186,6 +183,9 @@ importers:
       '@tauri-apps/cli':
         specifier: ^2.1.0
         version: 2.11.1
+      '@tauri-apps/plugin-fs':
+        specifier: ^2.5.1
+        version: 2.5.1
       '@types/node':
         specifier: ^20
         version: 20.19.41

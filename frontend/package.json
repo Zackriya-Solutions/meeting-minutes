@@ -57,7 +57,6 @@
         "@remirror/react": "^3.0.1",
         "@tanstack/react-virtual": "^3.13.13",
         "@tauri-apps/api": "^2.6.0",
-        "@tauri-apps/plugin-fs": "^2.4.0",
         "@tauri-apps/plugin-notification": "~2.3.1",
         "@tauri-apps/plugin-os": "^2.3.2",
         "@tauri-apps/plugin-process": "^2.3.0",
@@ -98,7 +97,7 @@
     "devDependencies": {
         "@tailwindcss/typography": "^0.5.15",
         "@tauri-apps/cli": "^2.1.0",
-        "@tauri-apps/plugin-fs": "~2.4.0",
+        "@tauri-apps/plugin-fs": "^2.5.1",
         "@types/node": "^20",
         "@types/react": "^18.3.18",
         "@types/react-dom": "^18.3.5",
