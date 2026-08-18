@@ -1357,6 +1357,11 @@ impl AudioPipelineManager {
         }
     }
 
+    #[cfg(test)]
+    pub(crate) fn inject_stop_failure_for_test(&mut self, message: &'static str) {
+        self.pipeline_handle = Some(tokio::spawn(async move { Err(anyhow::anyhow!(message)) }));
+    }
+
     /// Start the audio pipeline with device information for adaptive buffering
     pub fn start(
         &mut self,

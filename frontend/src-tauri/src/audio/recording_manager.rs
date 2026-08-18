@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use log::{debug, error, info, warn};
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -291,6 +291,7 @@ impl RecordingManager {
     /// Stop streams and force immediate pipeline flush to process all accumulated audio
     pub async fn stop_streams_and_force_flush(&mut self) -> Result<()> {
         info!("🚀 Stopping recording streams with IMMEDIATE pipeline flush");
+        let mut stop_errors = Vec::new();
 
         // CRITICAL: Stop device monitor FIRST to prevent continuous WASAPI polling on Windows
         // This fixes the slow shutdown issue where device enumeration runs for 90+ seconds
@@ -305,16 +306,25 @@ impl RecordingManager {
         // Stop audio streams immediately
         if let Err(e) = self.stream_manager.stop_streams() {
             error!("Error stopping audio streams: {}", e);
+            stop_errors.push(format!("audio streams: {e}"));
         }
 
         // CRITICAL: Force pipeline to flush ALL accumulated audio before stopping
         debug!("💨 Forcing pipeline to flush accumulated audio immediately");
         if let Err(e) = self.pipeline_manager.force_flush_and_stop().await {
             error!("Error during force flush: {}", e);
+            stop_errors.push(format!("audio pipeline: {e}"));
         }
 
-        info!("✅ Recording streams stopped with immediate flush completed");
-        Ok(())
+        if stop_errors.is_empty() {
+            info!("✅ Recording streams stopped with immediate flush completed");
+            Ok(())
+        } else {
+            Err(anyhow!(
+                "Recording shutdown encountered errors: {}",
+                stop_errors.join("; ")
+            ))
+        }
     }
 
     /// Save recording after transcription is complete
@@ -688,5 +698,62 @@ impl Drop for RecordingManager {
     fn drop(&mut self) {
         // Note: Can't call async cleanup in Drop, but streams have their own Drop implementations
         self.state.cleanup();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn missing_streams_roll_back_pipeline_state_and_saver_task() {
+        let mut manager = RecordingManager::new();
+
+        let error = manager
+            .start_recording(None, None, false)
+            .await
+            .expect_err("starting without any devices must fail");
+
+        assert!(error.to_string().contains("No audio streams"));
+        assert!(!manager.is_recording());
+        assert_eq!(manager.active_stream_count(), 0);
+        assert!(manager
+            .state
+            .send_audio_chunk(AudioChunk {
+                data: vec![0.0; 64],
+                sample_rate: 48_000,
+                timestamp: 0.0,
+                chunk_id: 1,
+                device_type: RecordingDeviceType::Microphone,
+                speaker: None,
+            })
+            .is_err());
+
+        let saver_task = manager
+            .recording_saver
+            .take_accumulation_task_for_test()
+            .expect("accumulator was started before stream initialization");
+        tokio::time::timeout(std::time::Duration::from_secs(2), saver_task)
+            .await
+            .expect("rollback must close the saver channel")
+            .expect("saver task must not panic");
+    }
+
+    #[tokio::test]
+    async fn force_stop_propagates_pipeline_failure_after_attempting_cleanup() {
+        let mut manager = RecordingManager::new();
+        manager
+            .pipeline_manager
+            .inject_stop_failure_for_test("injected pipeline stop failure");
+
+        let error = manager
+            .stop_streams_and_force_flush()
+            .await
+            .expect_err("pipeline failure must reach the command layer");
+
+        let message = error.to_string();
+        assert!(message.contains("audio pipeline"));
+        assert!(message.contains("injected pipeline stop failure"));
+        assert!(!manager.is_recording());
     }
 }

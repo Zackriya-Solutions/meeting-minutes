@@ -23,6 +23,7 @@ use super::{
 };
 
 // Import transcription modules
+use super::recording_saver::{TranscriptSegment, TranscriptSink};
 use super::transcription::{self, reset_speech_detected_flag};
 
 // Re-export TranscriptUpdate for backward compatibility
@@ -56,6 +57,50 @@ pub struct TranscriptionStatus {
     pub chunks_in_queue: usize,
     pub is_processing: bool,
     pub last_activity_ms: u64,
+}
+
+#[derive(Debug, Serialize, Clone, PartialEq, Eq)]
+pub struct StopRecordingOutcome {
+    pub status: String,
+    pub message: String,
+    pub stop_error: Option<String>,
+}
+
+fn shutdown_completion(stop_error: Option<&str>) -> StopRecordingOutcome {
+    match stop_error {
+        Some(error) => StopRecordingOutcome {
+            status: "completed_with_warnings".to_string(),
+            message: format!(
+                "Recording data was finalized, but audio capture did not stop cleanly: {error}"
+            ),
+            stop_error: Some(error.to_string()),
+        },
+        None => StopRecordingOutcome {
+            status: "success".to_string(),
+            message: "Recording stopped successfully".to_string(),
+            stop_error: None,
+        },
+    }
+}
+
+fn persist_transcript_event(transcript_sink: &TranscriptSink, payload: &str) -> bool {
+    let Ok(update) = serde_json::from_str::<TranscriptUpdate>(payload) else {
+        warn!("Ignoring malformed transcript-update event payload");
+        return false;
+    };
+
+    transcript_sink.add(TranscriptSegment {
+        id: format!("seg_{}", update.sequence_id),
+        text: update.text,
+        audio_start_time: update.audio_start_time,
+        audio_end_time: update.audio_end_time,
+        duration: update.duration,
+        display_time: update.timestamp,
+        confidence: update.confidence,
+        sequence_id: update.sequence_id,
+        speaker: update.speaker,
+    });
+    true
 }
 
 // ============================================================================
@@ -300,23 +345,7 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
     {
         use tauri::Listener;
         let listener_id = app.listen("transcript-update", move |event: tauri::Event| {
-            // Parse the transcript update from the event payload
-            if let Ok(update) = serde_json::from_str::<TranscriptUpdate>(event.payload()) {
-                // Create structured transcript segment
-                let segment = crate::audio::recording_saver::TranscriptSegment {
-                    id: format!("seg_{}", update.sequence_id),
-                    text: update.text.clone(),
-                    audio_start_time: update.audio_start_time,
-                    audio_end_time: update.audio_end_time,
-                    duration: update.duration,
-                    display_time: update.timestamp.clone(), // Use wall-clock timestamp for display
-                    confidence: update.confidence,
-                    sequence_id: update.sequence_id,
-                    speaker: update.speaker.clone(),
-                };
-
-                transcript_sink.add(segment);
-            }
+            persist_transcript_event(&transcript_sink, event.payload());
         });
         let mut global_listener = TRANSCRIPT_LISTENER_ID.lock().unwrap();
         *global_listener = Some(listener_id);
@@ -482,23 +511,7 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
     {
         use tauri::Listener;
         let listener_id = app.listen("transcript-update", move |event: tauri::Event| {
-            // Parse the transcript update from the event payload
-            if let Ok(update) = serde_json::from_str::<TranscriptUpdate>(event.payload()) {
-                // Create structured transcript segment
-                let segment = crate::audio::recording_saver::TranscriptSegment {
-                    id: format!("seg_{}", update.sequence_id),
-                    text: update.text.clone(),
-                    audio_start_time: update.audio_start_time,
-                    audio_end_time: update.audio_end_time,
-                    duration: update.duration,
-                    display_time: update.timestamp.clone(), // Use wall-clock timestamp for display
-                    confidence: update.confidence,
-                    sequence_id: update.sequence_id,
-                    speaker: update.speaker.clone(),
-                };
-
-                transcript_sink.add(segment);
-            }
+            persist_transcript_event(&transcript_sink, event.payload());
         });
         let mut global_listener = TRANSCRIPT_LISTENER_ID.lock().unwrap();
         *global_listener = Some(listener_id);
@@ -534,7 +547,7 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
 pub async fn stop_recording<R: Runtime>(
     app: AppHandle<R>,
     _args: RecordingArgs,
-) -> Result<(), String> {
+) -> Result<StopRecordingOutcome, String> {
     info!(
         "🛑 Starting optimized recording shutdown - ensuring ALL transcript chunks are preserved"
     );
@@ -548,7 +561,7 @@ pub async fn stop_recording<R: Runtime>(
         .is_err()
     {
         info!("Recording was not active");
-        return Ok(());
+        return Ok(shutdown_completion(None));
     }
 
     // Emit shutdown progress to frontend
@@ -576,16 +589,29 @@ pub async fn stop_recording<R: Runtime>(
         Ok(())
     };
 
-    match stop_result {
+    let stream_stop_error = match stop_result {
         Ok(_) => {
             info!("✅ Audio streams stopped successfully - no more chunks will be created");
+            None
         }
         Err(e) => {
             error!("❌ Failed to stop audio streams: {}", e);
             // Continue draining transcription and saving whatever was captured. Returning
             // here used to strand the session in a half-stopped global state.
+            let message = e.to_string();
+            let _ = app.emit(
+                "recording-shutdown-progress",
+                serde_json::json!({
+                    "stage": "stopping_audio_warning",
+                    "message": format!("Audio capture did not stop cleanly: {message}"),
+                    "progress": 25,
+                    "status": "warning",
+                    "stop_error": message.clone()
+                }),
+            );
+            Some(message)
         }
-    }
+    };
 
     // Keep the stopped manager globally visible while queued transcription drains so reload
     // history remains available. The event listener writes through its independent sink.
@@ -921,7 +947,12 @@ pub async fn stop_recording<R: Runtime>(
         (None, None)
     };
 
-    info!("🔍 Recording session is fully finalized");
+    let completion = shutdown_completion(stream_stop_error.as_deref());
+    if stream_stop_error.is_some() {
+        warn!("Recording session finalized with an audio shutdown warning");
+    } else {
+        info!("🔍 Recording session is fully finalized");
+    }
 
     // Step 4.5: Prepare metadata for frontend (NO database save)
     // NOTE: We do NOT save to database here. The frontend will save after all transcripts are displayed.
@@ -943,8 +974,10 @@ pub async fn stop_recording<R: Runtime>(
         "recording-shutdown-progress",
         serde_json::json!({
             "stage": "complete",
-            "message": "Recording stopped successfully",
-            "progress": 100
+            "message": completion.message.clone(),
+            "progress": 100,
+            "status": completion.status.clone(),
+            "stop_error": completion.stop_error.clone()
         }),
     );
 
@@ -952,7 +985,9 @@ pub async fn stop_recording<R: Runtime>(
     app.emit(
         "recording-stopped",
         serde_json::json!({
-            "message": "Recording stopped - frontend will save after all transcripts received",
+            "message": completion.message.clone(),
+            "status": completion.status.clone(),
+            "stop_error": completion.stop_error.clone(),
             "folder_path": folder_path_str,
             "meeting_name": meeting_name_str
         }),
@@ -962,8 +997,10 @@ pub async fn stop_recording<R: Runtime>(
     // Update tray menu to reflect stopped state
     crate::tray::update_tray_menu(&app);
 
-    info!("🎉 Recording stopped successfully and accepted transcript chunks were drained");
-    Ok(())
+    if stream_stop_error.is_none() {
+        info!("🎉 Recording stopped successfully and accepted transcript chunks were drained");
+    }
+    Ok(completion)
 }
 
 /// Check if recording is active
@@ -1291,5 +1328,57 @@ pub async fn attempt_device_reconnect(
             error!("Manual reconnection error: {}", e);
             Err(e.to_string())
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn clean_shutdown_reports_success() {
+        let completion = shutdown_completion(None);
+        assert_eq!(completion.status, "success");
+        assert_eq!(completion.message, "Recording stopped successfully");
+        assert_eq!(completion.stop_error, None);
+    }
+
+    #[test]
+    fn stream_stop_failure_is_reported_after_finalization() {
+        let error = "audio streams: device handle remained active";
+        let completion = shutdown_completion(Some(error));
+
+        assert_eq!(completion.status, "completed_with_warnings");
+        assert!(completion.message.contains(error));
+        assert_eq!(completion.stop_error.as_deref(), Some(error));
+    }
+
+    #[test]
+    fn transcript_listener_payload_is_persisted_through_sink() {
+        let saver = super::super::recording_saver::RecordingSaver::new();
+        let sink = saver.transcript_sink();
+        let update = TranscriptUpdate {
+            text: "durable transcript".to_string(),
+            timestamp: "12:34:56".to_string(),
+            source: "whisper".to_string(),
+            sequence_id: 42,
+            chunk_start_time: 3.0,
+            is_partial: false,
+            confidence: 0.93,
+            audio_start_time: 3.0,
+            audio_end_time: 4.5,
+            duration: 1.5,
+            speaker: Some("mic".to_string()),
+        };
+
+        assert!(persist_transcript_event(
+            &sink,
+            &serde_json::to_string(&update).unwrap()
+        ));
+        let segments = saver.get_transcript_segments();
+        assert_eq!(segments.len(), 1);
+        assert_eq!(segments[0].sequence_id, 42);
+        assert_eq!(segments[0].text, "durable transcript");
+        assert_eq!(segments[0].speaker.as_deref(), Some("mic"));
     }
 }

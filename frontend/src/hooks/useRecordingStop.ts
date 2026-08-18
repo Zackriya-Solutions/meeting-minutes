@@ -112,6 +112,8 @@ export function useRecordingStop(
         console.log('Setting up recording-stopped listener for navigation...');
         unlistenFn = await listen<{
           message: string;
+          status?: 'success' | 'completed_with_warnings';
+          stop_error?: string | null;
           folder_path?: string;
           meeting_name?: string;
         }>('recording-stopped', async (event) => {
@@ -180,8 +182,17 @@ export function useRecordingStop(
       try {
         const dataDir = await appDataDir();
         const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-        await recordingService.stopRecording(`${dataDir}/recording-${timestamp}.wav`);
+        const stopOutcome = await recordingService.stopRecording(
+          `${dataDir}/recording-${timestamp}.wav`
+        );
         console.log('Native stop_recording completed');
+        if (stopOutcome.status === 'completed_with_warnings') {
+          const warning = stopOutcome.stop_error || stopOutcome.message;
+          console.warn('Recording finalized with an audio shutdown warning:', warning);
+          toast.warning(t('Recording stopped with a warning'), {
+            description: warning,
+          });
+        }
       } catch (stopError) {
         console.error('Failed to stop native recording:', stopError);
         // The recorder is still running — restore the UI to the recording state

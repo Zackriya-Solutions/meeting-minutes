@@ -5,7 +5,6 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Runtime};
 use tokio::sync::mpsc;
-use tokio::sync::Mutex as AsyncMutex;
 
 use super::audio_processing::create_meeting_folder;
 use super::incremental_saver::IncrementalAudioSaver;
@@ -92,7 +91,7 @@ pub struct DeviceInfo {
 
 /// New recording saver using incremental saving strategy
 pub struct RecordingSaver {
-    incremental_saver: Option<Arc<AsyncMutex<IncrementalAudioSaver>>>,
+    incremental_saver: Option<Arc<Mutex<IncrementalAudioSaver>>>,
     meeting_folder: Option<PathBuf>,
     meeting_name: Option<String>,
     metadata: Option<MeetingMetadata>,
@@ -146,6 +145,13 @@ impl RecordingSaver {
             segments: Arc::clone(&self.transcript_segments),
             meeting_folder: self.meeting_folder.clone(),
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn take_accumulation_task_for_test(
+        &mut self,
+    ) -> Option<tokio::task::JoinHandle<()>> {
+        self.accumulation_task.take()
     }
 
     /// Legacy method for backward compatibility - converts text to basic segment
@@ -216,33 +222,7 @@ impl RecordingSaver {
             // accumulation loop on the blocking pool so a 30-second checkpoint cannot stall
             // audio/VAD/transcript tasks on Tokio's async workers.
             self.accumulation_task = Some(tokio::task::spawn_blocking(move || {
-                info!(
-                    "Recording saver accumulation task started (save_audio: {})",
-                    save_audio
-                );
-
-                // Drain through channel closure. The pipeline owns the sender and drops it
-                // only after all mixed audio has been forwarded, which gives shutdown a real
-                // completion signal instead of a timing-dependent sleep.
-                while let Some(chunk) = receiver.blocking_recv() {
-                    // Only process audio chunks if auto_save is enabled
-                    if save_audio {
-                        // Add chunk to incremental saver
-                        if let Some(saver_arc) = &incremental_saver_arc {
-                            let mut saver_guard = saver_arc.blocking_lock();
-                            if let Err(e) = saver_guard.add_chunk(chunk) {
-                                error!("Failed to add chunk to incremental saver: {}", e);
-                            }
-                        } else {
-                            error!("Incremental saver not available while accumulating");
-                        }
-                    } else {
-                        // auto_save is false: discard audio chunk (no-op)
-                        // Transcription already happened in the pipeline before this point
-                    }
-                }
-
-                info!("Recording saver accumulation task ended");
+                drain_audio_chunks(&mut receiver, incremental_saver_arc, save_audio)
             }));
         }
 
@@ -268,7 +248,7 @@ impl RecordingSaver {
         // Only initialize incremental saver if checkpoints are needed (auto_save is true)
         if create_checkpoints {
             let incremental_saver = IncrementalAudioSaver::new(meeting_folder.clone(), 48000)?;
-            self.incremental_saver = Some(Arc::new(AsyncMutex::new(incremental_saver)));
+            self.incremental_saver = Some(Arc::new(Mutex::new(incremental_saver)));
             info!(
                 "✅ Incremental audio saver initialized for meeting: {}",
                 meeting_name
@@ -370,8 +350,16 @@ impl RecordingSaver {
         }
 
         // Finalize incremental saver (merge checkpoints into final audio.mp4)
-        let final_audio_path = if let Some(saver_arc) = &self.incremental_saver {
-            let mut saver = saver_arc.lock().await;
+        let final_audio_path = if let Some(saver_arc) = self.incremental_saver.take() {
+            // The accumulator has completed and dropped its Arc clone, so reclaim the saver
+            // before awaiting finalization. No std::sync::Mutex guard is held across `.await`,
+            // and no Tokio mutex is accessed from blocking code.
+            let saver_mutex = Arc::try_unwrap(saver_arc).map_err(|_| {
+                "Incremental saver still has active owners after accumulation stopped".to_string()
+            })?;
+            let mut saver = saver_mutex
+                .into_inner()
+                .map_err(|_| "Incremental saver mutex was poisoned".to_string())?;
             match saver.finalize().await {
                 Ok(path) => {
                     info!("✅ Successfully finalized audio: {}", path.display());
@@ -477,6 +465,38 @@ impl RecordingSaver {
     }
 }
 
+fn drain_audio_chunks(
+    receiver: &mut mpsc::Receiver<AudioChunk>,
+    incremental_saver: Option<Arc<Mutex<IncrementalAudioSaver>>>,
+    save_audio: bool,
+) {
+    info!(
+        "Recording saver accumulation task started (save_audio: {})",
+        save_audio
+    );
+
+    // Drain through channel closure. The pipeline owns the sender and drops it only after
+    // all mixed audio has been forwarded, which gives shutdown a real completion signal.
+    while let Some(chunk) = receiver.blocking_recv() {
+        if !save_audio {
+            continue;
+        }
+
+        let Some(saver) = &incremental_saver else {
+            error!("Incremental saver not available while accumulating");
+            continue;
+        };
+        let mut saver = saver
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Err(e) = saver.add_chunk(chunk) {
+            error!("Failed to add chunk to incremental saver: {e}");
+        }
+    }
+
+    info!("Recording saver accumulation task ended");
+}
+
 fn write_transcripts_json_from_segments(
     folder: &PathBuf,
     segments: &Arc<Mutex<Vec<TranscriptSegment>>>,
@@ -554,5 +574,39 @@ mod tests {
         assert_eq!(persisted["segments"][0]["text"], "corrected");
         assert_eq!(persisted["segments"][1]["text"], "next");
         assert_eq!(segments.lock().unwrap().len(), 2);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn accumulation_is_safe_on_a_current_thread_runtime() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::create_dir(temp.path().join(".checkpoints")).unwrap();
+        let saver = Arc::new(Mutex::new(
+            IncrementalAudioSaver::new(temp.path().to_path_buf(), 48_000).unwrap(),
+        ));
+        let task_saver = Arc::clone(&saver);
+        let (sender, mut receiver) = mpsc::channel(2);
+
+        let task = tokio::task::spawn_blocking(move || {
+            drain_audio_chunks(&mut receiver, Some(task_saver), true)
+        });
+        sender
+            .send(AudioChunk {
+                data: vec![0.25; 4_800],
+                sample_rate: 48_000,
+                timestamp: 0.0,
+                chunk_id: 1,
+                device_type: super::super::recording_state::DeviceType::Microphone,
+                speaker: None,
+            })
+            .await
+            .unwrap();
+        drop(sender);
+
+        tokio::time::timeout(std::time::Duration::from_secs(2), task)
+            .await
+            .expect("accumulator must not deadlock")
+            .expect("accumulator must not panic");
+        assert_eq!(Arc::strong_count(&saver), 1);
+        assert_eq!(saver.lock().unwrap().get_checkpoint_count(), 0);
     }
 }
