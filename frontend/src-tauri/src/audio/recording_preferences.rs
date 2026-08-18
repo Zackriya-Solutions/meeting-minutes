@@ -11,6 +11,10 @@ use log::error;
 #[cfg(target_os = "macos")]
 use crate::audio::capture::AudioCaptureBackend;
 
+fn default_live_transcription_enabled() -> bool {
+    true
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct RecordingPreferences {
     pub save_folder: PathBuf,
@@ -23,6 +27,13 @@ pub struct RecordingPreferences {
     #[cfg(target_os = "macos")]
     #[serde(default)]
     pub system_audio_backend: Option<String>,
+    /// When false, recording skips live Whisper/Parakeet transcription entirely (audio is
+    /// still captured and saved normally) — trades the live transcript for lower CPU/GPU
+    /// load during the call. Transcription can then be run on demand afterward via the
+    /// existing retranscription flow. Defaults to true so existing installs keep today's
+    /// behavior unless the user opts in.
+    #[serde(default = "default_live_transcription_enabled")]
+    pub live_transcription_enabled: bool,
 }
 
 impl Default for RecordingPreferences {
@@ -35,6 +46,7 @@ impl Default for RecordingPreferences {
             preferred_system_device: None,
             #[cfg(target_os = "macos")]
             system_audio_backend: Some("coreaudio".to_string()),
+            live_transcription_enabled: true,
         }
     }
 }

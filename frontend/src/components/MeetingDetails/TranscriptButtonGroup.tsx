@@ -30,6 +30,13 @@ export function TranscriptButtonGroup({
   const { betaFeatures } = useConfig();
   const [showRetranscribeDialog, setShowRetranscribeDialog] = useState(false);
 
+  // A meeting with zero transcript segments has no prior transcript to overwrite — most
+  // likely recorded in "record only" mode. Surface the transcribe action unconditionally
+  // for that case (no beta gate needed, there's nothing to accidentally clobber); meetings
+  // that already have a transcript keep the existing beta-gated "Retranscribe" behavior.
+  const isFirstTranscription = transcriptCount === 0;
+  const canTranscribe = (betaFeatures.importAndRetranscribe || isFirstTranscription) && meetingId && meetingFolderPath;
+
   const handleRetranscribeComplete = useCallback(async () => {
     // Refetch transcripts to show the updated data
     if (onRefetchTranscripts) {
@@ -68,30 +75,31 @@ export function TranscriptButtonGroup({
           <span className="hidden lg:inline">Recording</span>
         </Button>
 
-        {betaFeatures.importAndRetranscribe && meetingId && meetingFolderPath && (
+        {canTranscribe && (
           <Button
             size="sm"
             variant="outline"
             className="bg-gradient-to-r from-blue-50 to-purple-50 hover:from-blue-100 hover:to-purple-100 border-blue-200 xl:px-4"
             onClick={() => {
-              Analytics.trackButtonClick('enhance_transcript', 'meeting_details');
+              Analytics.trackButtonClick(isFirstTranscription ? 'transcribe_now' : 'enhance_transcript', 'meeting_details');
               setShowRetranscribeDialog(true);
             }}
-            title="Retranscribe to enhance your recorded audio"
+            title={isFirstTranscription ? 'Transcribe this recording' : 'Retranscribe to enhance your recorded audio'}
           >
             <RefreshCw className="xl:mr-2" size={18} />
-            <span className="hidden lg:inline">Enhance</span>
+            <span className="hidden lg:inline">{isFirstTranscription ? 'Transcribe Now' : 'Enhance'}</span>
           </Button>
         )}
       </ButtonGroup>
 
-      {betaFeatures.importAndRetranscribe && meetingId && meetingFolderPath && (
+      {canTranscribe && (
         <RetranscribeDialog
           open={showRetranscribeDialog}
           onOpenChange={setShowRetranscribeDialog}
           meetingId={meetingId}
           meetingFolderPath={meetingFolderPath}
           onComplete={handleRetranscribeComplete}
+          isFirstTranscription={isFirstTranscription}
         />
       )}
     </div>

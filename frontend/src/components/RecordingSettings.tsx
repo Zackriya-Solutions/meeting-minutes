@@ -12,6 +12,7 @@ export interface RecordingPreferences {
   file_format: string;
   preferred_mic_device: string | null;
   preferred_system_device: string | null;
+  live_transcription_enabled: boolean;
 }
 
 interface RecordingSettingsProps {
@@ -24,7 +25,8 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
     auto_save: true,
     file_format: 'mp4',
     preferred_mic_device: null,
-    preferred_system_device: null
+    preferred_system_device: null,
+    live_transcription_enabled: true
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -75,6 +77,16 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
 
     // Track auto-save setting change
     await Analytics.track('auto_save_recording_toggled', {
+      enabled: enabled.toString()
+    });
+  };
+
+  const handleLiveTranscriptionToggle = async (enabled: boolean) => {
+    const newPreferences = { ...preferences, live_transcription_enabled: enabled };
+    setPreferences(newPreferences);
+    await savePreferences(newPreferences);
+
+    await Analytics.track('live_transcription_toggled', {
       enabled: enabled.toString()
     });
   };
@@ -172,6 +184,22 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
         <Switch
           checked={preferences.auto_save}
           onCheckedChange={handleAutoSaveToggle}
+          disabled={saving}
+        />
+      </div>
+
+      {/* Live Transcription Toggle */}
+      <div className="flex items-center justify-between p-4 border rounded-lg">
+        <div className="flex-1">
+          <div className="font-medium">Live Transcription During Recording</div>
+          <div className="text-sm text-gray-600">
+            Transcribe as you record. Turning this off records audio only (lower CPU/GPU load
+            during the call) — use &quot;Transcribe Now&quot; on the meeting afterward.
+          </div>
+        </div>
+        <Switch
+          checked={preferences.live_transcription_enabled}
+          onCheckedChange={handleLiveTranscriptionToggle}
           disabled={saving}
         />
       </div>

@@ -30,6 +30,10 @@ interface RetranscribeDialogProps {
   meetingId: string;
   meetingFolderPath: string | null;
   onComplete?: () => void;
+  /** True for a record-only-mode meeting with no existing transcript — adjusts the dialog's
+   * copy from "Retranscribe" to "Transcribe Now" wording. The underlying mechanism is
+   * identical either way (it never required a prior transcript to exist). */
+  isFirstTranscription?: boolean;
 }
 
 interface RetranscriptionProgress {
@@ -57,6 +61,7 @@ export function RetranscribeDialog({
   meetingId,
   meetingFolderPath,
   onComplete,
+  isFirstTranscription = false,
 }: RetranscribeDialogProps) {
   const { selectedLanguage, transcriptModelConfig } = useConfig();
   const [isProcessing, setIsProcessing] = useState(false);
@@ -154,7 +159,9 @@ export function RetranscribeDialog({
 
             setIsProcessing(false);
             toast.success(
-              `Retranscription complete! ${event.payload.segments_count} segments created.`
+              isFirstTranscription
+                ? `Transcription complete! ${event.payload.segments_count} segments created.`
+                : `Retranscription complete! ${event.payload.segments_count} segments created.`
             );
             onCompleteRef.current?.();
             onOpenChangeRef.current(false);
@@ -276,17 +283,17 @@ export function RetranscribeDialog({
             {isProcessing ? (
               <>
                 <Loader2 className="h-5 w-5 animate-spin text-blue-600" />
-                Retranscribing...
+                {isFirstTranscription ? 'Transcribing...' : 'Retranscribing...'}
               </>
             ) : error ? (
               <>
                 <AlertCircle className="h-5 w-5 text-red-600" />
-                Retranscription Failed
+                {isFirstTranscription ? 'Transcription Failed' : 'Retranscription Failed'}
               </>
             ) : (
               <>
                 <RefreshCw className="h-5 w-5 text-blue-600" />
-                Retranscribe Meeting
+                {isFirstTranscription ? 'Transcribe Meeting' : 'Retranscribe Meeting'}
               </>
             )}
           </DialogTitle>
@@ -294,8 +301,10 @@ export function RetranscribeDialog({
             {isProcessing
               ? progress?.message || 'Processing audio...'
               : error
-                ? 'An error occurred during retranscription'
-                : 'Re-process the audio with different language settings'}
+                ? `An error occurred during ${isFirstTranscription ? 'transcription' : 'retranscription'}`
+                : isFirstTranscription
+                  ? 'This recording was captured audio-only — transcribe it now'
+                  : 'Re-process the audio with different language settings'}
           </DialogDescription>
         </DialogHeader>
 
@@ -399,7 +408,7 @@ export function RetranscribeDialog({
                 disabled={!meetingFolderPath}
               >
                 <RefreshCw className="h-4 w-4 mr-2" />
-                Start Retranscription
+                {isFirstTranscription ? 'Start Transcription' : 'Start Retranscription'}
               </Button>
             </>
           )}
