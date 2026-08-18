@@ -4,13 +4,13 @@ import { useTranscripts } from '@/contexts/TranscriptContext';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
 import { useConfig } from '@/contexts/ConfigContext';
 import { useRecordingState, RecordingStatus } from '@/contexts/RecordingStateContext';
-import { recordingService } from '@/services/recordingService';
+import { AudioCaptureSelection, recordingService } from '@/services/recordingService';
 import Analytics from '@/lib/analytics';
 import { showRecordingNotification } from '@/lib/recordingNotification';
 import { toast } from 'sonner';
 
 interface UseRecordingStartReturn {
-  handleRecordingStart: () => Promise<void>;
+  handleRecordingStart: (captureSelection?: AudioCaptureSelection) => Promise<void>;
   isAutoStarting: boolean;
 }
 
@@ -80,7 +80,7 @@ export function useRecordingStart(
   }, []);
 
   // Handle manual recording start (from button click)
-  const handleRecordingStart = useCallback(async () => {
+  const handleRecordingStart = useCallback(async (captureSelection: AudioCaptureSelection = { mode: 'global' }) => {
     try {
       console.log('handleRecordingStart called - checking Parakeet model status');
 
@@ -119,7 +119,8 @@ export function useRecordingStart(
       await recordingService.startRecordingWithDevices(
         selectedDevices?.micDevice || null,
         selectedDevices?.systemDevice || null,
-        randomTitle
+        randomTitle,
+        captureSelection
       );
       console.log('Backend recording started successfully');
 

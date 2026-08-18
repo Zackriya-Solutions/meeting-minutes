@@ -3,19 +3,22 @@
 import { invoke } from '@tauri-apps/api/core';
 import { appDataDir } from '@tauri-apps/api/path';
 import { useCallback, useEffect, useState, useRef } from 'react';
-import { Play, Pause, Square, Mic, AlertCircle, X } from 'lucide-react';
+import { Play, Pause, Square, Mic, AlertCircle, X, AppWindow } from 'lucide-react';
 import { ProcessRequest, SummaryResponse } from '@/types/summary';
 import { listen } from '@tauri-apps/api/event';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import Analytics from '@/lib/analytics';
 import { useRecordingState } from '@/contexts/RecordingStateContext';
+import { ApplicationAudioPicker } from './ApplicationAudioPicker';
+import { AudioCaptureSelection } from '@/services/recordingService';
+import { useIsLinux } from '@/hooks/usePlatform';
 
 interface RecordingControlsProps {
   isRecording: boolean;
   barHeights: string[];
   onRecordingStop: (callApi?: boolean) => void;
-  onRecordingStart: () => void;
+  onRecordingStart: (selection: AudioCaptureSelection) => void | Promise<void>;
   onTranscriptReceived: (summary: SummaryResponse) => void;
   onTranscriptionError?: (message: string) => void;
   onStopInitiated?: () => void; // Called immediately when stop button is clicked
@@ -44,6 +47,8 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
   // Use global recording state context for pause state (syncs with tray operations)
   const recordingState = useRecordingState();
   const isPaused = recordingState.isPaused;
+  // Selected application/media stream capture is a PipeWire (Linux) feature
+  const isApplicationAudioSupported = useIsLinux();
 
   const [showPlayback, setShowPlayback] = useState(false);
   const [recordingPath, setRecordingPath] = useState<string | null>(null);
@@ -58,6 +63,7 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
   const [isValidatingModel, setIsValidatingModel] = useState(false);
   const [speechDetected, setSpeechDetected] = useState(false);
   const [deviceError, setDeviceError] = useState<{ title: string, message: string } | null>(null);
+  const [showAudioPicker, setShowAudioPicker] = useState(false);
 
   const currentTime = 0;
   const duration = 0;
@@ -83,7 +89,7 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
     checkTauri();
   }, []);
 
-  const handleStartRecording = useCallback(async () => {
+  const handleStartRecording = useCallback(async (captureSelection: AudioCaptureSelection) => {
     if (isStarting || isValidatingModel) return;
     console.log('Starting recording...');
     console.log('Selected devices:', selectedDevices);
@@ -100,7 +106,8 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
       // 2. Show appropriate toast/modal
       // 3. Call backend if valid
       // 4. Update UI state
-      await onRecordingStart();
+      await onRecordingStart(captureSelection);
+      setShowAudioPicker(false);
     } catch (error) {
       console.error('Failed to start recording:', error);
       console.error('Error details:', {
@@ -117,6 +124,11 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
         setDeviceError({
           title: 'Microphone Not Available',
           message: 'Unable to access your microphone. Please check that:\n• Your microphone is connected\n• The app has microphone permissions\n• No other app is using the microphone'
+        });
+      } else if (errorMsg.toLowerCase().includes('selected application') || errorMsg.toLowerCase().includes('pipewire')) {
+        setDeviceError({
+          title: 'Application Audio Unavailable',
+          message: 'The selected application/media stream is no longer available. Choose global system audio or select another stream before starting the meeting.'
         });
       } else if (errorMsg.includes('system audio') || errorMsg.includes('speaker') || errorMsg.includes('output')) {
         setDeviceError({
@@ -342,6 +354,13 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
   return (
     <TooltipProvider>
       <div className="flex flex-col space-y-2">
+        {isApplicationAudioSupported && showAudioPicker && !isRecording && !isProcessing && (
+          <ApplicationAudioPicker
+            onStart={handleStartRecording}
+            onCancel={() => setShowAudioPicker(false)}
+            disabled={isStarting || isValidatingModel}
+          />
+        )}
         <div className="flex items-center space-x-2 bg-white rounded-full shadow-lg px-4 py-2">
           {isProcessing && !isParentProcessing ? (
             <div className="flex items-center space-x-2">
@@ -353,7 +372,7 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
               {showPlayback ? (
                 <>
                   <button
-                    onClick={handleStartRecording}
+                    onClick={() => void handleStartRecording({ mode: 'global' })}
                     className="w-10 h-10 flex items-center justify-center bg-red-500 rounded-full text-white hover:bg-red-600 transition-colors"
                   >
                     <Mic size={16} />
@@ -389,28 +408,50 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
                 <>
                   {!isRecording ? (
                     // Start recording button
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <button
-                          onClick={() => {
-                            Analytics.trackButtonClick('start_recording', 'recording_controls');
-                            handleStartRecording();
-                          }}
-                          disabled={isStarting || isProcessing || isRecordingDisabled || isValidatingModel}
-                          className={`w-12 h-12 flex items-center justify-center ${isStarting || isProcessing || isValidatingModel ? 'bg-gray-400' : 'bg-red-500 hover:bg-red-600'
-                            } rounded-full text-white transition-colors relative`}
-                        >
-                          {isValidatingModel ? (
-                            <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
-                          ) : (
-                            <Mic size={20} />
-                          )}
-                        </button>
-                      </TooltipTrigger>
-                      <TooltipContent>
-                        <p>Start recording</p>
-                      </TooltipContent>
-                    </Tooltip>
+                    <>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <button
+                            onClick={() => {
+                              Analytics.trackButtonClick('start_recording', 'recording_controls');
+                              void handleStartRecording({ mode: 'global' });
+                            }}
+                            disabled={isStarting || isProcessing || isRecordingDisabled || isValidatingModel}
+                            className={`w-12 h-12 flex items-center justify-center ${isStarting || isProcessing || isValidatingModel ? 'bg-gray-400' : 'bg-red-500 hover:bg-red-600'
+                              } rounded-full text-white transition-colors relative`}
+                          >
+                            {isValidatingModel ? (
+                              <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+                            ) : (
+                              <Mic size={20} />
+                            )}
+                          </button>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          <p>Start recording with global system audio</p>
+                        </TooltipContent>
+                      </Tooltip>
+
+                      {isApplicationAudioSupported && (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <button
+                              onClick={() => {
+                                Analytics.trackButtonClick('open_application_audio_picker', 'recording_controls');
+                                setShowAudioPicker((current) => !current);
+                              }}
+                              disabled={isStarting || isProcessing || isRecordingDisabled || isValidatingModel}
+                              className="w-10 h-10 flex items-center justify-center rounded-full border-2 border-gray-300 bg-white text-gray-600 transition-colors hover:border-gray-400 hover:bg-gray-50 disabled:opacity-50"
+                            >
+                              <AppWindow size={16} />
+                            </button>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            <p>Record one application&apos;s audio stream</p>
+                          </TooltipContent>
+                        </Tooltip>
+                      )}
+                    </>
                   ) : (
                     // Recording controls (pause/resume + stop)
                     <>

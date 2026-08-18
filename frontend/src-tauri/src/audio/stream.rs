@@ -8,7 +8,11 @@ use tokio::sync::mpsc;
 use super::devices::{AudioDevice, get_device_and_config};
 use super::pipeline::AudioCapture;
 use super::recording_state::{RecordingState, DeviceType};
+use super::application_capture::{AudioCaptureMode, AudioCaptureSelection};
 use super::capture::{AudioCaptureBackend, get_current_backend};
+
+#[cfg(target_os = "linux")]
+use super::application_capture::Stream as PipeWireAudioStream;
 
 #[cfg(target_os = "macos")]
 use super::capture::CoreAudioCapture;
@@ -17,6 +21,9 @@ use super::capture::CoreAudioCapture;
 pub enum StreamBackend {
     /// CPAL-based stream (ScreenCaptureKit or default)
     Cpal(Stream),
+    /// Native PipeWire capture of one selected application/media stream.
+    #[cfg(target_os = "linux")]
+    PipeWire(PipeWireAudioStream),
     /// Core Audio direct implementation (macOS only)
     #[cfg(target_os = "macos")]
     CoreAudio {
@@ -44,10 +51,11 @@ impl AudioStream {
         state: Arc<RecordingState>,
         device_type: DeviceType,
         recording_sender: Option<mpsc::UnboundedSender<super::recording_state::AudioChunk>>,
+        application_selection: Option<AudioCaptureSelection>,
     ) -> Result<Self> {
         // Get current backend from global config
         let backend_type = get_current_backend();
-        Self::create_with_backend(device, state, device_type, recording_sender, backend_type).await
+        Self::create_with_backend(device, state, device_type, recording_sender, backend_type, application_selection).await
     }
 
     /// Create a new audio stream with explicit backend selection
@@ -57,9 +65,33 @@ impl AudioStream {
         device_type: DeviceType,
         recording_sender: Option<mpsc::UnboundedSender<super::recording_state::AudioChunk>>,
         backend_type: AudioCaptureBackend,
+        application_selection: Option<AudioCaptureSelection>,
     ) -> Result<Self> {
         info!("🎵 Stream: Creating audio stream for device: {} with backend: {:?}, device_type: {:?}",
               device.name, backend_type, device_type);
+
+        #[cfg(target_os = "linux")]
+        if device_type == DeviceType::System {
+            if let Some(selection) = application_selection {
+                if selection.mode == AudioCaptureMode::Application {
+                    info!("🔊 Stream: Using native PipeWire application capture");
+                    let pipewire_stream = PipeWireAudioStream::start(&selection, state)?;
+                    return Ok(Self {
+                        device,
+                        backend: StreamBackend::PipeWire(pipewire_stream),
+                    });
+                }
+            }
+        }
+
+        #[cfg(not(target_os = "linux"))]
+        if let Some(selection) = &application_selection {
+            if selection.mode == AudioCaptureMode::Application {
+                return Err(anyhow::anyhow!(
+                    "Selected application audio capture requires PipeWire and is only available on Linux; global system capture will not be used as a fallback"
+                ));
+            }
+        }
 
         // For system audio devices, use the selected backend
         // For microphone devices, always use CPAL
@@ -343,6 +375,10 @@ impl AudioStream {
                     info!("Core Audio task aborted");
                 }
             }
+            #[cfg(target_os = "linux")]
+            StreamBackend::PipeWire(stream) => {
+                stream.stop()?;
+            }
         }
 
         // Explicitly drop self.device Arc reference
@@ -377,6 +413,7 @@ impl AudioStreamManager {
         microphone_device: Option<Arc<AudioDevice>>,
         system_device: Option<Arc<AudioDevice>>,
         recording_sender: Option<mpsc::UnboundedSender<super::recording_state::AudioChunk>>,
+        application_selection: AudioCaptureSelection,
     ) -> Result<()> {
         use super::capture::get_current_backend;
         let backend = get_current_backend();
@@ -385,7 +422,7 @@ impl AudioStreamManager {
         // Start microphone stream
         if let Some(mic_device) = microphone_device {
             info!("🎤 Creating microphone stream: {} (always uses CPAL)", mic_device.name);
-            match AudioStream::create(mic_device.clone(), self.state.clone(), DeviceType::Microphone, recording_sender.clone()).await {
+            match AudioStream::create(mic_device.clone(), self.state.clone(), DeviceType::Microphone, recording_sender.clone(), None).await {
                 Ok(stream) => {
                     self.state.set_microphone_device(mic_device);
                     self.microphone_stream = Some(stream);
@@ -401,9 +438,24 @@ impl AudioStreamManager {
         }
 
         // Start system audio stream
-        if let Some(sys_device) = system_device {
+        if application_selection.mode == AudioCaptureMode::Application {
+            let selected_device = Arc::new(AudioDevice::new(
+                "Selected application/media stream".to_string(),
+                super::devices::DeviceType::Output,
+            ));
+            info!("🔊 Creating selected PipeWire application audio stream");
+            match AudioStream::create(selected_device, self.state.clone(), DeviceType::System, recording_sender.clone(), Some(application_selection)).await {
+                Ok(stream) => {
+                    self.system_stream = Some(stream);
+                    info!("✅ Selected PipeWire application audio stream created successfully");
+                }
+                Err(e) => {
+                    return Err(e);
+                }
+            }
+        } else if let Some(sys_device) = system_device {
             info!("🔊 Creating system audio stream: {} (backend: {:?})", sys_device.name, backend);
-            match AudioStream::create(sys_device.clone(), self.state.clone(), DeviceType::System, recording_sender.clone()).await {
+            match AudioStream::create(sys_device.clone(), self.state.clone(), DeviceType::System, recording_sender.clone(), Some(application_selection.clone())).await {
                 Ok(stream) => {
                     self.state.set_system_device(sys_device);
                     self.system_stream = Some(stream);
@@ -471,6 +523,11 @@ impl AudioStreamManager {
     /// Check if any streams are active
     pub fn has_active_streams(&self) -> bool {
         self.microphone_stream.is_some() || self.system_stream.is_some()
+    }
+
+    /// Check if the microphone stream is active
+    pub fn has_microphone_stream(&self) -> bool {
+        self.microphone_stream.is_some()
     }
 }
 

@@ -96,6 +96,8 @@ Raw Audio (Mic + System)
 
 **Key Insight**: The pipeline performs **professional audio mixing** (RMS-based ducking, clipping prevention) for the recording file, while running a **separate stateful VAD per channel** (microphone and system) so only speech segments reach transcription, each tagged with its `DeviceType`.
 
+**System lane source modes**: the system lane carries either global system audio (default) or, on Linux only, one user-selected PipeWire application/media stream (`audio/application_capture.rs`, chosen per meeting via `AudioCaptureSelection` passed to the start-recording commands). Both modes flow through the same mixing, VAD, and transcription path and keep the `"Outros"` label. If the selected stream disappears, the backend emits the dedicated `selected-audio-unavailable` event and keeps the microphone recording; it never falls back to whole-monitor capture.
+
 **Transcript source labels**: the transcription worker (`audio/transcription/worker.rs`) maps `DeviceType::Microphone` → `"Você"` and `DeviceType::System` → `"Outros"` in `TranscriptUpdate.source`. The UI renders this as a speaker badge, and `recording_saver.rs` persists it in `TranscriptSegment.source` (segments without `source` deserialize as `"Audio"` via serde default and render without a badge). The SQLite `transcripts` table also stores it in a nullable `source` column (migration `20260817000000_add_transcript_source.sql`; `NULL` for legacy rows), so saved meetings reload with per-segment labels.
 
 ### Audio Device Modularization (Recently Completed)
@@ -117,6 +119,7 @@ audio/
 │   ├── microphone.rs          # Microphone capture stream
 │   ├── system.rs              # System audio capture stream
 │   └── core_audio.rs          # macOS ScreenCaptureKit integration
+├── application_capture.rs     # Linux PipeWire per-application stream capture (selection + native client)
 ├── pipeline.rs                # Audio mixing and VAD processing
 ├── recording_manager.rs       # High-level recording coordination
 ├── recording_commands.rs      # Tauri command interface
@@ -129,16 +132,20 @@ audio/
 - Audio capture issues → `capture/microphone.rs` or `capture/system.rs`
 - Mixing/processing problems → `pipeline.rs`
 - Recording workflow → `recording_manager.rs`
+- Selected application/media stream capture (Linux) → `application_capture.rs`
 
 ### Rust ↔ Frontend Communication (Tauri Architecture)
 
 **Command Pattern** (Frontend → Rust):
 ```typescript
 // Frontend: src/app/page.tsx
+// Invoke argument keys must be camelCase: without rename_all, tauri commands
+// look up camelCase wire keys and snake_case keys silently deserialize to None
+// (pinned by the ipc_boundary tests in audio/application_capture.rs).
 await invoke('start_recording', {
-  mic_device_name: "Built-in Microphone",
-  system_device_name: "BlackHole 2ch",
-  meeting_name: "Team Standup"
+  micDeviceName: "Built-in Microphone",
+  systemDeviceName: "BlackHole 2ch",
+  meetingName: "Team Standup"
 });
 ```
 
@@ -149,7 +156,8 @@ async fn start_recording<R: Runtime>(
     app: AppHandle<R>,
     mic_device_name: Option<String>,
     system_device_name: Option<String>,
-    meeting_name: Option<String>
+    meeting_name: Option<String>,
+    capture_selection: Option<audio::AudioCaptureSelection>
 ) -> Result<(), String> {
     // Implementation delegates to audio::recording_commands
 }
@@ -337,9 +345,9 @@ $env:RUST_LOG="debug"; ./clean_run_windows.bat
 - **System Audio**: Uses WASAPI loopback for system capture
 
 ### Linux
-- **Audio Capture**: ALSA/PulseAudio
+- **Audio Capture**: ALSA/PulseAudio for devices; native PipeWire client for the per-meeting application/media stream mode (`audio/application_capture.rs`)
 - **GPU**: CUDA (NVIDIA) or Vulkan via Cargo features
-- **Dependencies**: Requires cmake, llvm, libomp
+- **Dependencies**: Requires cmake, llvm, libomp, and PipeWire dev headers (libpipewire-0.3, libspa-0.2) — see [docs/building_in_linux.md](docs/building_in_linux.md)
 
 ## Performance Optimization Guidelines
 

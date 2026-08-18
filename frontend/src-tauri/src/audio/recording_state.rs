@@ -46,6 +46,7 @@ pub enum AudioError {
     PermissionDenied,
     BufferOverflow,
     SampleRateUnsupported,
+    SelectedAudioUnavailable(String),
 }
 
 impl AudioError {
@@ -63,22 +64,27 @@ impl AudioError {
             AudioError::PermissionDenied => false,
             AudioError::BufferOverflow => true,
             AudioError::SampleRateUnsupported => false,
+            AudioError::SelectedAudioUnavailable(_) => false,
         }
     }
 
     /// Get user-friendly error message
-    pub fn user_message(&self) -> &'static str {
+    pub fn user_message(&self) -> String {
         match self {
-            AudioError::DeviceDisconnected => "Audio device was disconnected",
-            AudioError::StreamFailed => "Audio stream encountered an error",
-            AudioError::ProcessingFailed => "Audio processing failed",
-            AudioError::TranscriptionFailed => "Speech transcription failed",
-            AudioError::ChannelClosed => "Audio channel was closed unexpectedly",
-            AudioError::InitializationFailed => "Failed to initialize audio system",
-            AudioError::ConfigurationError => "Audio configuration error",
-            AudioError::PermissionDenied => "Microphone permission denied",
-            AudioError::BufferOverflow => "Audio buffer overflow",
-            AudioError::SampleRateUnsupported => "Audio sample rate not supported",
+            AudioError::DeviceDisconnected => "Audio device was disconnected".to_string(),
+            AudioError::StreamFailed => "Audio stream encountered an error".to_string(),
+            AudioError::ProcessingFailed => "Audio processing failed".to_string(),
+            AudioError::TranscriptionFailed => "Speech transcription failed".to_string(),
+            AudioError::ChannelClosed => "Audio channel was closed unexpectedly".to_string(),
+            AudioError::InitializationFailed => "Failed to initialize audio system".to_string(),
+            AudioError::ConfigurationError => "Audio configuration error".to_string(),
+            AudioError::PermissionDenied => "Microphone permission denied".to_string(),
+            AudioError::BufferOverflow => "Audio buffer overflow".to_string(),
+            AudioError::SampleRateUnsupported => "Audio sample rate not supported".to_string(),
+            AudioError::SelectedAudioUnavailable(detail) => format!(
+                "Selected application audio is unavailable. Microphone recording continues; use global system audio for the next meeting. Details: {}",
+                detail
+            ),
         }
     }
 }
@@ -303,6 +309,8 @@ impl RecordingState {
                 log::error!("Too many recoverable errors ({}), stopping recording", recoverable_count);
                 self.stop_recording();
             }
+        } else if matches!(error, AudioError::SelectedAudioUnavailable(_)) {
+            log::error!("Selected application audio lane lost, keeping microphone recording active: {:?}", error);
         } else {
             log::error!("Non-recoverable audio error: {:?}", error);
             // Stop immediately for non-recoverable errors
@@ -445,5 +453,28 @@ impl Clone for RecordingStats {
             total_duration: self.total_duration,
             last_activity: self.last_activity,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn selected_audio_unavailable_keeps_recording_active() {
+        let state = RecordingState::new();
+        state.start_recording().unwrap();
+        state.report_error(AudioError::SelectedAudioUnavailable(
+            "stream disappeared".to_string(),
+        ));
+        assert!(state.is_recording());
+    }
+
+    #[test]
+    fn other_non_recoverable_errors_still_stop_recording() {
+        let state = RecordingState::new();
+        state.start_recording().unwrap();
+        state.report_error(AudioError::PermissionDenied);
+        assert!(!state.is_recording());
     }
 }

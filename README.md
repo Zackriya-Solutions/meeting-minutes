@@ -181,7 +181,7 @@ Use your own OpenAI-compatible endpoint for AI summaries. Perfect for organizati
 
 ### 🎙️ Professional Audio Mixing
 
-Capture microphone and system audio simultaneously with intelligent ducking and clipping prevention.
+Capture microphone and system audio simultaneously with intelligent ducking and clipping prevention. On Linux, you can instead capture a single application/media stream (via PipeWire) for a meeting rather than global system audio. This selects an application's audio stream, not an exact window or browser tab.
 
 <p align="center">
     <img src="docs/audio.png" width="650" style="border-radius: 10px;" alt="Device selection" />

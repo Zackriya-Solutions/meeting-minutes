@@ -382,6 +382,10 @@ impl AudioCapture {
         }
     }
 
+    pub(crate) fn state(&self) -> &Arc<RecordingState> {
+        &self.state
+    }
+
     /// Process audio data directly from callback
     pub fn process_audio_data(&self, data: &[f32]) {
         // Check if still recording

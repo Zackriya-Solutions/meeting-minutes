@@ -22,6 +22,25 @@ export interface RecordingStoppedPayload {
   meeting_name?: string;
 }
 
+export type AudioCaptureMode = 'global' | 'application';
+
+export interface AudioCaptureSelection {
+  mode: AudioCaptureMode;
+  object_serial?: number | null;
+  application_name?: string | null;
+  media_name?: string | null;
+  process_name?: string | null;
+}
+
+export interface ApplicationAudioStream {
+  object_serial: number;
+  node_id: number;
+  application_name: string;
+  media_name: string;
+  process_name: string;
+  node_name: string;
+}
+
 /**
  * Recording Service
  * Singleton service for managing recording lifecycle operations
@@ -69,13 +88,19 @@ export class RecordingService {
   async startRecordingWithDevices(
     micDeviceName: string | null,
     systemDeviceName: string | null,
-    meetingName: string
+    meetingName: string,
+    captureSelection: AudioCaptureSelection = { mode: 'global' }
   ): Promise<void> {
     return invoke('start_recording_with_devices_and_meeting', {
       mic_device_name: micDeviceName,
       system_device_name: systemDeviceName,
-      meeting_name: meetingName
+      meeting_name: meetingName,
+      captureSelection: captureSelection
     });
+  }
+
+  async listApplicationAudioStreams(): Promise<ApplicationAudioStream[]> {
+    return invoke<ApplicationAudioStream[]>('list_application_audio_streams');
   }
 
   /**

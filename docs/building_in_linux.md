@@ -13,14 +13,17 @@ If you're new to building on Linux, start here. These simple commands work for m
 ```bash
 # Ubuntu/Debian
 sudo apt update
-sudo apt install build-essential cmake git
+sudo apt install build-essential cmake git libpipewire-0.3-dev
 
 # Fedora/RHEL
-sudo dnf install gcc-c++ cmake git
+sudo dnf install gcc-c++ cmake git pipewire-devel
 
 # Arch Linux
-sudo pacman -S base-devel cmake git
+sudo pacman -S base-devel cmake git libpipewire
 ```
+
+The PipeWire development package (libpipewire-0.3 with libspa-0.2 headers) is
+required to build the per-meeting application audio capture feature.
 
 ### 2. Build and Run
 

@@ -10,11 +10,12 @@ use super::devices::get_safe_recording_devices_macos;
 
 #[cfg(not(target_os = "macos"))]
 use super::devices::{default_input_device, default_output_device};
-use super::recording_state::{RecordingState, AudioChunk, DeviceType as RecordingDeviceType};
+use super::recording_state::{RecordingState, AudioChunk, AudioError, DeviceType as RecordingDeviceType};
 use super::pipeline::AudioPipelineManager;
 use super::stream::AudioStreamManager;
 use super::recording_saver::RecordingSaver;
 use super::device_monitor::{AudioDeviceMonitor, DeviceEvent, DeviceMonitorType};
+use super::application_capture::{AudioCaptureMode, AudioCaptureSelection};
 
 /// Stream manager type enumeration
 pub enum StreamManagerType {
@@ -29,6 +30,7 @@ pub struct RecordingManager {
     recording_saver: RecordingSaver,
     device_monitor: Option<AudioDeviceMonitor>,
     device_event_receiver: Option<mpsc::UnboundedReceiver<DeviceEvent>>,
+    capture_selection: AudioCaptureSelection,
 }
 
 // SAFETY: RecordingManager contains types that we've marked as Send
@@ -49,6 +51,7 @@ impl RecordingManager {
             recording_saver: RecordingSaver::new(),
             device_monitor: Some(device_monitor),
             device_event_receiver: Some(device_event_receiver),
+            capture_selection: AudioCaptureSelection::global(),
         }
     }
 
@@ -64,9 +67,12 @@ impl RecordingManager {
         &mut self,
         microphone_device: Option<Arc<AudioDevice>>,
         system_device: Option<Arc<AudioDevice>>,
+        capture_selection: AudioCaptureSelection,
         auto_save: bool,
     ) -> Result<mpsc::UnboundedReceiver<AudioChunk>> {
         info!("Starting recording manager (auto_save: {})", auto_save);
+        capture_selection.validate()?;
+        self.capture_selection = capture_selection.clone();
 
         // Set up transcription channel
         let (transcription_sender, transcription_receiver) = mpsc::unbounded_channel::<AudioChunk>();
@@ -90,7 +96,9 @@ impl RecordingManager {
             ("No Microphone".to_string(), super::device_detection::InputDeviceKind::Unknown)
         };
 
-        let (sys_name, sys_kind) = if let Some(ref sys) = system_device {
+        let (sys_name, sys_kind) = if capture_selection.mode == AudioCaptureMode::Application {
+            ("Selected application/media stream".to_string(), super::device_detection::InputDeviceKind::Unknown)
+        } else if let Some(ref sys) = system_device {
             let device_kind = super::device_detection::InputDeviceKind::detect(&sys.name, 512, 48000);
             (sys.name.clone(), device_kind)
         } else {
@@ -100,7 +108,11 @@ impl RecordingManager {
         // Update recording metadata with device information
         self.recording_saver.set_device_info(
             microphone_device.as_ref().map(|d| d.name.clone()),
-            system_device.as_ref().map(|d| d.name.clone())
+            if capture_selection.mode == AudioCaptureMode::Application {
+                Some("Selected application/media stream".to_string())
+            } else {
+                system_device.as_ref().map(|d| d.name.clone())
+            }
         );
 
         // Start the audio processing pipeline with FFmpeg adaptive mixer
@@ -123,7 +135,7 @@ impl RecordingManager {
 
         // Start audio streams - they send RAW unmixed chunks to pipeline for mixing
         // Pipeline handles mixing and distribution to both recording and transcription
-        self.stream_manager.start_streams(microphone_device.clone(), system_device.clone(), None).await?;
+        self.stream_manager.start_streams(microphone_device.clone(), system_device.clone(), None, capture_selection.clone()).await?;
 
         // Start device monitoring to detect disconnects
         if let Some(ref mut monitor) = self.device_monitor {
@@ -186,7 +198,7 @@ impl RecordingManager {
             }
 
             // Start recording with selected devices and auto_save setting
-            self.start_recording(microphone_device, system_device, auto_save).await
+            self.start_recording(microphone_device, system_device, AudioCaptureSelection::global(), auto_save).await
         }
 
         #[cfg(not(target_os = "macos"))]
@@ -221,7 +233,7 @@ impl RecordingManager {
                 return Err(anyhow::anyhow!("No microphone device available"));
             }
 
-            self.start_recording(microphone_device, system_device, auto_save).await
+            self.start_recording(microphone_device, system_device, AudioCaptureSelection::global(), auto_save).await
         }
     }
 
@@ -521,13 +533,27 @@ impl RecordingManager {
                     self.stream_manager.stop_streams()?;
                     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
-                    self.stream_manager.start_streams(Some(device_arc.clone()), system_device, None).await?;
+                    match self.stream_manager.start_streams(Some(device_arc.clone()), system_device, None, self.capture_selection.clone()).await {
+                        Ok(()) => {}
+                        Err(e) if self.capture_selection.is_application()
+                            && self.stream_manager.has_microphone_stream() =>
+                        {
+                            warn!("Selected application stream could not be reacquired during microphone reconnect: {}", e);
+                            self.state.report_error(AudioError::SelectedAudioUnavailable(e.to_string()));
+                        }
+                        Err(e) => return Err(e),
+                    }
                     self.state.set_microphone_device(device_arc);
 
                     info!("✅ Microphone reconnected successfully");
                     Ok(true)
                 }
                 DeviceMonitorType::SystemAudio => {
+                    if self.capture_selection.is_application() {
+                        warn!("System audio reconnect is not applicable while capturing a selected application stream");
+                        return Ok(false);
+                    }
+
                     // Stop existing system audio stream and start new one
                     let microphone_device = self.state.get_microphone_device();
 
@@ -535,7 +561,7 @@ impl RecordingManager {
                     self.stream_manager.stop_streams()?;
                     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
-                    self.stream_manager.start_streams(microphone_device, Some(device_arc.clone()), None).await?;
+                    self.stream_manager.start_streams(microphone_device, Some(device_arc.clone()), None, self.capture_selection.clone()).await?;
                     self.state.set_system_device(device_arc);
 
                     info!("✅ System audio reconnected successfully");

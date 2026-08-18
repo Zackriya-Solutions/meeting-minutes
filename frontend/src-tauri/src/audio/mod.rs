@@ -16,6 +16,7 @@ pub mod diagnostics;
 pub mod ffmpeg_mixer;  // NEW: FFmpeg-style adaptive audio mixer
 
 // New simplified audio system
+pub mod application_capture;
 pub mod recording_state;
 pub mod pipeline;
 pub mod stream;
@@ -80,6 +81,7 @@ pub use system_audio_commands::{
 };
 
 // Export new simplified components
+pub use application_capture::{ApplicationAudioStream, AudioCaptureMode, AudioCaptureSelection};
 pub use recording_state::{RecordingState, AudioChunk, ProcessedAudioChunk, AudioError, DeviceType as RecordingDeviceType};
 pub use pipeline::{AudioPipelineManager};
 pub use stream::{AudioStreamManager};
@@ -118,4 +120,3 @@ pub use decoder::{decode_audio_file, DecodedAudio};
 
 // Export audio constants
 pub use constants::AUDIO_EXTENSIONS;
-

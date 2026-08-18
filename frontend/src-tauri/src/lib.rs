@@ -86,6 +86,7 @@ async fn start_recording<R: Runtime>(
     mic_device_name: Option<String>,
     system_device_name: Option<String>,
     meeting_name: Option<String>,
+    capture_selection: Option<audio::AudioCaptureSelection>,
 ) -> Result<(), String> {
     log_info!("🔥 CALLED start_recording with meeting: {:?}", meeting_name);
     log_info!(
@@ -105,6 +106,7 @@ async fn start_recording<R: Runtime>(
         mic_device_name,
         system_device_name,
         meeting_name.clone(),
+        capture_selection,
     )
     .await
     {
@@ -289,6 +291,13 @@ async fn get_audio_devices() -> Result<Vec<AudioDevice>, String> {
 }
 
 #[tauri::command]
+async fn list_application_audio_streams() -> Result<Vec<audio::ApplicationAudioStream>, String> {
+    audio::application_capture::list().map_err(|error| {
+        format!("Failed to list PipeWire application/media streams: {}", error)
+    })
+}
+
+#[tauri::command]
 async fn trigger_microphone_permission() -> Result<bool, String> {
     trigger_audio_permission()
         .map_err(|e| format!("Failed to trigger microphone permission: {}", e))
@@ -299,8 +308,9 @@ async fn start_recording_with_devices<R: Runtime>(
     app: AppHandle<R>,
     mic_device_name: Option<String>,
     system_device_name: Option<String>,
+    capture_selection: Option<audio::AudioCaptureSelection>,
 ) -> Result<(), String> {
-    start_recording_with_devices_and_meeting(app, mic_device_name, system_device_name, None).await
+    start_recording_with_devices_and_meeting(app, mic_device_name, system_device_name, None, capture_selection).await
 }
 
 #[tauri::command]
@@ -309,6 +319,7 @@ async fn start_recording_with_devices_and_meeting<R: Runtime>(
     mic_device_name: Option<String>,
     system_device_name: Option<String>,
     meeting_name: Option<String>,
+    capture_selection: Option<audio::AudioCaptureSelection>,
 ) -> Result<(), String> {
     log_info!("🚀 CALLED start_recording_with_devices_and_meeting - Mic: {:?}, System: {:?}, Meeting: {:?}",
              mic_device_name, system_device_name, meeting_name);
@@ -317,13 +328,16 @@ async fn start_recording_with_devices_and_meeting<R: Runtime>(
     let meeting_name_for_notification = meeting_name.clone();
 
     // Call the recording module functions that support meeting names
-    let recording_result = match (mic_device_name.clone(), system_device_name.clone()) {
-        (None, None) => {
+    let use_defaults = mic_device_name.is_none()
+        && system_device_name.is_none()
+        && capture_selection.as_ref().map(|selection| !selection.is_application()).unwrap_or(true);
+    let recording_result = match use_defaults {
+        true => {
             log_info!(
                 "No devices specified, starting with defaults and meeting: {:?}",
                 meeting_name
             );
-            audio::recording_commands::start_recording_with_meeting_name(app.clone(), meeting_name)
+            audio::recording_commands::start_recording_with_meeting_name(app.clone(), meeting_name, audio::AudioCaptureSelection::global())
                 .await
         }
         _ => {
@@ -338,6 +352,7 @@ async fn start_recording_with_devices_and_meeting<R: Runtime>(
                 mic_device_name,
                 system_device_name,
                 meeting_name,
+                capture_selection,
             )
             .await
         }
@@ -595,6 +610,7 @@ pub fn run() {
             whisper_engine::parallel_commands::prepare_audio_chunks,
             whisper_engine::parallel_commands::test_parallel_processing_setup,
             get_audio_devices,
+            list_application_audio_streams,
             trigger_microphone_permission,
             start_recording_with_devices,
             start_recording_with_devices_and_meeting,
