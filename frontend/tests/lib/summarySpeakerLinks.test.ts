@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import type { SpeakerInfo } from '../../src/types';
 import {
   linkAgreementSpeakers,
+  linkSpeakerNames,
   normalizedSpeakerName,
   roleForSpeaker,
 } from '../../src/lib/summarySpeakerLinks';
@@ -47,6 +48,34 @@ describe('summary speaker links', () => {
       [speaker(162, 'Зуйзуй', ['Блин'])],
       translate,
     )).toBe('- [Зуйзуй](#speaker-162) изменит правила.');
+  });
+
+  test('updates a renamed speaker wherever the name appears in the summary lead', () => {
+    expect(linkSpeakerNames(
+      'Сергей сообщил, что Сергей завершит задачу сегодня.',
+      [speaker(7, 'Михаил', ['Сергей'])],
+      translate,
+    )).toBe(
+      '[Михаил](#speaker-7) сообщил, что [Михаил](#speaker-7) завершит задачу сегодня.',
+    );
+  });
+
+  test('normalizes an already linked speaker without nesting the technical link', () => {
+    expect(linkSpeakerNames(
+      '[Сергей](#speaker-7) сообщил, что Сергей завершит задачу сегодня.',
+      [speaker(7, 'Михаил', ['Сергей'])],
+      translate,
+    )).toBe(
+      '[Михаил](#speaker-7) сообщил, что [Михаил](#speaker-7) завершит задачу сегодня.',
+    );
+  });
+
+  test('collapses the nested link artifact from an older render', () => {
+    expect(linkSpeakerNames(
+      '[[Сергей](#speaker-7)](#speaker-7) сообщил о результате.',
+      [speaker(7, 'Михаил', ['Сергей'])],
+      translate,
+    )).toBe('[Михаил](#speaker-7) сообщил о результате.');
   });
 
   test('does not link an alias shared by more than one speaker', () => {

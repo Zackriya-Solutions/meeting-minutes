@@ -8,7 +8,7 @@ use rubato::{
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
@@ -34,6 +34,10 @@ use super::vad::{ContinuousVadProcessor, SpeechSegment};
 // the rest of the module assumes: two concurrent microphone captures would
 // overwrite each other here.
 static MICROPHONE_LEVEL: AtomicU64 = AtomicU64::new(0);
+// Capture callbacks for the microphone and system device can run concurrently.
+// Keep diagnostics atomic as well; the previous `static mut` counter was a data race
+// (undefined behaviour) in exactly that two-stream recording scenario.
+static RING_BUFFER_SAMPLE_COUNTER: AtomicU64 = AtomicU64::new(0);
 static LEVEL_CLOCK: LazyLock<Instant> = LazyLock::new(Instant::now);
 
 /// A published level older than this reads as silence.
@@ -44,6 +48,10 @@ static LEVEL_CLOCK: LazyLock<Instant> = LazyLock::new(Instant::now);
 /// keeps the last RMS of a finished session forever, and the waveform shows a
 /// speaking user while nothing is being captured.
 const MICROPHONE_LEVEL_MAX_AGE_MS: u32 = 250;
+/// Once the recording queue is full, give its blocking checkpoint writer time to finish
+/// before sacrificing saved audio. The raw capture queue holds roughly ten seconds of
+/// callbacks, so this wait preserves ordinary checkpoint stalls without unbounded memory.
+const RECORDING_SEND_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Truncated to 32 bits, so it wraps after about 49 days of uptime. Ages are
 /// taken with `wrapping_sub`, which stays correct across that wrap.
@@ -119,18 +127,17 @@ impl AudioMixerRingBuffer {
     }
 
     pub(crate) fn add_samples(&mut self, device_type: DeviceType, samples: Vec<f32>) {
-        // Log buffer health periodically for diagnostics
-        static mut SAMPLE_COUNTER: u64 = 0;
-        unsafe {
-            SAMPLE_COUNTER += 1;
-            if SAMPLE_COUNTER % 200 == 0 {
-                debug!(
-                    "📊 Ring buffer status: mic={} samples, sys={} samples (max={})",
-                    self.mic_buffer.len(),
-                    self.system_buffer.len(),
-                    self.max_buffer_size
-                );
-            }
+        // Log buffer health periodically for diagnostics. Although the ring buffer itself
+        // is owned by one pipeline task, callers in tests/background capture can exist on
+        // different threads, so the process-wide counter must be synchronized.
+        let sample_count = RING_BUFFER_SAMPLE_COUNTER.fetch_add(1, Ordering::Relaxed) + 1;
+        if sample_count % 200 == 0 {
+            debug!(
+                "📊 Ring buffer status: mic={} samples, sys={} samples (max={})",
+                self.mic_buffer.len(),
+                self.system_buffer.len(),
+                self.max_buffer_size
+            );
         }
 
         match device_type {
@@ -286,8 +293,7 @@ struct ChannelEnergyTracker {
     windows: VecDeque<(f64, f64, f32, f32)>,
     /// Cumulative audio time (ms) fed to the VAD so far (mirrors the VAD clock).
     timeline_ms: f64,
-    /// Duration of one mixing window in milliseconds.
-    window_ms: f64,
+    sample_rate: u32,
 }
 
 impl ChannelEnergyTracker {
@@ -297,12 +303,11 @@ impl ChannelEnergyTracker {
     /// during long silences.
     const MAX_RETAIN_MS: f64 = 120_000.0;
 
-    fn new(window_size_samples: usize, sample_rate: u32) -> Self {
-        let window_ms = window_size_samples as f64 / sample_rate as f64 * 1000.0;
+    fn new(sample_rate: u32) -> Self {
         Self {
             windows: VecDeque::new(),
             timeline_ms: 0.0,
-            window_ms,
+            sample_rate,
         }
     }
 
@@ -310,7 +315,10 @@ impl ChannelEnergyTracker {
     /// clock by one window. O(1) amortized (bounded pruning at the front).
     fn record_window(&mut self, mic_window: &[f32], system_window: &[f32]) {
         let start = self.timeline_ms;
-        let end = start + self.window_ms;
+        // Normal windows use `window_ms`; the final stop-time tail can be shorter.
+        let frames = mic_window.len().max(system_window.len());
+        let duration_ms = frames as f64 / self.sample_rate as f64 * 1000.0;
+        let end = start + duration_ms;
         self.windows
             .push_back((start, end, rms(mic_window), rms(system_window)));
         self.timeline_ms = end;
@@ -944,10 +952,10 @@ impl AudioCapture {
 /// VAD-driven audio processing pipeline
 /// Uses Voice Activity Detection to segment speech in real-time and send only speech to Whisper
 pub struct AudioPipeline {
-    receiver: mpsc::UnboundedReceiver<AudioChunk>,
-    transcription_sender: mpsc::UnboundedSender<AudioChunk>,
-    // Keep shared recording state alive while the pipeline drains queued audio.
-    _state: Arc<RecordingState>,
+    receiver: mpsc::Receiver<AudioChunk>,
+    transcription_sender: mpsc::Sender<AudioChunk>,
+    // Shared state also carries non-fatal degradation warnings to the frontend.
+    state: Arc<RecordingState>,
     vad_processor: ContinuousVadProcessor,
     sample_rate: u32,
     chunk_id_counter: u64,
@@ -966,13 +974,14 @@ pub struct AudioPipeline {
     // Per-channel energy timeline for speaker (mic/system) attribution
     channel_energy: ChannelEnergyTracker,
     // Recording sender for pre-mixed audio
-    recording_sender_for_mixed: Option<mpsc::UnboundedSender<AudioChunk>>,
+    recording_sender_for_mixed: Option<mpsc::Sender<AudioChunk>>,
+    recording_chunks_dropped: u64,
 }
 
 impl AudioPipeline {
     pub fn new(
-        receiver: mpsc::UnboundedReceiver<AudioChunk>,
-        transcription_sender: mpsc::UnboundedSender<AudioChunk>,
+        receiver: mpsc::Receiver<AudioChunk>,
+        transcription_sender: mpsc::Sender<AudioChunk>,
         state: Arc<RecordingState>,
         target_chunk_duration_ms: u32,
         sample_rate: u32,
@@ -980,7 +989,7 @@ impl AudioPipeline {
         mic_device_kind: super::device_detection::InputDeviceKind,
         system_device_name: String,
         system_device_kind: super::device_detection::InputDeviceKind,
-    ) -> Self {
+    ) -> Result<Self> {
         // Log device characteristics for adaptive buffering
         info!("🎛️ AudioPipeline initializing with device characteristics:");
         info!(
@@ -1013,16 +1022,9 @@ impl AudioPipeline {
         // (import.rs); live stays lower to keep transcripts appearing promptly.
         let redemption_time = 800;
 
-        let vad_processor = match ContinuousVadProcessor::new(sample_rate, redemption_time) {
-            Ok(processor) => {
-                info!("VAD-driven pipeline: VAD segments will be sent directly to Whisper (no time-based accumulation)");
-                processor
-            }
-            Err(e) => {
-                error!("Failed to create VAD processor: {}", e);
-                panic!("VAD processor creation failed: {}", e);
-            }
-        };
+        let vad_processor = ContinuousVadProcessor::new(sample_rate, redemption_time)
+            .map_err(|e| anyhow::anyhow!("Failed to create VAD processor: {e}"))?;
+        info!("VAD-driven pipeline: completed and bounded live segments will be sent directly to speech recognition");
 
         // Initialize professional audio mixing components
         let ring_buffer = AudioMixerRingBuffer::new(sample_rate);
@@ -1031,16 +1033,15 @@ impl AudioPipeline {
         // Energy tracker uses the SAME window size + sample rate as the ring
         // buffer, so its per-window duration matches the audio actually fed to
         // the VAD (and therefore the VAD's segment timestamps).
-        let channel_energy =
-            ChannelEnergyTracker::new(ring_buffer.window_size_samples, sample_rate);
+        let channel_energy = ChannelEnergyTracker::new(sample_rate);
 
         // Note: target_chunk_duration_ms is ignored - VAD controls segmentation now
         let _ = target_chunk_duration_ms;
 
-        Self {
+        Ok(Self {
             receiver,
             transcription_sender,
-            _state: state,
+            state,
             vad_processor,
             sample_rate,
             chunk_id_counter: 0,
@@ -1055,7 +1056,8 @@ impl AudioPipeline {
             mixer,
             channel_energy,
             recording_sender_for_mixed: None, // Will be set by manager
-        }
+            recording_chunks_dropped: 0,
+        })
     }
 
     /// Run the VAD-driven audio processing pipeline
@@ -1082,7 +1084,7 @@ impl AudioPipeline {
                             "📥 Received FLUSH signal #{} - flushing VAD processor",
                             u64::MAX - chunk.chunk_id
                         );
-                        self.flush_remaining_audio()?;
+                        self.flush_remaining_audio().await?;
                         // Continue processing to handle any remaining chunks
                         continue;
                     }
@@ -1158,7 +1160,7 @@ impl AudioPipeline {
                             }
 
                             // STEP 4: Send mixed audio for recording (WAV file)
-                            if let Some(ref sender) = self.recording_sender_for_mixed {
+                            if self.recording_sender_for_mixed.is_some() {
                                 let recording_chunk = AudioChunk {
                                     data: mixed_with_gain.clone(),
                                     sample_rate: self.sample_rate,
@@ -1167,7 +1169,7 @@ impl AudioPipeline {
                                     device_type: DeviceType::Microphone, // Mixed audio
                                     speaker: None, // Recording path is channel-agnostic
                                 };
-                                let _ = sender.send(recording_chunk);
+                                self.forward_recording_chunk(recording_chunk).await;
                             }
                         }
                     }
@@ -1187,17 +1189,47 @@ impl AudioPipeline {
         }
 
         // Flush any remaining VAD segments
-        self.flush_remaining_audio()?;
+        self.flush_remaining_audio().await?;
 
         info!("VAD-driven audio pipeline ended");
         Ok(())
     }
 
-    fn flush_remaining_audio(&mut self) -> Result<()> {
+    async fn flush_remaining_audio(&mut self) -> Result<()> {
         info!(
             "Flushing remaining audio from pipeline (processed {} chunks)",
             self.processed_chunks
         );
+
+        // Drain the final sub-window from the mixer before flushing VAD. Previously every
+        // stop discarded up to one full mixing window from both the saved audio and the
+        // transcript input, making the last words dependent on callback timing.
+        if let Some((mic_window, sys_window)) = self.ring_buffer.flush() {
+            let timestamp = self.channel_energy.timeline_ms / 1000.0;
+            self.channel_energy.record_window(&mic_window, &sys_window);
+            let mixed = self.mixer.mix_window(&mic_window, &sys_window);
+
+            match self.vad_processor.process_audio(&mixed) {
+                Ok(speech_segments) => {
+                    for segment in speech_segments {
+                        self.send_speech_segment(segment, true);
+                    }
+                }
+                Err(e) => warn!("Failed to process final mixed audio through VAD: {e}"),
+            }
+
+            if self.recording_sender_for_mixed.is_some() {
+                let recording_chunk = AudioChunk {
+                    data: mixed,
+                    sample_rate: self.sample_rate,
+                    timestamp,
+                    chunk_id: self.chunk_id_counter,
+                    device_type: DeviceType::Microphone,
+                    speaker: None,
+                };
+                self.forward_recording_chunk(recording_chunk).await;
+            }
+        }
 
         // Flush any remaining audio from VAD processor and send segments to transcription
         match self.vad_processor.flush() {
@@ -1212,6 +1244,45 @@ impl AudioPipeline {
         }
 
         Ok(())
+    }
+
+    async fn forward_recording_chunk(&mut self, chunk: AudioChunk) -> bool {
+        self.forward_recording_chunk_with_timeout(chunk, RECORDING_SEND_TIMEOUT)
+            .await
+    }
+
+    async fn forward_recording_chunk_with_timeout(
+        &mut self,
+        chunk: AudioChunk,
+        wait: Duration,
+    ) -> bool {
+        let Some(sender) = self.recording_sender_for_mixed.clone() else {
+            return true;
+        };
+
+        match tokio::time::timeout(wait, sender.send(chunk)).await {
+            Ok(Ok(())) => true,
+            Ok(Err(_)) => {
+                self.report_recording_drop("recording saver channel closed");
+                false
+            }
+            Err(_) => {
+                self.report_recording_drop("recording saver remained full after bounded wait");
+                false
+            }
+        }
+    }
+
+    fn report_recording_drop(&mut self, reason: &str) {
+        self.recording_chunks_dropped += 1;
+        warn!(
+            "Recording audio window dropped ({reason}); total dropped windows: {}",
+            self.recording_chunks_dropped
+        );
+        if self.recording_chunks_dropped == 1 {
+            self.state
+                .report_non_fatal_warning(AudioError::BufferOverflow);
+        }
     }
 
     /// Trim, split, and send one VAD segment to the transcription worker.
@@ -1275,10 +1346,19 @@ impl AudioPipeline {
                 speaker,
             };
 
-            if let Err(e) = self.transcription_sender.send(transcription_chunk) {
-                warn!("Failed to send VAD segment: {}", e);
-            } else {
-                self.chunk_id_counter += 1;
+            match self.transcription_sender.try_send(transcription_chunk) {
+                Ok(()) => self.chunk_id_counter += 1,
+                Err(mpsc::error::TrySendError::Full(_)) => {
+                    // Preserve the recording path under sustained ASR overload. The saved
+                    // audio can be re-transcribed; allowing an unbounded queue to exhaust
+                    // process memory can lose both audio and transcript in a crash.
+                    warn!(
+                        "Live transcription queue is full; preserving audio and skipping one ASR segment"
+                    );
+                }
+                Err(mpsc::error::TrySendError::Closed(_)) => {
+                    warn!("Failed to send VAD segment: transcription worker is closed");
+                }
             }
         }
     }
@@ -1307,7 +1387,7 @@ pub(crate) fn trim_leading_overlap(
 /// Simple audio pipeline manager
 pub struct AudioPipelineManager {
     pipeline_handle: Option<JoinHandle<Result<()>>>,
-    audio_sender: Option<mpsc::UnboundedSender<AudioChunk>>,
+    audio_sender: Option<mpsc::Sender<AudioChunk>>,
 }
 
 impl AudioPipelineManager {
@@ -1318,14 +1398,19 @@ impl AudioPipelineManager {
         }
     }
 
+    #[cfg(test)]
+    pub(crate) fn inject_stop_failure_for_test(&mut self, message: &'static str) {
+        self.pipeline_handle = Some(tokio::spawn(async move { Err(anyhow::anyhow!(message)) }));
+    }
+
     /// Start the audio pipeline with device information for adaptive buffering
     pub fn start(
         &mut self,
         state: Arc<RecordingState>,
-        transcription_sender: mpsc::UnboundedSender<AudioChunk>,
+        transcription_sender: mpsc::Sender<AudioChunk>,
         target_chunk_duration_ms: u32,
         sample_rate: u32,
-        recording_sender: Option<mpsc::UnboundedSender<AudioChunk>>,
+        recording_sender: Option<mpsc::Sender<AudioChunk>>,
         mic_device_name: String,
         mic_device_kind: super::device_detection::InputDeviceKind,
         system_device_name: String,
@@ -1343,7 +1428,9 @@ impl AudioPipelineManager {
         );
 
         // Create audio processing channel
-        let (audio_sender, audio_receiver) = mpsc::unbounded_channel::<AudioChunk>();
+        // Bound raw capture memory. This queue is intentionally much larger than the
+        // downstream ASR queue because it carries two low-latency device streams.
+        let (audio_sender, audio_receiver) = mpsc::channel::<AudioChunk>(2_048);
 
         // Set sender in state for audio captures to use
         state.set_audio_sender(audio_sender.clone());
@@ -1359,7 +1446,7 @@ impl AudioPipelineManager {
             mic_device_kind,
             system_device_name,
             system_device_kind,
-        );
+        )?;
 
         // CRITICAL FIX: Connect recording sender to receive pre-mixed audio
         // This ensures both mic AND system audio are captured in recordings
@@ -1415,7 +1502,7 @@ impl AudioPipelineManager {
                 speaker: None,
             };
 
-            if let Err(e) = sender.send(flush_chunk) {
+            if let Err(e) = sender.send(flush_chunk).await {
                 warn!("Failed to send flush signal: {}", e);
             } else {
                 info!("📤 Sent flush signal to pipeline");
@@ -1435,7 +1522,7 @@ impl AudioPipelineManager {
                         device_type: super::recording_state::DeviceType::Microphone,
                         speaker: None,
                     };
-                    let _ = sender.send(additional_flush);
+                    let _ = sender.try_send(additional_flush);
                 }
 
                 info!("📤 Sent additional flush signals for reliability");
@@ -1494,6 +1581,206 @@ mod tests {
         let (mic, system) = ring.flush().unwrap();
         assert_eq!((mic.len(), system.len()), (90, 90));
         assert_eq!(mic[40..], [0.0; 50]);
+    }
+
+    #[tokio::test]
+    async fn pipeline_flush_forwards_final_mixing_tail_to_recording() {
+        let (_audio_sender, audio_receiver) = mpsc::channel(16);
+        let (transcription_sender, _transcription_receiver) = mpsc::channel(16);
+        let (recording_sender, mut recording_receiver) = mpsc::channel(16);
+        let mut pipeline = AudioPipeline::new(
+            audio_receiver,
+            transcription_sender,
+            RecordingState::new(),
+            0,
+            48_000,
+            "test mic".to_string(),
+            super::super::device_detection::InputDeviceKind::Unknown,
+            "no system".to_string(),
+            super::super::device_detection::InputDeviceKind::Unknown,
+        )
+        .unwrap();
+        pipeline.recording_sender_for_mixed = Some(recording_sender);
+        pipeline
+            .ring_buffer
+            .add_samples(DeviceType::Microphone, vec![0.25; 4_800]);
+
+        pipeline.flush_remaining_audio().await.unwrap();
+
+        let tail = recording_receiver.try_recv().expect("recording tail");
+        assert_eq!(tail.data.len(), 4_800);
+        assert!(recording_receiver.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn normal_recording_handoff_waits_for_a_full_queue_to_drain() {
+        let (_audio_sender, audio_receiver) = mpsc::channel(16);
+        let (transcription_sender, _transcription_receiver) = mpsc::channel(16);
+        let (recording_sender, mut recording_receiver) = mpsc::channel(1);
+        recording_sender.try_send(recording_chunk(1)).unwrap();
+
+        let mut pipeline = AudioPipeline::new(
+            audio_receiver,
+            transcription_sender,
+            RecordingState::new(),
+            0,
+            48_000,
+            "test mic".to_string(),
+            super::super::device_detection::InputDeviceKind::Unknown,
+            "no system".to_string(),
+            super::super::device_detection::InputDeviceKind::Unknown,
+        )
+        .unwrap();
+        pipeline.recording_sender_for_mixed = Some(recording_sender);
+
+        let drain = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            let queued = recording_receiver.recv().await.unwrap();
+            let forwarded = recording_receiver.recv().await.unwrap();
+            (queued, forwarded)
+        });
+
+        assert!(
+            pipeline
+                .forward_recording_chunk_with_timeout(
+                    recording_chunk(2),
+                    Duration::from_millis(500),
+                )
+                .await
+        );
+        let (queued, forwarded) = drain.await.unwrap();
+        assert_eq!(queued.chunk_id, 1);
+        assert_eq!(forwarded.chunk_id, 2);
+        assert_eq!(pipeline.recording_chunks_dropped, 0);
+    }
+
+    #[tokio::test]
+    async fn normal_mixing_loop_preserves_window_while_recording_queue_is_full() {
+        let (audio_sender, audio_receiver) = mpsc::channel(2);
+        let (transcription_sender, _transcription_receiver) = mpsc::channel(16);
+        let (recording_sender, mut recording_receiver) = mpsc::channel(1);
+        recording_sender
+            .try_send(recording_chunk(u64::MAX))
+            .unwrap();
+        let mut pipeline = AudioPipeline::new(
+            audio_receiver,
+            transcription_sender,
+            RecordingState::new(),
+            0,
+            48_000,
+            "test mic".to_string(),
+            super::super::device_detection::InputDeviceKind::Unknown,
+            "no system".to_string(),
+            super::super::device_detection::InputDeviceKind::Unknown,
+        )
+        .unwrap();
+        pipeline.recording_sender_for_mixed = Some(recording_sender);
+
+        let pipeline_task = tokio::spawn(pipeline.run());
+        audio_sender
+            .send(AudioChunk {
+                data: vec![0.25; 28_800], // one 600ms normal mixing window
+                sample_rate: 48_000,
+                timestamp: 0.0,
+                chunk_id: 7,
+                device_type: DeviceType::Microphone,
+                speaker: None,
+            })
+            .await
+            .unwrap();
+        drop(audio_sender);
+
+        // With the old try_send path the pipeline dropped the window and exited. The new
+        // handoff remains pending until the saver makes room.
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        assert!(!pipeline_task.is_finished());
+        assert_eq!(recording_receiver.recv().await.unwrap().chunk_id, u64::MAX);
+
+        let mixed = tokio::time::timeout(Duration::from_secs(2), recording_receiver.recv())
+            .await
+            .expect("mixed window should arrive after capacity is released")
+            .expect("recording channel should remain open");
+        assert_eq!(mixed.data.len(), 28_800);
+        tokio::time::timeout(Duration::from_secs(2), pipeline_task)
+            .await
+            .expect("pipeline should finish after forwarding the window")
+            .expect("pipeline task must not panic")
+            .expect("pipeline must exit cleanly");
+    }
+
+    #[tokio::test]
+    async fn recording_handoff_timeout_is_counted_and_reported() {
+        let state = RecordingState::new();
+        let warning_count = Arc::new(AtomicU64::new(0));
+        let warning_count_for_callback = Arc::clone(&warning_count);
+        state.set_error_callback(move |error| {
+            if matches!(error, AudioError::BufferOverflow) {
+                warning_count_for_callback.fetch_add(1, Ordering::Relaxed);
+            }
+        });
+
+        let (_audio_sender, audio_receiver) = mpsc::channel(16);
+        let (transcription_sender, _transcription_receiver) = mpsc::channel(16);
+        let (recording_sender, _recording_receiver) = mpsc::channel(1);
+        recording_sender.try_send(recording_chunk(1)).unwrap();
+        let mut pipeline = AudioPipeline::new(
+            audio_receiver,
+            transcription_sender,
+            state,
+            0,
+            48_000,
+            "test mic".to_string(),
+            super::super::device_detection::InputDeviceKind::Unknown,
+            "no system".to_string(),
+            super::super::device_detection::InputDeviceKind::Unknown,
+        )
+        .unwrap();
+        pipeline.recording_sender_for_mixed = Some(recording_sender);
+
+        assert!(
+            !pipeline
+                .forward_recording_chunk_with_timeout(recording_chunk(2), Duration::from_millis(20))
+                .await
+        );
+        assert_eq!(pipeline.recording_chunks_dropped, 1);
+        assert_eq!(warning_count.load(Ordering::Relaxed), 1);
+    }
+
+    fn recording_chunk(chunk_id: u64) -> AudioChunk {
+        AudioChunk {
+            data: vec![0.25; 4_800],
+            sample_rate: 48_000,
+            timestamp: 0.0,
+            chunk_id,
+            device_type: DeviceType::Microphone,
+            speaker: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn transcription_backlog_is_bounded_instead_of_growing_without_limit() {
+        let (_audio_sender, audio_receiver) = mpsc::channel(16);
+        let (transcription_sender, mut transcription_receiver) = mpsc::channel(1);
+        let mut pipeline = AudioPipeline::new(
+            audio_receiver,
+            transcription_sender,
+            RecordingState::new(),
+            0,
+            48_000,
+            "test mic".to_string(),
+            super::super::device_detection::InputDeviceKind::Unknown,
+            "no system".to_string(),
+            super::super::device_detection::InputDeviceKind::Unknown,
+        )
+        .unwrap();
+
+        pipeline.send_speech_segment(seg(0.0, 1_000.0), false);
+        pipeline.send_speech_segment(seg(1_000.0, 2_000.0), false);
+
+        let accepted = transcription_receiver.try_recv().expect("first segment");
+        assert_eq!(accepted.chunk_id, 0);
+        assert_eq!(pipeline.chunk_id_counter, 1);
+        assert!(transcription_receiver.try_recv().is_err());
     }
 
     #[test]
@@ -1688,9 +1975,7 @@ mod tests {
     #[test]
     fn tracker_classifies_dominant_channel_over_segment() {
         // window_size 8000 @ 16kHz → 500ms windows for easy arithmetic.
-        let mut tracker = ChannelEnergyTracker::new(8000, 16000);
-        assert!((tracker.window_ms - 500.0).abs() < 1e-9);
-
+        let mut tracker = ChannelEnergyTracker::new(16000);
         // Window 0 [0,500): system dominates. Window 1 [500,1000): mic dominates.
         tracker.record_window(&[0.05; 8000], &[0.9; 8000]);
         tracker.record_window(&[0.9; 8000], &[0.05; 8000]);
@@ -1705,15 +1990,15 @@ mod tests {
 
     #[test]
     fn tracker_returns_none_without_overlap() {
-        let tracker = ChannelEnergyTracker::new(8000, 16000);
+        let tracker = ChannelEnergyTracker::new(16000);
         // No windows recorded → nothing to integrate.
         assert_eq!(tracker.classify(0.0, 500.0), None);
     }
 
     #[test]
     fn tracker_prunes_old_windows() {
-        let mut tracker = ChannelEnergyTracker::new(8000, 16000); // 500ms windows
-                                                                  // Record far more history than MAX_RETAIN_MS (120s / 0.5s = 240 windows).
+        let mut tracker = ChannelEnergyTracker::new(16000); // 500ms windows
+                                                            // Record far more history than MAX_RETAIN_MS (120s / 0.5s = 240 windows).
         let total = (ChannelEnergyTracker::MAX_RETAIN_MS / 500.0) as usize + 50;
         for _ in 0..total {
             tracker.record_window(&[0.1; 8000], &[0.1; 8000]);

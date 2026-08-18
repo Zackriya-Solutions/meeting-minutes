@@ -157,7 +157,6 @@ function MeetingDetailsContent() {
   );
   const [summaryLoadError, setSummaryLoadError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
 
   // Use pagination hook for efficient transcript loading
   const {
@@ -183,6 +182,7 @@ function MeetingDetailsContent() {
     selfSpeakerIds,
     refetchSpeakers,
     assignSegmentSpeaker,
+    addAndAssignSegmentSpeaker,
     renameSpeaker,
     setSelfSpeaker,
   } = useMeetingSpeakers({
@@ -211,6 +211,12 @@ function MeetingDetailsContent() {
     await assignSegmentSpeaker(transcriptId, speakerId);
     await refetch();
   }, [assignSegmentSpeaker, refetch]);
+
+  const handleAddAndAssignSegmentSpeaker = useCallback(async (transcriptId: string, displayName: string) => {
+    await addAndAssignSegmentSpeaker(transcriptId, displayName);
+    await refetchSpeakers();
+    await refetch();
+  }, [addAndAssignSegmentSpeaker, refetch, refetchSpeakers]);
 
   const handleRenameSpeaker = useCallback(async (speakerId: number, displayName: string) => {
     await renameSpeaker(speakerId, displayName);
@@ -309,89 +315,84 @@ function MeetingDetailsContent() {
     now: Date.now(),
   }), []);
 
-  const fetchMeetingSummary = useCallback(async (showPageLoader = false) => {
+  const fetchMeetingSummary = useCallback(async () => {
     if (!meetingId || meetingId === 'intro-call') return;
 
     const requestId = ++summaryLoadRequestRef.current;
-    if (showPageLoader) setIsLoading(true);
     if (!meetingSummaryRef.current) setSummaryLoadStatus('loading');
     setSummaryLoadError(null);
 
     let lastError: unknown = null;
-    try {
-      // SQLite reads should normally be instant, but background migrations/jobs can produce a
-      // transient failure. Retry before presenting an error and never replace known content.
-      for (let attempt = 0; attempt < 3; attempt += 1) {
-        try {
-          const response = await invoke('api_get_summary', { meetingId }) as any;
-          if (summaryLoadRequestRef.current !== requestId) return;
+    // SQLite reads should normally be instant, but background migrations/jobs can produce a
+    // transient failure. Retry before presenting an error and never replace known content.
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        const response = await invoke('api_get_summary', { meetingId }) as any;
+        if (summaryLoadRequestRef.current !== requestId) return;
 
-          if (response?.data != null) {
-            const parsed = parsePersistedSummary(response.data);
-            if (!parsed) {
-              throw new Error(t('The saved summary has an unsupported or damaged format.'));
-            }
-            commitMeetingSummary(parsed);
+        if (response?.data != null) {
+          const parsed = parsePersistedSummary(response.data);
+          if (!parsed) {
+            throw new Error(t('The saved summary has an unsupported or damaged format.'));
+          }
+          commitMeetingSummary(parsed);
+          return;
+        }
+
+        if (response?.status === 'idle') {
+          if (meetingSummaryRef.current) {
+            // A late/stale `idle` response must not erase content already shown in this
+            // session. Keep it and surface the inconsistency as recoverable load trouble.
+            setSummaryLoadStatus('loaded');
+            setSummaryLoadError(t('Could not verify the saved summary. The last loaded version is still shown.'));
+          } else {
+            commitMeetingSummary(null);
+          }
+          return;
+        }
+
+        if (['pending', 'processing', 'summarizing', 'regenerating'].includes(response?.status)) {
+          if (hasSummaryRunStalled(response?.start)) {
+            // Treat an abandoned run as a missing summary rather than a permanent spinner:
+            // 'absent' lets the automatic generation effect start a fresh, tracked run.
+            console.warn(`Summary run for ${meetingId} looks abandoned; started at ${response?.start}`);
+            setSummaryLoadStatus(meetingSummaryRef.current ? 'loaded' : 'absent');
+            setSummaryLoadError(t('Summary generation was interrupted. Try again.'));
             return;
           }
+          setSummaryLoadStatus(meetingSummaryRef.current ? 'loaded' : 'loading');
+          return;
+        }
 
-          if (response?.status === 'idle') {
-            if (meetingSummaryRef.current) {
-              // A late/stale `idle` response must not erase content already shown in this
-              // session. Keep it and surface the inconsistency as recoverable load trouble.
-              setSummaryLoadStatus('loaded');
-              setSummaryLoadError(t('Could not verify the saved summary. The last loaded version is still shown.'));
-            } else {
-              commitMeetingSummary(null);
-            }
-            return;
+        if (['failed', 'error', 'cancelled'].includes(response?.status)) {
+          if (meetingSummaryRef.current) {
+            setSummaryLoadStatus('loaded');
+          } else {
+            // A failed background attempt is still a missing summary. Mark it as
+            // absent so the automatic generation effect can retry once for this
+            // meeting instead of permanently stranding the drawer in an error
+            // snapshot created by an earlier app/network failure.
+            setSummaryLoadStatus('absent');
           }
+          setSummaryLoadError(response?.error || t('The summary could not be generated automatically.'));
+          return;
+        }
 
-          if (['pending', 'processing', 'summarizing', 'regenerating'].includes(response?.status)) {
-            if (hasSummaryRunStalled(response?.start)) {
-              // Treat an abandoned run as a missing summary rather than a permanent spinner:
-              // 'absent' lets the automatic generation effect start a fresh, tracked run.
-              console.warn(`Summary run for ${meetingId} looks abandoned; started at ${response?.start}`);
-              setSummaryLoadStatus(meetingSummaryRef.current ? 'loaded' : 'absent');
-              setSummaryLoadError(t('Summary generation was interrupted. Try again.'));
-              return;
-            }
-            setSummaryLoadStatus(meetingSummaryRef.current ? 'loaded' : 'loading');
-            return;
-          }
-
-          if (['failed', 'error', 'cancelled'].includes(response?.status)) {
-            if (meetingSummaryRef.current) {
-              setSummaryLoadStatus('loaded');
-            } else {
-              // A failed background attempt is still a missing summary. Mark it as
-              // absent so the automatic generation effect can retry once for this
-              // meeting instead of permanently stranding the drawer in an error
-              // snapshot created by an earlier app/network failure.
-              setSummaryLoadStatus('absent');
-            }
-            setSummaryLoadError(response?.error || t('The summary could not be generated automatically.'));
-            return;
-          }
-
-          throw new Error(response?.error || t('The saved summary could not be loaded.'));
-        } catch (error) {
-          lastError = error;
-          if (attempt < 2) {
-            await new Promise((resolve) => window.setTimeout(resolve, 150 * (attempt + 1)));
-          }
+        throw new Error(response?.error || t('The saved summary could not be loaded.'));
+      } catch (error) {
+        lastError = error;
+        if (attempt < 2) {
+          await new Promise((resolve) => window.setTimeout(resolve, 150 * (attempt + 1)));
         }
       }
-
-      if (summaryLoadRequestRef.current !== requestId) return;
-      console.error('FETCH SUMMARY: exhausted retries:', lastError);
-      setSummaryLoadStatus(meetingSummaryRef.current ? 'loaded' : 'error');
-      setSummaryLoadError(
-        lastError instanceof Error ? lastError.message : t('The saved summary could not be loaded.')
-      );
-    } finally {
-      if (summaryLoadRequestRef.current === requestId) setIsLoading(false);
     }
+
+    if (summaryLoadRequestRef.current !== requestId) return;
+    console.error('FETCH SUMMARY: exhausted retries:', lastError);
+    setSummaryLoadStatus(meetingSummaryRef.current ? 'loaded' : 'error');
+    setSummaryLoadError(
+      lastError instanceof Error ? lastError.message : t('The saved summary could not be loaded.')
+    );
   }, [meetingId, commitMeetingSummary, hasSummaryRunStalled, t]);
 
   // Reset states when meetingId changes (prevent race conditions)
@@ -404,7 +405,6 @@ function MeetingDetailsContent() {
     setSummaryLoadStatus(cachedSummary ? 'loaded' : 'loading');
     setSummaryLoadError(null);
     setError(null);
-    setIsLoading(true);
   }, [meetingId]);
 
   // Cleanup: Stop polling when navigating away from a meeting
@@ -423,13 +423,12 @@ function MeetingDetailsContent() {
     if (!meetingId || meetingId === 'intro-call') {
       console.warn('No valid meeting ID in URL - meetingId:', meetingId);
       setError(t('No meeting selected'));
-      setIsLoading(false);
       Analytics.trackPageView('meeting_details');
       return;
     }
 
     console.log('Valid meeting ID found, fetching details for:', meetingId);
-    void fetchMeetingSummary(!meetingSummaryRef.current);
+    void fetchMeetingSummary();
 
     return () => {
       // Ignore a late response from a meeting that is no longer open.
@@ -447,7 +446,7 @@ function MeetingDetailsContent() {
     let timer: number | null = null;
 
     const poll = async () => {
-      await fetchMeetingSummary(false);
+      await fetchMeetingSummary();
       if (!cancelled) timer = window.setTimeout(poll, 1500);
     };
 
@@ -475,7 +474,7 @@ function MeetingDetailsContent() {
   }
 
   // Show loading spinner while initial data loads
-  if ((isLoading || isLoadingTranscripts) || !meetingDetails) {
+  if (isLoadingTranscripts || !meetingDetails) {
     return <MeetingDrawerLoading />;
   }
 
@@ -484,7 +483,7 @@ function MeetingDetailsContent() {
     summaryData={meetingSummary}
     summaryLoadStatus={summaryLoadStatus}
     summaryLoadError={summaryLoadError}
-    onRetrySummary={() => fetchMeetingSummary(false)}
+    onRetrySummary={() => fetchMeetingSummary()}
     onSummaryDataChange={commitMeetingSummary}
     shouldAutoGenerate={
       summaryLoadStatus === 'absent'
@@ -513,6 +512,7 @@ function MeetingDetailsContent() {
     speakerCount={speakers.length}
     onRenameSpeaker={handleRenameSpeaker}
     onAssignSegmentSpeaker={handleAssignSegmentSpeaker}
+    onAddAndAssignSegmentSpeaker={handleAddAndAssignSegmentSpeaker}
     onSetSelfSpeaker={handleSetSelfSpeaker}
     onSpeakersDetected={handleSpeakersDetected}
   />;

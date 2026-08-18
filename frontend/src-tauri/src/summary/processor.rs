@@ -581,7 +581,7 @@ fn compact_standard_meeting_violations(markdown: &str) -> Vec<Violation> {
             "Summary",
             false,
             None,
-            Some(500),
+            Some(600),
         )),
         None => {
             violations.push(Violation::structural(
@@ -954,7 +954,7 @@ pub async fn generate_meeting_summary(
                 violation_messages(&violations).join("; ")
             );
             let repair_prompt = format!(
-                "{final_user_prompt}\n\n<report_to_revise>\n{final_markdown}\n</report_to_revise>\n\nThe draft report above failed mandatory output validation:\n- {}\n\nReturn the complete corrected Markdown report. Preserve factual meaning and all other sections, but rewrite the invalid sections so every requirement is satisfied. Summary may contain any number of bullets, but their combined visible text must have at most 500 Unicode characters. Agreements may remain empty when nothing was agreed; otherwise it may contain at most 3 bullets and 150 visible Unicode characters in total. Do not truncate text or use ellipses.",
+                "{final_user_prompt}\n\n<report_to_revise>\n{final_markdown}\n</report_to_revise>\n\nThe draft report above failed mandatory output validation:\n- {}\n\nReturn the complete corrected Markdown report. Preserve factual meaning and all other sections, but rewrite the invalid sections so every requirement is satisfied. Summary may contain any number of bullets, but their combined visible text must have at most 600 Unicode characters. Agreements may remain empty when nothing was agreed; otherwise it may contain at most 3 bullets and 150 visible Unicode characters in total. Do not truncate text or use ellipses.",
                 violation_messages(&violations).join("\n- ")
             );
             let repaired = generate_summary(

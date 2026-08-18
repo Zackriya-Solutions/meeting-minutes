@@ -24,6 +24,7 @@ import {
 } from '@/lib/summaryToMarkdown';
 import {
   linkAgreementSpeakers,
+  linkSpeakerNames,
   normalizedSpeakerName,
   roleForSpeaker,
 } from '@/lib/summarySpeakerLinks';
@@ -165,6 +166,7 @@ export function SummaryMessage({
 
   const isGenerating =
     p.summaryStatus === 'processing' || p.summaryStatus === 'summarizing' || p.summaryStatus === 'regenerating';
+  const isSummaryLoading = p.summaryLoadStatus === 'loading' || isGenerating;
   const hasSummary = !!p.aiSummary;
   const failureMessage = isGenerating ? null : (p.summaryError || p.summaryLoadError);
 
@@ -205,13 +207,17 @@ export function SummaryMessage({
     () => linkAgreementSpeakers(content.agreements, speakers, t),
     [content.agreements, speakers, t],
   );
+  const linkedLead = useMemo(
+    () => linkSpeakerNames(content.lead, speakers, t),
+    [content.lead, speakers, t],
+  );
   return (
-    <div className={isGenerating ? 'flex min-h-full flex-1 flex-col' : undefined}>
-      {isGenerating ? (
+    <div className={isSummaryLoading ? 'flex min-h-full flex-1 flex-col' : undefined}>
+      {isSummaryLoading ? (
         <div
           className="flex min-h-0 flex-1 items-center justify-center"
           role="status"
-          aria-label={p.getSummaryStatusMessage(p.summaryStatus)}
+          aria-label={isGenerating ? p.getSummaryStatusMessage(p.summaryStatus) : t('Loading saved summary...')}
         >
           <FluidSpinner className="h-10 w-10 text-[var(--primary-10)]" />
         </div>
@@ -272,7 +278,35 @@ export function SummaryMessage({
           {content.lead ? (
             <section>
               <h2 className="text-sm font-normal leading-5 text-[var(--primary-50)]">{t('About the meeting')}</h2>
-              <ChatMarkdown content={content.lead} className="mm-summary-plain mt-2" />
+              <ChatMarkdown
+                content={linkedLead}
+                className="mm-summary-plain mt-2"
+                components={{
+                  a: ({ href, children }) => {
+                    const speakerIdMatch = href?.match(/^#speaker-(\d+)$/u);
+                    if (!speakerIdMatch || !onRenameSpeaker) {
+                      return <a href={href}>{children}</a>;
+                    }
+                    const speaker = speakers.find(({ id }) => id === Number(speakerIdMatch[1]));
+                    if (!speaker) return <>{children}</>;
+
+                    return (
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <button
+                            type="button"
+                            className="speaker-rename-underline text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary-20)]"
+                            onClick={() => setRenamingSpeaker(speaker)}
+                          >
+                            {children}
+                          </button>
+                        </TooltipTrigger>
+                        <TooltipContent>{t('Rename')}</TooltipContent>
+                      </Tooltip>
+                    );
+                  },
+                }}
+              />
             </section>
           ) : null}
           {content.agreements ? (

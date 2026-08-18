@@ -1110,6 +1110,12 @@ const MEMBERSHIP_SQL: &str = concat!(
     "AND (operational_speaker_id=?2 OR placeholder_speaker_id=?2))",
 );
 
+// Adding a person is only for a line diarization could not attribute.  Keeping the
+// predicate in the update makes that invariant hold even if the UI is stale or another
+// attribution wins between the command's initial ownership check and this transaction.
+const ASSIGN_UNATTRIBUTED_SEGMENT_SQL: &str =
+    "UPDATE transcripts SET speaker_id=? WHERE id=? AND meeting_id=? AND speaker_id IS NULL";
+
 #[tauri::command]
 pub async fn assign_segment_speaker(
     state: tauri::State<'_, AppState>,
@@ -1155,6 +1161,79 @@ pub async fn assign_segment_speaker(
         .map_err(|error| error.to_string())?;
     log::info!("[diarize] line {transcript_id} attributed to speaker {speaker_id} by the user");
     Ok(())
+}
+
+/// Create a named speaker from the user's manual attribution and attach the current line to it.
+///
+/// This is intentionally a separate action from automatic diarization: typing a person's name
+/// is an explicit assertion, so the profile is confirmed immediately, while no voice embedding
+/// is invented from a single ambiguous line. Future diarization may learn a voice for the profile
+/// once the user has confirmed enough examples through the existing rename flow.
+#[tauri::command]
+pub async fn add_and_assign_segment_speaker(
+    state: tauri::State<'_, AppState>,
+    meeting_id: String,
+    transcript_id: String,
+    display_name: String,
+) -> Result<i64, String> {
+    let name = display_name.trim();
+    if name.is_empty() {
+        return Err("Speaker name cannot be empty".to_string());
+    }
+    if name.chars().count() > 120 {
+        return Err("Speaker name is too long".to_string());
+    }
+
+    let pool = state.db_manager.pool();
+    let belongs: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM transcripts WHERE id=? AND meeting_id=?)",
+    )
+    .bind(&transcript_id)
+    .bind(&meeting_id)
+    .fetch_one(pool)
+    .await
+    .map_err(|error| error.to_string())?;
+    if !belongs {
+        return Err("This line does not belong to the meeting".to_string());
+    }
+
+    let mut transaction = pool
+        .begin()
+        .await
+        .map_err(|error| format!("Failed to start speaker attribution: {error}"))?;
+    let speaker_id: i64 = sqlx::query_scalar(
+        "INSERT INTO speakers(display_name, voice_embedding, is_confirmed) \
+         VALUES(?, NULL, 1) RETURNING id",
+    )
+    .bind(name)
+    .fetch_one(&mut *transaction)
+    .await
+    .map_err(|error| format!("Failed to add speaker: {error}"))?;
+
+    let affected = sqlx::query(ASSIGN_UNATTRIBUTED_SEGMENT_SQL)
+        .bind(speaker_id)
+        .bind(&transcript_id)
+        .bind(&meeting_id)
+        .execute(&mut *transaction)
+        .await
+        .map_err(|error| format!("Failed to attribute the line: {error}"))?;
+    if affected.rows_affected() == 0 {
+        return Err("This line has already been attributed".to_string());
+    }
+    sqlx::query("DELETE FROM unattributed_segments WHERE transcript_id=?")
+        .bind(&transcript_id)
+        .execute(&mut *transaction)
+        .await
+        .map_err(|error| error.to_string())?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| format!("Failed to save speaker attribution: {error}"))?;
+
+    log::info!(
+        "[diarize] line {transcript_id} attributed to newly added speaker {speaker_id}"
+    );
+    Ok(speaker_id)
 }
 
 /// Persist whether a diarized voice profile belongs to the local user.
@@ -1257,6 +1336,75 @@ mod tests {
         assert!(!belongs("m-elsewhere", 2).await, "clustered, but in another meeting");
     }
     use super::*;
+
+    #[tokio::test]
+    async fn adding_a_speaker_does_not_replace_an_existing_attribution() {
+        use sqlx::sqlite::SqlitePoolOptions;
+
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+
+        sqlx::query("INSERT INTO meetings (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)")
+            .bind("meeting")
+            .bind("meeting")
+            .bind("2026-01-01T00:00:00Z")
+            .bind("2026-01-01T00:00:00Z")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO speakers (id, display_name) VALUES (?, ?)")
+            .bind(1_i64)
+            .bind("Existing speaker")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(concat!(
+            "INSERT INTO transcripts (id, meeting_id, transcript, timestamp, speaker_id) ",
+            "VALUES (?, ?, ?, ?, ?)"
+        ))
+        .bind("line")
+        .bind("meeting")
+        .bind("Already attributed")
+        .bind("2026-01-01T00:00:00Z")
+        .bind(1_i64)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let mut transaction = pool.begin().await.unwrap();
+        sqlx::query("INSERT INTO speakers (id, display_name) VALUES (?, ?)")
+            .bind(2_i64)
+            .bind("New speaker")
+            .execute(&mut *transaction)
+            .await
+            .unwrap();
+        let affected = sqlx::query(ASSIGN_UNATTRIBUTED_SEGMENT_SQL)
+            .bind(2_i64)
+            .bind("line")
+            .bind("meeting")
+            .execute(&mut *transaction)
+            .await
+            .unwrap();
+
+        assert_eq!(affected.rows_affected(), 0);
+        drop(transaction); // The command returns here, rolling back the new speaker too.
+
+        let speaker_id: i64 = sqlx::query_scalar("SELECT speaker_id FROM transcripts WHERE id=?")
+            .bind("line")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let speaker_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM speakers")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(speaker_id, 1, "the prior attribution must survive");
+        assert_eq!(speaker_count, 1, "the rejected new speaker must be rolled back");
+    }
 
     fn turn(start_ms: i64, end_ms: i64, cluster_id: i64) -> SpeakerTurn {
         SpeakerTurn {

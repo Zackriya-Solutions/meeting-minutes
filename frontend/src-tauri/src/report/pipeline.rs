@@ -45,7 +45,7 @@ const STAGE_META: [(&str, &str); TOTAL_STAGES as usize] = [
     ("commitments", "Обязательства"),
     ("threads_risks", "Незакрытое и риски"),
     ("disagreements_concepts", "Разногласия и концепции"),
-    ("numbers", "Числа встречи"),
+    ("numbers", "Числа"),
     ("roles", "Роли на встрече"),
     ("insights", "Главное — синтез"),
     ("render", "Сборка отчёта"),

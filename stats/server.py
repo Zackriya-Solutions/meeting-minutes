@@ -646,7 +646,11 @@ def compute_product(days: float = 30.0) -> dict[str, Any]:
     clause, params = exclusion_clause(excluded)
     today = _day_index(now)
     current_date = date.fromordinal(today)
-    week_start = today - current_date.weekday()
+    # Traction fleet decision 2026-08-17: WAU is a rolling 7-Moscow-date
+    # window, like MAU since 01.08 — week-to-date collapsed onto DAU every
+    # Monday. `weekly_value_devices` keeps the calendar week it always had.
+    week_start = today - 6
+    calendar_week_start = today - current_date.weekday()
     month_start = current_date.toordinal() - 29
     # Retention needs at most the latest 90 Moscow dates; longer requested windows
     # still receive their complete selected history.
@@ -842,7 +846,7 @@ def compute_product(days: float = 30.0) -> dict[str, Any]:
                 period_active(active_days, today) / period_active(active_days, month_start)
                 if period_active(active_days, month_start) else None
             ),
-            "weekly_value_devices": period_active(value_days, week_start),
+            "weekly_value_devices": period_active(value_days, calendar_week_start),
             "value_devices_in_window": len(value_devices),
             "new_value_devices": new_value_devices,
             "returning_value_devices": len(value_devices) - new_value_devices,

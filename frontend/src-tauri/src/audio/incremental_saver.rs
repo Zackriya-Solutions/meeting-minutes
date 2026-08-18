@@ -1,9 +1,12 @@
-use super::encode::encode_single_audio;
+use super::encode::{
+    encode_single_audio, wait_for_process_output_with_timeout, FFMPEG_PROCESS_TIMEOUT,
+};
 use super::recording_state::AudioChunk;
 use anyhow::{anyhow, Result};
 use log::{error, info, warn};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+use std::process::Stdio;
 
 use super::ffmpeg::find_ffmpeg_path;
 
@@ -67,8 +70,12 @@ impl IncrementalAudioSaver {
 
         // Save checkpoint when buffer reaches threshold (30 seconds)
         if total_samples >= self.checkpoint_interval_samples {
-            self.save_checkpoint()?;
+            // Always release this 30-second buffer. Retrying a failed FFmpeg encode on every
+            // subsequent audio callback made the buffer grow without limit and repeatedly
+            // encoded an ever-larger payload, which could take down the whole recording.
+            let save_result = self.save_checkpoint();
             self.checkpoint_buffer.clear();
+            save_result?;
         }
 
         Ok(())
@@ -207,6 +214,10 @@ impl IncrementalAudioSaver {
             "-y",   // Overwrite output file
             output.to_str().unwrap(),
         ]);
+        command
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
 
         // Hide console window on Windows to prevent CMD popup during finalization
         #[cfg(target_os = "windows")]
@@ -216,7 +227,13 @@ impl IncrementalAudioSaver {
             command.creation_flags(CREATE_NO_WINDOW);
         }
 
-        let ffmpeg_output = command.output()?;
+        let ffmpeg = command.spawn()?;
+        let ffmpeg_output = wait_for_process_output_with_timeout(
+            ffmpeg,
+            None,
+            FFMPEG_PROCESS_TIMEOUT,
+            "FFmpeg checkpoint merge",
+        )?;
 
         if !ffmpeg_output.status.success() {
             let stderr = String::from_utf8_lossy(&ffmpeg_output.stderr);
@@ -419,6 +436,10 @@ pub async fn recover_audio_from_checkpoints(
         "-y", // Overwrite if exists
         &output_path_str,
     ]);
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
 
     // Hide console window on Windows
     #[cfg(target_os = "windows")]
@@ -428,7 +449,17 @@ pub async fn recover_audio_from_checkpoints(
         command.creation_flags(CREATE_NO_WINDOW);
     }
 
-    let ffmpeg_result = command.output();
+    let ffmpeg_result = command
+        .spawn()
+        .map_err(|e| anyhow!("Failed to spawn FFmpeg recovery: {e}"))
+        .and_then(|ffmpeg| {
+            wait_for_process_output_with_timeout(
+                ffmpeg,
+                None,
+                FFMPEG_PROCESS_TIMEOUT,
+                "FFmpeg audio recovery",
+            )
+        });
 
     match ffmpeg_result {
         Ok(output) if output.status.success() => {
