@@ -21,12 +21,15 @@ import {
   saveMeetingSummaryLanguage,
   SummaryLanguageStorage,
 } from '@/lib/summary-language-preferences';
+import { MeetingOrganizationPanel } from '@/components/MeetingOrganizationPanel';
 
 interface SummaryPanelProps {
   meeting: {
     id: string;
     title: string;
     created_at: string;
+    project_folder_id?: string | null;
+    tags?: Array<{ id: string; name: string }>;
   };
   meetingTitle: string;
   onTitleChange: (title: string) => void;
@@ -256,6 +259,7 @@ export function SummaryPanel({
     <div className="flex-1 min-w-0 flex flex-col bg-white overflow-hidden">
       {/* Title area */}
       <div className="p-4 border-b border-gray-200">
+        <MeetingOrganizationPanel meetingId={meeting.id} folderId={meeting.project_folder_id} tags={meeting.tags} hasContent={transcripts.length > 0 || aiSummary !== null} />
         {/* <EditableTitle
           title={meetingTitle}
           isEditing={isEditingTitle}

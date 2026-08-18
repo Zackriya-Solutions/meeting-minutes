@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
-import { ChevronDown, ChevronRight, File, Settings, ChevronLeftCircle, ChevronRightCircle, Calendar, StickyNote, Home, Trash2, Mic, Square, Plus, Search, Pencil, NotebookPen, SearchIcon, X, Upload } from 'lucide-react';
+import { ChevronDown, ChevronRight, File, Settings, ChevronLeftCircle, ChevronRightCircle, Calendar, StickyNote, Home, Trash2, Mic, Square, Plus, Search, Pencil, NotebookPen, SearchIcon, X, Upload, FolderPlus } from 'lucide-react';
 import { useRouter, usePathname } from 'next/navigation';
 import { useSidebar } from './SidebarProvider';
 import type { CurrentMeeting } from '@/components/Sidebar/SidebarProvider';
@@ -37,6 +37,7 @@ interface SidebarItem {
   title: string;
   type: 'folder' | 'file';
   children?: SidebarItem[];
+  tags?: string[];
 }
 
 const Sidebar: React.FC = () => {
@@ -54,7 +55,9 @@ const Sidebar: React.FC = () => {
     isSearching,
     meetings,
     setMeetings,
-    serverAddress
+    serverAddress,
+    projectFolders,
+    refetchOrganization
   } = useSidebar();
 
   // Get recording state from RecordingStateContext (single source of truth)
@@ -94,6 +97,15 @@ const Sidebar: React.FC = () => {
     }
   }, [expandedFolders]);
 
+  useEffect(() => {
+    setExpandedFolders(previous => {
+      const next = new Set(previous);
+      next.add('unfiled');
+      projectFolders.forEach(folder => next.add(folder.id));
+      return next;
+    });
+  }, [projectFolders]);
+
   // useEffect(() => {
   //   if (settingsSaveSuccess !== null) {
   //     const timer = setTimeout(() => {
@@ -104,6 +116,8 @@ const Sidebar: React.FC = () => {
 
 
   const [deleteModalState, setDeleteModalState] = useState<{ isOpen: boolean; itemId: string | null }>({ isOpen: false, itemId: null });
+  const [folderDialog, setFolderDialog] = useState<{ mode: 'create' | 'rename'; folderId?: string; name: string } | null>(null);
+  const [folderToDelete, setFolderToDelete] = useState<string | null>(null);
 
   useEffect(() => {
     // Note: Don't set hardcoded defaults - let DB be the source of truth
@@ -258,63 +272,20 @@ const Sidebar: React.FC = () => {
   // Combine search results with sidebar items
   const filteredSidebarItems = useMemo(() => {
     if (!searchQuery.trim()) return sidebarItems;
-
-    // If we have search results, highlight matching meetings
-    if (searchResults.length > 0) {
-      // Get the IDs of meetings that matched in transcripts
-      const matchedMeetingIds = new Set(searchResults.map(result => result.id));
-
-      return sidebarItems
-        .map(folder => {
-          // Always include folders in the results
-          if (folder.type === 'folder') {
-            if (!folder.children) return folder;
-
-            // Filter children based on search results or title match
-            const filteredChildren = folder.children.filter(item => {
-              // Include if the meeting ID is in our search results
-              if (matchedMeetingIds.has(item.id)) return true;
-
-              // Or if the title matches the search query
-              return item.title.toLowerCase().includes(searchQuery.toLowerCase());
-            });
-
-            return {
-              ...folder,
-              children: filteredChildren
-            };
-          }
-
-          // For non-folder items, check if they match the search
-          return (matchedMeetingIds.has(folder.id) ||
-            folder.title.toLowerCase().includes(searchQuery.toLowerCase()))
-            ? folder : undefined;
-        })
-        .filter((item): item is SidebarItem => item !== undefined); // Type-safe filter
-    } else {
-      // Fall back to title-only filtering if no transcript results
-      return sidebarItems
-        .map(folder => {
-          // Always include folders in the results
-          if (folder.type === 'folder') {
-            if (!folder.children) return folder;
-
-            // Filter children based on search query
-            const filteredChildren = folder.children.filter(item =>
-              item.title.toLowerCase().includes(searchQuery.toLowerCase())
-            );
-
-            return {
-              ...folder,
-              children: filteredChildren
-            };
-          }
-
-          // For non-folder items, check if they match the search
-          return folder.title.toLowerCase().includes(searchQuery.toLowerCase()) ? folder : undefined;
-        })
-        .filter((item): item is SidebarItem => item !== undefined); // Type-safe filter
-    }
+    const query = searchQuery.toLowerCase();
+    const matchedMeetingIds = new Set(searchResults.map(result => result.id));
+    const filterItem = (item: SidebarItem, isRoot = false): SidebarItem | undefined => {
+      if (item.type === 'folder') {
+        const children = (item.children ?? []).map(child => filterItem(child)).filter((child): child is SidebarItem => child !== undefined);
+        return isRoot || children.length > 0 || item.title.toLowerCase().includes(query)
+          ? { ...item, children }
+          : undefined;
+      }
+      const matches = matchedMeetingIds.has(item.id) || item.title.toLowerCase().includes(query) ||
+        (item.tags ?? []).some(tag => tag.toLowerCase().includes(query));
+      return matches ? item : undefined;
+    };
+    return sidebarItems.map(item => filterItem(item, true)).filter((item): item is SidebarItem => item !== undefined);
   }, [sidebarItems, searchQuery, searchResults, expandedFolders]);
 
 
@@ -359,6 +330,34 @@ const Sidebar: React.FC = () => {
       handleDelete(deleteModalState.itemId);
     }
     setDeleteModalState({ isOpen: false, itemId: null });
+  };
+
+  const handleFolderSave = async () => {
+    if (!folderDialog?.name.trim()) return;
+    try {
+      if (folderDialog.mode === 'create') {
+        await invoke('api_create_project_folder', { name: folderDialog.name.trim() });
+      } else if (folderDialog.folderId) {
+        await invoke('api_rename_project_folder', { folderId: folderDialog.folderId, name: folderDialog.name.trim() });
+      }
+      await refetchOrganization();
+      setFolderDialog(null);
+      toast.success(folderDialog.mode === 'create' ? 'Project folder created' : 'Project folder renamed');
+    } catch (error) {
+      toast.error('Could not save project folder', { description: error instanceof Error ? error.message : String(error) });
+    }
+  };
+
+  const handleFolderDelete = async () => {
+    if (!folderToDelete) return;
+    try {
+      await invoke('api_delete_project_folder', { folderId: folderToDelete });
+      await refetchOrganization();
+      setFolderToDelete(null);
+      toast.success('Project folder deleted', { description: 'Its meetings were returned to Unfiled.' });
+    } catch (error) {
+      toast.error('Could not delete project folder', { description: error instanceof Error ? error.message : String(error) });
+    }
   };
 
   // Handle modal editing of meeting names
@@ -592,6 +591,12 @@ const Sidebar: React.FC = () => {
                 <Calendar className="w-4 h-4 mr-2" />
               ) : null}
               <span className={depth === 0 ? "" : "font-medium"}>{item.title}</span>
+              {depth > 0 && item.id !== 'unfiled' && (
+                <div className="ml-auto flex items-center gap-1 opacity-0 group-hover:opacity-100">
+                  <button aria-label={`Rename ${item.title}`} className="p-1 hover:text-blue-600" onClick={(event) => { event.stopPropagation(); setFolderDialog({ mode: 'rename', folderId: item.id, name: item.title }); }}><Pencil className="w-3.5 h-3.5" /></button>
+                  <button aria-label={`Delete ${item.title}`} className="p-1 hover:text-red-600" onClick={(event) => { event.stopPropagation(); setFolderToDelete(item.id); }}><Trash2 className="w-3.5 h-3.5" /></button>
+                </div>
+              )}
               <div className="ml-auto">
                 {isExpanded ? (
                   <ChevronDown className="w-4 h-4 text-gray-500" />
@@ -641,6 +646,16 @@ const Sidebar: React.FC = () => {
                   </div>
                 )}
               </div>
+
+              {isMeetingItem && (
+                <div className="ml-8 mt-1 flex flex-wrap gap-1">
+                  {(item.tags ?? []).map(tag => <span key={tag} className="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] text-gray-600">#{tag}</span>)}
+                  <select aria-label="Move meeting to project folder" className="max-w-[120px] rounded border border-gray-200 bg-white px-1 text-[10px] text-gray-500" value={meetings.find(meeting => meeting.id === item.id)?.project_folder_id ?? ''} onClick={(event) => event.stopPropagation()} onChange={async (event) => { event.stopPropagation(); await invoke('api_move_meeting_to_project_folder', { meetingId: item.id, folderId: event.target.value || null }); await refetchOrganization(); }}>
+                    <option value="">Unfiled</option>
+                    {projectFolders.map(folder => <option key={folder.id} value={folder.id}>{folder.name}</option>)}
+                  </select>
+                </div>
+              )}
 
               {/* Show transcript match snippet if available */}
               {hasTranscriptMatch && (
@@ -746,6 +761,7 @@ const Sidebar: React.FC = () => {
                     >
                       <NotebookPen className="w-4 h-4 mr-2 text-gray-600" />
                       <span className="text-gray-700">{item.title}</span>
+                      {item.id === 'meetings' && <button aria-label="Create project folder" className="ml-auto rounded p-1 text-gray-500 hover:bg-gray-100 hover:text-blue-600" onClick={() => setFolderDialog({ mode: 'create', name: '' })}><FolderPlus className="w-4 h-4" /></button>}
                       {searchQuery && item.id === 'meetings' && isSearching && (
                         <span className="ml-2 text-xs text-blue-500 animate-pulse">Searching...</span>
                       )}
@@ -824,6 +840,26 @@ const Sidebar: React.FC = () => {
         onConfirm={handleDeleteConfirm}
         onCancel={() => setDeleteModalState({ isOpen: false, itemId: null })}
       />
+
+      <ConfirmationModal
+        isOpen={folderToDelete !== null}
+        text="Delete this project folder? Its meetings will return to Unfiled and will not be deleted."
+        onConfirm={handleFolderDelete}
+        onCancel={() => setFolderToDelete(null)}
+      />
+
+      <Dialog open={folderDialog !== null} onOpenChange={(open) => { if (!open) setFolderDialog(null); }}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogTitle>{folderDialog?.mode === 'create' ? 'Create project folder' : 'Rename project folder'}</DialogTitle>
+          <div className="space-y-4 py-4">
+            <Input aria-label="Project folder name" autoFocus value={folderDialog?.name ?? ''} onChange={(event) => setFolderDialog(current => current ? { ...current, name: event.target.value } : current)} placeholder="e.g. Mobile app" />
+            <DialogFooter>
+              <button className="rounded px-3 py-2 text-sm text-gray-600 hover:bg-gray-100" onClick={() => setFolderDialog(null)}>Cancel</button>
+              <button className="rounded bg-blue-600 px-3 py-2 text-sm text-white hover:bg-blue-700" onClick={handleFolderSave}>Save</button>
+            </DialogFooter>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Edit Meeting Title Modal */}
       <Dialog open={editModalState.isOpen} onOpenChange={(open) => {

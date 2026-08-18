@@ -1,20 +1,21 @@
 use log::{debug as log_debug, error as log_error, info as log_info, warn as log_warn};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use tauri::{AppHandle, Runtime};
+use tauri::{AppHandle, Manager, Runtime};
 use tauri_plugin_store::StoreExt;
 
 use crate::{
     database::{
         models::MeetingModel,
         repositories::{
-            meeting::MeetingsRepository, setting::SettingsRepository,
+            meeting::MeetingsRepository, organization::OrganizationRepository, setting::SettingsRepository,
             transcript::TranscriptsRepository,
         },
     },
     state::AppState,
     summary::CustomOpenAIConfig,
 };
+use crate::summary::llm_client::{generate_summary, LLMProvider};
 
 // Hardcoded server URL
 const APP_SERVER_URL: &str = "http://localhost:5167";
@@ -30,6 +31,10 @@ pub struct ApiResponse<T> {
 pub struct Meeting {
     pub id: String,
     pub title: String,
+    #[serde(default)]
+    pub project_folder_id: Option<String>,
+    #[serde(default)]
+    pub tags: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -123,6 +128,10 @@ pub struct MeetingDetails {
     pub created_at: String,
     pub updated_at: String,
     pub transcripts: Vec<MeetingTranscript>,
+    #[serde(default)]
+    pub project_folder_id: Option<String>,
+    #[serde(default)]
+    pub tags: Vec<OrganizationTag>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -150,6 +159,22 @@ pub struct MeetingMetadata {
     pub updated_at: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub folder_path: Option<String>,
+    #[serde(default)]
+    pub project_folder_id: Option<String>,
+    #[serde(default)]
+    pub tags: Vec<OrganizationTag>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct OrganizationFolder {
+    pub id: String,
+    pub name: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct OrganizationTag {
+    pub id: String,
+    pub name: String,
 }
 
 /// Paginated transcripts response with total count
@@ -340,13 +365,21 @@ pub async fn api_get_meetings<R: Runtime>(
         Ok(meeting_models) => {
             log_info!("Successfully got {} meetings", meeting_models.len());
 
-            let result: Vec<Meeting> = meeting_models
-                .into_iter()
-                .map(|m| Meeting {
+            let mut result = Vec::with_capacity(meeting_models.len());
+            for m in meeting_models {
+                let tags = OrganizationRepository::get_tags_for_meeting(pool, &m.id)
+                    .await
+                    .map_err(|e| e.to_string())?
+                    .into_iter()
+                    .map(|tag| tag.name)
+                    .collect();
+                result.push(Meeting {
                     id: m.id,
                     title: m.title,
-                })
-                .collect();
+                    project_folder_id: m.project_folder_id,
+                    tags,
+                });
+            }
             Ok(result)
         }
         Err(e) => {
@@ -354,6 +387,165 @@ pub async fn api_get_meetings<R: Runtime>(
             Err(e.to_string())
         }
     }
+}
+
+#[tauri::command]
+pub async fn api_get_project_folders<R: Runtime>(
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<OrganizationFolder>, String> {
+    OrganizationRepository::get_folders(state.db_manager.pool())
+        .await
+        .map(|folders| folders.into_iter().map(|folder| OrganizationFolder { id: folder.id, name: folder.name }).collect())
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn api_create_project_folder<R: Runtime>(
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    name: String,
+) -> Result<OrganizationFolder, String> {
+    OrganizationRepository::create_folder(state.db_manager.pool(), &name)
+        .await
+        .map(|folder| OrganizationFolder { id: folder.id, name: folder.name })
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn api_rename_project_folder<R: Runtime>(
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    folder_id: String,
+    name: String,
+) -> Result<(), String> {
+    if OrganizationRepository::rename_folder(state.db_manager.pool(), &folder_id, &name)
+        .await.map_err(|e| e.to_string())? { Ok(()) } else { Err("Project folder not found".into()) }
+}
+
+#[tauri::command]
+pub async fn api_delete_project_folder<R: Runtime>(
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    folder_id: String,
+) -> Result<(), String> {
+    if OrganizationRepository::delete_folder(state.db_manager.pool(), &folder_id)
+        .await.map_err(|e| e.to_string())? { Ok(()) } else { Err("Project folder not found".into()) }
+}
+
+#[tauri::command]
+pub async fn api_move_meeting_to_project_folder<R: Runtime>(
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    meeting_id: String,
+    folder_id: Option<String>,
+) -> Result<(), String> {
+    if let Some(folder_id) = folder_id.as_deref() {
+        let exists = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM project_folders WHERE id = ?")
+            .bind(folder_id).fetch_one(state.db_manager.pool()).await.map_err(|e| e.to_string())?;
+        if exists == 0 { return Err("Project folder not found".into()); }
+    }
+    if OrganizationRepository::assign_folder(state.db_manager.pool(), &meeting_id, folder_id.as_deref())
+        .await.map_err(|e| e.to_string())? { Ok(()) } else { Err("Meeting not found".into()) }
+}
+
+#[tauri::command]
+pub async fn api_get_meeting_tags<R: Runtime>(
+    _app: AppHandle<R>, state: tauri::State<'_, AppState>, meeting_id: String,
+) -> Result<Vec<OrganizationTag>, String> {
+    OrganizationRepository::get_tags_for_meeting(state.db_manager.pool(), &meeting_id).await
+        .map(|tags| tags.into_iter().map(|tag| OrganizationTag { id: tag.id, name: tag.name }).collect())
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn api_get_all_tags<R: Runtime>(
+    _app: AppHandle<R>, state: tauri::State<'_, AppState>,
+) -> Result<Vec<OrganizationTag>, String> {
+    OrganizationRepository::get_all_tags(state.db_manager.pool()).await
+        .map(|tags| tags.into_iter().map(|tag| OrganizationTag { id: tag.id, name: tag.name }).collect())
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn api_add_meeting_tag<R: Runtime>(
+    _app: AppHandle<R>, state: tauri::State<'_, AppState>, meeting_id: String, name: String,
+) -> Result<OrganizationTag, String> {
+    OrganizationRepository::add_tag(state.db_manager.pool(), &meeting_id, &name).await
+        .map(|tag| OrganizationTag { id: tag.id, name: tag.name })
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn api_remove_meeting_tag<R: Runtime>(
+    _app: AppHandle<R>, state: tauri::State<'_, AppState>, meeting_id: String, tag_id: String,
+) -> Result<(), String> {
+    OrganizationRepository::remove_tag(state.db_manager.pool(), &meeting_id, &tag_id).await
+        .map(|_| ()).map_err(|e| e.to_string())
+}
+
+fn parse_suggested_tags(raw: &str) -> Vec<String> {
+    let cleaned = raw.trim().trim_start_matches("```json").trim_start_matches("```").trim_end_matches("```").trim();
+    let parsed: Option<Vec<String>> = serde_json::from_str::<serde_json::Value>(cleaned).ok().and_then(|value| {
+        value.get("tags").cloned().unwrap_or(value).as_array().map(|items| {
+            items.iter().filter_map(|item| item.as_str().map(str::to_string)).collect()
+        })
+    });
+    let candidates = parsed.unwrap_or_else(|| cleaned.split([',', '\n']).map(str::trim).map(str::to_string).collect());
+    let mut result = Vec::new();
+    for candidate in candidates {
+        let tag = candidate.trim().trim_start_matches('#').trim().to_string();
+        if tag.is_empty() || tag.chars().count() > 40 || result.iter().any(|existing: &String| existing.eq_ignore_ascii_case(&tag)) {
+            continue;
+        }
+        result.push(tag);
+        if result.len() == 8 { break; }
+    }
+    result
+}
+
+#[tauri::command]
+pub async fn api_suggest_meeting_tags<R: Runtime>(
+    app: AppHandle<R>, state: tauri::State<'_, AppState>, meeting_id: String,
+) -> Result<Vec<String>, String> {
+    let pool = state.db_manager.pool();
+    let transcript_rows: Vec<(String,)> = sqlx::query_as(
+        "SELECT transcript FROM transcripts WHERE meeting_id = ? ORDER BY audio_start_time, timestamp",
+    ).bind(&meeting_id).fetch_all(pool).await.map_err(|e| e.to_string())?;
+    let summary_row: Option<(Option<String>,)> = sqlx::query_as(
+        "SELECT result FROM summary_processes WHERE meeting_id = ? AND result IS NOT NULL",
+    ).bind(&meeting_id).fetch_optional(pool).await.map_err(|e| e.to_string())?;
+    let transcript = transcript_rows.into_iter().map(|row| row.0).collect::<Vec<_>>().join("\n");
+    let summary = summary_row.and_then(|row| row.0).unwrap_or_default();
+    let content = format!("Transcript:\n{}\n\nSummary:\n{}", transcript, summary);
+    if content.trim().len() < 20 { return Ok(Vec::new()); }
+
+    let config = SettingsRepository::get_model_config(pool).await.map_err(|e| e.to_string())?
+        .ok_or_else(|| "No summary model configured".to_string())?;
+    if config.provider.trim().is_empty() || config.model.trim().is_empty() {
+        return Err("No summary model configured".into());
+    }
+    let provider = LLMProvider::from_str(&config.provider)?;
+    let api_key = match provider {
+        LLMProvider::Ollama | LLMProvider::BuiltInAI | LLMProvider::CustomOpenAI => String::new(),
+        _ => SettingsRepository::get_api_key(pool, &config.provider).await.map_err(|e| e.to_string())?.unwrap_or_default(),
+    };
+    let custom_config: Option<CustomOpenAIConfig> = if provider == LLMProvider::CustomOpenAI {
+        Some(SettingsRepository::get_custom_openai_config(pool).await.map_err(|e| e.to_string())?
+            .ok_or_else(|| "Custom OpenAI provider is not configured".to_string())?)
+    } else { None };
+    let final_api_key = custom_config.as_ref().and_then(|value| value.api_key.clone()).unwrap_or(api_key);
+    let generated = generate_summary(
+        &reqwest::Client::new(), &provider, &config.model, &final_api_key,
+        "You suggest concise organization tags for a meeting. Return only JSON in the form {\"tags\":[\"tag\"]}. Suggest 3 to 8 specific, reusable tags. Do not include people names, dates, or generic words like meeting.",
+        &content.chars().take(24000).collect::<String>(),
+        config.ollama_endpoint.as_deref(), custom_config.as_ref().map(|value| value.endpoint.as_str()),
+        custom_config.as_ref().and_then(|value| value.max_tokens.map(|tokens| tokens as u32)),
+        custom_config.as_ref().and_then(|value| value.temperature),
+        custom_config.as_ref().and_then(|value| value.top_p),
+        Some(&app.path().app_data_dir().map_err(|e| e.to_string())?), None,
+    ).await?;
+    Ok(parse_suggested_tags(&generated))
 }
 
 #[tauri::command]
@@ -826,12 +1018,17 @@ pub async fn api_get_meeting_metadata<R: Runtime>(
     match MeetingsRepository::get_meeting_metadata(pool, &meeting_id).await {
         Ok(Some(meeting)) => {
             log_info!("Successfully retrieved meeting metadata {}", meeting_id);
+            let tags = OrganizationRepository::get_tags_for_meeting(pool, &meeting.id)
+                .await.map_err(|e| e.to_string())?.into_iter()
+                .map(|tag| OrganizationTag { id: tag.id, name: tag.name }).collect();
             Ok(MeetingMetadata {
                 id: meeting.id,
                 title: meeting.title,
                 created_at: meeting.created_at.0.to_rfc3339(),
                 updated_at: meeting.updated_at.0.to_rfc3339(),
                 folder_path: meeting.folder_path,
+                project_folder_id: meeting.project_folder_id,
+                tags,
             })
         }
         Ok(None) => {

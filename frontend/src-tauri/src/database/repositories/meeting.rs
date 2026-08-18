@@ -1,5 +1,6 @@
 use crate::api::{MeetingDetails, MeetingTranscript};
 use crate::database::models::{MeetingModel, Transcript};
+use crate::database::repositories::organization::OrganizationRepository;
 use chrono::Utc;
 use sqlx::{Connection, Error as SqlxError, SqliteConnection, SqlitePool};
 use tracing::{error, info};
@@ -9,7 +10,7 @@ pub struct MeetingsRepository;
 impl MeetingsRepository {
     pub async fn get_meetings(pool: &SqlitePool) -> Result<Vec<MeetingModel>, sqlx::Error> {
         let meetings =
-            sqlx::query_as::<_, MeetingModel>("SELECT * FROM meetings ORDER BY created_at DESC")
+            sqlx::query_as::<_, MeetingModel>("SELECT id, title, created_at, updated_at, folder_path, project_folder_id FROM meetings ORDER BY created_at DESC")
                 .fetch_all(pool)
                 .await?;
         Ok(meetings)
@@ -62,7 +63,7 @@ impl MeetingsRepository {
 
         // Get meeting details
         let meeting: Option<MeetingModel> =
-            sqlx::query_as("SELECT id, title, created_at, updated_at, folder_path FROM meetings WHERE id = ?")
+            sqlx::query_as("SELECT id, title, created_at, updated_at, folder_path, project_folder_id FROM meetings WHERE id = ?")
                 .bind(meeting_id)
                 .fetch_optional(&mut *transaction)
                 .await?;
@@ -96,12 +97,20 @@ impl MeetingsRepository {
                 })
                 .collect::<Vec<_>>();
 
+            let tags = OrganizationRepository::get_tags_for_meeting(pool, meeting_id)
+                .await?
+                .into_iter()
+                .map(|tag| crate::api::OrganizationTag { id: tag.id, name: tag.name })
+                .collect();
+
             Ok(Some(MeetingDetails {
                 id: meeting.id,
                 title: meeting.title,
                 created_at: meeting.created_at.0.to_rfc3339(),
                 updated_at: meeting.updated_at.0.to_rfc3339(),
                 transcripts: meeting_transcripts,
+                project_folder_id: meeting.project_folder_id,
+                tags,
             }))
         } else {
             transaction.rollback().await?;
@@ -121,7 +130,7 @@ impl MeetingsRepository {
         }
 
         let meeting: Option<MeetingModel> =
-            sqlx::query_as("SELECT id, title, created_at, updated_at, folder_path FROM meetings WHERE id = ?")
+            sqlx::query_as("SELECT id, title, created_at, updated_at, folder_path, project_folder_id FROM meetings WHERE id = ?")
                 .bind(meeting_id)
                 .fetch_optional(pool)
                 .await?;

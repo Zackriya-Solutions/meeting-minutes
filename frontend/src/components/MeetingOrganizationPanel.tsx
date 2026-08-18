@@ -1,0 +1,87 @@
+'use client';
+
+import { useEffect, useState } from 'react';
+import { Check, Plus, X } from 'lucide-react';
+import { invoke } from '@tauri-apps/api/core';
+import { toast } from 'sonner';
+import { useSidebar } from '@/components/Sidebar/SidebarProvider';
+
+interface OrganizationTag { id: string; name: string; }
+
+interface MeetingOrganizationPanelProps {
+  meetingId: string;
+  folderId?: string | null;
+  tags?: OrganizationTag[];
+  hasContent: boolean;
+}
+
+export function MeetingOrganizationPanel({ meetingId, folderId, tags: initialTags = [], hasContent }: MeetingOrganizationPanelProps) {
+  const { projectFolders, refetchOrganization } = useSidebar();
+  const [tags, setTags] = useState<OrganizationTag[]>(initialTags);
+  const [newTag, setNewTag] = useState('');
+  const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [suggestionsDismissed, setSuggestionsDismissed] = useState(false);
+
+  useEffect(() => setTags(initialTags), [initialTags]);
+
+  useEffect(() => {
+    if (!hasContent || suggestionsDismissed) return;
+    let cancelled = false;
+    void invoke('api_suggest_meeting_tags', { meetingId }).then((result) => {
+      if (!cancelled) setSuggestions(result as string[]);
+    }).catch(() => { /* Optional enhancement: manual tags still work. */ });
+    return () => { cancelled = true; };
+  }, [meetingId, hasContent, suggestionsDismissed]);
+
+  const addTag = async (name: string) => {
+    const trimmed = name.trim();
+    if (!trimmed || tags.some(tag => tag.name.toLowerCase() === trimmed.toLowerCase())) return;
+    try {
+      const tag = await invoke('api_add_meeting_tag', { meetingId, name: trimmed }) as OrganizationTag;
+      setTags(previous => [...previous, tag].sort((left, right) => left.name.localeCompare(right.name)));
+      setNewTag('');
+      setSuggestions(previous => previous.filter(suggestion => suggestion.toLowerCase() !== trimmed.toLowerCase()));
+      await refetchOrganization();
+    } catch (error) { toast.error('Could not add tag', { description: error instanceof Error ? error.message : String(error) }); }
+  };
+
+  const removeTag = async (tag: OrganizationTag) => {
+    try {
+      await invoke('api_remove_meeting_tag', { meetingId, tagId: tag.id });
+      setTags(previous => previous.filter(current => current.id !== tag.id));
+      await refetchOrganization();
+    } catch (error) { toast.error('Could not remove tag', { description: error instanceof Error ? error.message : String(error) }); }
+  };
+
+  const moveMeeting = async (value: string) => {
+    try {
+      await invoke('api_move_meeting_to_project_folder', { meetingId, folderId: value || null });
+      await refetchOrganization();
+    } catch (error) { toast.error('Could not move meeting', { description: error instanceof Error ? error.message : String(error) }); }
+  };
+
+  return (
+    <div className="mt-3 rounded-lg border border-gray-200 bg-gray-50 p-3 text-left">
+      <div className="flex flex-wrap items-center gap-2">
+        <label htmlFor="meeting-project-folder" className="text-xs font-medium text-gray-600">Project</label>
+        <select id="meeting-project-folder" value={folderId ?? ''} onChange={(event) => void moveMeeting(event.target.value)} className="rounded border border-gray-200 bg-white px-2 py-1 text-xs">
+          <option value="">Unfiled</option>
+          {projectFolders.map(folder => <option key={folder.id} value={folder.id}>{folder.name}</option>)}
+        </select>
+      </div>
+      <div className="mt-2 flex flex-wrap items-center gap-1.5">
+        {tags.map(tag => <span key={tag.id} className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-2 py-1 text-xs text-blue-700">#{tag.name}<button aria-label={`Remove tag ${tag.name}`} onClick={() => void removeTag(tag)}><X className="h-3 w-3" /></button></span>)}
+        <form onSubmit={(event) => { event.preventDefault(); void addTag(newTag); }} className="inline-flex items-center gap-1">
+          <input aria-label="Add meeting tag" value={newTag} onChange={(event) => setNewTag(event.target.value)} placeholder="Add tag" className="w-24 rounded border border-gray-200 bg-white px-2 py-1 text-xs" />
+          <button type="submit" aria-label="Add tag" className="rounded p-1 text-gray-500 hover:bg-white hover:text-blue-600"><Plus className="h-3.5 w-3.5" /></button>
+        </form>
+      </div>
+      {!suggestionsDismissed && suggestions.length > 0 && (
+        <div className="mt-2 border-t border-gray-200 pt-2">
+          <div className="flex items-center justify-between text-xs text-gray-500"><span>Suggested tags</span><button onClick={() => setSuggestionsDismissed(true)} className="hover:text-gray-800">Discard</button></div>
+          <div className="mt-1 flex flex-wrap gap-1.5">{suggestions.map(suggestion => <span key={suggestion} className="inline-flex items-center gap-1 rounded-full border border-dashed border-blue-300 bg-white px-2 py-1 text-xs text-blue-700"><button onClick={() => void addTag(suggestion)} className="inline-flex items-center gap-1 hover:text-blue-900"><Check className="h-3 w-3" />{suggestion}</button><button onClick={() => setNewTag(suggestion)} className="border-l border-blue-200 pl-1 text-[10px] hover:text-blue-900">Edit</button></span>)}</div>
+        </div>
+      )}
+    </div>
+  );
+}
