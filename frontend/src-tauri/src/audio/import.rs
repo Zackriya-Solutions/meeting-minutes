@@ -436,6 +436,23 @@ enum ImportRunOutcome {
     AlreadyImported(ExistingAudioMeeting),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DuplicatePolicy {
+    /// Folder imports are discovery-oriented and never create another take of
+    /// audio that is already known.
+    SkipKnownSource,
+    /// A direct file import may add the one known raw/denoised variant that is
+    /// missing. Legacy rows with unknown provenance still count as a match:
+    /// this policy never guesses how historical audio was processed.
+    AddMissingKnownVariant,
+}
+
+impl DuplicatePolicy {
+    fn permits_missing_known_variant(self) -> bool {
+        matches!(self, Self::AddMissingKnownVariant)
+    }
+}
+
 #[derive(Debug)]
 enum CreateMeetingOutcome {
     Created,
@@ -1033,10 +1050,7 @@ async fn start_import<R: Runtime>(
         provider,
         denoise_audio,
         None,
-        // A single-file import is an explicit user action. It may create the
-        // one missing raw/denoised variant; run_import still rejects a variant
-        // that already exists. Batch imports use the stricter skip policy.
-        true,
+        DuplicatePolicy::AddMissingKnownVariant,
     )
     .await;
 
@@ -1191,9 +1205,7 @@ pub async fn start_batch_import<R: Runtime>(
             provider.clone(),
             denoise_audio,
             Some(source_sha256.clone()),
-            // Batch import keeps skipping duplicates: a folder of files is not a
-            // deliberate re-run of one of them.
-            false,
+            DuplicatePolicy::SkipKnownSource,
         ))
         .catch_unwind()
         .await
@@ -1302,7 +1314,7 @@ async fn run_import<R: Runtime>(
     provider: Option<String>,
     denoise_audio: bool,
     source_sha256: Option<String>,
-    allow_processing_variant: bool,
+    duplicate_policy: DuplicatePolicy,
 ) -> Result<ImportRunOutcome> {
     let source = PathBuf::from(&source_path);
 
@@ -1326,9 +1338,9 @@ async fn run_import<R: Runtime>(
         .try_state::<AppState>()
         .ok_or_else(|| anyhow!("App state not available"))?;
     let pool = app_state.db_manager.pool();
-    // An explicit single-file re-run is useful only when it creates a processing
-    // variant that does not already exist. This policy is selected by the native
-    // command path, not by a frontend flag; callers cannot disable idempotency.
+    // Duplicate handling is selected by the native call path, not by a frontend
+    // flag. A direct import can add a known missing processing variant; a batch
+    // import skips any known source. Neither path guesses legacy provenance.
     if let Some(canonical) = find_existing_audio_meeting(pool, &source_sha256).await? {
         // Historical imports predate denoise provenance. Treat unknown as an
         // existing match for either mode: guessing that it differs would create
@@ -1343,7 +1355,7 @@ async fn run_import<R: Runtime>(
                 denoise_audio,
             )
             .await?;
-        if !allow_processing_variant || same_processing.is_some() {
+        if !duplicate_policy.permits_missing_known_variant() || same_processing.is_some() {
             let existing = same_processing.unwrap_or(canonical);
             info!(
                 "Audio '{}' is already imported with the requested processing as meeting {}",
@@ -1926,7 +1938,7 @@ async fn run_import<R: Runtime>(
         source_size,
         Some((duration_seconds * 1000.0).round().max(0.0) as i64),
         denoise_sample_rate.is_some(),
-        allow_processing_variant,
+        duplicate_policy,
     )
     .await?;
     if let CreateMeetingOutcome::AlreadyImported(existing) = create_outcome {
@@ -2015,12 +2027,12 @@ async fn create_meeting_with_transcripts(
     source_size: u64,
     duration_ms: Option<i64>,
     denoise_applied: bool,
-    keep_duplicate: bool,
+    duplicate_policy: DuplicatePolicy,
 ) -> Result<CreateMeetingOutcome> {
     // Avoid all writes when this exact take already exists. The unique partial
     // index on (sha256, denoise_applied) is the concurrent safety net; this read
     // is the normal fast path and returns the most useful meeting to the caller.
-    if keep_duplicate {
+    if duplicate_policy.permits_missing_known_variant() {
         if let Some(canonical) =
             crate::database::repositories::audio_identity::find_canonical_meeting(
                 pool,
@@ -2102,7 +2114,8 @@ async fn create_meeting_with_transcripts(
         // A deliberate re-run of the same file — the user changed how it should be
         // processed — is a second take, not an accident to be undone. It stays as a
         // duplicate candidate so both results exist side by side and can be compared.
-        Ok(IdentityRegistration::DuplicateCandidate { .. }) if keep_duplicate => {}
+        Ok(IdentityRegistration::DuplicateCandidate { .. })
+            if duplicate_policy.permits_missing_known_variant() => {}
         Ok(IdentityRegistration::DuplicateCandidate { .. }) => {
             tx.rollback()
                 .await
@@ -2125,7 +2138,7 @@ async fn create_meeting_with_transcripts(
             drop(conn);
             // A concurrent import may have committed the same processing
             // variant after the preflight read and won the unique index race.
-            if keep_duplicate {
+            if duplicate_policy.permits_missing_known_variant() {
                 if let Some(existing) =
                     crate::database::repositories::audio_identity::find_processing_variant(
                         pool,
@@ -2811,7 +2824,9 @@ mod tests {
             println!("skip: set MEETILY_AB_CLIPS");
             return;
         };
-        let model = std::env::var("MEETILY_DENOISE_MODEL").ok().map(PathBuf::from);
+        let model = std::env::var("MEETILY_DENOISE_MODEL")
+            .ok()
+            .map(PathBuf::from);
         if let Some(model) = &model {
             assert!(model.exists(), "model not found: {}", model.display());
         }
@@ -2849,9 +2864,7 @@ mod tests {
             } else {
                 "same"
             };
-            println!(
-                "{name:<16} {raw_n:>8} {raw_s:>9.1} {enh_n:>8} {enh_s:>9.1}   {verdict}"
-            );
+            println!("{name:<16} {raw_n:>8} {raw_s:>9.1} {enh_n:>8} {enh_s:>9.1}   {verdict}");
         }
     }
     use super::*;
@@ -3641,7 +3654,7 @@ mod tests {
             7,
             Some(1_000),
             false,
-            false,
+            DuplicatePolicy::SkipKnownSource,
         )
         .await
         .unwrap();
@@ -3679,7 +3692,7 @@ mod tests {
             7,
             Some(1_000),
             false,
-            false,
+            DuplicatePolicy::SkipKnownSource,
         )
         .await
         .unwrap();
@@ -3696,7 +3709,7 @@ mod tests {
             7,
             Some(1_000),
             true,
-            true,
+            DuplicatePolicy::AddMissingKnownVariant,
         )
         .await
         .unwrap();
@@ -3763,7 +3776,7 @@ mod tests {
             7,
             Some(1_000),
             false,
-            false,
+            DuplicatePolicy::SkipKnownSource,
         )
         .await
         .unwrap();
@@ -3778,7 +3791,7 @@ mod tests {
             7,
             Some(1_000),
             false,
-            true,
+            DuplicatePolicy::AddMissingKnownVariant,
         )
         .await
         .unwrap();
@@ -3818,9 +3831,10 @@ mod tests {
         .unwrap();
         tx.commit().await.unwrap();
 
-        for (meeting_id, denoise_applied) in
-            [("meeting-raw-guess", false), ("meeting-denoised-guess", true)]
-        {
+        for (meeting_id, denoise_applied) in [
+            ("meeting-raw-guess", false),
+            ("meeting-denoised-guess", true),
+        ] {
             let outcome = create_meeting_with_transcripts(
                 &pool,
                 meeting_id,
@@ -3831,7 +3845,7 @@ mod tests {
                 7,
                 Some(1_000),
                 denoise_applied,
-                true,
+                DuplicatePolicy::AddMissingKnownVariant,
             )
             .await
             .unwrap();
@@ -3863,7 +3877,7 @@ mod tests {
             7,
             Some(1_000),
             false,
-            false,
+            DuplicatePolicy::SkipKnownSource,
         )
         .await
         .unwrap();
@@ -3877,7 +3891,7 @@ mod tests {
             7,
             Some(1_000),
             true,
-            true,
+            DuplicatePolicy::AddMissingKnownVariant,
         )
         .await
         .unwrap();
@@ -3892,7 +3906,7 @@ mod tests {
             7,
             Some(1_000),
             true,
-            true,
+            DuplicatePolicy::AddMissingKnownVariant,
         )
         .await
         .unwrap();
@@ -3923,7 +3937,7 @@ mod tests {
             7,
             Some(1_000),
             false,
-            false,
+            DuplicatePolicy::SkipKnownSource,
         )
         .await
         .unwrap();
@@ -3939,7 +3953,7 @@ mod tests {
             7,
             Some(1_000),
             false,
-            false,
+            DuplicatePolicy::SkipKnownSource,
         )
         .await
         .unwrap();
