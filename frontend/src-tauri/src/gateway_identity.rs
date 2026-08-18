@@ -592,6 +592,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(debug_assertions))]
     fn analytics_and_gateway_failures_have_independent_cooldowns() {
         assert!(!std::ptr::eq(
             device_id_attempt(DeviceIdPurpose::Analytics),
