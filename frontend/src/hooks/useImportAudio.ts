@@ -99,8 +99,7 @@ export interface UseImportAudioReturn {
     title: string,
     language?: string | null,
     model?: string | null,
-    provider?: string | null,
-    forceReimport?: boolean
+    provider?: string | null
   ) => Promise<void>;
   startBatchImport: (
     items: BatchImportItem[],
@@ -368,8 +367,7 @@ export function useImportAudio({
       title: string,
       language?: string | null,
       model?: string | null,
-      provider?: string | null,
-      forceReimport?: boolean
+      provider?: string | null
     ) => {
       isCancelledRef.current = false;
       setStatus('processing');
@@ -394,7 +392,6 @@ export function useImportAudio({
           model: model || null,
           provider: provider || null,
           denoiseAudio: loadBetaFeatures().noisyAudioDenoising,
-          forceReimport: forceReimport ?? false,
         });
       } catch (err: any) {
         setStatus('error');

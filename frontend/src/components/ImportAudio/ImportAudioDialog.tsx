@@ -142,8 +142,7 @@ export function ImportAudioDialog({
                 pending.title,
                 pending.language,
                 pending.model,
-                pending.provider,
-                true
+                pending.provider
               );
             },
           }
@@ -274,7 +273,7 @@ export function ImportAudioDialog({
     await selectFolder();
   };
 
-  const handleStartImport = async (forceReimport = false) => {
+  const handleStartImport = async () => {
     if (loadingModels || !selectedModel) {
       toast.error(t('No transcription model is available for import'), {
         description: t('Download GigaAM in Settings → Transcription before importing audio.'),
@@ -308,8 +307,7 @@ export function ImportAudioDialog({
       request.title,
       request.language,
       request.model,
-      request.provider,
-      forceReimport
+      request.provider
     );
   };
 
@@ -450,7 +448,7 @@ export function ImportAudioDialog({
                           variant="secondary"
                           size="md"
                           className="mt-2 w-full"
-                          onClick={() => void handleStartImport(true)}
+                          onClick={() => void handleStartImport()}
                           disabled={loadingModels || !selectedModel}
                         >
                           {t('Redo with current settings')}
@@ -643,7 +641,7 @@ export function ImportAudioDialog({
                 {t('Cancel')}
               </Button>
               <Button
-                onClick={() => void handleStartImport(false)}
+                onClick={() => void handleStartImport()}
                 className="min-w-0"
                 variant="primary"
                 size="md"

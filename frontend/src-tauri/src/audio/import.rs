@@ -1016,7 +1016,6 @@ async fn start_import<R: Runtime>(
     model: Option<String>,
     provider: Option<String>,
     denoise_audio: bool,
-    force_reimport: bool,
 ) -> Result<ImportRunOutcome> {
     // Acquire guard - ensures flag is cleared even on panic/early return
     let _guard = ImportGuard::acquire().map_err(|e| anyhow!(e))?;
@@ -1034,7 +1033,10 @@ async fn start_import<R: Runtime>(
         provider,
         denoise_audio,
         None,
-        force_reimport,
+        // A single-file import is an explicit user action. It may create the
+        // one missing raw/denoised variant; run_import still rejects a variant
+        // that already exists. Batch imports use the stricter skip policy.
+        true,
     )
     .await;
 
@@ -1300,7 +1302,7 @@ async fn run_import<R: Runtime>(
     provider: Option<String>,
     denoise_audio: bool,
     source_sha256: Option<String>,
-    force_reimport: bool,
+    allow_processing_variant: bool,
 ) -> Result<ImportRunOutcome> {
     let source = PathBuf::from(&source_path);
 
@@ -1324,9 +1326,9 @@ async fn run_import<R: Runtime>(
         .try_state::<AppState>()
         .ok_or_else(|| anyhow!("App state not available"))?;
     let pool = app_state.db_manager.pool();
-    // An explicit re-run is useful only when it creates a processing variant
-    // that does not already exist. Keep the backend authoritative: callers may
-    // set force_reimport directly, so a raw boolean cannot disable idempotency.
+    // An explicit single-file re-run is useful only when it creates a processing
+    // variant that does not already exist. This policy is selected by the native
+    // command path, not by a frontend flag; callers cannot disable idempotency.
     if let Some(canonical) = find_existing_audio_meeting(pool, &source_sha256).await? {
         let same_processing =
             crate::database::repositories::audio_identity::find_processing_variant(
@@ -1335,7 +1337,7 @@ async fn run_import<R: Runtime>(
                 denoise_audio,
             )
             .await?;
-        if !force_reimport || same_processing.is_some() {
+        if !allow_processing_variant || same_processing.is_some() {
             let existing = same_processing.unwrap_or(canonical);
             info!(
                 "Audio '{}' is already imported with the requested processing as meeting {}",
@@ -1918,7 +1920,7 @@ async fn run_import<R: Runtime>(
         source_size,
         Some((duration_seconds * 1000.0).round().max(0.0) as i64),
         denoise_sample_rate.is_some(),
-        force_reimport,
+        allow_processing_variant,
     )
     .await?;
     if let CreateMeetingOutcome::AlreadyImported(existing) = create_outcome {
@@ -2625,7 +2627,6 @@ pub async fn start_import_audio_command<R: Runtime>(
     model: Option<String>,
     provider: Option<String>,
     denoise_audio: Option<bool>,
-    force_reimport: Option<bool>,
 ) -> Result<ImportStarted, String> {
     // Check if import is already in progress (guard will be acquired in start_import)
     if IMPORT_IN_PROGRESS.load(Ordering::SeqCst) {
@@ -2642,7 +2643,6 @@ pub async fn start_import_audio_command<R: Runtime>(
             model,
             provider,
             denoise_audio.unwrap_or(false),
-            force_reimport.unwrap_or(false),
         )
         .await;
 

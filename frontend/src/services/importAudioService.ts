@@ -7,7 +7,6 @@ export interface StartAudioImportRequest {
   model: string | null;
   provider: string | null;
   denoiseAudio: boolean;
-  forceReimport: boolean;
 }
 
 type InvokeCommand = (
@@ -26,6 +25,5 @@ export function startAudioImportCommand(
     model: request.model,
     provider: request.provider,
     denoiseAudio: request.denoiseAudio,
-    forceReimport: request.forceReimport,
   });
 }

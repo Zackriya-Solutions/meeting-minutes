@@ -491,11 +491,18 @@ mod tests {
     #[tokio::test]
     async fn deleting_canonical_promotes_oldest_duplicate() {
         let pool = pool().await;
-        for meeting_id in ["m1", "m2"] {
+        for (meeting_id, denoise_applied) in [("m1", false), ("m2", true)] {
             let mut tx = pool.begin().await.unwrap();
-            register_import_identity(&mut tx, meeting_id, HASH, 7, None, None)
-                .await
-                .unwrap();
+            register_import_identity(
+                &mut tx,
+                meeting_id,
+                HASH,
+                7,
+                None,
+                Some(denoise_applied),
+            )
+            .await
+            .unwrap();
             tx.commit().await.unwrap();
         }
 
@@ -509,6 +516,7 @@ mod tests {
 
         let existing = find_canonical_meeting(&pool, HASH).await.unwrap().unwrap();
         assert_eq!(existing.meeting_id, "m2");
+        assert_eq!(existing.denoise_applied, Some(true));
         let role: String =
             sqlx::query_scalar("SELECT role FROM meeting_audio_identities WHERE meeting_id='m2'")
                 .fetch_one(&pool)
