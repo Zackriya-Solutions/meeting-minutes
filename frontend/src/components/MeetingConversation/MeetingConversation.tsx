@@ -387,6 +387,14 @@ export function MeetingConversation({
   );
   const isSummaryGenerating = ['processing', 'summarizing', 'regenerating'].includes(summaryPanelProps.summaryStatus);
   const isSummaryLoading = summaryPanelProps.summaryLoadStatus === 'loading' || isSummaryGenerating;
+  // A failed first run has no saved summary yet, but it still needs the top-bar retry
+  // action. Once content exists, use regeneration so the current summary is preserved
+  // as a fallback if the next run fails.
+  const canRestartSummary = hasSummary || summaryPanelProps.summaryStatus === 'error';
+  const restartSummary = useCallback(() => {
+    if (hasSummary) return summaryPanelProps.onRegenerateSummary();
+    return summaryPanelProps.onGenerateSummary('');
+  }, [hasSummary, summaryPanelProps.onGenerateSummary, summaryPanelProps.onRegenerateSummary]);
   const showSummaryContent = hasSummary
     || summaryPanelProps.summaryLoadStatus === 'loading'
     || isSummaryGenerating
@@ -459,7 +467,7 @@ export function MeetingConversation({
             totalCount={totalCount}
             onSelect={handleTranscriptSearchSelect}
           />
-          {hasSummary && (
+          {canRestartSummary && (
             <FluidButton
               type="button"
               variant="secondary"
@@ -468,7 +476,7 @@ export function MeetingConversation({
               title={t('Regenerate')}
               data-no-window-drag
               disabled={['processing', 'summarizing', 'regenerating'].includes(summaryPanelProps.summaryStatus)}
-              onClick={() => void summaryPanelProps.onRegenerateSummary()}
+              onClick={() => void restartSummary()}
               className="no-drag h-10 w-10 rounded-full shadow-none [&>span:first-child]:!bg-[var(--primary-5)] active:scale-[0.96]"
             >
               <RefreshCw size={18} strokeWidth={2} />
