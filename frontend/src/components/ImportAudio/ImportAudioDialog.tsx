@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { loadBetaFeatures } from '@/types/betaFeatures';
 import {
   Globe,
   Cpu,
@@ -78,6 +79,15 @@ export function ImportAudioDialog({
   const [selectedLang, setSelectedLang] = useState(selectedLanguage || 'auto');
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [titleModifiedByUser, setTitleModifiedByUser] = useState(false);
+  // What the last import was asked to do, so an already-imported file can be re-run
+  // with exactly the same request plus the current settings.
+  const pendingImportRef = useRef<{
+    path: string;
+    title: string;
+    language: string | null;
+    model: string | null;
+    provider: string | null;
+  } | null>(null);
 
   // Always start as false — represents "dialog has not yet been opened".
   // Do NOT initialize from the `open` prop: if the component mounts with open=true
@@ -109,8 +119,35 @@ export function ImportAudioDialog({
   }, [t]);
 
   const handleDuplicate = useCallback((existing: ExistingAudioMeeting) => {
+    // The file was imported before. Say how it was processed and offer to run it again
+    // with the current settings — otherwise changing the denoise switch would mean
+    // deleting the existing meeting first.
+    const processedAs =
+      existing.denoise_applied === null
+        ? t('processing unknown')
+        : existing.denoise_applied
+        ? t('imported with denoising')
+        : t('imported without denoising');
+    const wantsDenoise = loadBetaFeatures().noisyAudioDenoising;
+    const canRedoWithCurrentSettings =
+      existing.denoise_applied !== null && existing.denoise_applied !== wantsDenoise;
+    const pending = pendingImportRef.current;
     toast.info(t('Audio already imported'), {
-      description: `${t('Opening existing meeting')}: ${existing.title}`,
+      description: `${existing.title} — ${processedAs}`,
+      action: pending && canRedoWithCurrentSettings
+        ? {
+            label: t('Redo with current settings'),
+            onClick: () => {
+              void startImport(
+                pending.path,
+                pending.title,
+                pending.language,
+                pending.model,
+                pending.provider
+              );
+            },
+          }
+        : undefined,
     });
     refetchMeetings();
     onOpenChange(false);
@@ -258,12 +295,20 @@ export function ImportAudioDialog({
     }
     if (!fileInfo) return;
 
+    const request = {
+      path: fileInfo.path,
+      title: title || fileInfo.filename,
+      language: languageAutoOnly ? null : selectedLang === 'auto' ? null : selectedLang,
+      model: selectedModel?.name || null,
+      provider: selectedModel?.provider || null,
+    };
+    pendingImportRef.current = request;
     await startImport(
-      fileInfo.path,
-      title || fileInfo.filename,
-      languageAutoOnly ? null : selectedLang === 'auto' ? null : selectedLang,
-      selectedModel?.name || null,
-      selectedModel?.provider || null
+      request.path,
+      request.title,
+      request.language,
+      request.model,
+      request.provider
     );
   };
 
@@ -399,6 +444,18 @@ export function ImportAudioDialog({
                       >
                         {t('Open existing meeting')}
                       </Button>
+                      {fileInfo.existing_meeting.denoise_applied !== null
+                        && fileInfo.existing_meeting.denoise_applied !== loadBetaFeatures().noisyAudioDenoising && (
+                        <Button
+                          variant="secondary"
+                          size="md"
+                          className="mt-2 w-full"
+                          onClick={() => void handleStartImport()}
+                          disabled={loadingModels || !selectedModel}
+                        >
+                          {t('Redo with current settings')}
+                        </Button>
+                      )}
                     </div>
                   )}
 
@@ -586,7 +643,7 @@ export function ImportAudioDialog({
                 {t('Cancel')}
               </Button>
               <Button
-                onClick={handleStartImport}
+                onClick={() => void handleStartImport()}
                 className="min-w-0"
                 variant="primary"
                 size="md"

@@ -436,6 +436,23 @@ enum ImportRunOutcome {
     AlreadyImported(ExistingAudioMeeting),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DuplicatePolicy {
+    /// Folder imports are discovery-oriented and never create another take of
+    /// audio that is already known.
+    SkipKnownSource,
+    /// A direct file import may add the one known raw/denoised variant that is
+    /// missing. Legacy rows with unknown provenance still count as a match:
+    /// this policy never guesses how historical audio was processed.
+    AddMissingKnownVariant,
+}
+
+impl DuplicatePolicy {
+    fn permits_missing_known_variant(self) -> bool {
+        matches!(self, Self::AddMissingKnownVariant)
+    }
+}
+
 #[derive(Debug)]
 enum CreateMeetingOutcome {
     Created,
@@ -1033,6 +1050,7 @@ async fn start_import<R: Runtime>(
         provider,
         denoise_audio,
         None,
+        DuplicatePolicy::AddMissingKnownVariant,
     )
     .await;
 
@@ -1187,6 +1205,7 @@ pub async fn start_batch_import<R: Runtime>(
             provider.clone(),
             denoise_audio,
             Some(source_sha256.clone()),
+            DuplicatePolicy::SkipKnownSource,
         ))
         .catch_unwind()
         .await
@@ -1295,6 +1314,7 @@ async fn run_import<R: Runtime>(
     provider: Option<String>,
     denoise_audio: bool,
     source_sha256: Option<String>,
+    duplicate_policy: DuplicatePolicy,
 ) -> Result<ImportRunOutcome> {
     let source = PathBuf::from(&source_path);
 
@@ -1318,12 +1338,31 @@ async fn run_import<R: Runtime>(
         .try_state::<AppState>()
         .ok_or_else(|| anyhow!("App state not available"))?;
     let pool = app_state.db_manager.pool();
-    if let Some(existing) = find_existing_audio_meeting(pool, &source_sha256).await? {
-        info!(
-            "Audio '{}' is already imported as meeting {}",
-            source_path, existing.meeting_id
-        );
-        return Ok(ImportRunOutcome::AlreadyImported(existing));
+    // Duplicate handling is selected by the native call path, not by a frontend
+    // flag. A direct import can add a known missing processing variant; a batch
+    // import skips any known source. Neither path guesses legacy provenance.
+    if let Some(canonical) = find_existing_audio_meeting(pool, &source_sha256).await? {
+        // Historical imports predate denoise provenance. Treat unknown as an
+        // existing match for either mode: guessing that it differs would create
+        // a speculative duplicate that the user cannot meaningfully compare.
+        if canonical.denoise_applied.is_none() {
+            return Ok(ImportRunOutcome::AlreadyImported(canonical));
+        }
+        let same_processing =
+            crate::database::repositories::audio_identity::find_processing_variant(
+                pool,
+                &source_sha256,
+                denoise_audio,
+            )
+            .await?;
+        if !duplicate_policy.permits_missing_known_variant() || same_processing.is_some() {
+            let existing = same_processing.unwrap_or(canonical);
+            info!(
+                "Audio '{}' is already imported with the requested processing as meeting {}",
+                source_path, existing.meeting_id
+            );
+            return Ok(ImportRunOutcome::AlreadyImported(existing));
+        }
     }
 
     let (provider, model) = resolve_import_transcription(pool, provider, model).await?;
@@ -1898,6 +1937,8 @@ async fn run_import<R: Runtime>(
         &source_sha256,
         source_size,
         Some((duration_seconds * 1000.0).round().max(0.0) as i64),
+        denoise_sample_rate.is_some(),
+        duplicate_policy,
     )
     .await?;
     if let CreateMeetingOutcome::AlreadyImported(existing) = create_outcome {
@@ -1985,7 +2026,36 @@ async fn create_meeting_with_transcripts(
     source_sha256: &str,
     source_size: u64,
     duration_ms: Option<i64>,
+    denoise_applied: bool,
+    duplicate_policy: DuplicatePolicy,
 ) -> Result<CreateMeetingOutcome> {
+    // Avoid all writes when this exact take already exists. The unique partial
+    // index on (sha256, denoise_applied) is the concurrent safety net; this read
+    // is the normal fast path and returns the most useful meeting to the caller.
+    if duplicate_policy.permits_missing_known_variant() {
+        if let Some(canonical) =
+            crate::database::repositories::audio_identity::find_canonical_meeting(
+                pool,
+                source_sha256,
+            )
+            .await?
+        {
+            if canonical.denoise_applied.is_none() {
+                return Ok(CreateMeetingOutcome::AlreadyImported(canonical));
+            }
+        }
+        if let Some(existing) =
+            crate::database::repositories::audio_identity::find_processing_variant(
+                pool,
+                source_sha256,
+                denoise_applied,
+            )
+            .await?
+        {
+            return Ok(CreateMeetingOutcome::AlreadyImported(existing));
+        }
+    }
+
     let now = chrono::Utc::now();
 
     // Start transaction
@@ -2036,10 +2106,16 @@ async fn create_meeting_with_transcripts(
             source_sha256,
             source_size,
             duration_ms,
+            Some(denoise_applied),
         )
         .await;
     match identity_registration {
         Ok(IdentityRegistration::Canonical) => {}
+        // A deliberate re-run of the same file — the user changed how it should be
+        // processed — is a second take, not an accident to be undone. It stays as a
+        // duplicate candidate so both results exist side by side and can be compared.
+        Ok(IdentityRegistration::DuplicateCandidate { .. })
+            if duplicate_policy.permits_missing_known_variant() => {}
         Ok(IdentityRegistration::DuplicateCandidate { .. }) => {
             tx.rollback()
                 .await
@@ -2060,6 +2136,20 @@ async fn create_meeting_with_transcripts(
                 )
             })?;
             drop(conn);
+            // A concurrent import may have committed the same processing
+            // variant after the preflight read and won the unique index race.
+            if duplicate_policy.permits_missing_known_variant() {
+                if let Some(existing) =
+                    crate::database::repositories::audio_identity::find_processing_variant(
+                        pool,
+                        source_sha256,
+                        denoise_applied,
+                    )
+                    .await?
+                {
+                    return Ok(CreateMeetingOutcome::AlreadyImported(existing));
+                }
+            }
             if let Some(existing) =
                 crate::database::repositories::audio_identity::find_canonical_meeting(
                     pool,
@@ -2719,6 +2809,64 @@ pub async fn is_import_in_progress_command() -> bool {
 
 #[cfg(test)]
 mod tests {
+
+    /// A/B the import decode path on real clips: same audio, same VAD, denoising on and
+    /// off. On the telephone profile the enhanced track is primary and raw only patches
+    /// the gaps it left, so if enhancement mangles the signal there is nothing to fall
+    /// back to — this measures whether that is happening.
+    ///
+    /// MEETILY_AB_CLIPS=/path/a.wav,/path/b.wav MEETILY_DENOISE_MODEL=/path/model.onnx \
+    ///   cargo test --lib -- ab_denoise --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn ab_denoise() {
+        let Ok(clips) = std::env::var("MEETILY_AB_CLIPS") else {
+            println!("skip: set MEETILY_AB_CLIPS");
+            return;
+        };
+        let model = std::env::var("MEETILY_DENOISE_MODEL")
+            .ok()
+            .map(PathBuf::from);
+        if let Some(model) = &model {
+            assert!(model.exists(), "model not found: {}", model.display());
+        }
+        println!(
+            "{:<16} {:>8} {:>9} {:>8} {:>9}   {}",
+            "clip", "raw seg", "raw sec", "enh seg", "enh sec", "verdict"
+        );
+        for clip in clips.split(',') {
+            let path = PathBuf::from(clip.trim());
+            let name = path
+                .file_stem()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_default();
+            let run = |model: Option<&Path>| {
+                stream_decode_speech_segments(&path, VAD_REDEMPTION_TIME_MS, None, model, |_, _| {
+                    true
+                })
+                .map(|(segments, _)| {
+                    let speech: f64 = segments
+                        .iter()
+                        .map(|s| (s.end_timestamp_ms - s.start_timestamp_ms) / 1000.0)
+                        .sum();
+                    (segments.len(), speech)
+                })
+            };
+            let (raw_n, raw_s) = run(None).expect("raw decode");
+            let (enh_n, enh_s) = match model.as_deref() {
+                Some(model) => run(Some(model)).expect("enhanced decode"),
+                None => (0, 0.0),
+            };
+            let verdict = if enh_s > raw_s * 1.05 {
+                "denoise finds more"
+            } else if enh_s < raw_s * 0.95 {
+                "DENOISE LOSES SPEECH"
+            } else {
+                "same"
+            };
+            println!("{name:<16} {raw_n:>8} {raw_s:>9.1} {enh_n:>8} {enh_s:>9.1}   {verdict}");
+        }
+    }
     use super::*;
 
     async fn import_identity_test_pool() -> sqlx::SqlitePool {
@@ -2750,13 +2898,16 @@ mod tests {
                 byte_size INTEGER NOT NULL,
                 duration_ms INTEGER,
                 verified_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                denoise_applied INTEGER
             )",
             "CREATE TABLE meeting_audio_identities(
                 meeting_id TEXT PRIMARY KEY,
                 sha256 TEXT NOT NULL,
                 role TEXT NOT NULL,
-                detected_at TEXT DEFAULT CURRENT_TIMESTAMP
+                denoise_applied INTEGER,
+                detected_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(sha256, denoise_applied)
             )",
             "CREATE TABLE audio_duplicate_reviews(
                 duplicate_meeting_id TEXT PRIMARY KEY,
@@ -3502,6 +3653,8 @@ mod tests {
             "fe432cb211dac676fcd7d2f05033f82be9fd8325923e6e3a322758fee60e94cf",
             7,
             Some(1_000),
+            false,
+            DuplicatePolicy::SkipKnownSource,
         )
         .await
         .unwrap();
@@ -3521,6 +3674,254 @@ mod tests {
         assert_eq!(transcripts, 0);
     }
 
+    /// Flipping the denoise switch and importing the same file again has to produce a
+    /// second result to compare against the first. Before this, the only way to change
+    /// how a file was processed was to delete the meeting made from it.
+    #[tokio::test]
+    async fn a_deliberate_rerun_keeps_both_takes() {
+        const HASH: &str = "fe432cb211dac676fcd7d2f05033f82be9fd8325923e6e3a322758fee60e94cf";
+        let pool = import_identity_test_pool().await;
+
+        let first = create_meeting_with_transcripts(
+            &pool,
+            "meeting-raw",
+            "Raw",
+            &[],
+            "/tmp/raw".into(),
+            HASH,
+            7,
+            Some(1_000),
+            false,
+            DuplicatePolicy::SkipKnownSource,
+        )
+        .await
+        .unwrap();
+        assert!(matches!(first, CreateMeetingOutcome::Created));
+
+        // Same file, denoising now on, asked for on purpose.
+        let second = create_meeting_with_transcripts(
+            &pool,
+            "meeting-denoised",
+            "Denoised",
+            &[],
+            "/tmp/denoised".into(),
+            HASH,
+            7,
+            Some(1_000),
+            true,
+            DuplicatePolicy::AddMissingKnownVariant,
+        )
+        .await
+        .unwrap();
+        assert!(
+            matches!(second, CreateMeetingOutcome::Created),
+            "a deliberate re-run is a second take, not a refused duplicate"
+        );
+
+        let kept: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM meetings WHERE id IN (?, ?)")
+            .bind("meeting-raw")
+            .bind("meeting-denoised")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(kept, 2, "both takes survive so they can be compared");
+
+        // The first import stays canonical for the file; the re-run is linked to it.
+        let canonical: String =
+            sqlx::query_scalar("SELECT canonical_meeting_id FROM audio_identities WHERE sha256=?")
+                .bind(HASH)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(canonical, "meeting-raw");
+        let role: String = sqlx::query_scalar(
+            "SELECT role FROM meeting_audio_identities WHERE meeting_id='meeting-denoised'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(role, "duplicate_candidate");
+        let candidate_denoise: Option<i64> = sqlx::query_scalar(
+            "SELECT denoise_applied FROM meeting_audio_identities \
+             WHERE meeting_id='meeting-denoised'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(candidate_denoise, Some(1));
+
+        // And how the canonical take was processed is now on record, instead of being
+        // unanswerable after the fact.
+        let denoised: Option<i64> =
+            sqlx::query_scalar("SELECT denoise_applied FROM audio_identities WHERE sha256=?")
+                .bind(HASH)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(denoised, Some(0));
+    }
+
+    #[tokio::test]
+    async fn deliberate_rerun_with_unchanged_processing_reuses_existing_take() {
+        const HASH: &str = "fe432cb211dac676fcd7d2f05033f82be9fd8325923e6e3a322758fee60e94cf";
+        let pool = import_identity_test_pool().await;
+
+        create_meeting_with_transcripts(
+            &pool,
+            "meeting-raw",
+            "Raw",
+            &[],
+            "/tmp/raw".into(),
+            HASH,
+            7,
+            Some(1_000),
+            false,
+            DuplicatePolicy::SkipKnownSource,
+        )
+        .await
+        .unwrap();
+
+        let repeated = create_meeting_with_transcripts(
+            &pool,
+            "meeting-repeated",
+            "Repeated",
+            &[],
+            "/tmp/repeated".into(),
+            HASH,
+            7,
+            Some(1_000),
+            false,
+            DuplicatePolicy::AddMissingKnownVariant,
+        )
+        .await
+        .unwrap();
+        let CreateMeetingOutcome::AlreadyImported(existing) = repeated else {
+            panic!("unchanged processing unexpectedly created another take");
+        };
+        assert_eq!(existing.meeting_id, "meeting-raw");
+
+        let meetings: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM meetings")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(meetings, 1);
+    }
+
+    #[tokio::test]
+    async fn legacy_unknown_processing_never_creates_a_speculative_variant() {
+        const HASH: &str = "fe432cb211dac676fcd7d2f05033f82be9fd8325923e6e3a322758fee60e94cf";
+        let pool = import_identity_test_pool().await;
+        sqlx::query(
+            "INSERT INTO meetings(id,title,created_at,updated_at,folder_path) \
+             VALUES('meeting-legacy','Legacy','2026-01-01','2026-01-01','/tmp/legacy')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let mut tx = pool.begin().await.unwrap();
+        crate::database::repositories::audio_identity::register_import_identity(
+            &mut tx,
+            "meeting-legacy",
+            HASH,
+            7,
+            Some(1_000),
+            None,
+        )
+        .await
+        .unwrap();
+        tx.commit().await.unwrap();
+
+        for (meeting_id, denoise_applied) in [
+            ("meeting-raw-guess", false),
+            ("meeting-denoised-guess", true),
+        ] {
+            let outcome = create_meeting_with_transcripts(
+                &pool,
+                meeting_id,
+                "Speculative",
+                &[],
+                format!("/tmp/{meeting_id}"),
+                HASH,
+                7,
+                Some(1_000),
+                denoise_applied,
+                DuplicatePolicy::AddMissingKnownVariant,
+            )
+            .await
+            .unwrap();
+            let CreateMeetingOutcome::AlreadyImported(existing) = outcome else {
+                panic!("legacy unknown processing unexpectedly created {meeting_id}");
+            };
+            assert_eq!(existing.meeting_id, "meeting-legacy");
+        }
+
+        let meetings: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM meetings")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(meetings, 1);
+    }
+
+    #[tokio::test]
+    async fn each_processing_variant_can_only_be_created_once() {
+        const HASH: &str = "fe432cb211dac676fcd7d2f05033f82be9fd8325923e6e3a322758fee60e94cf";
+        let pool = import_identity_test_pool().await;
+
+        create_meeting_with_transcripts(
+            &pool,
+            "meeting-raw",
+            "Raw",
+            &[],
+            "/tmp/raw".into(),
+            HASH,
+            7,
+            Some(1_000),
+            false,
+            DuplicatePolicy::SkipKnownSource,
+        )
+        .await
+        .unwrap();
+        create_meeting_with_transcripts(
+            &pool,
+            "meeting-denoised",
+            "Denoised",
+            &[],
+            "/tmp/denoised".into(),
+            HASH,
+            7,
+            Some(1_000),
+            true,
+            DuplicatePolicy::AddMissingKnownVariant,
+        )
+        .await
+        .unwrap();
+
+        let repeated = create_meeting_with_transcripts(
+            &pool,
+            "meeting-denoised-again",
+            "Denoised again",
+            &[],
+            "/tmp/denoised-again".into(),
+            HASH,
+            7,
+            Some(1_000),
+            true,
+            DuplicatePolicy::AddMissingKnownVariant,
+        )
+        .await
+        .unwrap();
+        let CreateMeetingOutcome::AlreadyImported(existing) = repeated else {
+            panic!("a second denoised take unexpectedly survived");
+        };
+        assert_eq!(existing.meeting_id, "meeting-denoised");
+
+        let meetings: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM meetings")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(meetings, 2, "raw and denoised are the only valid variants");
+    }
+
     #[tokio::test]
     async fn duplicate_import_is_rejected_atomically() {
         const HASH: &str = "fe432cb211dac676fcd7d2f05033f82be9fd8325923e6e3a322758fee60e94cf";
@@ -3535,6 +3936,8 @@ mod tests {
             HASH,
             7,
             Some(1_000),
+            false,
+            DuplicatePolicy::SkipKnownSource,
         )
         .await
         .unwrap();
@@ -3549,6 +3952,8 @@ mod tests {
             HASH,
             7,
             Some(1_000),
+            false,
+            DuplicatePolicy::SkipKnownSource,
         )
         .await
         .unwrap();

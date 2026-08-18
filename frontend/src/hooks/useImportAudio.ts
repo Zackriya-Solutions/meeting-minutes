@@ -6,6 +6,7 @@ import { applyPinnedSummaryLanguageToMeeting } from '@/lib/summary-language-pref
 import { toast } from 'sonner';
 import { useT } from '@/lib/i18n';
 import { loadBetaFeatures } from '@/types/betaFeatures';
+import { startAudioImportCommand } from '@/services/importAudioService';
 
 export interface AudioFileInfo {
   path: string;
@@ -21,6 +22,8 @@ export interface ExistingAudioMeeting {
   meeting_id: string;
   title: string;
   created_at: string;
+  /** How that import was processed. `null` means it predates the record: unknown, not "no". */
+  denoise_applied: boolean | null;
 }
 
 export interface ImportProgress {
@@ -382,7 +385,7 @@ export function useImportAudio({
           });
         }
 
-        await invoke('start_import_audio_command', {
+        await startAudioImportCommand({
           sourcePath,
           title,
           language: language || null,
