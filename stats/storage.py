@@ -161,17 +161,38 @@ def insert_events(
         )
 
     with WRITE_LOCK:
-        inserted_rows = []
-        for row in rows:
-            cursor = db.execute(
+        # Reserve the SQLite writer before checking ids.  The schema's only
+        # insert-conflict rule is the event_id unique index, so filtering under
+        # this database-level lock is both exact and substantially faster than
+        # one INSERT ... RETURNING round-trip per event.
+        db.execute("BEGIN IMMEDIATE")
+        try:
+            ids = {row[4] for row in rows}
+            existing_ids = {
+                str(item[0])
+                for item in db.execute(
+                    f"SELECT event_id FROM events WHERE event_id IN "
+                    f"({','.join('?' for _ in ids)})",
+                    tuple(ids),
+                )
+            } if ids else set()
+            inserted_rows = []
+            seen_ids = set(existing_ids)
+            for row in rows:
+                if row[4] in seen_ids:
+                    continue
+                seen_ids.add(row[4])
+                inserted_rows.append(row)
+            db.executemany(
                 "INSERT OR IGNORE INTO events"
                 " (ts,device_id,name,properties,event_id,source,ingested_at)"
-                " VALUES (?,?,?,?,?,?,?) RETURNING event_id",
-                row,
+                " VALUES (?,?,?,?,?,?,?)",
+                inserted_rows,
             )
-            if cursor.fetchone() is not None:
-                inserted_rows.append(row)
-        db.commit()
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
         inserted = len(inserted_rows)
     result: dict[str, Any] = {
         "accepted": len(rows),
