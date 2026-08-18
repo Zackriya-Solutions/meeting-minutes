@@ -238,13 +238,22 @@ pub fn upcoming_meetings(days: u32) -> Result<Vec<LocalOutlookMeeting>, String> 
     let range_end = now + Duration::days(i64::from(days));
 
     let mut meetings = parse_records(&output, range_start, range_end)?;
+    sort_and_dedup_meetings(&mut meetings);
+    Ok(meetings)
+}
+
+fn sort_and_dedup_meetings(meetings: &mut Vec<LocalOutlookMeeting>) {
+    // A recent series can be returned both by Outlook's range query and by
+    // `get occurrence of`. Group by the occurrence id first: chronological
+    // sorting alone does not guarantee duplicates stay adjacent if Outlook
+    // exposes slightly different fields for the two objects.
+    meetings.sort_by(|left, right| left.id.cmp(&right.id));
+    meetings.dedup_by(|left, right| left.id == right.id);
     meetings.sort_by(|left, right| {
         left.start_at
             .cmp(&right.start_at)
             .then_with(|| left.subject.cmp(&right.subject))
     });
-    meetings.dedup_by(|left, right| left.id == right.id);
-    Ok(meetings)
 }
 
 fn parse_records(
@@ -892,6 +901,69 @@ mod tests {
         assert_eq!(meetings.len(), 2);
         assert_ne!(meetings[0].id, meetings[1].id);
         assert!(meetings.iter().all(|meeting| meeting.is_recurring));
+    }
+
+    #[test]
+    fn deduplicates_an_occurrence_returned_by_both_outlook_queries() {
+        let range_start = Local
+            .with_ymd_and_hms(2026, 8, 18, 0, 0, 0)
+            .single()
+            .unwrap();
+        let range_end = range_start + Duration::days(7);
+        let payload = format!(
+            "{}{RECORD_SEPARATOR}{}{RECORD_SEPARATOR}{}",
+            record(&[
+                "1",
+                "Calendar",
+                "same-occurrence-id",
+                "Daily sync",
+                "2026-08-18T15:30:00",
+                "2026-08-18T16:00:00",
+                "false",
+                "true",
+                "",
+                "4",
+            ]),
+            record(&[
+                "1",
+                "Calendar",
+                "another-event-id",
+                "Middle event",
+                "2026-08-18T15:30:00",
+                "2026-08-18T16:00:00",
+                "false",
+                "false",
+                "",
+                "2",
+            ]),
+            // Outlook can expose slightly different fields for the ordinary
+            // range result and the occurrence object returned by the series.
+            record(&[
+                "1",
+                "Calendar",
+                "same-occurrence-id",
+                "Daily sync (occurrence)",
+                "2026-08-18T15:30:00",
+                "2026-08-18T16:00:00",
+                "false",
+                "true",
+                "",
+                "4",
+            ]),
+        );
+
+        let mut meetings = parse_records(&payload, range_start, range_end).unwrap();
+        let duplicate_id = meetings[0].id.clone();
+        sort_and_dedup_meetings(&mut meetings);
+
+        assert_eq!(meetings.len(), 2);
+        assert_eq!(
+            meetings
+                .iter()
+                .filter(|meeting| meeting.id == duplicate_id)
+                .count(),
+            1
+        );
     }
 
     #[test]
