@@ -76,6 +76,15 @@ experiments/
 .cursor/
 target/
 
+# Packaged app bundles (build output, never commit — one of these was previously
+# committed by accident at ~500MB and had to be stripped from history)
+*.deb
+*.AppImage
+*.msi
+*.dmg
+*.rpm
+*.snap
+
 frontend/src-tauri/binaries/
 
 # Google Calendar OAuth client credentials (never commit)
