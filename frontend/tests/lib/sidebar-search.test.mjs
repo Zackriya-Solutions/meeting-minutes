@@ -34,7 +34,7 @@ function loadTsModule(filePath) {
   return module.exports;
 }
 
-const { filterSidebarItems } = loadTsModule(modulePath);
+const { filterSidebarItems, isFolderExpanded } = loadTsModule(modulePath);
 
 const tree = () => [
   {
@@ -119,6 +119,30 @@ assert.deepEqual(
   foldersIn(filterSidebarItems(tree(), 'nothing-matches', new Set())),
   ['meetings'],
   'the root container survives an empty result so the sidebar keeps its header'
+);
+
+assert.equal(
+  isFolderExpanded('project-1', new Set(), 'standup'),
+  true,
+  'a collapsed folder must open while a search is active so its matches are visible'
+);
+
+assert.equal(
+  isFolderExpanded('project-1', new Set(), '   '),
+  false,
+  'a whitespace-only query is not an active search'
+);
+
+assert.equal(
+  isFolderExpanded('project-1', new Set(), ''),
+  false,
+  'a collapsed folder stays collapsed with no search'
+);
+
+assert.equal(
+  isFolderExpanded('project-1', new Set(['project-1']), ''),
+  true,
+  'an explicitly expanded folder stays open with no search'
 );
 
 console.log('sidebar-search tests passed');

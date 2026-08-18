@@ -6,6 +6,14 @@ export interface SearchableSidebarItem {
   tags?: string[];
 }
 
+export function isFolderExpanded(
+  folderId: string,
+  expandedFolders: Set<string>,
+  searchQuery: string
+): boolean {
+  return searchQuery.trim() !== '' || expandedFolders.has(folderId);
+}
+
 export function filterSidebarItems<T extends SearchableSidebarItem>(
   items: T[],
   searchQuery: string,

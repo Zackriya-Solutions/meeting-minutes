@@ -32,7 +32,7 @@ import { ComplianceNotification } from '../ComplianceNotification';
 import { Input } from '../ui/input';
 import { Button } from '../ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
-import { filterSidebarItems } from '@/lib/sidebar-search';
+import { filterSidebarItems, isFolderExpanded } from '@/lib/sidebar-search';
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from '../ui/input-group';
 
 interface SidebarItem {
@@ -41,6 +41,7 @@ interface SidebarItem {
   type: 'folder' | 'file';
   children?: SidebarItem[];
   tags?: string[];
+  project_folder_id?: string | null;
 }
 
 const Sidebar: React.FC = () => {
@@ -555,7 +556,7 @@ const Sidebar: React.FC = () => {
   };
 
   const renderItem = (item: SidebarItem, depth = 0) => {
-    const isExpanded = expandedFolders.has(item.id);
+    const isExpanded = isFolderExpanded(item.id, expandedFolders, searchQuery);
     const paddingLeft = `${depth * 12 + 12}px`;
     const isActive = item.type === 'file' && currentMeeting?.id === item.id;
     const isMeetingItem = item.id.includes('-') && !item.id.startsWith('intro-call');
@@ -655,7 +656,7 @@ const Sidebar: React.FC = () => {
                 <div className="ml-8 mt-1 flex flex-wrap items-center gap-1">
                   {(item.tags ?? []).map(tag => <span key={tag} className="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] text-gray-600">#{tag}</span>)}
                   <Select
-                    value={meetings.find(meeting => meeting.id === item.id)?.project_folder_id ?? UNFILED_FOLDER_VALUE}
+                    value={item.project_folder_id ?? UNFILED_FOLDER_VALUE}
                     onValueChange={(value) => void handleMeetingMove(item.id, value === UNFILED_FOLDER_VALUE ? null : value)}
                   >
                     <SelectTrigger aria-label="Move meeting to project folder" className="h-6 max-w-[140px] px-2 text-[10px] text-gray-500" onClick={(event) => event.stopPropagation()}>
@@ -787,7 +788,7 @@ const Sidebar: React.FC = () => {
             {!isCollapsed && (
               <div className="flex-1 overflow-y-auto custom-scrollbar min-h-0">
                 {filteredSidebarItems
-                  .filter(item => item.type === 'folder' && expandedFolders.has(item.id) && item.children)
+                  .filter(item => item.type === 'folder' && isFolderExpanded(item.id, expandedFolders, searchQuery) && item.children)
                   .map(item => (
                     <div key={`${item.id}-children`} className="mx-3">
                       {item.children!.map(child => renderItem(child, 1))}

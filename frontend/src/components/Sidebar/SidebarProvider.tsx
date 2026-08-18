@@ -13,6 +13,7 @@ interface SidebarItem {
   type: 'folder' | 'file';
   children?: SidebarItem[];
   tags?: string[];
+  project_folder_id?: string | null;
 }
 
 export interface ProjectFolder {
@@ -104,8 +105,10 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
   const fetchMeetings = React.useCallback(async () => {
     if (serverAddress) {
       try {
-        const meetings = await invoke('api_get_meetings') as CurrentMeeting[];
-        const folders = await invoke('api_get_project_folders') as ProjectFolder[];
+        const [meetings, folders] = await Promise.all([
+          invoke('api_get_meetings') as Promise<CurrentMeeting[]>,
+          invoke('api_get_project_folders') as Promise<ProjectFolder[]>,
+        ]);
         const transformedMeetings = meetings.map((meeting) => ({
           id: meeting.id,
           title: meeting.title,
@@ -141,12 +144,12 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
       title: 'Meeting Notes',
       type: 'folder' as const,
       children: [
-        { id: UNFILED_FOLDER_VALUE, title: 'Unfiled', type: 'folder' as const, children: meetings.filter(m => !m.project_folder_id).map(m => ({ id: m.id, title: m.title, type: 'file' as const, tags: m.tags })) },
+        { id: UNFILED_FOLDER_VALUE, title: 'Unfiled', type: 'folder' as const, children: meetings.filter(m => !m.project_folder_id).map(m => ({ id: m.id, title: m.title, type: 'file' as const, tags: m.tags, project_folder_id: m.project_folder_id ?? null })) },
         ...projectFolders.map(folder => ({
           id: folder.id,
           title: folder.name,
           type: 'folder' as const,
-          children: meetings.filter(m => m.project_folder_id === folder.id).map(m => ({ id: m.id, title: m.title, type: 'file' as const, tags: m.tags })),
+          children: meetings.filter(m => m.project_folder_id === folder.id).map(m => ({ id: m.id, title: m.title, type: 'file' as const, tags: m.tags, project_folder_id: m.project_folder_id ?? null })),
         })),
       ]
     },

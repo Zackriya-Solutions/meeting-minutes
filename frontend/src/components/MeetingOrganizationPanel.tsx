@@ -58,7 +58,6 @@ export function MeetingOrganizationPanel({ meetingId, folderId, tags: initialTag
   const { projectFolders, meetings, refetchOrganization } = useSidebar();
   const [tags, setTags] = useState<OrganizationTag[]>(initialTags);
   const [newTag, setNewTag] = useState('');
-  const [selectedFolderId, setSelectedFolderId] = useState<string | null>(folderId ?? null);
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [suggestionsDismissed, setSuggestionsDismissed] = useState(false);
   const [isSuggesting, setIsSuggesting] = useState(false);
@@ -68,7 +67,6 @@ export function MeetingOrganizationPanel({ meetingId, folderId, tags: initialTag
   const currentFolderId = sidebarMeeting ? sidebarMeeting.project_folder_id ?? null : folderId ?? null;
 
   useEffect(() => setTags(initialTags), [initialTags]);
-  useEffect(() => setSelectedFolderId(currentFolderId), [currentFolderId]);
 
   useEffect(() => {
     const stored = readStoredSuggestions(meetingId);
@@ -102,8 +100,8 @@ export function MeetingOrganizationPanel({ meetingId, folderId, tags: initialTag
       const generated = await invoke('api_suggest_meeting_tags', { meetingId }) as string[];
       updateSuggestions(generated, false);
       setNoSuggestionsFound(generated.length === 0);
-    } catch (error) {
-      toast.error('Could not suggest tags', { description: error instanceof Error ? error.message : String(error) });
+    } catch {
+      // No model configured or the call failed: stay manual and quiet.
     } finally {
       setIsSuggesting(false);
     }
@@ -135,7 +133,6 @@ export function MeetingOrganizationPanel({ meetingId, folderId, tags: initialTag
     const nextFolderId = value === UNFILED_FOLDER_VALUE ? null : value;
     try {
       await invoke('api_move_meeting_to_project_folder', { meetingId, folderId: nextFolderId });
-      setSelectedFolderId(nextFolderId);
       await refetchOrganization();
     } catch (error) { toast.error('Could not move meeting', { description: error instanceof Error ? error.message : String(error) }); }
   };
@@ -146,7 +143,7 @@ export function MeetingOrganizationPanel({ meetingId, folderId, tags: initialTag
     <div className="mt-3 rounded-lg border border-gray-200 bg-gray-50 p-3 text-left">
       <div className="flex flex-wrap items-center gap-2">
         <label htmlFor="meeting-project-folder" className="text-xs font-medium text-gray-600">Project</label>
-        <Select value={selectedFolderId ?? UNFILED_FOLDER_VALUE} onValueChange={(value) => void moveMeeting(value)}>
+        <Select value={currentFolderId ?? UNFILED_FOLDER_VALUE} onValueChange={(value) => void moveMeeting(value)}>
           <SelectTrigger id="meeting-project-folder" className="h-8 w-40 bg-white text-xs">
             <SelectValue />
           </SelectTrigger>
