@@ -227,10 +227,7 @@ pub fn upcoming_meetings(days: u32) -> Result<Vec<LocalOutlookMeeting>, String> 
         }
     }
 
-    let script = CALENDAR_SCRIPT
-        .replace("__DAYS__", &days.to_string())
-        .replace("__MAX_ATTENDEES__", &MAX_ATTENDEES.to_string())
-        .replace("__ATTENDEE_BUDGET__", &ATTENDEE_NAME_BUDGET.to_string());
+    let script = render_calendar_script(days);
     let output = run_osascript(&script, SCRIPT_TIMEOUT)?;
 
     let now = Local::now();
@@ -240,6 +237,13 @@ pub fn upcoming_meetings(days: u32) -> Result<Vec<LocalOutlookMeeting>, String> 
     let mut meetings = parse_records(&output, range_start, range_end)?;
     sort_and_dedup_meetings(&mut meetings);
     Ok(meetings)
+}
+
+fn render_calendar_script(days: u32) -> String {
+    CALENDAR_SCRIPT
+        .replace("__DAYS__", &days.to_string())
+        .replace("__MAX_ATTENDEES__", &MAX_ATTENDEES.to_string())
+        .replace("__ATTENDEE_BUDGET__", &ATTENDEE_NAME_BUDGET.to_string())
 }
 
 fn sort_and_dedup_meetings(meetings: &mut Vec<LocalOutlookMeeting>) {
@@ -964,13 +968,21 @@ mod tests {
                 .count(),
             1
         );
+        assert!(meetings
+            .iter()
+            .any(|meeting| meeting.subject == "Daily sync"));
     }
 
     #[test]
     fn calendar_script_expands_occurrences_without_reading_event_bodies() {
-        assert!(CALENDAR_SCRIPT.contains("get occurrence of currentSeries at probeDate"));
-        assert!(!CALENDAR_SCRIPT.contains("content of currentEvent"));
-        assert!(!CALENDAR_SCRIPT.contains("plain text content of currentEvent"));
+        let script = render_calendar_script(7);
+        assert!(script.contains("get occurrence of currentSeries at probeDate"));
+        assert!(script.contains("repeat with dayOffset from 0 to (7 + 1)"));
+        assert!(!script.contains("__DAYS__"));
+        assert!(!script.contains("__MAX_ATTENDEES__"));
+        assert!(!script.contains("__ATTENDEE_BUDGET__"));
+        assert!(!script.contains("content of currentEvent"));
+        assert!(!script.contains("plain text content of currentEvent"));
     }
 
     #[test]
