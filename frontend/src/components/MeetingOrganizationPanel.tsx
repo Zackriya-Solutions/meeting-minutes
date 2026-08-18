@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Check, Plus, Sparkles, X } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
@@ -62,6 +62,7 @@ export function MeetingOrganizationPanel({ meetingId, folderId, tags: initialTag
   const [suggestionsDismissed, setSuggestionsDismissed] = useState(false);
   const [isSuggesting, setIsSuggesting] = useState(false);
   const [noSuggestionsFound, setNoSuggestionsFound] = useState(false);
+  const suggestionTokenRef = useRef(0);
 
   const sidebarMeeting = meetings.find(meeting => meeting.id === meetingId);
   const currentFolderId = sidebarMeeting ? sidebarMeeting.project_folder_id ?? null : folderId ?? null;
@@ -69,6 +70,7 @@ export function MeetingOrganizationPanel({ meetingId, folderId, tags: initialTag
   useEffect(() => setTags(initialTags), [initialTags]);
 
   useEffect(() => {
+    suggestionTokenRef.current += 1;
     const stored = readStoredSuggestions(meetingId);
     setSuggestions(stored?.status === 'generated' ? stored.suggestions : []);
     setSuggestionsDismissed(stored?.status === 'dismissed');
@@ -78,16 +80,18 @@ export function MeetingOrganizationPanel({ meetingId, folderId, tags: initialTag
   useEffect(() => {
     if (!hasContent || readStoredSuggestions(meetingId) !== null) return;
     writeStoredSuggestions(meetingId, { status: 'generated', suggestions: [] });
-    let cancelled = false;
+    const token = suggestionTokenRef.current;
     void invoke('api_suggest_meeting_tags', { meetingId }).then((result) => {
+      if (suggestionTokenRef.current !== token) return;
       const generated = result as string[];
       writeStoredSuggestions(meetingId, { status: 'generated', suggestions: generated });
-      if (!cancelled) setSuggestions(generated);
+      setSuggestions(generated);
     }).catch(() => { /* Optional enhancement: manual tags still work. */ });
-    return () => { cancelled = true; };
+    return () => { suggestionTokenRef.current += 1; };
   }, [meetingId, hasContent]);
 
   const updateSuggestions = (next: string[], dismissed: boolean) => {
+    if (dismissed) suggestionTokenRef.current += 1;
     setSuggestions(next);
     setSuggestionsDismissed(dismissed);
     setNoSuggestionsFound(false);
@@ -95,9 +99,12 @@ export function MeetingOrganizationPanel({ meetingId, folderId, tags: initialTag
   };
 
   const requestSuggestions = async () => {
+    suggestionTokenRef.current += 1;
+    const token = suggestionTokenRef.current;
     setIsSuggesting(true);
     try {
       const generated = await invoke('api_suggest_meeting_tags', { meetingId }) as string[];
+      if (suggestionTokenRef.current !== token) return;
       updateSuggestions(generated, false);
       setNoSuggestionsFound(generated.length === 0);
     } catch {
