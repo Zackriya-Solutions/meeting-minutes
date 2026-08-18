@@ -18,6 +18,40 @@ pub struct Tag {
     pub name: String,
 }
 
+#[derive(Debug)]
+pub enum OrganizationError {
+    Invalid(String),
+    Database(sqlx::Error),
+}
+
+impl std::fmt::Display for OrganizationError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            OrganizationError::Invalid(message) => write!(formatter, "{}", message),
+            OrganizationError::Database(error) => write!(formatter, "{}", error),
+        }
+    }
+}
+
+impl std::error::Error for OrganizationError {}
+
+impl From<sqlx::Error> for OrganizationError {
+    fn from(error: sqlx::Error) -> Self {
+        OrganizationError::Database(error)
+    }
+}
+
+fn map_folder_name_conflict(error: sqlx::Error) -> OrganizationError {
+    match &error {
+        sqlx::Error::Database(database_error) if database_error.is_unique_violation() => {
+            OrganizationError::Invalid(
+                "A project folder with that name already exists".to_string(),
+            )
+        }
+        _ => OrganizationError::Database(error),
+    }
+}
+
 pub struct OrganizationRepository;
 
 impl OrganizationRepository {
@@ -32,10 +66,12 @@ impl OrganizationRepository {
     pub async fn create_folder(
         pool: &SqlitePool,
         name: &str,
-    ) -> Result<ProjectFolder, sqlx::Error> {
+    ) -> Result<ProjectFolder, OrganizationError> {
         let name = name.trim();
         if name.is_empty() {
-            return Err(sqlx::Error::Protocol("Folder name cannot be empty".into()));
+            return Err(OrganizationError::Invalid(
+                "Folder name cannot be empty".to_string(),
+            ));
         }
         let folder = ProjectFolder {
             id: format!("project-{}", Uuid::new_v4()),
@@ -51,7 +87,8 @@ impl OrganizationRepository {
         .bind(&folder.created_at)
         .bind(&folder.updated_at)
         .execute(pool)
-        .await?;
+        .await
+        .map_err(map_folder_name_conflict)?;
         Ok(folder)
     }
 
@@ -59,10 +96,12 @@ impl OrganizationRepository {
         pool: &SqlitePool,
         folder_id: &str,
         name: &str,
-    ) -> Result<bool, sqlx::Error> {
+    ) -> Result<bool, OrganizationError> {
         let name = name.trim();
         if name.is_empty() {
-            return Err(sqlx::Error::Protocol("Folder name cannot be empty".into()));
+            return Err(OrganizationError::Invalid(
+                "Folder name cannot be empty".to_string(),
+            ));
         }
         let result =
             sqlx::query("UPDATE project_folders SET name = ?, updated_at = ? WHERE id = ?")
@@ -70,7 +109,8 @@ impl OrganizationRepository {
                 .bind(Utc::now().to_rfc3339())
                 .bind(folder_id)
                 .execute(pool)
-                .await?;
+                .await
+                .map_err(map_folder_name_conflict)?;
         Ok(result.rows_affected() > 0)
     }
 
@@ -137,20 +177,16 @@ impl OrganizationRepository {
         Ok(tags_by_meeting)
     }
 
-    pub async fn get_all_tags(pool: &SqlitePool) -> Result<Vec<Tag>, sqlx::Error> {
-        sqlx::query_as::<_, Tag>("SELECT id, name FROM tags ORDER BY name COLLATE NOCASE")
-            .fetch_all(pool)
-            .await
-    }
-
     pub async fn add_tag(
         pool: &SqlitePool,
         meeting_id: &str,
         name: &str,
-    ) -> Result<Tag, sqlx::Error> {
+    ) -> Result<Tag, OrganizationError> {
         let name = name.trim();
         if name.is_empty() {
-            return Err(sqlx::Error::Protocol("Tag name cannot be empty".into()));
+            return Err(OrganizationError::Invalid(
+                "Tag name cannot be empty".to_string(),
+            ));
         }
         let existing =
             sqlx::query_as::<_, Tag>("SELECT id, name FROM tags WHERE name = ? COLLATE NOCASE")
@@ -234,6 +270,44 @@ mod tests {
                 .unwrap()[0]
                 .id,
             tag.id
+        );
+    }
+
+    #[tokio::test]
+    async fn duplicate_folder_names_report_a_readable_message() {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+        let existing = OrganizationRepository::create_folder(&pool, "Product")
+            .await
+            .unwrap();
+        let other = OrganizationRepository::create_folder(&pool, "Mobile app")
+            .await
+            .unwrap();
+
+        let created = OrganizationRepository::create_folder(&pool, "Product")
+            .await
+            .unwrap_err();
+        assert_eq!(
+            created.to_string(),
+            "A project folder with that name already exists"
+        );
+
+        let renamed = OrganizationRepository::rename_folder(&pool, &other.id, "Product")
+            .await
+            .unwrap_err();
+        assert_eq!(
+            renamed.to_string(),
+            "A project folder with that name already exists"
+        );
+
+        assert!(
+            OrganizationRepository::rename_folder(&pool, &existing.id, "Product Team")
+                .await
+                .unwrap()
         );
     }
 

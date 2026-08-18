@@ -652,8 +652,6 @@ pub fn run() {
             api::api_rename_project_folder,
             api::api_delete_project_folder,
             api::api_move_meeting_to_project_folder,
-            api::api_get_meeting_tags,
-            api::api_get_all_tags,
             api::api_add_meeting_tag,
             api::api_remove_meeting_tag,
             api::api_suggest_meeting_tags,

@@ -3,7 +3,7 @@
 import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { ChevronDown, ChevronRight, File, Settings, ChevronLeftCircle, ChevronRightCircle, Calendar, StickyNote, Home, Trash2, Mic, Square, Plus, Search, Pencil, NotebookPen, SearchIcon, X, Upload, FolderPlus } from 'lucide-react';
 import { useRouter, usePathname } from 'next/navigation';
-import { useSidebar } from './SidebarProvider';
+import { useSidebar, UNFILED_FOLDER_VALUE } from './SidebarProvider';
 import type { CurrentMeeting } from '@/components/Sidebar/SidebarProvider';
 import { ConfirmationModal } from '../ConfirmationModel/confirmation-modal';
 import { ModelConfig } from '@/components/ModelSettingsModal';
@@ -30,6 +30,8 @@ import Logo from '../Logo';
 import Info from '../Info';
 import { ComplianceNotification } from '../ComplianceNotification';
 import { Input } from '../ui/input';
+import { Button } from '../ui/button';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from '../ui/input-group';
 
 interface SidebarItem {
@@ -281,10 +283,9 @@ const Sidebar: React.FC = () => {
     const matchedMeetingIds = new Set(searchResults.map(result => result.id));
     const filterItem = (item: SidebarItem, isRoot = false): SidebarItem | undefined => {
       if (item.type === 'folder') {
+        if (item.title.toLowerCase().includes(query)) return item;
         const children = (item.children ?? []).map(child => filterItem(child)).filter((child): child is SidebarItem => child !== undefined);
-        return isRoot || children.length > 0 || item.title.toLowerCase().includes(query)
-          ? { ...item, children }
-          : undefined;
+        return isRoot || children.length > 0 ? { ...item, children } : undefined;
       }
       const matches = matchedMeetingIds.has(item.id) || item.title.toLowerCase().includes(query) ||
         (item.tags ?? []).some(tag => tag.toLowerCase().includes(query));
@@ -662,12 +663,20 @@ const Sidebar: React.FC = () => {
               </div>
 
               {isMeetingItem && (
-                <div className="ml-8 mt-1 flex flex-wrap gap-1">
+                <div className="ml-8 mt-1 flex flex-wrap items-center gap-1">
                   {(item.tags ?? []).map(tag => <span key={tag} className="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] text-gray-600">#{tag}</span>)}
-                  <select aria-label="Move meeting to project folder" className="max-w-[120px] rounded border border-gray-200 bg-white px-1 text-[10px] text-gray-500" value={meetings.find(meeting => meeting.id === item.id)?.project_folder_id ?? ''} onClick={(event) => event.stopPropagation()} onChange={(event) => { event.stopPropagation(); void handleMeetingMove(item.id, event.target.value || null); }}>
-                    <option value="">Unfiled</option>
-                    {projectFolders.map(folder => <option key={folder.id} value={folder.id}>{folder.name}</option>)}
-                  </select>
+                  <Select
+                    value={meetings.find(meeting => meeting.id === item.id)?.project_folder_id ?? UNFILED_FOLDER_VALUE}
+                    onValueChange={(value) => void handleMeetingMove(item.id, value === UNFILED_FOLDER_VALUE ? null : value)}
+                  >
+                    <SelectTrigger aria-label="Move meeting to project folder" className="h-6 max-w-[140px] px-2 text-[10px] text-gray-500" onClick={(event) => event.stopPropagation()}>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={UNFILED_FOLDER_VALUE} className="text-xs">Unfiled</SelectItem>
+                      {projectFolders.map(folder => <SelectItem key={folder.id} value={folder.id} className="text-xs">{folder.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
                 </div>
               )}
 
@@ -868,8 +877,8 @@ const Sidebar: React.FC = () => {
           <div className="space-y-4 py-4">
             <Input aria-label="Project folder name" autoFocus value={folderDialog?.name ?? ''} onChange={(event) => setFolderDialog(current => current ? { ...current, name: event.target.value } : current)} placeholder="e.g. Mobile app" />
             <DialogFooter>
-              <button className="rounded px-3 py-2 text-sm text-gray-600 hover:bg-gray-100" onClick={() => setFolderDialog(null)}>Cancel</button>
-              <button className="rounded bg-blue-600 px-3 py-2 text-sm text-white hover:bg-blue-700" onClick={handleFolderSave}>Save</button>
+              <Button variant="gray" onClick={() => setFolderDialog(null)}>Cancel</Button>
+              <Button variant="blue" onClick={handleFolderSave}>Save</Button>
             </DialogFooter>
           </div>
         </DialogContent>

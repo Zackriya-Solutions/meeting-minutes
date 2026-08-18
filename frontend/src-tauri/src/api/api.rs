@@ -455,24 +455,6 @@ pub async fn api_move_meeting_to_project_folder<R: Runtime>(
 }
 
 #[tauri::command]
-pub async fn api_get_meeting_tags<R: Runtime>(
-    _app: AppHandle<R>, state: tauri::State<'_, AppState>, meeting_id: String,
-) -> Result<Vec<OrganizationTag>, String> {
-    OrganizationRepository::get_tags_for_meeting(state.db_manager.pool(), &meeting_id).await
-        .map(|tags| tags.into_iter().map(|tag| OrganizationTag { id: tag.id, name: tag.name }).collect())
-        .map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-pub async fn api_get_all_tags<R: Runtime>(
-    _app: AppHandle<R>, state: tauri::State<'_, AppState>,
-) -> Result<Vec<OrganizationTag>, String> {
-    OrganizationRepository::get_all_tags(state.db_manager.pool()).await
-        .map(|tags| tags.into_iter().map(|tag| OrganizationTag { id: tag.id, name: tag.name }).collect())
-        .map_err(|e| e.to_string())
-}
-
-#[tauri::command]
 pub async fn api_add_meeting_tag<R: Runtime>(
     _app: AppHandle<R>, state: tauri::State<'_, AppState>, meeting_id: String, name: String,
 ) -> Result<OrganizationTag, String> {
@@ -489,18 +471,27 @@ pub async fn api_remove_meeting_tag<R: Runtime>(
         .map(|_| ()).map_err(|e| e.to_string())
 }
 
+fn is_plausible_tag(tag: &str) -> bool {
+    !tag.is_empty()
+        && tag.chars().count() <= 40
+        && !tag.ends_with(':')
+        && tag.split_whitespace().count() <= 3
+        && tag.chars().any(char::is_alphanumeric)
+}
+
 fn parse_suggested_tags(raw: &str) -> Vec<String> {
     let cleaned = raw.trim().trim_start_matches("```json").trim_start_matches("```").trim_end_matches("```").trim();
-    let parsed: Option<Vec<String>> = serde_json::from_str::<serde_json::Value>(cleaned).ok().and_then(|value| {
-        value.get("tags").cloned().unwrap_or(value).as_array().map(|items| {
-            items.iter().filter_map(|item| item.as_str().map(str::to_string)).collect()
-        })
-    });
-    let candidates = parsed.unwrap_or_else(|| cleaned.split([',', '\n']).map(str::trim).map(str::to_string).collect());
-    let mut result = Vec::new();
+    let candidates: Vec<String> = match serde_json::from_str::<serde_json::Value>(cleaned) {
+        Ok(value) => match value.get("tags").cloned().unwrap_or(value).as_array() {
+            Some(items) => items.iter().filter_map(|item| item.as_str().map(str::to_string)).collect(),
+            None => Vec::new(),
+        },
+        Err(_) => cleaned.split([',', '\n']).map(str::trim).map(str::to_string).collect(),
+    };
+    let mut result: Vec<String> = Vec::new();
     for candidate in candidates {
         let tag = candidate.trim().trim_start_matches('#').trim().to_string();
-        if tag.is_empty() || tag.chars().count() > 40 || result.iter().any(|existing: &String| existing.eq_ignore_ascii_case(&tag)) {
+        if !is_plausible_tag(&tag) || result.iter().any(|existing| existing.eq_ignore_ascii_case(&tag)) {
             continue;
         }
         result.push(tag);
@@ -1586,5 +1577,51 @@ pub async fn api_test_custom_openai_connection<R: Runtime>(
                 Err(format!("Connection failed: {}", e))
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_suggested_tags;
+
+    #[test]
+    fn parses_json_tag_objects_and_arrays() {
+        assert_eq!(
+            parse_suggested_tags("{\"tags\":[\"roadmap\",\"alpha-release\"]}"),
+            vec!["roadmap".to_string(), "alpha-release".to_string()]
+        );
+        assert_eq!(
+            parse_suggested_tags("```json\n[\"roadmap\", \"#mobile\"]\n```"),
+            vec!["roadmap".to_string(), "mobile".to_string()]
+        );
+    }
+
+    #[test]
+    fn drops_conversational_prose_from_the_plain_text_fallback() {
+        assert_eq!(
+            parse_suggested_tags("Here are 5 tags for this meeting:\n\nroadmap, alpha-release, mobile"),
+            vec![
+                "roadmap".to_string(),
+                "alpha-release".to_string(),
+                "mobile".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn returns_nothing_for_json_without_a_tag_array() {
+        assert!(parse_suggested_tags("{\"suggestions\":[\"roadmap\"]}").is_empty());
+    }
+
+    #[test]
+    fn deduplicates_case_insensitively_and_caps_at_eight() {
+        assert_eq!(
+            parse_suggested_tags("roadmap, Roadmap"),
+            vec!["roadmap".to_string()]
+        );
+        assert_eq!(
+            parse_suggested_tags("a1, b2, c3, d4, e5, f6, g7, h8, i9").len(),
+            8
+        );
     }
 }

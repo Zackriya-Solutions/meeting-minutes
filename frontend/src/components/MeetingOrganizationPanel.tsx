@@ -4,7 +4,10 @@ import { useEffect, useState } from 'react';
 import { Check, Plus, Sparkles, X } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
-import { useSidebar } from '@/components/Sidebar/SidebarProvider';
+import { useSidebar, UNFILED_FOLDER_VALUE } from '@/components/Sidebar/SidebarProvider';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 interface OrganizationTag { id: string; name: string; }
 
@@ -52,7 +55,7 @@ function writeStoredSuggestions(meetingId: string, value: StoredTagSuggestions):
 }
 
 export function MeetingOrganizationPanel({ meetingId, folderId, tags: initialTags = EMPTY_TAGS, hasContent }: MeetingOrganizationPanelProps) {
-  const { projectFolders, refetchOrganization } = useSidebar();
+  const { projectFolders, meetings, refetchOrganization } = useSidebar();
   const [tags, setTags] = useState<OrganizationTag[]>(initialTags);
   const [newTag, setNewTag] = useState('');
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(folderId ?? null);
@@ -60,8 +63,11 @@ export function MeetingOrganizationPanel({ meetingId, folderId, tags: initialTag
   const [suggestionsDismissed, setSuggestionsDismissed] = useState(false);
   const [isSuggesting, setIsSuggesting] = useState(false);
 
+  const sidebarMeeting = meetings.find(meeting => meeting.id === meetingId);
+  const currentFolderId = sidebarMeeting ? sidebarMeeting.project_folder_id ?? null : folderId ?? null;
+
   useEffect(() => setTags(initialTags), [initialTags]);
-  useEffect(() => setSelectedFolderId(folderId ?? null), [folderId]);
+  useEffect(() => setSelectedFolderId(currentFolderId), [currentFolderId]);
 
   useEffect(() => {
     const stored = readStoredSuggestions(meetingId);
@@ -122,9 +128,10 @@ export function MeetingOrganizationPanel({ meetingId, folderId, tags: initialTag
   };
 
   const moveMeeting = async (value: string) => {
+    const nextFolderId = value === UNFILED_FOLDER_VALUE ? null : value;
     try {
-      await invoke('api_move_meeting_to_project_folder', { meetingId, folderId: value || null });
-      setSelectedFolderId(value || null);
+      await invoke('api_move_meeting_to_project_folder', { meetingId, folderId: nextFolderId });
+      setSelectedFolderId(nextFolderId);
       await refetchOrganization();
     } catch (error) { toast.error('Could not move meeting', { description: error instanceof Error ? error.message : String(error) }); }
   };
@@ -135,26 +142,36 @@ export function MeetingOrganizationPanel({ meetingId, folderId, tags: initialTag
     <div className="mt-3 rounded-lg border border-gray-200 bg-gray-50 p-3 text-left">
       <div className="flex flex-wrap items-center gap-2">
         <label htmlFor="meeting-project-folder" className="text-xs font-medium text-gray-600">Project</label>
-        <select id="meeting-project-folder" value={selectedFolderId ?? ''} onChange={(event) => void moveMeeting(event.target.value)} className="rounded border border-gray-200 bg-white px-2 py-1 text-xs">
-          <option value="">Unfiled</option>
-          {projectFolders.map(folder => <option key={folder.id} value={folder.id}>{folder.name}</option>)}
-        </select>
+        <Select value={selectedFolderId ?? UNFILED_FOLDER_VALUE} onValueChange={(value) => void moveMeeting(value)}>
+          <SelectTrigger id="meeting-project-folder" className="h-8 w-40 bg-white text-xs">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={UNFILED_FOLDER_VALUE} className="text-xs">Unfiled</SelectItem>
+            {projectFolders.map(folder => <SelectItem key={folder.id} value={folder.id} className="text-xs">{folder.name}</SelectItem>)}
+          </SelectContent>
+        </Select>
       </div>
       <div className="mt-2 flex flex-wrap items-center gap-1.5">
         {tags.map(tag => <span key={tag.id} className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-2 py-1 text-xs text-blue-700">#{tag.name}<button aria-label={`Remove tag ${tag.name}`} onClick={() => void removeTag(tag)}><X className="h-3 w-3" /></button></span>)}
         <form onSubmit={(event) => { event.preventDefault(); void addTag(newTag); }} className="inline-flex items-center gap-1">
-          <input aria-label="Add meeting tag" value={newTag} onChange={(event) => setNewTag(event.target.value)} placeholder="Add tag" className="w-24 rounded border border-gray-200 bg-white px-2 py-1 text-xs" />
-          <button type="submit" aria-label="Add tag" className="rounded p-1 text-gray-500 hover:bg-white hover:text-blue-600"><Plus className="h-3.5 w-3.5" /></button>
+          <Input aria-label="Add meeting tag" value={newTag} onChange={(event) => setNewTag(event.target.value)} placeholder="Add tag" className="h-8 w-24 bg-white text-xs" />
+          <Button type="submit" variant="ghost" size="icon" aria-label="Add tag" className="h-8 w-8 text-gray-500 hover:text-blue-600">
+            <Plus className="h-3.5 w-3.5" />
+          </Button>
         </form>
         {hasContent && (
-          <button onClick={() => void requestSuggestions()} disabled={isSuggesting} className="inline-flex items-center gap-1 rounded border border-gray-200 bg-white px-2 py-1 text-xs text-gray-600 hover:text-blue-600 disabled:opacity-50">
+          <Button variant="outline" size="sm" onClick={() => void requestSuggestions()} disabled={isSuggesting} className="h-8 bg-white text-xs text-gray-600 hover:text-blue-600">
             <Sparkles className="h-3 w-3" />{isSuggesting ? 'Suggesting...' : 'Suggest tags'}
-          </button>
+          </Button>
         )}
       </div>
       {!suggestionsDismissed && visibleSuggestions.length > 0 && (
         <div className="mt-2 border-t border-gray-200 pt-2">
-          <div className="flex items-center justify-between text-xs text-gray-500"><span>Suggested tags</span><button onClick={() => updateSuggestions([], true)} className="hover:text-gray-800">Discard</button></div>
+          <div className="flex items-center justify-between text-xs text-gray-500">
+            <span>Suggested tags</span>
+            <Button variant="ghost" size="sm" onClick={() => updateSuggestions([], true)} className="h-6 px-2 text-xs text-gray-500 hover:text-gray-800">Discard</Button>
+          </div>
           <div className="mt-1 flex flex-wrap gap-1.5">{visibleSuggestions.map(suggestion => <span key={suggestion} className="inline-flex items-center gap-1 rounded-full border border-dashed border-blue-300 bg-white px-2 py-1 text-xs text-blue-700"><button onClick={() => void addTag(suggestion)} className="inline-flex items-center gap-1 hover:text-blue-900"><Check className="h-3 w-3" />{suggestion}</button><button onClick={() => setNewTag(suggestion)} className="border-l border-blue-200 pl-1 text-[10px] hover:text-blue-900">Edit</button></span>)}</div>
         </div>
       )}

@@ -274,11 +274,66 @@ async fn delete_meeting_with_transaction(
         .execute(&mut *transaction)
         .await?;
 
-    // 4. Finally, delete the meeting
+    // 4. Delete tag assignments, then prune tags no meeting references anymore
+    sqlx::query("DELETE FROM meeting_tags WHERE meeting_id = ?")
+        .bind(meeting_id)
+        .execute(&mut *transaction)
+        .await?;
+
+    sqlx::query(
+        "DELETE FROM tags WHERE NOT EXISTS (SELECT 1 FROM meeting_tags WHERE meeting_tags.tag_id = tags.id)",
+    )
+    .execute(&mut *transaction)
+    .await?;
+
+    // 5. Finally, delete the meeting
     let result = sqlx::query("DELETE FROM meetings WHERE id = ?")
         .bind(meeting_id)
         .execute(&mut *transaction)
         .await?;
 
     Ok(result.rows_affected() > 0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sqlx::sqlite::SqlitePoolOptions;
+
+    #[tokio::test]
+    async fn deleting_a_meeting_prunes_tags_no_other_meeting_uses() {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+        sqlx::query("INSERT INTO meetings (id, title, created_at, updated_at) VALUES ('meeting-1', 'Planning', '2026-08-18T10:00:00Z', '2026-08-18T10:00:00Z'), ('meeting-2', 'Retro', '2026-08-18T11:00:00Z', '2026-08-18T11:00:00Z')").execute(&pool).await.unwrap();
+        OrganizationRepository::add_tag(&pool, "meeting-1", "roadmap")
+            .await
+            .unwrap();
+        OrganizationRepository::add_tag(&pool, "meeting-2", "roadmap")
+            .await
+            .unwrap();
+        OrganizationRepository::add_tag(&pool, "meeting-1", "alpha-release")
+            .await
+            .unwrap();
+
+        assert!(MeetingsRepository::delete_meeting(&pool, "meeting-1")
+            .await
+            .unwrap());
+
+        let remaining: Vec<String> = sqlx::query_scalar("SELECT name FROM tags ORDER BY name")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+        assert_eq!(remaining, vec!["roadmap".to_string()]);
+        assert_eq!(
+            OrganizationRepository::get_tags_for_meeting(&pool, "meeting-2")
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+    }
 }
