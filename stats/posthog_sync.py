@@ -13,7 +13,7 @@ import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from storage import connect, insert_events, parse_timestamp
 
@@ -37,7 +37,9 @@ def _request_json(url: str, key: str, allowed_host: str) -> dict[str, Any]:
         return json.loads(response.read(8 * 1024 * 1024))
 
 
-def sync_once(db) -> dict[str, Any]:
+def sync_once(
+    db, on_inserted: Callable[[list[tuple[Any, ...]]], None] | None = None
+) -> dict[str, Any]:
     key = os.environ.get("POSTHOG_PERSONAL_API_KEY", "")
     project = os.environ.get("POSTHOG_PROJECT_ID", "")
     host = os.environ.get("POSTHOG_HOST", DEFAULT_HOST).rstrip("/")
@@ -92,7 +94,12 @@ def sync_once(db) -> dict[str, Any]:
             ts = parse_timestamp(event.get("timestamp"))
             if ts is not None:
                 max_seen = max(max_seen, ts)
-        result = insert_events(db, normalized, source="posthog")
+        result = insert_events(
+            db, normalized, source="posthog", return_rows=on_inserted is not None
+        )
+        inserted_rows = result.pop("_inserted_rows", [])
+        if on_inserted is not None and inserted_rows:
+            on_inserted(inserted_rows)
         for key_name in totals:
             totals[key_name] += result[key_name]
         pages += 1

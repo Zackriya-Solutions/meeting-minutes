@@ -30,10 +30,15 @@ from storage import (
     exclusion_clause,
     insert_events,
 )
+from materialized import FactEvent, MaterializedStats
+from materialized_worker import MaterializedWorker
 
 HERE = Path(__file__).resolve().parent
 PORT = int(os.environ.get("STATS_PORT", "9901"))
 DB_PATH = Path(os.environ.get("STATS_DB", HERE / "data" / "events.db"))
+METRICS_DB_PATH = Path(
+    os.environ.get("STATS_METRICS_DB", DB_PATH.with_name("metrics.db"))
+)
 INGEST_TOKEN = os.environ.get("STATS_INGEST_TOKEN", "")
 ALLOWED_GATEWAY_IDENTITY_HOSTS = frozenset({
     "gw.multitool.works",
@@ -124,6 +129,8 @@ GATEWAY_SPEND_RATE_LIMIT_PER_MINUTE = max(
 RETENTION_DAYS = max(1, int(os.environ.get("STATS_RETENTION_DAYS", "365")))
 VERSION_FILE = HERE / "VERSION"
 VERSION = VERSION_FILE.read_text().strip() if VERSION_FILE.exists() else "dev"
+SUMMARY_BATCH_CAPABILITY = "summary_batch_v1"
+PERIOD_SNAPSHOT_CAPABILITY = "period_snapshot_v1"
 MAX_BODY_BYTES = 1_000_000
 DAY = 86_400.0
 REPORTING_TZ = ZoneInfo("Europe/Moscow")
@@ -151,6 +158,57 @@ _static_request_times: deque[float] = deque()
 _gateway_spend_times: deque[float] = deque()
 # days -> (monotonic_expiry, payload)
 _gateway_spend_cache: dict[int, tuple[float, dict[str, Any]]] = {}
+_materialized = MaterializedStats(METRICS_DB_PATH)
+
+
+def _facts_from_storage_rows(rows: list[tuple[Any, ...]]) -> list[FactEvent]:
+    excluded = excluded_device_ids()
+    facts = []
+    for timestamp, device_id, name, raw_properties, event_id, _source, _ingested in rows:
+        properties = _props(raw_properties)
+        included = str(device_id or "") not in excluded
+        active = included and bool(device_id)
+        facts.append(FactEvent(
+            float(timestamp), str(device_id or ""),
+            "error" if _is_error(str(name), properties) else str(name),
+            str(event_id or ""), included, active, active,
+        ))
+    return facts
+
+
+def _materialized_events():
+    excluded = excluded_device_ids()
+    connection = connect(DB_PATH)
+    try:
+        for rowid, timestamp, device_id, name, raw_properties, event_id in connection.execute(
+            "SELECT rowid,ts,device_id,name,properties,event_id "
+            "FROM events ORDER BY ts,rowid"
+        ):
+            properties = _props(raw_properties)
+            included = str(device_id or "") not in excluded
+            active = included and bool(device_id)
+            yield FactEvent(
+                float(timestamp), str(device_id or ""),
+                "error" if _is_error(str(name), properties) else str(name),
+                str(event_id or f"raw:{rowid}"), included, active, active,
+            )
+    finally:
+        connection.close()
+
+
+def _raw_state() -> tuple[int, float | None]:
+    count, watermark = _db.execute(
+        "SELECT COUNT(*),MAX(ts) FROM events"
+    ).fetchone()
+    return int(count), (float(watermark) if watermark is not None else None)
+
+
+_materialized_worker = MaterializedWorker(
+    _materialized, _materialized_events, _raw_state,
+    error_names=frozenset({"error"}), code_revision=VERSION,
+    tick_seconds=float(os.environ.get("STATS_REFRESH_TICK", "15")),
+    preserve_history=True,
+)
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -366,7 +424,12 @@ async def _posthog_sync_loop() -> None:
     interval = max(30, int(os.environ.get("POSTHOG_SYNC_INTERVAL_SECONDS", "300")))
     while True:
         try:
-            result = await asyncio.to_thread(sync_once, _db)
+            result = await asyncio.to_thread(
+                sync_once, _db,
+                lambda rows: _materialized_worker.enqueue(
+                    _facts_from_storage_rows(rows)
+                ),
+            )
             if result.get("enabled"):
                 print(f"[posthog-sync] {json.dumps(result, sort_keys=True)}", flush=True)
         except Exception as error:  # the dashboard remains live when PostHog is down
@@ -383,11 +446,14 @@ async def _retention_loop() -> None:
         )
         if deleted:
             print(f"[retention] deleted {deleted} expired events", flush=True)
+            # The raw journal is retained for a bounded time, while lifetime
+            # reach intentionally survives in the derived metrics database.
         await asyncio.sleep(DAY)
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    _materialized_worker.start()
     tasks = [asyncio.create_task(_retention_loop())]
     if os.environ.get("POSTHOG_PERSONAL_API_KEY") and os.environ.get("POSTHOG_PROJECT_ID"):
         tasks.append(asyncio.create_task(_posthog_sync_loop()))
@@ -558,6 +624,10 @@ async def health() -> dict[str, Any]:
     page_state = _db.execute(
         "SELECT 1 FROM sync_state WHERE source='posthog_page'"
     ).fetchone()
+    stats = _materialized_worker.health()
+    capabilities = [SUMMARY_BATCH_CAPABILITY]
+    if stats["ready"]:
+        capabilities.append(PERIOD_SNAPSHOT_CAPABILITY)
     return {
         "ok": True,
         "version": VERSION,
@@ -571,6 +641,9 @@ async def health() -> dict[str, Any]:
         "posthog_backfill_complete": not bool(page_state),
         "posthog_cursor": _iso(float(state[0])) if state else None,
         "posthog_synced_at": _iso(float(state[1])) if state else None,
+        "contract_version": 2,
+        "capabilities": capabilities,
+        "stats": stats,
     }
 
 
@@ -635,7 +708,11 @@ async def ingest(request: Request) -> JSONResponse:
         device,
         source=source,
         authoritative_device=verified_device,
+        return_rows=True,
     )
+    inserted_rows = result.pop("_inserted_rows", [])
+    if inserted_rows:
+        _materialized_worker.enqueue(_facts_from_storage_rows(inserted_rows))
     return JSONResponse({"ok": True, "ingested": result["accepted"], **result})
 
 
@@ -969,6 +1046,49 @@ def summary(days: float = 1.0) -> JSONResponse:
         _canonical_cards(now, {"weekly_cohorts": product.get("weekly_cohorts") or {}})
     )
     return JSONResponse(payload, headers={"Cache-Control": "no-store"})
+
+
+@app.get("/summary-batch")
+def summary_batch(days: str = "1,3,7,30") -> JSONResponse:
+    try:
+        windows = sorted({
+            float(max(1, min(int(float(item.strip()) + 0.999999), 365)))
+            for item in days.split(",") if item.strip()
+        })
+    except ValueError:
+        return JSONResponse(
+            {"error": "days must be comma-separated numbers"}, status_code=400
+        )
+    if not windows or len(windows) > 10:
+        return JSONResponse({"error": "expected 1 to 10 windows"}, status_code=400)
+    summaries = {
+        f"{window:g}": json.loads(summary(window).body) for window in windows
+    }
+    return JSONResponse({
+        "schema_version": 1,
+        "updated_at": max(item["updated_at"] for item in summaries.values()),
+        "summaries": summaries,
+    }, headers={"Cache-Control": "no-store"})
+
+
+@app.get("/period-snapshot")
+def period_snapshot() -> JSONResponse:
+    _materialized_worker.start()
+    if not _materialized_worker.ready.is_set():
+        return JSONResponse(
+            {"error": "materialized backfill is not ready"}, status_code=503
+        )
+    return JSONResponse(
+        _materialized.snapshot(), headers={"Cache-Control": "no-store"}
+    )
+
+
+@app.get("/stats-telemetry")
+def stats_telemetry() -> JSONResponse:
+    return JSONResponse(
+        {"schema_version": 1, **_materialized_worker.health()},
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 @app.get("/product")

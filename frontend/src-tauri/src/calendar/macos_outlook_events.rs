@@ -33,7 +33,12 @@ const RECORD_SEPARATOR: char = '\u{1e}';
 const UNIT_SEPARATOR: char = '\u{1f}';
 /// Separates the invitee names inside a record's attendee field.
 const GROUP_SEPARATOR: char = '\u{1d}';
-const SCRIPT_TIMEOUT: StdDuration = StdDuration::from_secs(45);
+const SCRIPT_TIMEOUT: StdDuration = StdDuration::from_secs(150);
+/// Bound the slower `get occurrence of` fallback so a mailbox with years of
+/// recurring series cannot exhaust the AppleScript timeout. The ordinary range
+/// query remains unbounded and still returns every event Outlook exposes there.
+const MAX_RECURRING_OCCURRENCE_PROBES: u32 = 640;
+const MAX_RECURRING_SERIES_PROBES: u32 = 64;
 /// Invitee names one user-initiated enrichment read may return in total. A calendar busy
 /// enough to exhaust this budget still returns every meeting, with later entries simply
 /// carrying no invitee list. Background refreshes never request these names.
@@ -227,14 +232,7 @@ pub fn upcoming_meetings(
         }
     }
 
-    let script = CALENDAR_SCRIPT
-        .replace("__DAYS__", &days.to_string())
-        .replace("__MAX_ATTENDEES__", &MAX_ATTENDEES.to_string())
-        .replace("__ATTENDEE_BUDGET__", &ATTENDEE_NAME_BUDGET.to_string())
-        .replace(
-            "__INCLUDE_ATTENDEES__",
-            if include_attendees { "true" } else { "false" },
-        );
+    let script = render_calendar_script(days, include_attendees);
     let output = run_osascript(&script, SCRIPT_TIMEOUT)?;
 
     let now = Local::now();
@@ -242,13 +240,40 @@ pub fn upcoming_meetings(
     let range_end = now + Duration::days(i64::from(days));
 
     let mut meetings = parse_records(&output, range_start, range_end, include_attendees)?;
+    sort_and_dedup_meetings(&mut meetings);
+    Ok(meetings)
+}
+
+fn render_calendar_script(days: u32, include_attendees: bool) -> String {
+    let series_probe_budget = recurring_series_probe_budget(days);
+    CALENDAR_SCRIPT
+        .replace("__DAYS__", &days.to_string())
+        .replace("__SERIES_PROBE_BUDGET__", &series_probe_budget.to_string())
+        .replace("__MAX_ATTENDEES__", &MAX_ATTENDEES.to_string())
+        .replace("__ATTENDEE_BUDGET__", &ATTENDEE_NAME_BUDGET.to_string())
+        .replace(
+            "__INCLUDE_ATTENDEES__",
+            if include_attendees { "true" } else { "false" },
+        )
+}
+
+fn recurring_series_probe_budget(days: u32) -> u32 {
+    let probe_dates_per_series = days.saturating_add(2).max(1);
+    (MAX_RECURRING_OCCURRENCE_PROBES / probe_dates_per_series).clamp(1, MAX_RECURRING_SERIES_PROBES)
+}
+
+fn sort_and_dedup_meetings(meetings: &mut Vec<LocalOutlookMeeting>) {
+    // A recent series can be returned both by Outlook's range query and by
+    // `get occurrence of`. Group by the occurrence id first: chronological
+    // sorting alone does not guarantee duplicates stay adjacent if Outlook
+    // exposes slightly different fields for the two objects.
+    meetings.sort_by(|left, right| left.id.cmp(&right.id));
+    meetings.dedup_by(|left, right| left.id == right.id);
     meetings.sort_by(|left, right| {
         left.start_at
             .cmp(&right.start_at)
             .then_with(|| left.subject.cmp(&right.subject))
     });
-    meetings.dedup_by(|left, right| left.id == right.id);
-    Ok(meetings)
 }
 
 fn parse_records(
@@ -476,6 +501,7 @@ set collected to {}
 set failureText to ""
 set attendeeBudget to __ATTENDEE_BUDGET__
 set includeAttendees to __INCLUDE_ATTENDEES__
+set seriesProbeBudget to __SERIES_PROBE_BUDGET__
 
 tell application "Microsoft Outlook"
 	launch
@@ -498,6 +524,65 @@ tell application "Microsoft Outlook"
 				if failureText is "" then set failureText to errorText
 				set eventList to {}
 			end try
+
+			-- Outlook stores a recurring series as a master whose own start time can be
+			-- months or years before this window. The range query above therefore does
+			-- not reliably return today's occurrence. Ask Outlook for each occurrence
+			-- by date so exceptions and cancelled instances stay Outlook's decision,
+			-- rather than reimplementing recurrence rules in Memento.
+			set recurringSeries to {}
+			try
+				set recurringSeries to (every calendar event of currentCalendar whose is recurring is true)
+			end try
+			repeat with currentSeries in recurringSeries
+				if seriesProbeBudget <= 0 then exit repeat
+				set shouldProbe to true
+				try
+					if is occurrence of currentSeries then set shouldProbe to false
+				end try
+
+				set seriesStart to missing value
+				if shouldProbe then
+					try
+						set seriesStart to start time of currentSeries
+						if seriesStart > rangeEnd then set shouldProbe to false
+					end try
+				end if
+
+				-- Skip series whose recurrence metadata proves they cannot overlap the
+				-- requested window. Number-bounded series are left to `get occurrence of`.
+				if shouldProbe then
+					try
+						set recurrenceInfo to recurrence of currentSeries
+						if (start date of recurrenceInfo) > rangeEnd then set shouldProbe to false
+						set recurrenceEndInfo to end date of recurrenceInfo
+						if (end type of recurrenceEndInfo) is end date type then
+							if (data of recurrenceEndInfo) < rangeStart then set shouldProbe to false
+						end if
+					end try
+				end if
+
+				if shouldProbe and seriesStart is not missing value then
+					set seriesProbeBudget to seriesProbeBudget - 1
+					copy rangeStart to firstProbeDate
+					set time of firstProbeDate to time of seriesStart
+					repeat with dayOffset from 0 to (__DAYS__ + 1)
+						set probeDate to firstProbeDate + (dayOffset * days)
+						try
+							set occurrenceEvent to get occurrence of currentSeries at probeDate
+							if occurrenceEvent is not missing value then
+								set occurrenceStart to start time of occurrenceEvent
+								set occurrenceEnd to end time of occurrenceEvent
+								if occurrenceEnd >= rangeStart and occurrenceStart <= rangeEnd then
+									set end of eventList to occurrenceEvent
+								end if
+							end if
+						on error
+							-- A missing/cancelled occurrence is expected for most probe dates.
+						end try
+					end repeat
+				end if
+			end repeat
 
 			repeat with currentEvent in eventList
 				try
@@ -717,15 +802,11 @@ mod tests {
 
     #[test]
     fn attendee_properties_are_vectorized_instead_of_queried_person_by_person() {
-        assert!(CALENDAR_SCRIPT.contains(
-            "set attendeeEmails to «class emad» of every item in eventAttendees"
-        ));
-        assert!(CALENDAR_SCRIPT.contains(
-            "set displayNames to «class pnam» of every item in attendeeEmails"
-        ));
-        assert!(!CALENDAR_SCRIPT.contains(
-            "email address of item attendeeIndex of eventAttendees"
-        ));
+        assert!(CALENDAR_SCRIPT
+            .contains("set attendeeEmails to «class emad» of every item in eventAttendees"));
+        assert!(CALENDAR_SCRIPT
+            .contains("set displayNames to «class pnam» of every item in attendeeEmails"));
+        assert!(!CALENDAR_SCRIPT.contains("email address of item attendeeIndex of eventAttendees"));
     }
 
     #[test]
@@ -877,6 +958,138 @@ mod tests {
         assert!(!meetings[1].is_meeting);
         // Distinct events must not collide on the generated id.
         assert_ne!(meetings[0].id, meetings[1].id);
+    }
+
+    #[test]
+    fn keeps_distinct_occurrences_from_the_same_recurring_series() {
+        let range_start = Local
+            .with_ymd_and_hms(2026, 8, 18, 0, 0, 0)
+            .single()
+            .unwrap();
+        let range_end = range_start + Duration::days(7);
+        let payload = format!(
+            "{}{RECORD_SEPARATOR}{}",
+            record(&[
+                "1",
+                "Calendar",
+                "same-exchange-series-id",
+                "Daily sync",
+                "2026-08-18T15:30:00",
+                "2026-08-18T16:00:00",
+                "false",
+                "true",
+                "",
+                "4",
+            ]),
+            record(&[
+                "1",
+                "Calendar",
+                "same-exchange-series-id",
+                "Daily sync",
+                "2026-08-19T15:30:00",
+                "2026-08-19T16:00:00",
+                "false",
+                "true",
+                "",
+                "4",
+            ]),
+        );
+
+        let meetings = parse_records(&payload, range_start, range_end, true).unwrap();
+        assert_eq!(meetings.len(), 2);
+        assert_ne!(meetings[0].id, meetings[1].id);
+        assert!(meetings.iter().all(|meeting| meeting.is_recurring));
+    }
+
+    #[test]
+    fn deduplicates_an_occurrence_returned_by_both_outlook_queries() {
+        let range_start = Local
+            .with_ymd_and_hms(2026, 8, 18, 0, 0, 0)
+            .single()
+            .unwrap();
+        let range_end = range_start + Duration::days(7);
+        let payload = format!(
+            "{}{RECORD_SEPARATOR}{}{RECORD_SEPARATOR}{}",
+            record(&[
+                "1",
+                "Calendar",
+                "same-occurrence-id",
+                "Daily sync",
+                "2026-08-18T15:30:00",
+                "2026-08-18T16:00:00",
+                "false",
+                "true",
+                "",
+                "4",
+            ]),
+            record(&[
+                "1",
+                "Calendar",
+                "another-event-id",
+                "Middle event",
+                "2026-08-18T15:30:00",
+                "2026-08-18T16:00:00",
+                "false",
+                "false",
+                "",
+                "2",
+            ]),
+            // Outlook can expose slightly different fields for the ordinary
+            // range result and the occurrence object returned by the series.
+            record(&[
+                "1",
+                "Calendar",
+                "same-occurrence-id",
+                "Daily sync (occurrence)",
+                "2026-08-18T15:30:00",
+                "2026-08-18T16:00:00",
+                "false",
+                "true",
+                "",
+                "4",
+            ]),
+        );
+
+        let mut meetings = parse_records(&payload, range_start, range_end, true).unwrap();
+        let duplicate_id = meetings[0].id.clone();
+        sort_and_dedup_meetings(&mut meetings);
+
+        assert_eq!(meetings.len(), 2);
+        assert_eq!(
+            meetings
+                .iter()
+                .filter(|meeting| meeting.id == duplicate_id)
+                .count(),
+            1
+        );
+        assert!(meetings
+            .iter()
+            .any(|meeting| meeting.subject == "Daily sync"));
+    }
+
+    #[test]
+    fn calendar_script_expands_occurrences_without_reading_event_bodies() {
+        let script = render_calendar_script(7, true);
+        assert!(script.contains("get occurrence of currentSeries at probeDate"));
+        assert!(script.contains("repeat with dayOffset from 0 to (7 + 1)"));
+        assert!(!script.contains("__DAYS__"));
+        assert!(!script.contains("__SERIES_PROBE_BUDGET__"));
+        assert!(!script.contains("__MAX_ATTENDEES__"));
+        assert!(!script.contains("__ATTENDEE_BUDGET__"));
+        assert!(!script.contains("__INCLUDE_ATTENDEES__"));
+        assert!(script.contains("set seriesProbeBudget to 64"));
+        assert!(script.contains("if seriesProbeBudget <= 0 then exit repeat"));
+        assert!(!script.contains("content of currentEvent"));
+        assert!(!script.contains("plain text content of currentEvent"));
+    }
+
+    #[test]
+    fn caps_recurring_occurrence_lookups_for_longer_windows() {
+        for days in 1..=31 {
+            let series_budget = recurring_series_probe_budget(days);
+            assert!(series_budget <= MAX_RECURRING_SERIES_PROBES);
+            assert!(series_budget * (days + 2) <= MAX_RECURRING_OCCURRENCE_PROBES);
+        }
     }
 
     #[test]

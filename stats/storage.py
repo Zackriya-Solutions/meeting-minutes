@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import math
 import os
 import re
@@ -103,7 +104,8 @@ def insert_events(
     envelope_device: str | None = None,
     source: str = "direct",
     authoritative_device: str | None = None,
-) -> dict[str, int]:
+    return_rows: bool = False,
+) -> dict[str, Any]:
     if not isinstance(events, list):
         return {"accepted": 0, "inserted": 0, "duplicates": 0, "rejected": 1}
     rows: list[tuple[float, str, str, str, str | None, str, float]] = []
@@ -131,13 +133,27 @@ def insert_events(
             or event.get("uuid")
             or event.get("id")
         )
-        event_id = str(event_id_value)[:200] if event_id_value else None
+        properties_json = json.dumps(
+            properties, separators=(",", ":"), sort_keys=True
+        )
+        if event_id_value:
+            event_id = str(event_id_value)[:200]
+        else:
+            # A retry without a client-supplied id must resolve to the same
+            # identity.  A random UUID lets the raw table and the incremental
+            # materialized layer count the same delivery more than once.
+            identity = json.dumps(
+                [ts, device_id, name, properties_json],
+                separators=(",", ":"),
+                ensure_ascii=False,
+            ).encode("utf-8")
+            event_id = "derived:" + hashlib.sha256(identity).hexdigest()
         rows.append(
             (
                 ts,
                 device_id,
                 name,
-                json.dumps(properties, separators=(",", ":"), sort_keys=True),
+                properties_json,
                 event_id,
                 source[:32],
                 time.time(),
@@ -145,21 +161,48 @@ def insert_events(
         )
 
     with WRITE_LOCK:
-        before = db.total_changes
-        db.executemany(
-            "INSERT OR IGNORE INTO events"
-            " (ts,device_id,name,properties,event_id,source,ingested_at)"
-            " VALUES (?,?,?,?,?,?,?)",
-            rows,
-        )
-        db.commit()
-        inserted = db.total_changes - before
-    return {
+        # Reserve the SQLite writer before checking ids.  The schema's only
+        # insert-conflict rule is the event_id unique index, so filtering under
+        # this database-level lock is both exact and substantially faster than
+        # one INSERT ... RETURNING round-trip per event.
+        db.execute("BEGIN IMMEDIATE")
+        try:
+            ids = {row[4] for row in rows}
+            existing_ids = {
+                str(item[0])
+                for item in db.execute(
+                    f"SELECT event_id FROM events WHERE event_id IN "
+                    f"({','.join('?' for _ in ids)})",
+                    tuple(ids),
+                )
+            } if ids else set()
+            inserted_rows = []
+            seen_ids = set(existing_ids)
+            for row in rows:
+                if row[4] in seen_ids:
+                    continue
+                seen_ids.add(row[4])
+                inserted_rows.append(row)
+            db.executemany(
+                "INSERT OR IGNORE INTO events"
+                " (ts,device_id,name,properties,event_id,source,ingested_at)"
+                " VALUES (?,?,?,?,?,?,?)",
+                inserted_rows,
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
+        inserted = len(inserted_rows)
+    result: dict[str, Any] = {
         "accepted": len(rows),
         "inserted": inserted,
         "duplicates": len(rows) - inserted,
         "rejected": rejected,
     }
+    if return_rows:
+        result["_inserted_rows"] = inserted_rows
+    return result
 
 
 def delete_events_before(db: sqlite3.Connection, cutoff: float) -> int:
