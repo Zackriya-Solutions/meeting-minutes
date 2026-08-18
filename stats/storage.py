@@ -8,6 +8,7 @@ import re
 import sqlite3
 import threading
 import time
+import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterable
@@ -103,7 +104,8 @@ def insert_events(
     envelope_device: str | None = None,
     source: str = "direct",
     authoritative_device: str | None = None,
-) -> dict[str, int]:
+    return_rows: bool = False,
+) -> dict[str, Any]:
     if not isinstance(events, list):
         return {"accepted": 0, "inserted": 0, "duplicates": 0, "rejected": 1}
     rows: list[tuple[float, str, str, str, str | None, str, float]] = []
@@ -131,7 +133,7 @@ def insert_events(
             or event.get("uuid")
             or event.get("id")
         )
-        event_id = str(event_id_value)[:200] if event_id_value else None
+        event_id = str(event_id_value)[:200] if event_id_value else str(uuid.uuid4())
         rows.append(
             (
                 ts,
@@ -145,6 +147,25 @@ def insert_events(
         )
 
     with WRITE_LOCK:
+        ids = {row[4] for row in rows if row[4]}
+        existing_ids: set[str] = set()
+        if ids:
+            existing_ids = {
+                str(row[0]) for row in db.execute(
+                    f"SELECT event_id FROM events WHERE event_id IN "
+                    f"({','.join('?' for _ in ids)})",
+                    tuple(ids),
+                )
+            }
+        inserted_rows = []
+        seen_ids = set(existing_ids)
+        for row in rows:
+            event_id = row[4]
+            if event_id and event_id in seen_ids:
+                continue
+            inserted_rows.append(row)
+            if event_id:
+                seen_ids.add(event_id)
         before = db.total_changes
         db.executemany(
             "INSERT OR IGNORE INTO events"
@@ -154,12 +175,15 @@ def insert_events(
         )
         db.commit()
         inserted = db.total_changes - before
-    return {
+    result: dict[str, Any] = {
         "accepted": len(rows),
         "inserted": inserted,
         "duplicates": len(rows) - inserted,
         "rejected": rejected,
     }
+    if return_rows:
+        result["_inserted_rows"] = inserted_rows
+    return result
 
 
 def delete_events_before(db: sqlite3.Connection, cutoff: float) -> int:
