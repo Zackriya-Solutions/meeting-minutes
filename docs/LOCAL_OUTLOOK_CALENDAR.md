@@ -43,6 +43,8 @@ enriched on demand when the user opens a calendar entry or starts the meeting. T
 keeps Outlook's synchronous automation thread out of the recurring refresh path.
 The New Outlook Accessibility fallback is not polled on an interval or on focus at all,
 because reading it requires traversing and sometimes navigating the visible Outlook UI.
+Its Settings row provides an explicit Refresh button so long-running sessions can update
+on demand without returning to disruptive background scans.
 
 On macOS, the user approves one **Automation** consent alert ("Memento wants
 access to control Microsoft Outlook"). Memento then starts Outlook in the

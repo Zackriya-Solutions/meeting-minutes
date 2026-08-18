@@ -23,6 +23,7 @@ import {
   needsOutlookPermission,
   requestOutlookCalendarPermission,
   setLocalOutlookCalendarEnabled,
+  shouldAutomaticallyRefreshOutlookCalendar,
 } from '@/lib/localOutlookCalendar';
 
 const HOME_MEETING_LIMIT = 2;
@@ -34,10 +35,12 @@ interface LocalOutlookCalendarContextValue {
   enabled: boolean;
   upcomingMeetings: LocalOutlookMeeting[];
   loading: boolean;
+  refreshing: boolean;
   saving: boolean;
   homeCardVisible: boolean;
   setHomeCardVisible: (visible: boolean) => void;
   toggleEnabled: (enabled: boolean) => Promise<void>;
+  refresh: () => Promise<void>;
 }
 
 const LocalOutlookCalendarContext = createContext<LocalOutlookCalendarContextValue | null>(null);
@@ -64,6 +67,7 @@ export function LocalOutlookCalendarProvider({ children }: { children: ReactNode
   const [enabled, setEnabled] = useState(false);
   const [upcomingMeetings, setUpcomingMeetings] = useState<LocalOutlookMeeting[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [homeCardVisible, setHomeCardVisible] = useState(false);
   const [homeCardDismissed, setHomeCardDismissed] = useState(false);
@@ -134,7 +138,7 @@ export function LocalOutlookCalendarProvider({ children }: { children: ReactNode
       // calendar cache instead of synchronously rescanning Outlook on every switch.
       // The Accessibility fallback manipulates the visible Outlook window, so it is
       // deliberately user/initial-load driven and never runs on focus.
-      if (status?.provider === 'macos-outlook-accessibility') return;
+      if (!shouldAutomaticallyRefreshOutlookCalendar(status)) return;
       void loadCalendarState().catch(() => undefined);
     };
     window.addEventListener('focus', refresh);
@@ -147,7 +151,7 @@ export function LocalOutlookCalendarProvider({ children }: { children: ReactNode
   }, [loadCalendarState, status?.provider, t]);
 
   useEffect(() => {
-    if (!enabled || status?.provider === 'macos-outlook-accessibility') return;
+    if (!enabled || !shouldAutomaticallyRefreshOutlookCalendar(status)) return;
 
     const refresh = () => {
       void loadCalendarState().catch(() => undefined);
@@ -224,20 +228,38 @@ export function LocalOutlookCalendarProvider({ children }: { children: ReactNode
     }
   }, [enabled, homeCardDismissed, refreshStatus, status, t]);
 
+  const refresh = useCallback(async () => {
+    if (!enabled || refreshing) return;
+    setRefreshing(true);
+    try {
+      await loadCalendarState(true);
+    } catch (error) {
+      toast.error(t('Could not check the local Outlook calendar'), {
+        description: String(error),
+      });
+    } finally {
+      setRefreshing(false);
+    }
+  }, [enabled, loadCalendarState, refreshing, t]);
+
   const value = useMemo<LocalOutlookCalendarContextValue>(() => ({
     status,
     enabled,
     upcomingMeetings,
     loading,
+    refreshing,
     saving,
     homeCardVisible,
     setHomeCardVisible: setHomeCardVisiblePersistently,
     toggleEnabled,
+    refresh,
   }), [
     enabled,
     homeCardVisible,
     setHomeCardVisiblePersistently,
     loading,
+    refresh,
+    refreshing,
     saving,
     status,
     toggleEnabled,

@@ -3,6 +3,7 @@ import {
   canReadOutlookAttendees,
   MEETING_IN_PROGRESS_GRACE_MS,
   selectMeetingInProgress,
+  shouldAutomaticallyRefreshOutlookCalendar,
   type LocalOutlookMeeting,
 } from "../../src/lib/localOutlookCalendar";
 
@@ -18,6 +19,34 @@ describe("canReadOutlookAttendees", () => {
       provider: "macos-outlook-accessibility",
       detail: "",
     })).toBe(false);
+  });
+});
+
+describe("shouldAutomaticallyRefreshOutlookCalendar", () => {
+  test("keeps visible-UI Accessibility reads manual", () => {
+    expect(shouldAutomaticallyRefreshOutlookCalendar({
+      supported: true,
+      installed: true,
+      running: true,
+      permission: "accessibility",
+      permission_state: "granted",
+      requires_admin: true,
+      provider: "macos-outlook-accessibility",
+      detail: "",
+    })).toBe(false);
+  });
+
+  test("allows non-navigating Outlook connectors to refresh", () => {
+    expect(shouldAutomaticallyRefreshOutlookCalendar({
+      supported: true,
+      installed: true,
+      running: true,
+      permission: "automation",
+      permission_state: "granted",
+      requires_admin: false,
+      provider: "macos-outlook-automation",
+      detail: "",
+    })).toBe(true);
   });
 });
 

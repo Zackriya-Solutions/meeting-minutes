@@ -241,7 +241,7 @@ pub fn upcoming_meetings(
     let range_start = now - Duration::hours(LOOKBEHIND_HOURS);
     let range_end = now + Duration::days(i64::from(days));
 
-    let mut meetings = parse_records(&output, range_start, range_end)?;
+    let mut meetings = parse_records(&output, range_start, range_end, include_attendees)?;
     meetings.sort_by(|left, right| {
         left.start_at
             .cmp(&right.start_at)
@@ -255,6 +255,7 @@ fn parse_records(
     output: &str,
     range_start: DateTime<Local>,
     range_end: DateTime<Local>,
+    include_attendees: bool,
 ) -> Result<Vec<LocalOutlookMeeting>, String> {
     let mut meetings = Vec::new();
     for record in output.split(RECORD_SEPARATOR) {
@@ -265,7 +266,12 @@ fn parse_records(
         if let Some(message) = record.strip_prefix("ERROR\u{1f}") {
             return Err(format!("Outlook rejected the calendar query: {message}"));
         }
-        if let Some(meeting) = parse_record(record, range_start, range_end) {
+        if let Some(mut meeting) = parse_record(record, range_start, range_end) {
+            // Defense in depth: background callers requested metadata only. Even if a
+            // future script revision accidentally emits names, do not return or cache them.
+            if !include_attendees {
+                meeting.attendees.clear();
+            }
             meetings.push(meeting);
         }
     }
@@ -646,6 +652,7 @@ mod tests {
             ]),
             range_start,
             range_end,
+            true,
         )
         .unwrap();
 
@@ -694,6 +701,7 @@ mod tests {
             ]),
             range_start,
             range_end,
+            true,
         )
         .unwrap();
 
@@ -721,6 +729,38 @@ mod tests {
     }
 
     #[test]
+    fn metadata_only_reads_discard_attendee_fields_even_if_the_script_emits_them() {
+        let range_start = Local
+            .with_ymd_and_hms(2026, 7, 28, 0, 0, 0)
+            .single()
+            .unwrap();
+        let range_end = range_start + Duration::days(7);
+        let meetings = parse_records(
+            &record(&[
+                "42",
+                "Calendar",
+                "key",
+                "Weekly sync",
+                "2026-07-29T10:30:00",
+                "2026-07-29T11:00:00",
+                "false",
+                "false",
+                "",
+                "2",
+                "Maria Example",
+            ]),
+            range_start,
+            range_end,
+            false,
+        )
+        .unwrap();
+
+        assert_eq!(meetings.len(), 1);
+        assert!(meetings[0].is_meeting);
+        assert!(meetings[0].attendees.is_empty());
+    }
+
+    #[test]
     fn counts_an_event_with_invitees_as_a_meeting() {
         let range_start = Local
             .with_ymd_and_hms(2026, 7, 28, 0, 0, 0)
@@ -744,6 +784,7 @@ mod tests {
             ]),
             range_start,
             range_end,
+            true,
         )
         .unwrap();
         assert!(meetings[0].is_meeting);
@@ -771,6 +812,7 @@ mod tests {
             ]),
             range_start,
             range_end,
+            true,
         )
         .unwrap();
         assert!(meetings.is_empty());
@@ -784,6 +826,7 @@ mod tests {
             &format!("ERROR{UNIT_SEPARATOR}Outlook got an error: Access denied."),
             range_start,
             range_end,
+            true,
         )
         .unwrap_err();
         assert!(error.contains("Access denied"));
@@ -823,7 +866,7 @@ mod tests {
                 "0",
             ]),
         );
-        let meetings = parse_records(&payload, range_start, range_end).unwrap();
+        let meetings = parse_records(&payload, range_start, range_end, true).unwrap();
         assert_eq!(meetings.len(), 2);
         assert_eq!(meetings[0].subject, "First");
         // An event without a location must arrive as an empty field, never as
@@ -858,6 +901,7 @@ mod tests {
             ]),
             range_start,
             range_end,
+            true,
         )
         .unwrap();
         assert_eq!(meetings.len(), 1);

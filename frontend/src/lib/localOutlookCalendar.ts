@@ -60,6 +60,13 @@ export function canReadOutlookAttendees(status: LocalOutlookCalendarStatus): boo
   return status.provider !== 'macos-outlook-accessibility';
 }
 
+/** Accessibility reads/navigates Outlook's visible UI and must remain user-driven. */
+export function shouldAutomaticallyRefreshOutlookCalendar(
+  status: LocalOutlookCalendarStatus | null,
+): boolean {
+  return status?.provider !== 'macos-outlook-accessibility';
+}
+
 export interface LocalOutlookMeeting {
   id: string;
   calendar_id: string;

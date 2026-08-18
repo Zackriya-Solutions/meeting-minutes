@@ -1,7 +1,7 @@
 'use client';
 
 import { type MouseEvent } from 'react';
-import { Calendar } from '@/components/deslop-icons';
+import { Calendar, RefreshCw } from '@/components/deslop-icons';
 import { Button as FluidButton } from '@/components/ui/fluid-button';
 import { Switch } from '@/components/ui/switch';
 import { useLocalOutlookCalendar } from '@/contexts/LocalOutlookCalendarContext';
@@ -44,10 +44,12 @@ export function CalendarSettings({ variant = 'settings', onOpenMeeting }: Calend
     enabled,
     upcomingMeetings,
     loading,
+    refreshing,
     saving,
     homeCardVisible,
     setHomeCardVisible,
     toggleEnabled,
+    refresh,
   } = useLocalOutlookCalendar();
 
   if (loading && variant === 'settings') {
@@ -165,13 +167,29 @@ export function CalendarSettings({ variant = 'settings', onOpenMeeting }: Calend
           <h3 className="settings-cell__label">{t('Local Outlook calendar')}</h3>
           <p className="settings-cell__caption">{caption}</p>
         </div>
-        <Switch
-          className="shrink-0"
-          checked={enabled}
-          disabled={unavailable || saving}
-          onCheckedChange={toggleEnabled}
-          aria-label={t('Use local Outlook calendar')}
-        />
+        <div className="flex shrink-0 items-center gap-1">
+          {enabled && (
+            <FluidButton
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              loading={refreshing}
+              disabled={refreshing || saving}
+              onClick={() => void refresh()}
+              aria-label={t('Refresh')}
+              title={t('Refresh')}
+            >
+              <RefreshCw aria-hidden="true" size={16} />
+            </FluidButton>
+          )}
+          <Switch
+            className="shrink-0"
+            checked={enabled}
+            disabled={unavailable || saving}
+            onCheckedChange={toggleEnabled}
+            aria-label={t('Use local Outlook calendar')}
+          />
+        </div>
       </div>
     </section>
   );
