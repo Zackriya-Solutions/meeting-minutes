@@ -62,6 +62,7 @@ export function MeetingOrganizationPanel({ meetingId, folderId, tags: initialTag
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [suggestionsDismissed, setSuggestionsDismissed] = useState(false);
   const [isSuggesting, setIsSuggesting] = useState(false);
+  const [noSuggestionsFound, setNoSuggestionsFound] = useState(false);
 
   const sidebarMeeting = meetings.find(meeting => meeting.id === meetingId);
   const currentFolderId = sidebarMeeting ? sidebarMeeting.project_folder_id ?? null : folderId ?? null;
@@ -73,6 +74,7 @@ export function MeetingOrganizationPanel({ meetingId, folderId, tags: initialTag
     const stored = readStoredSuggestions(meetingId);
     setSuggestions(stored?.status === 'generated' ? stored.suggestions : []);
     setSuggestionsDismissed(stored?.status === 'dismissed');
+    setNoSuggestionsFound(false);
   }, [meetingId]);
 
   useEffect(() => {
@@ -90,6 +92,7 @@ export function MeetingOrganizationPanel({ meetingId, folderId, tags: initialTag
   const updateSuggestions = (next: string[], dismissed: boolean) => {
     setSuggestions(next);
     setSuggestionsDismissed(dismissed);
+    setNoSuggestionsFound(false);
     writeStoredSuggestions(meetingId, { status: dismissed ? 'dismissed' : 'generated', suggestions: dismissed ? [] : next });
   };
 
@@ -98,6 +101,7 @@ export function MeetingOrganizationPanel({ meetingId, folderId, tags: initialTag
     try {
       const generated = await invoke('api_suggest_meeting_tags', { meetingId }) as string[];
       updateSuggestions(generated, false);
+      setNoSuggestionsFound(generated.length === 0);
     } catch (error) {
       toast.error('Could not suggest tags', { description: error instanceof Error ? error.message : String(error) });
     } finally {
@@ -166,6 +170,9 @@ export function MeetingOrganizationPanel({ meetingId, folderId, tags: initialTag
           </Button>
         )}
       </div>
+      {noSuggestionsFound && !isSuggesting && (
+        <p className="mt-2 text-xs text-gray-500">No tag suggestions found for this meeting.</p>
+      )}
       {!suggestionsDismissed && visibleSuggestions.length > 0 && (
         <div className="mt-2 border-t border-gray-200 pt-2">
           <div className="flex items-center justify-between text-xs text-gray-500">

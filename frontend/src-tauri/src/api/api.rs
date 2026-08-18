@@ -500,6 +500,26 @@ fn parse_suggested_tags(raw: &str) -> Vec<String> {
     result
 }
 
+const SUGGESTION_CONTENT_LIMIT: usize = 24_000;
+
+fn build_suggestion_content(transcript: &str, summary: &str, limit: usize) -> String {
+    let transcript = transcript.trim();
+    let summary = summary.trim();
+    if summary.is_empty() {
+        return format!("Transcript:\n{}", transcript.chars().take(limit).collect::<String>());
+    }
+    let summary_slice: String = summary.chars().take(limit).collect();
+    let remaining = limit - summary_slice.chars().count();
+    if transcript.is_empty() || remaining == 0 {
+        return format!("Summary:\n{}", summary_slice);
+    }
+    format!(
+        "Summary:\n{}\n\nTranscript:\n{}",
+        summary_slice,
+        transcript.chars().take(remaining).collect::<String>()
+    )
+}
+
 #[tauri::command]
 pub async fn api_suggest_meeting_tags<R: Runtime>(
     app: AppHandle<R>, state: tauri::State<'_, AppState>, meeting_id: String,
@@ -514,7 +534,7 @@ pub async fn api_suggest_meeting_tags<R: Runtime>(
     let transcript = transcript_rows.into_iter().map(|row| row.0).collect::<Vec<_>>().join("\n");
     let summary = summary_row.and_then(|row| row.0).unwrap_or_default();
     if transcript.trim().len() + summary.trim().len() < 20 { return Ok(Vec::new()); }
-    let content = format!("Transcript:\n{}\n\nSummary:\n{}", transcript, summary);
+    let content = build_suggestion_content(&transcript, &summary, SUGGESTION_CONTENT_LIMIT);
 
     let config = SettingsRepository::get_model_config(pool).await.map_err(|e| e.to_string())?
         .ok_or_else(|| "No summary model configured".to_string())?;
@@ -534,7 +554,7 @@ pub async fn api_suggest_meeting_tags<R: Runtime>(
     let generated = generate_summary(
         &reqwest::Client::new(), &provider, &config.model, &final_api_key,
         "You suggest concise organization tags for a meeting. Return only JSON in the form {\"tags\":[\"tag\"]}. Suggest 3 to 8 specific, reusable tags. Do not include people names, dates, or generic words like meeting.",
-        &content.chars().take(24000).collect::<String>(),
+        &content,
         config.ollama_endpoint.as_deref(), custom_config.as_ref().map(|value| value.endpoint.as_str()),
         custom_config.as_ref().and_then(|value| value.max_tokens.map(|tokens| tokens as u32)),
         custom_config.as_ref().and_then(|value| value.temperature),
@@ -1582,7 +1602,42 @@ pub async fn api_test_custom_openai_connection<R: Runtime>(
 
 #[cfg(test)]
 mod tests {
-    use super::parse_suggested_tags;
+    use super::{build_suggestion_content, parse_suggested_tags};
+
+    #[test]
+    fn keeps_the_whole_summary_when_the_transcript_overflows_the_limit() {
+        let transcript = "t".repeat(40_000);
+        let summary = "Decided to ship the mobile alpha.";
+
+        let content = build_suggestion_content(&transcript, summary, 24_000);
+
+        let (summary_part, transcript_part) = content.split_once("\n\nTranscript:\n").unwrap();
+        assert_eq!(summary_part, format!("Summary:\n{}", summary));
+        assert_eq!(transcript_part, "t".repeat(24_000 - summary.chars().count()));
+    }
+
+    #[test]
+    fn falls_back_to_the_transcript_when_no_summary_exists() {
+        let content = build_suggestion_content("we shipped the alpha", "", 24_000);
+
+        assert_eq!(content, "Transcript:\nwe shipped the alpha");
+    }
+
+    #[test]
+    fn drops_the_transcript_entirely_when_the_summary_fills_the_budget() {
+        let summary = "s".repeat(30_000);
+
+        let content = build_suggestion_content("a transcript", &summary, 100);
+
+        assert_eq!(content, format!("Summary:\n{}", "s".repeat(100)));
+    }
+
+    #[test]
+    fn counts_multibyte_characters_without_splitting_them() {
+        let content = build_suggestion_content("ação", "café", 3);
+
+        assert_eq!(content, "Summary:\ncaf");
+    }
 
     #[test]
     fn parses_json_tag_objects_and_arrays() {

@@ -141,7 +141,7 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
       title: 'Meeting Notes',
       type: 'folder' as const,
       children: [
-        { id: 'unfiled', title: 'Unfiled', type: 'folder' as const, children: meetings.filter(m => !m.project_folder_id).map(m => ({ id: m.id, title: m.title, type: 'file' as const, tags: m.tags })) },
+        { id: UNFILED_FOLDER_VALUE, title: 'Unfiled', type: 'folder' as const, children: meetings.filter(m => !m.project_folder_id).map(m => ({ id: m.id, title: m.title, type: 'file' as const, tags: m.tags })) },
         ...projectFolders.map(folder => ({
           id: folder.id,
           title: folder.name,

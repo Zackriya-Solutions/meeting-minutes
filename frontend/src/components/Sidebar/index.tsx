@@ -103,7 +103,7 @@ const Sidebar: React.FC = () => {
   const seenProjectFolderIdsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
-    const freshFolderIds = ['unfiled', ...projectFolders.map(folder => folder.id)]
+    const freshFolderIds = [UNFILED_FOLDER_VALUE, ...projectFolders.map(folder => folder.id)]
       .filter(id => !seenProjectFolderIdsRef.current.has(id));
     if (freshFolderIds.length === 0) return;
     freshFolderIds.forEach(id => seenProjectFolderIdsRef.current.add(id));
@@ -595,7 +595,7 @@ const Sidebar: React.FC = () => {
                 <Calendar className="w-4 h-4 mr-2" />
               ) : null}
               <span className={depth === 0 ? "" : "font-medium"}>{item.title}</span>
-              {depth > 0 && item.id !== 'unfiled' && (
+              {depth > 0 && item.id !== UNFILED_FOLDER_VALUE && (
                 <div className="ml-auto flex items-center gap-1 opacity-0 group-hover:opacity-100">
                   <button aria-label={`Rename ${item.title}`} className="p-1 hover:text-blue-600" onClick={(event) => { event.stopPropagation(); setFolderDialog({ mode: 'rename', folderId: item.id, name: item.title }); }}><Pencil className="w-3.5 h-3.5" /></button>
                   <button aria-label={`Delete ${item.title}`} className="p-1 hover:text-red-600" onClick={(event) => { event.stopPropagation(); setFolderToDelete(item.id); }}><Trash2 className="w-3.5 h-3.5" /></button>
