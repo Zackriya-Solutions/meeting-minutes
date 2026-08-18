@@ -33,6 +33,29 @@ pub async fn find_canonical_meeting(
     .await
 }
 
+/// Return the already-imported take for one exact processing mode. A content
+/// hash may have one raw and one denoised take, but repeating either mode is
+/// idempotent and must resolve to the existing meeting.
+pub async fn find_processing_variant(
+    pool: &SqlitePool,
+    sha256: &str,
+    denoise_applied: bool,
+) -> Result<Option<ExistingAudioMeeting>, sqlx::Error> {
+    sqlx::query_as::<_, ExistingAudioMeeting>(
+        "SELECT m.id AS meeting_id, m.title, CAST(m.created_at AS TEXT) AS created_at, \
+                mai.denoise_applied \
+         FROM meeting_audio_identities mai \
+         JOIN meetings m ON m.id = mai.meeting_id \
+         WHERE mai.sha256 = ? AND mai.denoise_applied = ? \
+         ORDER BY CASE mai.role WHEN 'canonical' THEN 0 ELSE 1 END, m.created_at, m.id \
+         LIMIT 1",
+    )
+    .bind(sha256)
+    .bind(i64::from(denoise_applied))
+    .fetch_optional(pool)
+    .await
+}
+
 pub async fn register_import_identity(
     tx: &mut Transaction<'_, Sqlite>,
     meeting_id: &str,
@@ -50,25 +73,31 @@ pub async fn register_import_identity(
     if let Some(canonical_meeting_id) = existing_canonical {
         if canonical_meeting_id == meeting_id {
             sqlx::query(
-                "INSERT INTO meeting_audio_identities (meeting_id, sha256, role) \
-                 VALUES (?, ?, 'canonical') \
+                "INSERT INTO meeting_audio_identities \
+                 (meeting_id, sha256, role, denoise_applied) \
+                 VALUES (?, ?, 'canonical', ?) \
                  ON CONFLICT(meeting_id) DO UPDATE SET \
-                   sha256=excluded.sha256, role='canonical'",
+                   sha256=excluded.sha256, role='canonical', \
+                   denoise_applied=excluded.denoise_applied",
             )
             .bind(meeting_id)
             .bind(sha256)
+            .bind(denoise_applied.map(i64::from))
             .execute(&mut **tx)
             .await?;
             return Ok(IdentityRegistration::Canonical);
         }
         sqlx::query(
-            "INSERT INTO meeting_audio_identities (meeting_id, sha256, role) \
-             VALUES (?, ?, 'duplicate_candidate') \
+            "INSERT INTO meeting_audio_identities \
+             (meeting_id, sha256, role, denoise_applied) \
+             VALUES (?, ?, 'duplicate_candidate', ?) \
              ON CONFLICT(meeting_id) DO UPDATE SET \
-               sha256=excluded.sha256, role='duplicate_candidate', detected_at=datetime('now')",
+               sha256=excluded.sha256, role='duplicate_candidate', \
+               denoise_applied=excluded.denoise_applied, detected_at=datetime('now')",
         )
         .bind(meeting_id)
         .bind(sha256)
+        .bind(denoise_applied.map(i64::from))
         .execute(&mut **tx)
         .await?;
         sqlx::query(
@@ -102,11 +131,13 @@ pub async fn register_import_identity(
     .execute(&mut **tx)
     .await?;
     sqlx::query(
-        "INSERT INTO meeting_audio_identities (meeting_id, sha256, role) \
-         VALUES (?, ?, 'canonical')",
+        "INSERT INTO meeting_audio_identities \
+         (meeting_id, sha256, role, denoise_applied) \
+         VALUES (?, ?, 'canonical', ?)",
     )
     .bind(meeting_id)
     .bind(sha256)
+    .bind(denoise_applied.map(i64::from))
     .execute(&mut **tx)
     .await?;
     Ok(IdentityRegistration::Canonical)
@@ -140,11 +171,16 @@ pub async fn register_backfilled_identity(
         });
     }
 
-    sqlx::query("UPDATE audio_identities SET canonical_meeting_id = ? WHERE sha256 = ?")
-        .bind(meeting_id)
-        .bind(sha256)
-        .execute(&mut **tx)
-        .await?;
+    sqlx::query(
+        "UPDATE audio_identities SET canonical_meeting_id = ?, denoise_applied = ( \
+             SELECT denoise_applied FROM meeting_audio_identities WHERE meeting_id = ? \
+         ) WHERE sha256 = ?",
+    )
+    .bind(meeting_id)
+    .bind(meeting_id)
+    .bind(sha256)
+    .execute(&mut **tx)
+    .await?;
     sqlx::query(
         "UPDATE meeting_audio_identities SET role = \
          CASE WHEN meeting_id = ? THEN 'canonical' ELSE 'duplicate_candidate' END \
@@ -272,11 +308,16 @@ pub async fn release_meeting_identity(
         .await?;
 
         if let Some(replacement_id) = replacement {
-            sqlx::query("UPDATE audio_identities SET canonical_meeting_id = ? WHERE sha256 = ?")
-                .bind(&replacement_id)
-                .bind(&sha256)
-                .execute(&mut **tx)
-                .await?;
+            sqlx::query(
+                "UPDATE audio_identities SET canonical_meeting_id = ?, denoise_applied = ( \
+                     SELECT denoise_applied FROM meeting_audio_identities WHERE meeting_id = ? \
+                 ) WHERE sha256 = ?",
+            )
+            .bind(&replacement_id)
+            .bind(&replacement_id)
+            .bind(&sha256)
+            .execute(&mut **tx)
+            .await?;
             sqlx::query(
                 "UPDATE meeting_audio_identities SET role='canonical' WHERE meeting_id = ?",
             )
@@ -376,7 +417,9 @@ mod tests {
                 meeting_id TEXT PRIMARY KEY,
                 sha256 TEXT NOT NULL,
                 role TEXT NOT NULL,
-                detected_at TEXT DEFAULT CURRENT_TIMESTAMP
+                denoise_applied INTEGER,
+                detected_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(sha256, denoise_applied)
             )",
             "CREATE TABLE audio_duplicate_reviews(
                 duplicate_meeting_id TEXT PRIMARY KEY,
@@ -425,6 +468,16 @@ mod tests {
 
         let existing = find_canonical_meeting(&pool, HASH).await.unwrap().unwrap();
         assert_eq!(existing.meeting_id, "m1");
+        let denoised = find_processing_variant(&pool, HASH, true)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(denoised.meeting_id, "m1");
+        let raw = find_processing_variant(&pool, HASH, false)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(raw.meeting_id, "m2");
         let review: (String, String) = sqlx::query_as(
             "SELECT canonical_meeting_id, status FROM audio_duplicate_reviews \
              WHERE duplicate_meeting_id='m2'",

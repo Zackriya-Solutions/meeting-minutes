@@ -6,6 +6,7 @@ import { applyPinnedSummaryLanguageToMeeting } from '@/lib/summary-language-pref
 import { toast } from 'sonner';
 import { useT } from '@/lib/i18n';
 import { loadBetaFeatures } from '@/types/betaFeatures';
+import { startAudioImportCommand } from '@/services/importAudioService';
 
 export interface AudioFileInfo {
   path: string;
@@ -386,7 +387,7 @@ export function useImportAudio({
           });
         }
 
-        await invoke('start_import_audio_command', {
+        await startAudioImportCommand({
           sourcePath,
           title,
           language: language || null,

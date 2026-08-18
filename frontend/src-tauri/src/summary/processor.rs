@@ -1098,14 +1098,14 @@ mod tests {
 
     #[test]
     fn compact_standard_meeting_rejects_missing_participants_and_long_copy() {
-        let long_summary = "а".repeat(501);
+        let long_summary = "а".repeat(601);
         let markdown = format!(
             "**Краткое содержание**\n- {long_summary}\n\n**Договорённости**\nТекст без буллита"
         );
         let found = compact_standard_meeting_violations(&markdown);
         let violations = violation_messages(&found).join(" ");
         assert!(violations.contains("Attendees"));
-        assert!(violations.contains("501 visible characters"));
+        assert!(violations.contains("601 visible characters"));
         assert!(violations.contains("Markdown bullet"));
     }
 

@@ -133,9 +133,9 @@ export function ImportAudioDialog({
     const pending = pendingImportRef.current;
     toast.info(t('Audio already imported'), {
       description: `${existing.title} — ${processedAs}`,
-      action: pending
+      action: pending && !sameAsNow
         ? {
-            label: sameAsNow ? t('Import again') : t('Redo with current settings'),
+            label: t('Redo with current settings'),
             onClick: () => {
               void startImport(
                 pending.path,
@@ -274,7 +274,7 @@ export function ImportAudioDialog({
     await selectFolder();
   };
 
-  const handleStartImport = async () => {
+  const handleStartImport = async (forceReimport = false) => {
     if (loadingModels || !selectedModel) {
       toast.error(t('No transcription model is available for import'), {
         description: t('Download GigaAM in Settings → Transcription before importing audio.'),
@@ -308,7 +308,8 @@ export function ImportAudioDialog({
       request.title,
       request.language,
       request.model,
-      request.provider
+      request.provider,
+      forceReimport
     );
   };
 
@@ -444,6 +445,17 @@ export function ImportAudioDialog({
                       >
                         {t('Open existing meeting')}
                       </Button>
+                      {fileInfo.existing_meeting.denoise_applied !== loadBetaFeatures().noisyAudioDenoising && (
+                        <Button
+                          variant="secondary"
+                          size="md"
+                          className="mt-2 w-full"
+                          onClick={() => void handleStartImport(true)}
+                          disabled={loadingModels || !selectedModel}
+                        >
+                          {t('Redo with current settings')}
+                        </Button>
+                      )}
                     </div>
                   )}
 
@@ -631,7 +643,7 @@ export function ImportAudioDialog({
                 {t('Cancel')}
               </Button>
               <Button
-                onClick={handleStartImport}
+                onClick={() => void handleStartImport(false)}
                 className="min-w-0"
                 variant="primary"
                 size="md"
