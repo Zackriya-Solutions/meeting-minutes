@@ -32,6 +32,7 @@ import { ComplianceNotification } from '../ComplianceNotification';
 import { Input } from '../ui/input';
 import { Button } from '../ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
+import { filterSidebarItems } from '@/lib/sidebar-search';
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from '../ui/input-group';
 
 interface SidebarItem {
@@ -278,20 +279,8 @@ const Sidebar: React.FC = () => {
 
   // Combine search results with sidebar items
   const filteredSidebarItems = useMemo(() => {
-    if (!searchQuery.trim()) return sidebarItems;
-    const query = searchQuery.toLowerCase();
     const matchedMeetingIds = new Set(searchResults.map(result => result.id));
-    const filterItem = (item: SidebarItem, isRoot = false): SidebarItem | undefined => {
-      if (item.type === 'folder') {
-        if (item.title.toLowerCase().includes(query)) return item;
-        const children = (item.children ?? []).map(child => filterItem(child)).filter((child): child is SidebarItem => child !== undefined);
-        return isRoot || children.length > 0 ? { ...item, children } : undefined;
-      }
-      const matches = matchedMeetingIds.has(item.id) || item.title.toLowerCase().includes(query) ||
-        (item.tags ?? []).some(tag => tag.toLowerCase().includes(query));
-      return matches ? item : undefined;
-    };
-    return sidebarItems.map(item => filterItem(item, true)).filter((item): item is SidebarItem => item !== undefined);
+    return filterSidebarItems(sidebarItems, searchQuery, matchedMeetingIds);
   }, [sidebarItems, searchQuery, searchResults, expandedFolders]);
 
 

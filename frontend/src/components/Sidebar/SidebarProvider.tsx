@@ -163,7 +163,7 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
       setCurrentMeeting({ id: 'intro-call', title: '+ New Call' });
     }
     setSidebarItems(baseItems);
-  }, [pathname, baseItems]);
+  }, [pathname]);
 
   // Update sidebar items when meetings change
   useEffect(() => {
