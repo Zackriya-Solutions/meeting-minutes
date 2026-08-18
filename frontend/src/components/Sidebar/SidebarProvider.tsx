@@ -136,7 +136,19 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
 
   // Extract fetchMeetings as a reusable function
-  const fetchMeetings = React.useCallback((): Promise<boolean> => {
+  const fetchMeetings = React.useCallback(async (requireFresh = false): Promise<boolean> => {
+    // Background reads (startup/focus/visibility) may be shared, but an explicit
+    // refresh always follows a database mutation. Reusing a request that began
+    // before that mutation can put the old archive back into state and strand
+    // the newly saved meeting outside the list until the app is focused again.
+    if (requireFresh && meetingsRequestRef.current) {
+      const previousRequest = meetingsRequestRef.current;
+      await previousRequest;
+      if (meetingsRequestRef.current === previousRequest) {
+        meetingsRequestRef.current = null;
+      }
+    }
+
     if (meetingsRequestRef.current) return meetingsRequestRef.current;
 
     const request = (async () => {
@@ -202,7 +214,7 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const refetchMeetings = React.useCallback(async (): Promise<void> => {
-    await fetchMeetings();
+    await fetchMeetings(true);
   }, [fetchMeetings]);
 
   useEffect(() => {
@@ -275,6 +287,19 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
     }
     setSidebarItems(baseItems);
   }, [pathname]);
+
+  const previousPathnameRef = React.useRef(pathname);
+  useEffect(() => {
+    const previousPathname = previousPathnameRef.current;
+    previousPathnameRef.current = pathname;
+
+    // Returning home is a natural recovery boundary. If a post-save refresh
+    // failed transiently, do not keep serving the stale in-memory archive for
+    // the rest of the session.
+    if (pathname === '/' && previousPathname !== pathname) {
+      void refetchMeetings();
+    }
+  }, [pathname, refetchMeetings]);
 
   // Update sidebar items when meetings change
   useEffect(() => {
