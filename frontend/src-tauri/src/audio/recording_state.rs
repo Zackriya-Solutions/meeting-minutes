@@ -529,4 +529,43 @@ mod tests {
         assert!(receiver.try_recv().is_err());
         assert_eq!(state.get_error_count(), 0);
     }
+
+    #[test]
+    fn concurrent_capture_overflow_counts_drops_and_rate_limits_warnings() {
+        let state = RecordingState::new();
+        let (sender, _receiver) = mpsc::channel(1);
+        state.set_audio_sender(sender);
+
+        let warning_count = Arc::new(AtomicU64::new(0));
+        let callback_warning_count = Arc::clone(&warning_count);
+        state.set_error_callback(move |error| {
+            if matches!(error, AudioError::BufferOverflow) {
+                callback_warning_count.fetch_add(1, Ordering::Relaxed);
+            }
+        });
+
+        state.send_audio_chunk(chunk(0)).unwrap();
+        state.send_audio_chunk(chunk(1)).unwrap();
+        assert_eq!(warning_count.load(Ordering::Relaxed), 1);
+
+        let workers: Vec<_> = (0..3)
+            .map(|worker| {
+                let state = Arc::clone(&state);
+                std::thread::spawn(move || {
+                    for offset in 0..133 {
+                        state
+                            .send_audio_chunk(chunk(2 + worker * 133 + offset))
+                            .unwrap();
+                    }
+                })
+            })
+            .collect();
+        for worker in workers {
+            worker.join().unwrap();
+        }
+
+        assert_eq!(state.dropped_audio_chunks.load(Ordering::Relaxed), 400);
+        assert_eq!(warning_count.load(Ordering::Relaxed), 5);
+        assert_eq!(state.get_error_count(), 0);
+    }
 }

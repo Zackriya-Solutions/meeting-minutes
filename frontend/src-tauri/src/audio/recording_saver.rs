@@ -4,12 +4,17 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use tauri::{AppHandle, Emitter, Runtime};
 use tokio::sync::mpsc;
 
 use super::audio_processing::create_meeting_folder;
 use super::incremental_saver::IncrementalAudioSaver;
 use super::recording_state::AudioChunk;
+
+/// A second line of defense beyond each FFmpeg process timeout. This bounds queue draining if
+/// the blocking task wedges for an unexpected reason while preserving checkpoints for recovery.
+const ACCUMULATION_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Structured transcript segment for JSON export
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -340,12 +345,8 @@ impl RecordingSaver {
         // finalizing checkpoints. The former boolean + 200ms sleep could discard the tail,
         // or even let the receiver exit immediately due to a startup race.
         if let Some(task) = self.accumulation_task.take() {
-            match task.await {
-                Ok(saver) => self.incremental_saver = saver,
-                Err(e) => {
-                    return Err(format!("Recording accumulation task failed: {e}"));
-                }
-            }
+            self.incremental_saver =
+                await_accumulation_task(task, ACCUMULATION_SHUTDOWN_TIMEOUT).await?;
         }
 
         // Check if incremental saver exists (indicates auto_save was enabled)
@@ -461,6 +462,26 @@ impl RecordingSaver {
     /// Get meeting name (for reload sync)
     pub fn get_meeting_name(&self) -> Option<String> {
         self.meeting_name.clone()
+    }
+}
+
+async fn await_accumulation_task(
+    mut task: tokio::task::JoinHandle<Option<IncrementalAudioSaver>>,
+    timeout: Duration,
+) -> Result<Option<IncrementalAudioSaver>, String> {
+    match tokio::time::timeout(timeout, &mut task).await {
+        Ok(Ok(saver)) => Ok(saver),
+        Ok(Err(e)) => Err(format!("Recording accumulation task failed: {e}")),
+        Err(_) => {
+            // spawn_blocking tasks already in progress cannot be force-aborted, but abort still
+            // prevents a queued task from starting. FFmpeg itself has a shorter kill deadline,
+            // so an active task should unwind independently without holding up the UI.
+            task.abort();
+            Err(format!(
+                "Recording accumulation did not stop within {} seconds; saved checkpoints were preserved for recovery",
+                timeout.as_secs()
+            ))
+        }
     }
 }
 
@@ -607,5 +628,24 @@ mod tests {
             .expect("accumulator must return saver ownership");
         assert_eq!(returned_saver.get_checkpoint_count(), 0);
         assert_eq!(checkpoint_count.load(Ordering::Relaxed), 0);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn accumulation_shutdown_wait_has_a_hard_deadline() {
+        let (release_sender, release_receiver) = std::sync::mpsc::channel();
+        let task = tokio::task::spawn_blocking(move || {
+            let _ = release_receiver.recv();
+            None
+        });
+        let started = std::time::Instant::now();
+
+        let result = await_accumulation_task(task, Duration::from_millis(25)).await;
+        let _ = release_sender.send(());
+
+        assert!(matches!(
+            result,
+            Err(error) if error.contains("did not stop within")
+        ));
+        assert!(started.elapsed() < Duration::from_secs(1));
     }
 }
