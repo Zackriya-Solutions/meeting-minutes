@@ -74,6 +74,24 @@ class StatsModuleTests(unittest.TestCase):
         self.assertEqual(first["inserted"], 1)
         self.assertEqual(second["inserted"], 0)
         self.assertEqual(second["duplicates"], 1)
+
+    def test_storage_deduplicates_retries_without_client_event_id(self) -> None:
+        event = {
+            "ts": time.time(),
+            "device_id": "retry-device",
+            "name": "meeting_started",
+            "properties": {"app_version": "1.2.3"},
+        }
+
+        first = insert_events(server._db, [event], return_rows=True)
+        second = insert_events(server._db, [event], return_rows=True)
+
+        self.assertEqual(first["inserted"], 1)
+        self.assertEqual(len(first["_inserted_rows"]), 1)
+        self.assertTrue(first["_inserted_rows"][0][4].startswith("derived:"))
+        self.assertEqual(second["inserted"], 0)
+        self.assertEqual(second["duplicates"], 1)
+        self.assertEqual(second["_inserted_rows"], [])
         self.assertEqual(server._db.execute("SELECT COUNT(*) FROM events").fetchone()[0], 1)
 
     def test_retention_deletes_only_expired_events(self) -> None:
