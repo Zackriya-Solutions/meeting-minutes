@@ -488,6 +488,63 @@ tell application "Microsoft Outlook"
 				set eventList to {}
 			end try
 
+			-- Outlook stores a recurring series as a master whose own start time can be
+			-- months or years before this window. The range query above therefore does
+			-- not reliably return today's occurrence. Ask Outlook for each occurrence
+			-- by date so exceptions and cancelled instances stay Outlook's decision,
+			-- rather than reimplementing recurrence rules in Memento.
+			set recurringSeries to {}
+			try
+				set recurringSeries to (every calendar event of currentCalendar whose is recurring is true)
+			end try
+			repeat with currentSeries in recurringSeries
+				set shouldProbe to true
+				try
+					if is occurrence of currentSeries then set shouldProbe to false
+				end try
+
+				set seriesStart to missing value
+				if shouldProbe then
+					try
+						set seriesStart to start time of currentSeries
+						if seriesStart > rangeEnd then set shouldProbe to false
+					end try
+				end if
+
+				-- Skip series whose recurrence metadata proves they cannot overlap the
+				-- requested window. Number-bounded series are left to `get occurrence of`.
+				if shouldProbe then
+					try
+						set recurrenceInfo to recurrence of currentSeries
+						if (start date of recurrenceInfo) > rangeEnd then set shouldProbe to false
+						set recurrenceEndInfo to end date of recurrenceInfo
+						if (end type of recurrenceEndInfo) is end date type then
+							if (data of recurrenceEndInfo) < rangeStart then set shouldProbe to false
+						end if
+					end try
+				end if
+
+				if shouldProbe and seriesStart is not missing value then
+					copy rangeStart to firstProbeDate
+					set time of firstProbeDate to time of seriesStart
+					repeat with dayOffset from 0 to (__DAYS__ + 1)
+						set probeDate to firstProbeDate + (dayOffset * days)
+						try
+							set occurrenceEvent to get occurrence of currentSeries at probeDate
+							if occurrenceEvent is not missing value then
+								set occurrenceStart to start time of occurrenceEvent
+								set occurrenceEnd to end time of occurrenceEvent
+								if occurrenceEnd >= rangeStart and occurrenceStart <= rangeEnd then
+									set end of eventList to occurrenceEvent
+								end if
+							end if
+						on error
+							-- A missing/cancelled occurrence is expected for most probe dates.
+						end try
+					end repeat
+				end if
+			end repeat
+
 			repeat with currentEvent in eventList
 				try
 					set startsAt to start time of currentEvent
@@ -794,6 +851,54 @@ mod tests {
         assert!(!meetings[1].is_meeting);
         // Distinct events must not collide on the generated id.
         assert_ne!(meetings[0].id, meetings[1].id);
+    }
+
+    #[test]
+    fn keeps_distinct_occurrences_from_the_same_recurring_series() {
+        let range_start = Local
+            .with_ymd_and_hms(2026, 8, 18, 0, 0, 0)
+            .single()
+            .unwrap();
+        let range_end = range_start + Duration::days(7);
+        let payload = format!(
+            "{}{RECORD_SEPARATOR}{}",
+            record(&[
+                "1",
+                "Calendar",
+                "same-exchange-series-id",
+                "Daily sync",
+                "2026-08-18T15:30:00",
+                "2026-08-18T16:00:00",
+                "false",
+                "true",
+                "",
+                "4",
+            ]),
+            record(&[
+                "1",
+                "Calendar",
+                "same-exchange-series-id",
+                "Daily sync",
+                "2026-08-19T15:30:00",
+                "2026-08-19T16:00:00",
+                "false",
+                "true",
+                "",
+                "4",
+            ]),
+        );
+
+        let meetings = parse_records(&payload, range_start, range_end).unwrap();
+        assert_eq!(meetings.len(), 2);
+        assert_ne!(meetings[0].id, meetings[1].id);
+        assert!(meetings.iter().all(|meeting| meeting.is_recurring));
+    }
+
+    #[test]
+    fn calendar_script_expands_occurrences_without_reading_event_bodies() {
+        assert!(CALENDAR_SCRIPT.contains("get occurrence of currentSeries at probeDate"));
+        assert!(!CALENDAR_SCRIPT.contains("content of currentEvent"));
+        assert!(!CALENDAR_SCRIPT.contains("plain text content of currentEvent"));
     }
 
     #[test]
