@@ -34,6 +34,11 @@ const UNIT_SEPARATOR: char = '\u{1f}';
 /// Separates the invitee names inside a record's attendee field.
 const GROUP_SEPARATOR: char = '\u{1d}';
 const SCRIPT_TIMEOUT: StdDuration = StdDuration::from_secs(150);
+/// Bound the slower `get occurrence of` fallback so a mailbox with years of
+/// recurring series cannot exhaust the AppleScript timeout. The ordinary range
+/// query remains unbounded and still returns every event Outlook exposes there.
+const MAX_RECURRING_OCCURRENCE_PROBES: u32 = 640;
+const MAX_RECURRING_SERIES_PROBES: u32 = 64;
 /// Invitee names one calendar read may fetch in total.
 ///
 /// Every name is two Apple Event round trips, so a full week of large invitations could
@@ -240,10 +245,17 @@ pub fn upcoming_meetings(days: u32) -> Result<Vec<LocalOutlookMeeting>, String> 
 }
 
 fn render_calendar_script(days: u32) -> String {
+    let series_probe_budget = recurring_series_probe_budget(days);
     CALENDAR_SCRIPT
         .replace("__DAYS__", &days.to_string())
+        .replace("__SERIES_PROBE_BUDGET__", &series_probe_budget.to_string())
         .replace("__MAX_ATTENDEES__", &MAX_ATTENDEES.to_string())
         .replace("__ATTENDEE_BUDGET__", &ATTENDEE_NAME_BUDGET.to_string())
+}
+
+fn recurring_series_probe_budget(days: u32) -> u32 {
+    let probe_dates_per_series = days.saturating_add(2).max(1);
+    (MAX_RECURRING_OCCURRENCE_PROBES / probe_dates_per_series).clamp(1, MAX_RECURRING_SERIES_PROBES)
 }
 
 fn sort_and_dedup_meetings(meetings: &mut Vec<LocalOutlookMeeting>) {
@@ -478,6 +490,7 @@ set rangeEnd to rightNow + (__DAYS__ * days)
 set collected to {}
 set failureText to ""
 set attendeeBudget to __ATTENDEE_BUDGET__
+set seriesProbeBudget to __SERIES_PROBE_BUDGET__
 
 tell application "Microsoft Outlook"
 	launch
@@ -511,6 +524,7 @@ tell application "Microsoft Outlook"
 				set recurringSeries to (every calendar event of currentCalendar whose is recurring is true)
 			end try
 			repeat with currentSeries in recurringSeries
+				if seriesProbeBudget <= 0 then exit repeat
 				set shouldProbe to true
 				try
 					if is occurrence of currentSeries then set shouldProbe to false
@@ -538,6 +552,7 @@ tell application "Microsoft Outlook"
 				end if
 
 				if shouldProbe and seriesStart is not missing value then
+					set seriesProbeBudget to seriesProbeBudget - 1
 					copy rangeStart to firstProbeDate
 					set time of firstProbeDate to time of seriesStart
 					repeat with dayOffset from 0 to (__DAYS__ + 1)
@@ -979,10 +994,22 @@ mod tests {
         assert!(script.contains("get occurrence of currentSeries at probeDate"));
         assert!(script.contains("repeat with dayOffset from 0 to (7 + 1)"));
         assert!(!script.contains("__DAYS__"));
+        assert!(!script.contains("__SERIES_PROBE_BUDGET__"));
         assert!(!script.contains("__MAX_ATTENDEES__"));
         assert!(!script.contains("__ATTENDEE_BUDGET__"));
+        assert!(script.contains("set seriesProbeBudget to 64"));
+        assert!(script.contains("if seriesProbeBudget <= 0 then exit repeat"));
         assert!(!script.contains("content of currentEvent"));
         assert!(!script.contains("plain text content of currentEvent"));
+    }
+
+    #[test]
+    fn caps_recurring_occurrence_lookups_for_longer_windows() {
+        for days in 1..=31 {
+            let series_budget = recurring_series_probe_budget(days);
+            assert!(series_budget <= MAX_RECURRING_SERIES_PROBES);
+            assert!(series_budget * (days + 2) <= MAX_RECURRING_OCCURRENCE_PROBES);
+        }
     }
 
     #[test]
