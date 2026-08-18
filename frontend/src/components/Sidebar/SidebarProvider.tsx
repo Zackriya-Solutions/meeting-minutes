@@ -5,6 +5,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import Analytics from '@/lib/analytics';
 import { invoke } from '@tauri-apps/api/core';
 import { useRecordingState } from '@/contexts/RecordingStateContext';
+import { buildMeetingTree } from '@/lib/sidebar-tree';
 
 
 interface SidebarItem {
@@ -99,24 +100,31 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
   // Extract fetchMeetings as a reusable function
   const fetchMeetings = React.useCallback(async () => {
     if (serverAddress) {
-      try {
-        const [meetings, folders] = await Promise.all([
-          invoke('api_get_meetings') as Promise<CurrentMeeting[]>,
-          invoke('api_get_project_folders') as Promise<ProjectFolder[]>,
-        ]);
-        const transformedMeetings = meetings.map((meeting) => ({
+      const [meetingsResult, foldersResult] = await Promise.allSettled([
+        invoke('api_get_meetings') as Promise<CurrentMeeting[]>,
+        invoke('api_get_project_folders') as Promise<ProjectFolder[]>,
+      ]);
+
+      if (meetingsResult.status === 'fulfilled') {
+        const transformedMeetings = meetingsResult.value.map((meeting) => ({
           id: meeting.id,
           title: meeting.title,
           project_folder_id: meeting.project_folder_id ?? null,
           tags: meeting.tags ?? [],
         }));
         setMeetings(transformedMeetings);
-        setProjectFolders(folders);
         Analytics.trackBackendConnection(true);
-      } catch (error) {
+      } else {
+        const error = meetingsResult.reason;
         console.error('Error fetching meetings:', error);
         setMeetings([]);
         Analytics.trackBackendConnection(false, error instanceof Error ? error.message : 'Unknown error');
+      }
+
+      if (foldersResult.status === 'fulfilled') {
+        setProjectFolders(foldersResult.value);
+      } else {
+        console.error('Error fetching project folders:', foldersResult.reason);
       }
     }
   }, [serverAddress]);
@@ -133,22 +141,10 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
     fetchSettings();
   }, []);
 
-  const baseItems = useMemo<SidebarItem[]>(() => [
-    {
-      id: 'meetings',
-      title: 'Meeting Notes',
-      type: 'folder' as const,
-      children: [
-        { id: UNFILED_FOLDER_VALUE, title: 'Unfiled', type: 'folder' as const, children: meetings.filter(m => !m.project_folder_id).map(m => ({ id: m.id, title: m.title, type: 'file' as const, tags: m.tags, project_folder_id: m.project_folder_id ?? null })) },
-        ...projectFolders.map(folder => ({
-          id: folder.id,
-          title: folder.name,
-          type: 'folder' as const,
-          children: meetings.filter(m => m.project_folder_id === folder.id).map(m => ({ id: m.id, title: m.title, type: 'file' as const, tags: m.tags, project_folder_id: m.project_folder_id ?? null })),
-        })),
-      ]
-    },
-  ], [meetings, projectFolders]);
+  const baseItems = useMemo<SidebarItem[]>(
+    () => buildMeetingTree(meetings, projectFolders, UNFILED_FOLDER_VALUE),
+    [meetings, projectFolders]
+  );
 
 
   const toggleCollapse = () => {
