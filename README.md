@@ -269,3 +269,10 @@ MIT License - Feel free to use this project for your own purposes.
 ## Star History
 
 [![Star History Chart](https://api.star-history.com/chart?repos=Zackriya-Solutions/meetily&type=date&legend=top-left)](https://www.star-history.com/?repos=Zackriya-Solutions%2Fmeetily&type=date&legend=bottom-right)
+
+## Fork extras
+
+This fork adds the following features on top of upstream Meetily:
+
+- **Speaker source labels**: Microphone and system audio are transcribed as separate, labeled transcript lines (`Você` and `Outros`). Per-channel voice activity detection and source badges are used in transcript views, and each source is persisted with saved meetings in JSON and SQLite, with backward compatibility for older meetings.
+- **Per-meeting application capture (Linux/Wayland)**: Recordings can capture one selected application/media audio stream through a PipeWire picker that shows the stream's app, media, and process identity. Selection is at the application/media-stream level rather than an exact window; if the selected stream disappears, that lane fails visibly while the microphone continues recording. Global system capture remains the default.
