@@ -516,14 +516,29 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                if window.label() == "main" {
+            if window.label() != "main" {
+                return;
+            }
+
+            // Both closing (X button) and minimizing hide to the tray instead of actually
+            // closing/minimizing — the tray icon (and its "Open Main Window" menu item) is
+            // the only way back. Tauri has no direct WindowEvent::Minimized on this version,
+            // so minimize is detected via the Resized event + is_minimized() check, which is
+            // the standard workaround for this.
+            let should_hide = match event {
+                tauri::WindowEvent::CloseRequested { api, .. } => {
                     api.prevent_close();
-                    if let Err(e) = window.hide() {
-                        log::error!("Failed to hide main window on close request: {}", e);
-                    } else {
-                        log::info!("Main window hidden to tray on close request");
-                    }
+                    true
+                }
+                tauri::WindowEvent::Resized(_) => window.is_minimized().unwrap_or(false),
+                _ => false,
+            };
+
+            if should_hide {
+                if let Err(e) = window.hide() {
+                    log::error!("Failed to hide main window to tray: {}", e);
+                } else {
+                    log::info!("Main window hidden to tray");
                 }
             }
         })

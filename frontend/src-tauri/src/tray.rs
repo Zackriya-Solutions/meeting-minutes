@@ -221,6 +221,7 @@ pub fn update_tray_menu<R: Runtime>(app: &AppHandle<R>) {
 
 pub fn set_tray_state<R: Runtime>(app: &AppHandle<R>, state: RecordingState) {
     log::info!("Tray: Setting intermediate state: {:?}", state);
+    set_tray_tooltip(app, &state);
     // During recording state transitions, we assume recording is allowed (we're already recording)
     if let Ok(menu) = build_menu(app, state, true) {
         if let Some(tray) = app.tray_by_id("main-tray") {
@@ -231,6 +232,27 @@ pub fn set_tray_state<R: Runtime>(app: &AppHandle<R>, state: RecordingState) {
         }
     } else {
         log::error!("Tray: Failed to build menu for intermediate state");
+    }
+}
+
+/// The tray tooltip is the "at a glance" indicator described in the tray icon itself
+/// (no separate recording-state icon asset exists), so it mirrors the same state the
+/// menu text already reflects.
+fn set_tray_tooltip<R: Runtime>(app: &AppHandle<R>, state: &RecordingState) {
+    let text = match state {
+        RecordingState::Stopped => "Meetily",
+        RecordingState::Starting => "Meetily — Starting…",
+        RecordingState::Recording => "Meetily — Recording",
+        RecordingState::Pausing => "Meetily — Pausing…",
+        RecordingState::Paused => "Meetily — Paused",
+        RecordingState::Resuming => "Meetily — Resuming…",
+        RecordingState::Stopping => "Meetily — Stopping…",
+    };
+
+    if let Some(tray) = app.tray_by_id("main-tray") {
+        if let Err(e) = tray.set_tooltip(Some(text)) {
+            log::warn!("Tray: Failed to set tooltip: {}", e);
+        }
     }
 }
 
@@ -300,6 +322,8 @@ pub async fn update_tray_menu_async<R: Runtime>(app: &AppHandle<R>) {
     // Only block recording during incomplete onboarding when no transcription model is ready
     let can_record = check_can_record(app).await;
     log::info!("Tray: can_record: {}", can_record);
+
+    set_tray_tooltip(app, &recording_state);
 
     if let Ok(menu) = build_menu(app, recording_state, can_record) {
         if let Some(tray) = app.tray_by_id("main-tray") {
