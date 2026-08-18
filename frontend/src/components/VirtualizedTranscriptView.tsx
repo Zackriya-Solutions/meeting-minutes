@@ -234,7 +234,7 @@ const TranscriptSegment = memo(function TranscriptSegment({
     speakerId?: number | null;
     speakerRenamable?: boolean;
     onSpeakerClick?: (speakerId: number) => void;
-    /** Present when this line has no speaker and the meeting has voices to choose from. */
+    /** Present when this line has no speaker and the user can choose or add a speaker. */
     onAssignClick?: () => void;
     playbackActive?: boolean;
     isOwn?: boolean;
@@ -629,7 +629,10 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                         }
                                         onSpeakerClick={handleSpeakerClick}
                                         onAssignClick={
-                                            (onAssignSegmentSpeaker || onAddAndAssignSegmentSpeaker)
+                                            (
+                                                !!onAddAndAssignSegmentSpeaker
+                                                || (!!onAssignSegmentSpeaker && (speakersById?.size ?? 0) > 0)
+                                            )
                                             && segment.speaker_id == null
                                                 ? () => {
                                                     setAssigningSegmentId(segment.id);
