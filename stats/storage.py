@@ -2,13 +2,13 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import math
 import os
 import re
 import sqlite3
 import threading
 import time
-import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterable
@@ -133,13 +133,27 @@ def insert_events(
             or event.get("uuid")
             or event.get("id")
         )
-        event_id = str(event_id_value)[:200] if event_id_value else str(uuid.uuid4())
+        properties_json = json.dumps(
+            properties, separators=(",", ":"), sort_keys=True
+        )
+        if event_id_value:
+            event_id = str(event_id_value)[:200]
+        else:
+            # A retry without a client-supplied id must resolve to the same
+            # identity.  A random UUID lets the raw table and the incremental
+            # materialized layer count the same delivery more than once.
+            identity = json.dumps(
+                [ts, device_id, name, properties_json],
+                separators=(",", ":"),
+                ensure_ascii=False,
+            ).encode("utf-8")
+            event_id = "derived:" + hashlib.sha256(identity).hexdigest()
         rows.append(
             (
                 ts,
                 device_id,
                 name,
-                json.dumps(properties, separators=(",", ":"), sort_keys=True),
+                properties_json,
                 event_id,
                 source[:32],
                 time.time(),
@@ -147,34 +161,18 @@ def insert_events(
         )
 
     with WRITE_LOCK:
-        ids = {row[4] for row in rows if row[4]}
-        existing_ids: set[str] = set()
-        if ids:
-            existing_ids = {
-                str(row[0]) for row in db.execute(
-                    f"SELECT event_id FROM events WHERE event_id IN "
-                    f"({','.join('?' for _ in ids)})",
-                    tuple(ids),
-                )
-            }
         inserted_rows = []
-        seen_ids = set(existing_ids)
         for row in rows:
-            event_id = row[4]
-            if event_id and event_id in seen_ids:
-                continue
-            inserted_rows.append(row)
-            if event_id:
-                seen_ids.add(event_id)
-        before = db.total_changes
-        db.executemany(
-            "INSERT OR IGNORE INTO events"
-            " (ts,device_id,name,properties,event_id,source,ingested_at)"
-            " VALUES (?,?,?,?,?,?,?)",
-            rows,
-        )
+            cursor = db.execute(
+                "INSERT OR IGNORE INTO events"
+                " (ts,device_id,name,properties,event_id,source,ingested_at)"
+                " VALUES (?,?,?,?,?,?,?) RETURNING event_id",
+                row,
+            )
+            if cursor.fetchone() is not None:
+                inserted_rows.append(row)
         db.commit()
-        inserted = db.total_changes - before
+        inserted = len(inserted_rows)
     result: dict[str, Any] = {
         "accepted": len(rows),
         "inserted": inserted,
