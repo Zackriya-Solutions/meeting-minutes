@@ -2,14 +2,19 @@ use anyhow::Result;
 use log::{error, info, warn};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use tauri::{AppHandle, Emitter, Runtime};
 use tokio::sync::mpsc;
-use tokio::sync::Mutex as AsyncMutex;
 
 use super::audio_processing::create_meeting_folder;
 use super::incremental_saver::IncrementalAudioSaver;
 use super::recording_state::AudioChunk;
+
+/// A second line of defense beyond each FFmpeg process timeout. This bounds queue draining if
+/// the blocking task wedges for an unexpected reason while preserving checkpoints for recovery.
+const ACCUMULATION_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Structured transcript segment for JSON export
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -27,6 +32,45 @@ pub struct TranscriptSegment {
     /// export with diarized per-person speaker names.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub speaker: Option<String>,
+}
+
+/// Cloneable persistence handle used by the transcript event listener. It deliberately does
+/// not borrow the global recording manager, so transcript completions remain writable while
+/// shutdown temporarily moves that manager out to stop streams and finalize files.
+#[derive(Clone)]
+pub struct TranscriptSink {
+    segments: Arc<Mutex<Vec<TranscriptSegment>>>,
+    meeting_folder: Option<PathBuf>,
+}
+
+impl TranscriptSink {
+    pub fn add(&self, segment: TranscriptSegment) {
+        if let Ok(mut segments) = self.segments.lock() {
+            if let Some(existing) = segments
+                .iter_mut()
+                .find(|existing| existing.sequence_id == segment.sequence_id)
+            {
+                *existing = segment.clone();
+            } else {
+                segments.push(segment.clone());
+            }
+            info!(
+                "Persisted transcript segment {} (seq: {}) - total segments: {}",
+                segment.id,
+                segment.sequence_id,
+                segments.len()
+            );
+        } else {
+            error!("Failed to lock transcript segments for {}", segment.id);
+            return;
+        }
+
+        if let Some(folder) = &self.meeting_folder {
+            if let Err(e) = write_transcripts_json_from_segments(folder, &self.segments) {
+                warn!("Failed to write incremental transcript update: {e}");
+            }
+        }
+    }
 }
 
 /// Meeting metadata structure
@@ -53,13 +97,14 @@ pub struct DeviceInfo {
 
 /// New recording saver using incremental saving strategy
 pub struct RecordingSaver {
-    incremental_saver: Option<Arc<AsyncMutex<IncrementalAudioSaver>>>,
+    incremental_saver: Option<IncrementalAudioSaver>,
     meeting_folder: Option<PathBuf>,
     meeting_name: Option<String>,
     metadata: Option<MeetingMetadata>,
     transcript_segments: Arc<Mutex<Vec<TranscriptSegment>>>,
-    chunk_receiver: Option<mpsc::UnboundedReceiver<AudioChunk>>,
-    is_saving: Arc<Mutex<bool>>,
+    chunk_receiver: Option<mpsc::Receiver<AudioChunk>>,
+    accumulation_task: Option<tokio::task::JoinHandle<Option<IncrementalAudioSaver>>>,
+    checkpoint_count: Arc<AtomicU32>,
 }
 
 impl RecordingSaver {
@@ -71,7 +116,8 @@ impl RecordingSaver {
             metadata: None,
             transcript_segments: Arc::new(Mutex::new(Vec::new())),
             chunk_receiver: None,
-            is_saving: Arc::new(Mutex::new(false)),
+            accumulation_task: None,
+            checkpoint_count: Arc::new(AtomicU32::new(0)),
         }
     }
 
@@ -99,42 +145,21 @@ impl RecordingSaver {
     /// Add or update a structured transcript segment (upserts based on sequence_id)
     /// Also saves incrementally to disk
     pub fn add_transcript_segment(&self, segment: TranscriptSegment) {
-        if let Ok(mut segments) = self.transcript_segments.lock() {
-            // Check if segment with same sequence_id exists (update it)
-            if let Some(existing) = segments
-                .iter_mut()
-                .find(|s| s.sequence_id == segment.sequence_id)
-            {
-                *existing = segment.clone();
-                info!(
-                    "Updated transcript segment {} (seq: {}) - total segments: {}",
-                    segment.id,
-                    segment.sequence_id,
-                    segments.len()
-                );
-            } else {
-                // New segment, add it
-                segments.push(segment.clone());
-                info!(
-                    "Added new transcript segment {} (seq: {}) - total segments: {}",
-                    segment.id,
-                    segment.sequence_id,
-                    segments.len()
-                );
-            }
-        } else {
-            error!(
-                "Failed to lock transcript segments for adding segment {}",
-                segment.id
-            );
-        }
+        self.transcript_sink().add(segment);
+    }
 
-        // NEW: Save incrementally to disk
-        if let Some(folder) = &self.meeting_folder {
-            if let Err(e) = self.write_transcripts_json(folder) {
-                warn!("Failed to write incremental transcript update: {}", e);
-            }
+    pub fn transcript_sink(&self) -> TranscriptSink {
+        TranscriptSink {
+            segments: Arc::clone(&self.transcript_segments),
+            meeting_folder: self.meeting_folder.clone(),
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn take_accumulation_task_for_test(
+        &mut self,
+    ) -> Option<tokio::task::JoinHandle<Option<IncrementalAudioSaver>>> {
+        self.accumulation_task.take()
     }
 
     /// Legacy method for backward compatibility - converts text to basic segment
@@ -157,7 +182,7 @@ impl RecordingSaver {
     ///
     /// # Arguments
     /// * `auto_save` - If true, creates checkpoints and enables saving. If false, audio chunks are discarded.
-    pub fn start_accumulation(&mut self, auto_save: bool) -> mpsc::UnboundedSender<AudioChunk> {
+    pub fn start_accumulation(&mut self, auto_save: bool) -> mpsc::Sender<AudioChunk> {
         if auto_save {
             info!("Initializing incremental audio saver for recording (auto-save ENABLED)");
         } else {
@@ -167,7 +192,9 @@ impl RecordingSaver {
         }
 
         // Create channel for receiving audio chunks
-        let (sender, receiver) = mpsc::unbounded_channel::<AudioChunk>();
+        // Enough for more than a minute of 600ms mixed windows while FFmpeg writes a
+        // checkpoint, but bounded so a wedged encoder cannot exhaust process memory.
+        let (sender, receiver) = mpsc::channel::<AudioChunk>(128);
         self.chunk_receiver = Some(receiver);
 
         // Initialize meeting folder and incremental saver ONLY if auto_save is enabled
@@ -195,53 +222,22 @@ impl RecordingSaver {
         }
 
         // Start accumulation task
-        let is_saving_clone = self.is_saving.clone();
-        let incremental_saver_arc = self.incremental_saver.clone();
+        let incremental_saver = self.incremental_saver.take();
+        let checkpoint_count = Arc::clone(&self.checkpoint_count);
         let save_audio = auto_save;
 
         if let Some(mut receiver) = self.chunk_receiver.take() {
-            tokio::spawn(async move {
-                info!(
-                    "Recording saver accumulation task started (save_audio: {})",
-                    save_audio
-                );
-
-                while let Some(chunk) = receiver.recv().await {
-                    // Check if we should continue
-                    let should_continue = if let Ok(is_saving) = is_saving_clone.lock() {
-                        *is_saving
-                    } else {
-                        false
-                    };
-
-                    if !should_continue {
-                        break;
-                    }
-
-                    // Only process audio chunks if auto_save is enabled
-                    if save_audio {
-                        // Add chunk to incremental saver
-                        if let Some(saver_arc) = &incremental_saver_arc {
-                            let mut saver_guard = saver_arc.lock().await;
-                            if let Err(e) = saver_guard.add_chunk(chunk) {
-                                error!("Failed to add chunk to incremental saver: {}", e);
-                            }
-                        } else {
-                            error!("Incremental saver not available while accumulating");
-                        }
-                    } else {
-                        // auto_save is false: discard audio chunk (no-op)
-                        // Transcription already happened in the pipeline before this point
-                    }
-                }
-
-                info!("Recording saver accumulation task ended");
-            });
-        }
-
-        // Set saving flag
-        if let Ok(mut is_saving) = self.is_saving.lock() {
-            *is_saving = true;
+            // Checkpoint encoding launches FFmpeg and waits synchronously. Keep the entire
+            // accumulation loop on the blocking pool so a 30-second checkpoint cannot stall
+            // audio/VAD/transcript tasks on Tokio's async workers.
+            self.accumulation_task = Some(tokio::task::spawn_blocking(move || {
+                drain_audio_chunks(
+                    &mut receiver,
+                    incremental_saver,
+                    save_audio,
+                    checkpoint_count,
+                )
+            }));
         }
 
         sender
@@ -266,7 +262,8 @@ impl RecordingSaver {
         // Only initialize incremental saver if checkpoints are needed (auto_save is true)
         if create_checkpoints {
             let incremental_saver = IncrementalAudioSaver::new(meeting_folder.clone(), 48000)?;
-            self.incremental_saver = Some(Arc::new(AsyncMutex::new(incremental_saver)));
+            self.checkpoint_count.store(0, Ordering::Relaxed);
+            self.incremental_saver = Some(incremental_saver);
             info!(
                 "✅ Incremental audio saver initialized for meeting: {}",
                 meeting_name
@@ -320,84 +317,15 @@ impl RecordingSaver {
 
     /// Write transcripts.json to disk (atomic write with temp file and validation)
     fn write_transcripts_json(&self, folder: &PathBuf) -> Result<()> {
-        // Clone segments to avoid holding lock during I/O
-        let segments_clone = if let Ok(segments) = self.transcript_segments.lock() {
-            segments.clone()
-        } else {
-            error!("Failed to lock transcript segments for writing");
-            return Err(anyhow::anyhow!("Failed to lock transcript segments"));
-        };
-
-        info!(
-            "Writing {} transcript segments to JSON",
-            segments_clone.len()
-        );
-
-        let transcript_path = folder.join("transcripts.json");
-        let temp_path = folder.join(".transcripts.json.tmp");
-
-        // Create JSON structure
-        let json = serde_json::json!({
-            "version": "1.0",
-            "segments": segments_clone,
-            "last_updated": chrono::Utc::now().to_rfc3339(),
-            "total_segments": segments_clone.len()
-        });
-
-        // Serialize to pretty JSON string
-        let json_string = serde_json::to_string_pretty(&json).map_err(|e| {
-            error!("Failed to serialize transcripts to JSON: {}", e);
-            anyhow::anyhow!("JSON serialization failed: {}", e)
-        })?;
-
-        // Write to temp file with error handling
-        std::fs::write(&temp_path, &json_string).map_err(|e| {
-            error!(
-                "Failed to write transcript temp file to {}: {}",
-                temp_path.display(),
-                e
-            );
-            anyhow::anyhow!("Failed to write temp file: {}", e)
-        })?;
-
-        // Verify temp file was written correctly
-        if !temp_path.exists() {
-            error!(
-                "Temp transcript file does not exist after write: {}",
-                temp_path.display()
-            );
-            return Err(anyhow::anyhow!("Temp file verification failed"));
-        }
-
-        // Atomic rename
-        std::fs::rename(&temp_path, &transcript_path).map_err(|e| {
-            error!(
-                "Failed to rename transcript file from {} to {}: {}",
-                temp_path.display(),
-                transcript_path.display(),
-                e
-            );
-            anyhow::anyhow!("Failed to rename transcript file: {}", e)
-        })?;
-
-        info!(
-            "✅ Successfully wrote transcripts.json with {} segments",
-            segments_clone.len()
-        );
-        Ok(())
+        write_transcripts_json_from_segments(folder, &self.transcript_segments)
     }
 
     // in frontend/src-tauri/src/audio/recording_saver.rs
     pub fn get_stats(&self) -> (usize, u32) {
-        if let Some(ref saver) = self.incremental_saver {
-            if let Ok(guard) = saver.try_lock() {
-                (guard.get_checkpoint_count() as usize, 48000)
-            } else {
-                (0, 48000)
-            }
-        } else {
-            (0, 48000)
-        }
+        (
+            self.checkpoint_count.load(Ordering::Relaxed) as usize,
+            48000,
+        )
     }
 
     /// Stop and save using incremental saving approach
@@ -412,13 +340,14 @@ impl RecordingSaver {
     ) -> Result<Option<String>, String> {
         info!("Stopping recording saver");
 
-        // Stop accumulation
-        if let Ok(mut is_saving) = self.is_saving.lock() {
-            *is_saving = false;
+        // The audio pipeline has already stopped and dropped its sender. Wait until the
+        // accumulator observes channel closure and drains every queued mixed chunk before
+        // finalizing checkpoints. The former boolean + 200ms sleep could discard the tail,
+        // or even let the receiver exit immediately due to a startup race.
+        if let Some(task) = self.accumulation_task.take() {
+            self.incremental_saver =
+                await_accumulation_task(task, ACCUMULATION_SHUTDOWN_TIMEOUT).await?;
         }
-
-        // Give time for final chunks
-        tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
 
         // Check if incremental saver exists (indicates auto_save was enabled)
         let should_save_audio = self.incremental_saver.is_some();
@@ -430,8 +359,7 @@ impl RecordingSaver {
         }
 
         // Finalize incremental saver (merge checkpoints into final audio.mp4)
-        let final_audio_path = if let Some(saver_arc) = &self.incremental_saver {
-            let mut saver = saver_arc.lock().await;
+        let final_audio_path = if let Some(mut saver) = self.incremental_saver.take() {
             match saver.finalize().await {
                 Ok(path) => {
                     info!("✅ Successfully finalized audio: {}", path.display());
@@ -537,8 +465,187 @@ impl RecordingSaver {
     }
 }
 
+async fn await_accumulation_task(
+    mut task: tokio::task::JoinHandle<Option<IncrementalAudioSaver>>,
+    timeout: Duration,
+) -> Result<Option<IncrementalAudioSaver>, String> {
+    match tokio::time::timeout(timeout, &mut task).await {
+        Ok(Ok(saver)) => Ok(saver),
+        Ok(Err(e)) => Err(format!("Recording accumulation task failed: {e}")),
+        Err(_) => {
+            // spawn_blocking tasks already in progress cannot be force-aborted, but abort still
+            // prevents a queued task from starting. FFmpeg itself has a shorter kill deadline,
+            // so an active task should unwind independently without holding up the UI.
+            task.abort();
+            Err(format!(
+                "Recording accumulation did not stop within {} seconds; saved checkpoints were preserved for recovery",
+                timeout.as_secs()
+            ))
+        }
+    }
+}
+
+fn drain_audio_chunks(
+    receiver: &mut mpsc::Receiver<AudioChunk>,
+    mut incremental_saver: Option<IncrementalAudioSaver>,
+    save_audio: bool,
+    checkpoint_count: Arc<AtomicU32>,
+) -> Option<IncrementalAudioSaver> {
+    info!(
+        "Recording saver accumulation task started (save_audio: {})",
+        save_audio
+    );
+
+    // Drain through channel closure. The pipeline owns the sender and drops it only after
+    // all mixed audio has been forwarded, which gives shutdown a real completion signal.
+    while let Some(chunk) = receiver.blocking_recv() {
+        if !save_audio {
+            continue;
+        }
+
+        let Some(saver) = incremental_saver.as_mut() else {
+            error!("Incremental saver not available while accumulating");
+            continue;
+        };
+        if let Err(e) = saver.add_chunk(chunk) {
+            error!("Failed to add chunk to incremental saver: {e}");
+        }
+        checkpoint_count.store(saver.get_checkpoint_count(), Ordering::Relaxed);
+    }
+
+    info!("Recording saver accumulation task ended");
+    incremental_saver
+}
+
+fn write_transcripts_json_from_segments(
+    folder: &PathBuf,
+    segments: &Arc<Mutex<Vec<TranscriptSegment>>>,
+) -> Result<()> {
+    // Clone segments to avoid holding the mutex during serialization and file I/O.
+    let segments_clone = segments
+        .lock()
+        .map_err(|_| anyhow::anyhow!("Failed to lock transcript segments"))?
+        .clone();
+
+    let transcript_path = folder.join("transcripts.json");
+    let temp_path = folder.join(".transcripts.json.tmp");
+    let json = serde_json::json!({
+        "version": "1.0",
+        "segments": segments_clone,
+        "last_updated": chrono::Utc::now().to_rfc3339(),
+        "total_segments": segments_clone.len()
+    });
+    let json_string = serde_json::to_string_pretty(&json)
+        .map_err(|e| anyhow::anyhow!("JSON serialization failed: {e}"))?;
+
+    std::fs::write(&temp_path, json_string)
+        .map_err(|e| anyhow::anyhow!("Failed to write {}: {e}", temp_path.display()))?;
+    std::fs::rename(&temp_path, &transcript_path).map_err(|e| {
+        anyhow::anyhow!(
+            "Failed to replace transcript file {}: {e}",
+            transcript_path.display()
+        )
+    })?;
+
+    Ok(())
+}
+
 impl Default for RecordingSaver {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn segment(sequence_id: u64, text: &str) -> TranscriptSegment {
+        TranscriptSegment {
+            id: format!("seg_{sequence_id}"),
+            text: text.to_string(),
+            audio_start_time: sequence_id as f64,
+            audio_end_time: sequence_id as f64 + 1.0,
+            duration: 1.0,
+            display_time: "00:00:00".to_string(),
+            confidence: 0.9,
+            sequence_id,
+            speaker: Some("mic".to_string()),
+        }
+    }
+
+    #[test]
+    fn transcript_sink_persists_and_upserts_without_recording_manager() {
+        let temp = tempfile::tempdir().unwrap();
+        let segments = Arc::new(Mutex::new(Vec::new()));
+        let sink = TranscriptSink {
+            segments: Arc::clone(&segments),
+            meeting_folder: Some(temp.path().to_path_buf()),
+        };
+
+        sink.add(segment(7, "first"));
+        sink.add(segment(7, "corrected"));
+        sink.add(segment(8, "next"));
+
+        let persisted: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(temp.path().join("transcripts.json")).unwrap())
+                .unwrap();
+        assert_eq!(persisted["total_segments"], 2);
+        assert_eq!(persisted["segments"][0]["text"], "corrected");
+        assert_eq!(persisted["segments"][1]["text"], "next");
+        assert_eq!(segments.lock().unwrap().len(), 2);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn accumulation_is_safe_on_a_current_thread_runtime() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::create_dir(temp.path().join(".checkpoints")).unwrap();
+        let saver = IncrementalAudioSaver::new(temp.path().to_path_buf(), 48_000).unwrap();
+        let checkpoint_count = Arc::new(AtomicU32::new(0));
+        let task_checkpoint_count = Arc::clone(&checkpoint_count);
+        let (sender, mut receiver) = mpsc::channel(2);
+
+        let task = tokio::task::spawn_blocking(move || {
+            drain_audio_chunks(&mut receiver, Some(saver), true, task_checkpoint_count)
+        });
+        sender
+            .send(AudioChunk {
+                data: vec![0.25; 4_800],
+                sample_rate: 48_000,
+                timestamp: 0.0,
+                chunk_id: 1,
+                device_type: super::super::recording_state::DeviceType::Microphone,
+                speaker: None,
+            })
+            .await
+            .unwrap();
+        drop(sender);
+
+        let returned_saver = tokio::time::timeout(std::time::Duration::from_secs(2), task)
+            .await
+            .expect("accumulator must not deadlock")
+            .expect("accumulator must not panic")
+            .expect("accumulator must return saver ownership");
+        assert_eq!(returned_saver.get_checkpoint_count(), 0);
+        assert_eq!(checkpoint_count.load(Ordering::Relaxed), 0);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn accumulation_shutdown_wait_has_a_hard_deadline() {
+        let (release_sender, release_receiver) = std::sync::mpsc::channel();
+        let task = tokio::task::spawn_blocking(move || {
+            let _ = release_receiver.recv();
+            None
+        });
+        let started = std::time::Instant::now();
+
+        let result = await_accumulation_task(task, Duration::from_millis(25)).await;
+        let _ = release_sender.send(());
+
+        assert!(matches!(
+            result,
+            Err(error) if error.contains("did not stop within")
+        ));
+        assert!(started.elapsed() < Duration::from_secs(1));
     }
 }

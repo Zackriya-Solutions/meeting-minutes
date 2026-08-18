@@ -18,8 +18,16 @@ export interface RecordingState {
 
 export interface RecordingStoppedPayload {
   message: string;
+  status?: 'success' | 'completed_with_warnings';
+  stop_error?: string | null;
   folder_path?: string;
   meeting_name?: string;
+}
+
+export interface RecordingStopOutcome {
+  status: 'success' | 'completed_with_warnings';
+  message: string;
+  stop_error: string | null;
 }
 
 /**
@@ -88,10 +96,10 @@ export class RecordingService {
   /**
    * Stop recording and save to file
    * @param savePath - Path to save audio file
-   * @returns Promise<void>
+   * @returns Final shutdown status, including any non-fatal device-stop warning
    */
-  async stopRecording(savePath: string): Promise<void> {
-    return invoke('stop_recording', {
+  async stopRecording(savePath: string): Promise<RecordingStopOutcome> {
+    return invoke<RecordingStopOutcome>('stop_recording', {
       args: { save_path: savePath }
     });
   }

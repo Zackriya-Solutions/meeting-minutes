@@ -51,13 +51,13 @@ pub struct TranscriptUpdate {
 // NOTE: get_transcript_history and get_recording_meeting_name functions
 // have been moved to recording_commands.rs where they have access to RECORDING_MANAGER
 
-/// Optimized parallel transcription task ensuring ZERO chunk loss
+/// Ordered live transcription task with bounded memory.
 pub fn start_transcription_task<R: Runtime>(
     app: AppHandle<R>,
-    transcription_receiver: tokio::sync::mpsc::UnboundedReceiver<AudioChunk>,
+    transcription_receiver: tokio::sync::mpsc::Receiver<AudioChunk>,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
-        info!("🚀 Starting optimized parallel transcription task - guaranteeing zero chunk loss");
+        info!("🚀 Starting ordered live transcription task with bounded queues");
 
         // Initialize transcription engine (Whisper or Parakeet based on config)
         let transcription_engine = match super::engine::get_or_init_transcription_engine(&app).await
@@ -89,7 +89,7 @@ pub fn start_transcription_task<R: Runtime>(
 
         // Create parallel workers for faster processing while preserving ALL chunks
         const NUM_WORKERS: usize = 1; // Serial processing ensures transcripts emit in chronological order
-        let (work_sender, work_receiver) = tokio::sync::mpsc::unbounded_channel::<AudioChunk>();
+        let (work_sender, work_receiver) = tokio::sync::mpsc::channel::<AudioChunk>(16);
         let work_receiver = Arc::new(tokio::sync::Mutex::new(work_receiver));
 
         // Track completion: AtomicU64 for chunks queued, AtomicU64 for chunks completed
@@ -376,7 +376,7 @@ pub fn start_transcription_task<R: Runtime>(
                 chunk.chunk_id, queued
             );
 
-            if let Err(_) = work_sender.send(chunk) {
+            if work_sender.send(chunk).await.is_err() {
                 error!("❌ Failed to send chunk to workers - this should not happen!");
                 break;
             }
@@ -415,7 +415,7 @@ pub fn start_transcription_task<R: Runtime>(
 
             if final_queued == final_completed {
                 info!(
-                    "🎉 ALL {} chunks processed successfully - ZERO chunks lost!",
+                    "🎉 All {} accepted transcription chunks processed successfully",
                     final_completed
                 );
                 break;
@@ -495,15 +495,27 @@ async fn transcribe_chunk_with_provider<R: Runtime>(
         TranscriptionEngine::Whisper(whisper_engine) => {
             // Get language preference from global state
             let language = crate::get_language_preference_internal();
+            let engine = Arc::clone(whisper_engine);
+            let prompt = asr_vocabulary_prompt.map(str::to_owned);
+            let runtime = tokio::runtime::Handle::current();
 
-            match whisper_engine
-                .transcribe_audio_with_confidence_prompt(
+            // whisper.cpp inference is synchronous CPU/GPU work even though the engine API
+            // is async (the async portion protects model state). Running it on a Tokio worker
+            // can starve the audio pipeline, allowing its unbounded capture queue to consume
+            // memory until live transcripts stall or the process is terminated.
+            let inference = tokio::task::spawn_blocking(move || {
+                runtime.block_on(engine.transcribe_audio_with_confidence_prompt(
                     speech_samples,
                     language,
-                    asr_vocabulary_prompt,
-                )
-                .await
-            {
+                    prompt.as_deref(),
+                ))
+            })
+            .await
+            .map_err(|e| {
+                TranscriptionError::EngineFailed(format!("Whisper inference task failed: {e}"))
+            })?;
+
+            match inference {
                 Ok((text, confidence, is_partial)) => {
                     let cleaned_text = text.trim().to_string();
                     if cleaned_text.is_empty() {
@@ -538,7 +550,19 @@ async fn transcribe_chunk_with_provider<R: Runtime>(
             }
         }
         TranscriptionEngine::Parakeet(parakeet_engine) => {
-            match parakeet_engine.transcribe_audio(speech_samples).await {
+            let engine = Arc::clone(parakeet_engine);
+            let runtime = tokio::runtime::Handle::current();
+            // ONNX inference is blocking for the same reason as Whisper above. Isolating it
+            // keeps capture, VAD, checkpointing, and Tauri event delivery responsive.
+            let inference = tokio::task::spawn_blocking(move || {
+                runtime.block_on(engine.transcribe_audio(speech_samples))
+            })
+            .await
+            .map_err(|e| {
+                TranscriptionError::EngineFailed(format!("Parakeet inference task failed: {e}"))
+            })?;
+
+            match inference {
                 Ok(text) => {
                     let cleaned_text = text.trim().to_string();
                     if cleaned_text.is_empty() {

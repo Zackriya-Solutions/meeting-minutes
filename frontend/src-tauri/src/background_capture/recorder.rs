@@ -67,7 +67,9 @@ impl BackgroundRecorder {
         // A private state object: the interactive session's recording state, and
         // therefore the whole transcription pipeline, is left untouched.
         let state = RecordingState::new();
-        let (chunk_sender, chunk_receiver) = mpsc::unbounded_channel::<AudioChunk>();
+        // The blocking mixer can pause briefly while FFmpeg writes a checkpoint. Keep a
+        // generous but finite backlog so encoder failures cannot exhaust process memory.
+        let (chunk_sender, chunk_receiver) = mpsc::channel::<AudioChunk>(8_192);
         state.set_audio_sender(chunk_sender);
         state.start_recording()?;
 
@@ -176,7 +178,7 @@ fn select_devices() -> Result<SelectedDevices> {
 /// Align mic/system chunks into fixed windows, mix them, and append to the saver.
 /// Returns the saver plus the number of mixed frames written.
 fn mix_loop(
-    mut chunks: mpsc::UnboundedReceiver<AudioChunk>,
+    mut chunks: mpsc::Receiver<AudioChunk>,
     mut saver: IncrementalAudioSaver,
 ) -> Result<(IncrementalAudioSaver, u64)> {
     let mut ring = AudioMixerRingBuffer::new(MIX_RATE);

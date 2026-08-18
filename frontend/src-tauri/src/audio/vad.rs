@@ -8,6 +8,13 @@ use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
+/// Do not wait forever for an end-of-speech transition. Meetings frequently contain
+/// uninterrupted speech, background media, or VAD false positives; without a live bound,
+/// those samples remain in memory and no transcript appears until recording is stopped.
+/// Twelve seconds keeps inference chunks responsive and comfortably below every engine's
+/// maximum input size.
+const MAX_LIVE_SPEECH_SAMPLES: usize = 12 * 16_000;
+
 /// When true, VAD sessions created afterwards use more sensitive thresholds so quiet,
 /// narrowband inputs (e.g. Bluetooth headset mics in HFP mode at 16/24 kHz — AirPods as a
 /// microphone) still register as speech instead of being skipped. Fed from the
@@ -334,6 +341,35 @@ impl ContinuousVadProcessor {
         Ok(completed_segments)
     }
 
+    /// Emit bounded pieces while VAD remains in its speech state. The VAD session may later
+    /// return one padded segment covering the whole utterance; the audio pipeline already
+    /// trims timestamps that overlap previously emitted audio, so the final tail remains
+    /// lossless without duplicating text.
+    fn emit_bounded_live_segments(&mut self) {
+        while self.in_speech && self.current_speech.len() >= MAX_LIVE_SPEECH_SAMPLES {
+            let samples: Vec<f32> = self
+                .current_speech
+                .drain(..MAX_LIVE_SPEECH_SAMPLES)
+                .collect();
+            let start_timestamp_ms = (self.speech_start_sample as f64 / 16_000.0) * 1000.0;
+            let end_timestamp_ms = start_timestamp_ms + (samples.len() as f64 / 16_000.0) * 1000.0;
+
+            self.speech_segments.push_back(SpeechSegment {
+                samples,
+                start_timestamp_ms,
+                end_timestamp_ms,
+                confidence: 0.8,
+            });
+            self.speech_start_sample += MAX_LIVE_SPEECH_SAMPLES;
+            self.last_large_buffer_warning_samples = 0;
+
+            info!(
+                "VAD: Emitted bounded live speech segment ({:.1}s) while speech continues",
+                MAX_LIVE_SPEECH_SAMPLES as f64 / 16_000.0
+            );
+        }
+    }
+
     fn process_chunk(&mut self, chunk: &[f32]) -> Result<()> {
         // Track accumulated speech buffer size to detect memory issues
         let current_speech_size = self.current_speech.len();
@@ -395,17 +431,23 @@ impl ContinuousVadProcessor {
                     }
                     self.in_speech = false;
 
-                    // Use samples from VAD transition if available, otherwise use accumulated samples
-                    let speech_samples = if !samples.is_empty() {
-                        samples
+                    // Use samples from VAD transition if available, otherwise use the
+                    // accumulated tail. After a bounded live emission the tail starts later
+                    // than the VAD transition's original timestamp, so retain that updated
+                    // start rather than making overlap trimming discard valid tail audio.
+                    let (speech_samples, effective_start_ms) = if !samples.is_empty() {
+                        (samples, start_timestamp_ms as f64)
                     } else {
-                        self.current_speech.clone()
+                        (
+                            self.current_speech.clone(),
+                            (self.speech_start_sample as f64 / 16_000.0) * 1000.0,
+                        )
                     };
 
                     if !speech_samples.is_empty() {
                         let segment = SpeechSegment {
                             samples: speech_samples,
-                            start_timestamp_ms: start_timestamp_ms as f64,
+                            start_timestamp_ms: effective_start_ms,
                             end_timestamp_ms: end_timestamp_ms as f64,
                             confidence: 0.9, // VAD confidence
                         };
@@ -428,6 +470,7 @@ impl ContinuousVadProcessor {
         // Accumulate speech if we're currently in a speech state
         if self.in_speech {
             self.current_speech.extend_from_slice(chunk);
+            self.emit_bounded_live_segments();
         }
 
         self.processed_samples += chunk.len();
@@ -595,6 +638,31 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn continuous_speech_is_emitted_in_bounded_live_segments() {
+        let mut processor = ContinuousVadProcessor::new(16_000, 800).expect("create VAD processor");
+        processor.in_speech = true;
+        processor.speech_start_sample = 2 * 16_000;
+        processor.current_speech = vec![0.25; MAX_LIVE_SPEECH_SAMPLES * 2 + 800];
+
+        processor.emit_bounded_live_segments();
+
+        assert_eq!(processor.speech_segments.len(), 2);
+        let first = processor.speech_segments.pop_front().unwrap();
+        let second = processor.speech_segments.pop_front().unwrap();
+        assert_eq!(first.samples.len(), MAX_LIVE_SPEECH_SAMPLES);
+        assert_eq!(second.samples.len(), MAX_LIVE_SPEECH_SAMPLES);
+        assert_eq!(first.start_timestamp_ms, 2_000.0);
+        assert_eq!(first.end_timestamp_ms, 14_000.0);
+        assert_eq!(second.start_timestamp_ms, 14_000.0);
+        assert_eq!(second.end_timestamp_ms, 26_000.0);
+        assert_eq!(processor.current_speech.len(), 800);
+        assert_eq!(
+            processor.speech_start_sample,
+            2 * 16_000 + MAX_LIVE_SPEECH_SAMPLES * 2
+        );
+    }
 
     #[test]
     fn test_absolute_vad_timestamp_does_not_include_chunk_offset_twice() {

@@ -1,5 +1,5 @@
 use anyhow::Result;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use tokio::sync::mpsc;
@@ -81,7 +81,9 @@ impl AudioError {
             AudioError::InitializationFailed => "Failed to initialize audio system",
             AudioError::ConfigurationError => "Audio configuration error",
             AudioError::PermissionDenied => "Microphone permission denied",
-            AudioError::BufferOverflow => "Audio buffer overflow",
+            AudioError::BufferOverflow => {
+                "Recording could not keep up; a small part of the audio may be missing"
+            }
             AudioError::SampleRateUnsupported => "Audio sample rate not supported",
         }
     }
@@ -109,7 +111,8 @@ pub struct RecordingState {
     disconnected_device: Mutex<Option<(Arc<AudioDevice>, DeviceType)>>,
 
     // Audio pipeline
-    audio_sender: Mutex<Option<mpsc::UnboundedSender<AudioChunk>>>,
+    audio_sender: Mutex<Option<mpsc::Sender<AudioChunk>>>,
+    dropped_audio_chunks: AtomicU64,
 
     // Memory optimization
     buffer_pool: AudioBufferPool,
@@ -140,6 +143,7 @@ impl RecordingState {
             system_device: Mutex::new(None),
             disconnected_device: Mutex::new(None),
             audio_sender: Mutex::new(None),
+            dropped_audio_chunks: AtomicU64::new(0),
             buffer_pool: AudioBufferPool::new(16, 48000), // Pool of 16 buffers with 48kHz samples capacity
             error_count: AtomicU32::new(0),
             recoverable_error_count: AtomicU32::new(0),
@@ -158,6 +162,7 @@ impl RecordingState {
         *self.recording_start.lock().unwrap() = Some(Instant::now());
         self.error_count.store(0, Ordering::SeqCst);
         self.recoverable_error_count.store(0, Ordering::SeqCst);
+        self.dropped_audio_chunks.store(0, Ordering::Relaxed);
         *self.last_error.lock().unwrap() = None;
         Ok(())
     }
@@ -265,7 +270,7 @@ impl RecordingState {
     }
 
     // Audio pipeline management
-    pub fn set_audio_sender(&self, sender: mpsc::UnboundedSender<AudioChunk>) {
+    pub fn set_audio_sender(&self, sender: mpsc::Sender<AudioChunk>) {
         *self.audio_sender.lock().unwrap() = Some(sender);
     }
 
@@ -276,9 +281,25 @@ impl RecordingState {
         }
 
         if let Some(sender) = self.audio_sender.lock().unwrap().as_ref() {
-            sender
-                .send(chunk)
-                .map_err(|_| anyhow::anyhow!("Failed to send audio chunk"))?;
+            match sender.try_send(chunk) {
+                Ok(()) => {}
+                Err(mpsc::error::TrySendError::Full(_)) => {
+                    // Never block an OS audio callback and never let delayed downstream
+                    // processing grow memory without limit. A sporadic dropped raw callback
+                    // is preferable to terminating the process and losing the whole meeting.
+                    let dropped = self.dropped_audio_chunks.fetch_add(1, Ordering::Relaxed) + 1;
+                    if dropped == 1 || dropped % 100 == 0 {
+                        log::warn!(
+                            "Audio pipeline backlog is full; dropped {dropped} raw chunks this session"
+                        );
+                        self.report_non_fatal_warning(AudioError::BufferOverflow);
+                    }
+                    return Ok(());
+                }
+                Err(mpsc::error::TrySendError::Closed(_)) => {
+                    return Err(anyhow::anyhow!("Audio pipeline channel closed"));
+                }
+            }
 
             // Update statistics
             let mut stats = self.stats.lock().unwrap();
@@ -341,6 +362,15 @@ impl RecordingState {
                 count
             );
             self.stop_recording();
+        }
+    }
+
+    /// Notify the UI about recoverable degradation without incrementing fatal-error
+    /// thresholds. This is used for bounded-queue drops: the session should continue, but
+    /// the user must know the saved audio may contain a gap.
+    pub fn report_non_fatal_warning(&self, warning: AudioError) {
+        if let Some(callback) = self.error_callback.lock().unwrap().as_ref() {
+            callback(&warning);
         }
     }
 
@@ -429,6 +459,7 @@ impl RecordingState {
         *self.total_pause_duration.lock().unwrap() = std::time::Duration::ZERO;
         self.error_count.store(0, Ordering::SeqCst);
         self.recoverable_error_count.store(0, Ordering::SeqCst);
+        self.dropped_audio_chunks.store(0, Ordering::Relaxed);
 
         // Clear buffer pool to free memory
         self.buffer_pool.clear();
@@ -445,6 +476,7 @@ impl Default for RecordingState {
             system_device: Mutex::new(None),
             disconnected_device: Mutex::new(None),
             audio_sender: Mutex::new(None),
+            dropped_audio_chunks: AtomicU64::new(0),
             buffer_pool: AudioBufferPool::new(16, 48000), // Pool of 16 buffers with 48kHz samples capacity
             error_count: AtomicU32::new(0),
             recoverable_error_count: AtomicU32::new(0),
@@ -466,5 +498,74 @@ impl Clone for RecordingStats {
             total_duration: self.total_duration,
             last_activity: self.last_activity,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn chunk(chunk_id: u64) -> AudioChunk {
+        AudioChunk {
+            data: vec![0.25; 64],
+            sample_rate: 48_000,
+            timestamp: 0.0,
+            chunk_id,
+            device_type: DeviceType::Microphone,
+            speaker: None,
+        }
+    }
+
+    #[test]
+    fn full_capture_queue_drops_without_failing_the_recording() {
+        let state = RecordingState::new();
+        let (sender, mut receiver) = mpsc::channel(1);
+        state.set_audio_sender(sender);
+
+        assert!(state.send_audio_chunk(chunk(1)).is_ok());
+        assert!(state.send_audio_chunk(chunk(2)).is_ok());
+
+        assert_eq!(receiver.try_recv().unwrap().chunk_id, 1);
+        assert!(receiver.try_recv().is_err());
+        assert_eq!(state.get_error_count(), 0);
+    }
+
+    #[test]
+    fn concurrent_capture_overflow_counts_drops_and_rate_limits_warnings() {
+        let state = RecordingState::new();
+        let (sender, _receiver) = mpsc::channel(1);
+        state.set_audio_sender(sender);
+
+        let warning_count = Arc::new(AtomicU64::new(0));
+        let callback_warning_count = Arc::clone(&warning_count);
+        state.set_error_callback(move |error| {
+            if matches!(error, AudioError::BufferOverflow) {
+                callback_warning_count.fetch_add(1, Ordering::Relaxed);
+            }
+        });
+
+        state.send_audio_chunk(chunk(0)).unwrap();
+        state.send_audio_chunk(chunk(1)).unwrap();
+        assert_eq!(warning_count.load(Ordering::Relaxed), 1);
+
+        let workers: Vec<_> = (0..3)
+            .map(|worker| {
+                let state = Arc::clone(&state);
+                std::thread::spawn(move || {
+                    for offset in 0..133 {
+                        state
+                            .send_audio_chunk(chunk(2 + worker * 133 + offset))
+                            .unwrap();
+                    }
+                })
+            })
+            .collect();
+        for worker in workers {
+            worker.join().unwrap();
+        }
+
+        assert_eq!(state.dropped_audio_chunks.load(Ordering::Relaxed), 400);
+        assert_eq!(warning_count.load(Ordering::Relaxed), 5);
+        assert_eq!(state.get_error_count(), 0);
     }
 }
