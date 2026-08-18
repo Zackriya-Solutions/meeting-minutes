@@ -280,6 +280,16 @@ impl RecordingManager {
             error!("Error stopping audio streams: {}", e);
         }
 
+        // Give the system audio stack (e.g. PipeWire's PulseAudio compatibility layer) a
+        // moment to finish its own async stream teardown before we proceed. Stopping cpal
+        // streams here doesn't block until the underlying client library has fully cleaned
+        // up its side (mainloop/eventfd teardown) — racing that from another thread is a
+        // known class of PulseAudio/PipeWire client crash (SIGABRT from an internal
+        // assertion, not a Rust panic, so no amount of error handling here can catch it).
+        // This is most likely to matter when live transcription is disabled, since
+        // stop_recording now returns much faster with nothing to wait on afterward.
+        tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
+
         // CRITICAL: Force pipeline to flush ALL accumulated audio before stopping
         debug!("💨 Forcing pipeline to flush accumulated audio immediately");
         if let Err(e) = self.pipeline_manager.force_flush_and_stop().await {
