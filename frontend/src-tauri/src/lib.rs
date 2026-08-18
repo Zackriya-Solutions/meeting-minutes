@@ -86,6 +86,27 @@ use tokio::sync::RwLock;
 
 static RECORDING_FLAG: AtomicBool = AtomicBool::new(false);
 
+fn reconcile_already_stopped(
+    flag: &AtomicBool,
+) -> (audio::recording_commands::StopRecordingOutcome, bool) {
+    let stale_flag_was_set = flag.swap(false, Ordering::SeqCst);
+    let message = if stale_flag_was_set {
+        "Native recorder was already stopped; stale application state was reconciled"
+    } else {
+        "Recording was already stopped"
+    };
+
+    (
+        audio::recording_commands::StopRecordingOutcome {
+            status: "already_stopped".to_string(),
+            message: message.to_string(),
+            stop_error: None,
+            transcription_complete: true,
+        },
+        stale_flag_was_set,
+    )
+}
+
 // Global language preference storage (default to "auto-translate" for automatic translation to English)
 static LANGUAGE_PREFERENCE: std::sync::LazyLock<StdMutex<String>> =
     std::sync::LazyLock::new(|| StdMutex::new("auto-translate".to_string()));
@@ -155,13 +176,12 @@ async fn stop_recording<R: Runtime>(
     // Check the actual audio recording system state instead of the flag
     if !audio::recording_commands::is_recording().await {
         log_info!("Recording is already stopped");
-        RECORDING_FLAG.store(false, Ordering::SeqCst);
+        let (outcome, stale_flag_was_set) = reconcile_already_stopped(&RECORDING_FLAG);
+        if stale_flag_was_set {
+            log::warn!("Native recorder was stopped while RECORDING_FLAG was still set; reconciled stale state");
+        }
         tray::update_tray_menu(&app);
-        return Ok(audio::recording_commands::StopRecordingOutcome {
-            status: "success".to_string(),
-            message: "Recording was already stopped".to_string(),
-            stop_error: None,
-        });
+        return Ok(outcome);
     }
 
     // Call the actual audio recording system to stop
@@ -1187,4 +1207,25 @@ pub fn run() {
                 _ => {}
             }
         });
+}
+
+#[cfg(test)]
+mod recording_stop_contract_tests {
+    use super::*;
+
+    #[test]
+    fn repeated_stop_reconciles_the_flag_and_reports_already_stopped() {
+        let flag = AtomicBool::new(true);
+
+        let (first, stale_flag_was_set) = reconcile_already_stopped(&flag);
+        assert!(stale_flag_was_set);
+        assert!(!flag.load(Ordering::SeqCst));
+        assert_eq!(first.status, "already_stopped");
+        assert!(first.message.contains("reconciled"));
+
+        let (second, stale_flag_was_set) = reconcile_already_stopped(&flag);
+        assert!(!stale_flag_was_set);
+        assert_eq!(second.status, "already_stopped");
+        assert_eq!(second.message, "Recording was already stopped");
+    }
 }

@@ -71,6 +71,7 @@ describe("stopRecording", () => {
       status: "completed_with_warnings",
       message: "Recording data was finalized with a warning",
       stop_error: "Audio device did not close cleanly",
+      transcription_complete: true,
     };
 
     const outcome = await recordingService.stopRecording("/tmp/recording.wav");
@@ -92,6 +93,20 @@ describe("stopRecording", () => {
       status: "success",
       message: "Recording stopped successfully",
       stop_error: null,
+      transcription_complete: true,
     });
+  });
+
+  test("preserves the distinct already-stopped result for diagnostics", async () => {
+    invokeResult = {
+      status: "already_stopped",
+      message: "Recording was already stopped",
+      stop_error: null,
+      transcription_complete: true,
+    };
+
+    const outcome = await recordingService.stopRecording("/tmp/recording.wav");
+
+    expect(outcome.status).toBe("already_stopped");
   });
 });

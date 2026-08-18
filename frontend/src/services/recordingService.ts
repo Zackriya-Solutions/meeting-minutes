@@ -16,18 +16,25 @@ export interface RecordingState {
   active_duration: number | null;
 }
 
+export type RecordingStopStatus =
+  | 'success'
+  | 'completed_with_warnings'
+  | 'already_stopped';
+
 export interface RecordingStoppedPayload {
   message: string;
-  status?: 'success' | 'completed_with_warnings';
+  status?: RecordingStopStatus;
   stop_error?: string | null;
+  transcription_complete?: boolean;
   folder_path?: string;
   meeting_name?: string;
 }
 
 export interface RecordingStopOutcome {
-  status: 'success' | 'completed_with_warnings';
+  status: RecordingStopStatus;
   message: string;
   stop_error: string | null;
+  transcription_complete: boolean;
 }
 
 /**
@@ -110,6 +117,7 @@ export class RecordingService {
       status: 'success',
       message: 'Recording stopped successfully',
       stop_error: null,
+      transcription_complete: true,
     };
   }
 

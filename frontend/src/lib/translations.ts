@@ -1060,6 +1060,11 @@ export const RU: Record<string, string> = {
   "Recording saved successfully!": "Запись сохранена",
   "transcript segments saved.": "сегментов расшифровки сохранено.",
   "Failed to save meeting": "Не удалось сохранить встречу",
+  "Meeting needs recovery": "Встречу нужно восстановить",
+  "Transcription did not finish. The recording was preserved for recovery.":
+    "Расшифровка не завершилась. Запись сохранена для восстановления",
+  "The audio and available transcript are safe. Import the recording to retry transcription.":
+    "Аудио и доступная часть расшифровки сохранены. Импортируйте запись, чтобы повторить расшифровку",
   "Model ready! Closing window...": "Модель готова. Закрываю окно…",
   "Meeting metadata not found": "Метаданные встречи не найдены",
   "No transcripts found for this meeting": "Для этой встречи не найдено расшифровок",
