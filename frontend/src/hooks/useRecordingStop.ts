@@ -9,7 +9,7 @@ import { useConfig } from '@/contexts/ConfigContext';
 import { invoke } from '@tauri-apps/api/core';
 import { appDataDir } from '@tauri-apps/api/path';
 import { storageService } from '@/services/storageService';
-import { recordingService } from '@/services/recordingService';
+import { recordingService, RecordingStoppedPayload } from '@/services/recordingService';
 import { transcriptService } from '@/services/transcriptService';
 import { migrateMarkedMoments } from '@/lib/markedMoments';
 import { migrateStandupLiveState } from '@/lib/standupLiveState';
@@ -31,6 +31,7 @@ import {
   applyPinnedSummaryLanguageToMeeting,
   detectAndCacheSummaryLanguage,
 } from '@/lib/summary-language-preferences';
+import { decideRecordingPersistence } from '@/lib/recordingFinalization';
 
 type SummaryStatus = 'idle' | 'processing' | 'summarizing' | 'regenerating' | 'completed' | 'error';
 
@@ -102,6 +103,7 @@ export function useRecordingStop(
 
   // Promise to track recording-stopped event data (fixes race condition with recording-stop-complete)
   const recordingStoppedDataRef = useRef<Promise<void> | null>(null);
+  const recordingStoppedTranscriptionCompleteRef = useRef<boolean | undefined>(undefined);
 
   // Set up recording-stopped listener for meeting navigation
   useEffect(() => {
@@ -110,16 +112,12 @@ export function useRecordingStop(
     const setupRecordingStoppedListener = async () => {
       try {
         console.log('Setting up recording-stopped listener for navigation...');
-        unlistenFn = await listen<{
-          message: string;
-          status?: 'success' | 'completed_with_warnings';
-          stop_error?: string | null;
-          folder_path?: string;
-          meeting_name?: string;
-        }>('recording-stopped', async (event) => {
+        unlistenFn = await listen<RecordingStoppedPayload>('recording-stopped', async (event) => {
           // Create promise that resolves when sessionStorage is set (prevents race condition)
           recordingStoppedDataRef.current = (async () => {
             const { folder_path, meeting_name } = event.payload;
+            recordingStoppedTranscriptionCompleteRef.current =
+              event.payload.transcription_complete;
 
             // Store folder_path and meeting_name for later use in handleRecordingStop
             if (folder_path) {
@@ -166,6 +164,7 @@ export function useRecordingStop(
     setIsRecordingDisabled(true);
     const stopStartTime = Date.now();
     const tempMeetingId = sessionStorage.getItem('indexeddb_current_meeting_id');
+    let nativeTranscriptionComplete: boolean | undefined;
 
     try {
       console.log('Post-stop processing (new implementation)...', {
@@ -185,13 +184,18 @@ export function useRecordingStop(
         const stopOutcome = await recordingService.stopRecording(
           `${dataDir}/recording-${timestamp}.wav`
         );
+        nativeTranscriptionComplete =
+          recordingStoppedTranscriptionCompleteRef.current ??
+          stopOutcome.transcription_complete;
         console.log('Native stop_recording completed');
         if (stopOutcome.status === 'completed_with_warnings') {
           const warning = stopOutcome.stop_error || stopOutcome.message;
-          console.warn('Recording finalized with an audio shutdown warning:', warning);
+          console.warn('Recording finalized with a shutdown warning:', warning);
           toast.warning(t('Recording stopped with a warning'), {
             description: warning,
           });
+        } else if (stopOutcome.status === 'already_stopped') {
+          console.info('Native recorder was already stopped; continuing post-processing:', stopOutcome.message);
         }
       } catch (stopError) {
         console.error('Failed to stop native recording:', stopError);
@@ -213,7 +217,8 @@ export function useRecordingStop(
       const MAX_WAIT_TIME = 60000; // 60 seconds maximum wait (increased for longer processing)
       const POLL_INTERVAL = 500; // Check every 500ms
       let elapsedTime = 0;
-      let transcriptionComplete = false;
+      let transcriptionComplete = nativeTranscriptionComplete === true;
+      const transcriptionFailed = nativeTranscriptionComplete === false;
 
       // Listen for transcription-complete event
       const unlistenComplete = await listen('transcription-complete', () => {
@@ -222,7 +227,7 @@ export function useRecordingStop(
       });
 
       // Poll for transcription status
-      while (elapsedTime < MAX_WAIT_TIME && !transcriptionComplete) {
+      while (elapsedTime < MAX_WAIT_TIME && !transcriptionComplete && !transcriptionFailed) {
         try {
           const status = await transcriptService.getTranscriptionStatus();
           console.log('Transcription status:', status);
@@ -260,7 +265,9 @@ export function useRecordingStop(
       console.log('🧹 CLEANUP: Cleaning up transcription-complete listener');
       unlistenComplete();
 
-      if (!transcriptionComplete && elapsedTime >= MAX_WAIT_TIME) {
+      if (transcriptionFailed) {
+        console.error('Native transcription worker did not complete; preserving recording for recovery');
+      } else if (!transcriptionComplete && elapsedTime >= MAX_WAIT_TIME) {
         console.warn('⏰ Transcription wait timeout reached after', elapsedTime, 'ms');
       } else {
         console.log('✅ Transcription completed after', elapsedTime, 'ms');
@@ -294,7 +301,8 @@ export function useRecordingStop(
       // Save to SQLite
       // NOTE: enabled to save COMPLETE transcripts after frontend receives all updates
       // This ensures user sees all transcripts streaming in before database save
-      if (isCallApi && transcriptionComplete == true) {
+      const persistenceDecision = decideRecordingPersistence(isCallApi, transcriptionComplete);
+      if (persistenceDecision === 'save') {
 
         setStatus(RecordingStatus.SAVING, 'Saving meeting to database...');
 
@@ -562,6 +570,14 @@ export function useRecordingStop(
           });
           throw saveError;
         }
+      } else if (persistenceDecision === 'preserve_for_recovery') {
+        const message = t('Transcription did not finish. The recording was preserved for recovery.');
+        console.error(message);
+        setStatus(RecordingStatus.ERROR, message);
+        toast.error(t('Meeting needs recovery'), {
+          description: t('The audio and available transcript are safe. Import the recording to retry transcription.'),
+          duration: Infinity,
+        });
       } else {
         // No save needed, go back to IDLE
         setStatus(RecordingStatus.IDLE);
@@ -578,6 +594,8 @@ export function useRecordingStop(
     } finally {
       // Always reset the guard flag when done
       stopInProgress = false;
+      recordingStoppedDataRef.current = null;
+      recordingStoppedTranscriptionCompleteRef.current = undefined;
     }
   }, [
     setIsRecording,

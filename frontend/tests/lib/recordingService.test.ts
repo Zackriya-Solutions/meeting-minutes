@@ -8,11 +8,12 @@ import { beforeEach, describe, expect, mock, test } from "bun:test";
  * named after a timestamp. These tests pin the wire names.
  */
 const calls: Array<{ command: string; args: Record<string, unknown> | undefined }> = [];
+let invokeResult: unknown;
 
 mock.module("@tauri-apps/api/core", () => ({
   invoke: async (command: string, args?: Record<string, unknown>) => {
     calls.push({ command, args });
-    return undefined;
+    return invokeResult;
   },
 }));
 
@@ -25,6 +26,7 @@ const { recordingService } = await import("../../src/services/recordingService")
 describe("startRecordingWithDevices", () => {
   beforeEach(() => {
     calls.length = 0;
+    invokeResult = undefined;
   });
 
   test("passes the meeting name under the key the command actually reads", async () => {
@@ -55,5 +57,56 @@ describe("startRecordingWithDevices", () => {
 
     const keys = Object.keys(calls[0]!.args ?? {});
     expect(keys.filter((key) => key.includes("_"))).toEqual([]);
+  });
+});
+
+describe("stopRecording", () => {
+  beforeEach(() => {
+    calls.length = 0;
+    invokeResult = undefined;
+  });
+
+  test("returns the structured native shutdown outcome", async () => {
+    invokeResult = {
+      status: "completed_with_warnings",
+      message: "Recording data was finalized with a warning",
+      stop_error: "Audio device did not close cleanly",
+      transcription_complete: true,
+    };
+
+    const outcome = await recordingService.stopRecording("/tmp/recording.wav");
+
+    expect(calls[0]).toEqual({
+      command: "stop_recording",
+      args: { args: { save_path: "/tmp/recording.wav" } },
+    });
+    expect(outcome.status).toBe("completed_with_warnings");
+    expect(outcome.stop_error).toBe("Audio device did not close cleanly");
+  });
+
+  test("normalizes a legacy null response so meeting persistence can continue", async () => {
+    invokeResult = null;
+
+    const outcome = await recordingService.stopRecording("/tmp/recording.wav");
+
+    expect(outcome).toEqual({
+      status: "success",
+      message: "Recording stopped successfully",
+      stop_error: null,
+      transcription_complete: true,
+    });
+  });
+
+  test("preserves the distinct already-stopped result for diagnostics", async () => {
+    invokeResult = {
+      status: "already_stopped",
+      message: "Recording was already stopped",
+      stop_error: null,
+      transcription_complete: true,
+    };
+
+    const outcome = await recordingService.stopRecording("/tmp/recording.wav");
+
+    expect(outcome.status).toBe("already_stopped");
   });
 });

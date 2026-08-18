@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { RecordingStatus } from "../../src/contexts/RecordingStateContext";
 import {
+  canDismissRecordingDrawer,
   canStartRecordingNow,
   isRecordingSessionBusy,
 } from "../../src/lib/recordingNavigation";
@@ -45,6 +46,25 @@ describe("canStartRecordingNow", () => {
           expect(canStartRecordingNow(isRecording, status)).toBe(false);
         }
       }
+    }
+  });
+});
+
+describe("canDismissRecordingDrawer", () => {
+  test("keeps the transcript drawer open for the full recording lifecycle", () => {
+    for (const status of BUSY_STATUSES) {
+      expect(canDismissRecordingDrawer(false, status)).toBe(false);
+    }
+    expect(canDismissRecordingDrawer(true, RecordingStatus.IDLE)).toBe(false);
+  });
+
+  test("allows dismissal after the session settles", () => {
+    for (const status of [
+      RecordingStatus.IDLE,
+      RecordingStatus.COMPLETED,
+      RecordingStatus.ERROR,
+    ]) {
+      expect(canDismissRecordingDrawer(false, status)).toBe(true);
     }
   });
 });

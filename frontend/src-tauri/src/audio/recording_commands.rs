@@ -64,21 +64,41 @@ pub struct StopRecordingOutcome {
     pub status: String,
     pub message: String,
     pub stop_error: Option<String>,
+    pub transcription_complete: bool,
 }
 
-fn shutdown_completion(stop_error: Option<&str>) -> StopRecordingOutcome {
-    match stop_error {
-        Some(error) => StopRecordingOutcome {
+fn shutdown_completion(
+    stop_error: Option<&str>,
+    transcription_complete: bool,
+) -> StopRecordingOutcome {
+    match (stop_error, transcription_complete) {
+        (Some(error), true) => StopRecordingOutcome {
             status: "completed_with_warnings".to_string(),
             message: format!(
                 "Recording data was finalized, but audio capture did not stop cleanly: {error}"
             ),
             stop_error: Some(error.to_string()),
+            transcription_complete,
         },
-        None => StopRecordingOutcome {
+        (Some(error), false) => StopRecordingOutcome {
+            status: "completed_with_warnings".to_string(),
+            message: format!(
+                "Recording data was finalized, but audio capture did not stop cleanly and transcription did not finish: {error}"
+            ),
+            stop_error: Some(error.to_string()),
+            transcription_complete,
+        },
+        (None, false) => StopRecordingOutcome {
+            status: "completed_with_warnings".to_string(),
+            message: "Recording data was finalized, but transcription did not finish".to_string(),
+            stop_error: None,
+            transcription_complete,
+        },
+        (None, true) => StopRecordingOutcome {
             status: "success".to_string(),
             message: "Recording stopped successfully".to_string(),
             stop_error: None,
+            transcription_complete,
         },
     }
 }
@@ -571,7 +591,7 @@ pub async fn stop_recording<R: Runtime>(
         .is_err()
     {
         info!("Recording was not active");
-        return Ok(shutdown_completion(None));
+        return Ok(shutdown_completion(None, true));
     }
 
     // Emit shutdown progress to frontend
@@ -646,6 +666,7 @@ pub async fn stop_recording<R: Runtime>(
         global_task.take()
     };
 
+    let mut transcription_complete = true;
     if let Some(task_handle) = transcription_task {
         info!("⏳ Waiting for accepted transcription chunks to finish processing");
 
@@ -684,10 +705,12 @@ pub async fn stop_recording<R: Runtime>(
             }
             Ok(Err(e)) => {
                 warn!("⚠️ Transcription task completed with error: {:?}", e);
+                transcription_complete = false;
                 // Continue anyway - the worker may have processed most chunks
             }
             Err(_) => {
                 warn!("⏱️ Transcription timeout (10 minutes) reached, continuing shutdown to prevent indefinite hang");
+                transcription_complete = false;
                 // Continue shutdown even on timeout - better to lose some chunks than hang forever
             }
         }
@@ -957,8 +980,10 @@ pub async fn stop_recording<R: Runtime>(
         (None, None)
     };
 
-    let completion = shutdown_completion(stream_stop_error.as_deref());
-    if stream_stop_error.is_some() {
+    let completion = shutdown_completion(stream_stop_error.as_deref(), transcription_complete);
+    if !transcription_complete {
+        warn!("Recording session finalized with incomplete transcription; preserving recovery data");
+    } else if stream_stop_error.is_some() {
         warn!("Recording session finalized with an audio shutdown warning");
     } else {
         info!("🔍 Recording session is fully finalized");
@@ -987,7 +1012,8 @@ pub async fn stop_recording<R: Runtime>(
             "message": completion.message.clone(),
             "progress": 100,
             "status": completion.status.clone(),
-            "stop_error": completion.stop_error.clone()
+            "stop_error": completion.stop_error.clone(),
+            "transcription_complete": completion.transcription_complete
         }),
     );
 
@@ -998,6 +1024,7 @@ pub async fn stop_recording<R: Runtime>(
             "message": completion.message.clone(),
             "status": completion.status.clone(),
             "stop_error": completion.stop_error.clone(),
+            "transcription_complete": completion.transcription_complete,
             "folder_path": folder_path_str,
             "meeting_name": meeting_name_str
         }),
@@ -1347,20 +1374,31 @@ mod tests {
 
     #[test]
     fn clean_shutdown_reports_success() {
-        let completion = shutdown_completion(None);
+        let completion = shutdown_completion(None, true);
         assert_eq!(completion.status, "success");
         assert_eq!(completion.message, "Recording stopped successfully");
         assert_eq!(completion.stop_error, None);
+        assert!(completion.transcription_complete);
     }
 
     #[test]
     fn stream_stop_failure_is_reported_after_finalization() {
         let error = "audio streams: device handle remained active";
-        let completion = shutdown_completion(Some(error));
+        let completion = shutdown_completion(Some(error), true);
 
         assert_eq!(completion.status, "completed_with_warnings");
         assert!(completion.message.contains(error));
         assert_eq!(completion.stop_error.as_deref(), Some(error));
+        assert!(completion.transcription_complete);
+    }
+
+    #[test]
+    fn transcription_failure_is_not_reported_as_complete() {
+        let completion = shutdown_completion(None, false);
+
+        assert_eq!(completion.status, "completed_with_warnings");
+        assert!(completion.message.contains("transcription did not finish"));
+        assert!(!completion.transcription_complete);
     }
 
     #[test]

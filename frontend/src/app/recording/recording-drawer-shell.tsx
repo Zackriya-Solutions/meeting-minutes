@@ -19,6 +19,8 @@ import {
 } from "@/hooks/useRouteDrawerLifecycle"
 import { useRouteDrawerWindowConstraint } from "@/hooks/useRouteDrawerWindowConstraint"
 import { useT } from "@/lib/i18n"
+import { useRecordingState } from "@/contexts/RecordingStateContext"
+import { canDismissRecordingDrawer } from "@/lib/recordingNavigation"
 
 const DRAWER_WIDTH = 450
 
@@ -26,7 +28,9 @@ export function RecordingDrawerShell({ children }: { children: ReactNode }) {
   const router = useRouter()
   const t = useT()
   const { sidebarWidth } = useSidebar()
+  const { isRecording, status } = useRecordingState()
   const backgroundRef = useRef<HTMLDivElement>(null)
+  const canClose = canDismissRecordingDrawer(isRecording, status)
 
   useRouteDrawerWindowConstraint(sidebarWidth, DRAWER_WIDTH)
 
@@ -44,13 +48,14 @@ export function RecordingDrawerShell({ children }: { children: ReactNode }) {
     })
   }, [router])
 
-  // Closable while recording: dismissing the drawer hands off to the home screen and
-  // the recording keeps running, with the persistent sidebar button carrying Finish.
+  // Background clicks and swipe gestures must not hide the live transcript. Once recording
+  // and finalization settle, this becomes a normal dismissible route drawer again.
   const {
     open,
     onOpenChange,
     onOpenChangeComplete,
   } = useRouteDrawerLifecycle({
+    canClose,
     onClosed: navigateHome,
   })
 
