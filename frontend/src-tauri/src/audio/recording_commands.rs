@@ -310,7 +310,12 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
     // Set up error callback
     let app_for_error = app.clone();
     manager.set_error_callback(move |error| {
-        let _ = app_for_error.emit("recording-error", error.user_message());
+        let event_name = if matches!(error, super::recording_state::AudioError::BufferOverflow) {
+            "chunk-drop-warning"
+        } else {
+            "recording-error"
+        };
+        let _ = app_for_error.emit(event_name, error.user_message());
     });
 
     // Start recording with resolved devices (replaces start_recording_with_defaults_and_auto_save call)
@@ -476,7 +481,12 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
     // Set up error callback
     let app_for_error = app.clone();
     manager.set_error_callback(move |error| {
-        let _ = app_for_error.emit("recording-error", error.user_message());
+        let event_name = if matches!(error, super::recording_state::AudioError::BufferOverflow) {
+            "chunk-drop-warning"
+        } else {
+            "recording-error"
+        };
+        let _ = app_for_error.emit(event_name, error.user_message());
     });
 
     // Start recording with specified devices and auto_save setting

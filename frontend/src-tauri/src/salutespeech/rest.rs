@@ -19,6 +19,21 @@ use crate::audio::transcription::provider::{
 const RECOGNIZE_CONTENT_TYPE: &str = "audio/x-pcm;bit=16;rate=16000";
 const MIN_SAMPLES: usize = 1_600; // 100 ms @ 16 kHz — below this, don't bother the API.
 
+fn build_recognize_client(connect_timeout: Duration, request_timeout: Duration) -> reqwest::Client {
+    reqwest::Client::builder()
+        .connect_timeout(connect_timeout)
+        .timeout(request_timeout)
+        .build()
+        .unwrap_or_else(|error| {
+            log::warn!("Could not configure SaluteSpeech request timeouts: {error}");
+            reqwest::Client::new()
+        })
+}
+
+fn recognize_request_error(error: reqwest::Error) -> TranscriptionError {
+    TranscriptionError::EngineFailed(format!("salutespeech recognize request failed: {error}"))
+}
+
 pub struct SaluteSpeechProvider {
     auth: SaluteSpeechAuth,
     client: reqwest::Client,
@@ -32,14 +47,7 @@ impl SaluteSpeechProvider {
             auth: SaluteSpeechAuth::new(cfg.auth_key, cfg.oauth_url, cfg.scope),
             // reqwest has no total request timeout by default. A dead VPN/proxy used to hold
             // the only ordered live worker forever, making every later segment appear stuck.
-            client: reqwest::Client::builder()
-                .connect_timeout(Duration::from_secs(10))
-                .timeout(Duration::from_secs(45))
-                .build()
-                .unwrap_or_else(|error| {
-                    log::warn!("Could not configure SaluteSpeech request timeouts: {error}");
-                    reqwest::Client::new()
-                }),
+            client: build_recognize_client(Duration::from_secs(10), Duration::from_secs(45)),
             recognize_url: cfg.recognize_url,
             model: cfg.model,
         }
@@ -91,11 +99,7 @@ impl TranscriptionProvider for SaluteSpeechProvider {
             .body(pcm)
             .send()
             .await
-            .map_err(|e| {
-                TranscriptionError::EngineFailed(format!(
-                    "salutespeech recognize request failed: {e}"
-                ))
-            })?;
+            .map_err(recognize_request_error)?;
 
         if !resp.status().is_success() {
             let status = resp.status();
@@ -138,6 +142,40 @@ impl TranscriptionProvider for SaluteSpeechProvider {
 
     fn provider_name(&self) -> &'static str {
         "SaluteSpeech"
+    }
+}
+
+#[cfg(test)]
+mod timeout_tests {
+    use super::*;
+    use std::io::Read;
+
+    #[tokio::test]
+    async fn hanging_recognition_request_times_out_as_engine_failure() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(1)))
+                .unwrap();
+            let mut request = [0u8; 1024];
+            let _ = stream.read(&mut request);
+            std::thread::sleep(Duration::from_millis(150));
+        });
+        let client = build_recognize_client(Duration::from_millis(50), Duration::from_millis(30));
+
+        let request_error = client
+            .post(format!("http://{address}/recognize"))
+            .body(vec![0u8; 3_200])
+            .send()
+            .await
+            .expect_err("hanging request must time out");
+        assert!(request_error.is_timeout());
+        let mapped = recognize_request_error(request_error);
+        assert!(matches!(mapped, TranscriptionError::EngineFailed(_)));
+        assert!(mapped.to_string().contains("timed out"));
+        server.join().unwrap();
     }
 }
 

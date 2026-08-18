@@ -2,6 +2,7 @@ use anyhow::Result;
 use log::{error, info, warn};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Runtime};
 use tokio::sync::mpsc;
@@ -91,13 +92,14 @@ pub struct DeviceInfo {
 
 /// New recording saver using incremental saving strategy
 pub struct RecordingSaver {
-    incremental_saver: Option<Arc<Mutex<IncrementalAudioSaver>>>,
+    incremental_saver: Option<IncrementalAudioSaver>,
     meeting_folder: Option<PathBuf>,
     meeting_name: Option<String>,
     metadata: Option<MeetingMetadata>,
     transcript_segments: Arc<Mutex<Vec<TranscriptSegment>>>,
     chunk_receiver: Option<mpsc::Receiver<AudioChunk>>,
-    accumulation_task: Option<tokio::task::JoinHandle<()>>,
+    accumulation_task: Option<tokio::task::JoinHandle<Option<IncrementalAudioSaver>>>,
+    checkpoint_count: Arc<AtomicU32>,
 }
 
 impl RecordingSaver {
@@ -110,6 +112,7 @@ impl RecordingSaver {
             transcript_segments: Arc::new(Mutex::new(Vec::new())),
             chunk_receiver: None,
             accumulation_task: None,
+            checkpoint_count: Arc::new(AtomicU32::new(0)),
         }
     }
 
@@ -150,7 +153,7 @@ impl RecordingSaver {
     #[cfg(test)]
     pub(crate) fn take_accumulation_task_for_test(
         &mut self,
-    ) -> Option<tokio::task::JoinHandle<()>> {
+    ) -> Option<tokio::task::JoinHandle<Option<IncrementalAudioSaver>>> {
         self.accumulation_task.take()
     }
 
@@ -214,7 +217,8 @@ impl RecordingSaver {
         }
 
         // Start accumulation task
-        let incremental_saver_arc = self.incremental_saver.clone();
+        let incremental_saver = self.incremental_saver.take();
+        let checkpoint_count = Arc::clone(&self.checkpoint_count);
         let save_audio = auto_save;
 
         if let Some(mut receiver) = self.chunk_receiver.take() {
@@ -222,7 +226,12 @@ impl RecordingSaver {
             // accumulation loop on the blocking pool so a 30-second checkpoint cannot stall
             // audio/VAD/transcript tasks on Tokio's async workers.
             self.accumulation_task = Some(tokio::task::spawn_blocking(move || {
-                drain_audio_chunks(&mut receiver, incremental_saver_arc, save_audio)
+                drain_audio_chunks(
+                    &mut receiver,
+                    incremental_saver,
+                    save_audio,
+                    checkpoint_count,
+                )
             }));
         }
 
@@ -248,7 +257,8 @@ impl RecordingSaver {
         // Only initialize incremental saver if checkpoints are needed (auto_save is true)
         if create_checkpoints {
             let incremental_saver = IncrementalAudioSaver::new(meeting_folder.clone(), 48000)?;
-            self.incremental_saver = Some(Arc::new(Mutex::new(incremental_saver)));
+            self.checkpoint_count.store(0, Ordering::Relaxed);
+            self.incremental_saver = Some(incremental_saver);
             info!(
                 "✅ Incremental audio saver initialized for meeting: {}",
                 meeting_name
@@ -307,15 +317,10 @@ impl RecordingSaver {
 
     // in frontend/src-tauri/src/audio/recording_saver.rs
     pub fn get_stats(&self) -> (usize, u32) {
-        if let Some(ref saver) = self.incremental_saver {
-            if let Ok(guard) = saver.try_lock() {
-                (guard.get_checkpoint_count() as usize, 48000)
-            } else {
-                (0, 48000)
-            }
-        } else {
-            (0, 48000)
-        }
+        (
+            self.checkpoint_count.load(Ordering::Relaxed) as usize,
+            48000,
+        )
     }
 
     /// Stop and save using incremental saving approach
@@ -335,8 +340,11 @@ impl RecordingSaver {
         // finalizing checkpoints. The former boolean + 200ms sleep could discard the tail,
         // or even let the receiver exit immediately due to a startup race.
         if let Some(task) = self.accumulation_task.take() {
-            if let Err(e) = task.await {
-                warn!("Recording accumulation task failed: {e}");
+            match task.await {
+                Ok(saver) => self.incremental_saver = saver,
+                Err(e) => {
+                    return Err(format!("Recording accumulation task failed: {e}"));
+                }
             }
         }
 
@@ -350,16 +358,7 @@ impl RecordingSaver {
         }
 
         // Finalize incremental saver (merge checkpoints into final audio.mp4)
-        let final_audio_path = if let Some(saver_arc) = self.incremental_saver.take() {
-            // The accumulator has completed and dropped its Arc clone, so reclaim the saver
-            // before awaiting finalization. No std::sync::Mutex guard is held across `.await`,
-            // and no Tokio mutex is accessed from blocking code.
-            let saver_mutex = Arc::try_unwrap(saver_arc).map_err(|_| {
-                "Incremental saver still has active owners after accumulation stopped".to_string()
-            })?;
-            let mut saver = saver_mutex
-                .into_inner()
-                .map_err(|_| "Incremental saver mutex was poisoned".to_string())?;
+        let final_audio_path = if let Some(mut saver) = self.incremental_saver.take() {
             match saver.finalize().await {
                 Ok(path) => {
                     info!("✅ Successfully finalized audio: {}", path.display());
@@ -467,9 +466,10 @@ impl RecordingSaver {
 
 fn drain_audio_chunks(
     receiver: &mut mpsc::Receiver<AudioChunk>,
-    incremental_saver: Option<Arc<Mutex<IncrementalAudioSaver>>>,
+    mut incremental_saver: Option<IncrementalAudioSaver>,
     save_audio: bool,
-) {
+    checkpoint_count: Arc<AtomicU32>,
+) -> Option<IncrementalAudioSaver> {
     info!(
         "Recording saver accumulation task started (save_audio: {})",
         save_audio
@@ -482,19 +482,18 @@ fn drain_audio_chunks(
             continue;
         }
 
-        let Some(saver) = &incremental_saver else {
+        let Some(saver) = incremental_saver.as_mut() else {
             error!("Incremental saver not available while accumulating");
             continue;
         };
-        let mut saver = saver
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
         if let Err(e) = saver.add_chunk(chunk) {
             error!("Failed to add chunk to incremental saver: {e}");
         }
+        checkpoint_count.store(saver.get_checkpoint_count(), Ordering::Relaxed);
     }
 
     info!("Recording saver accumulation task ended");
+    incremental_saver
 }
 
 fn write_transcripts_json_from_segments(
@@ -580,14 +579,13 @@ mod tests {
     async fn accumulation_is_safe_on_a_current_thread_runtime() {
         let temp = tempfile::tempdir().unwrap();
         std::fs::create_dir(temp.path().join(".checkpoints")).unwrap();
-        let saver = Arc::new(Mutex::new(
-            IncrementalAudioSaver::new(temp.path().to_path_buf(), 48_000).unwrap(),
-        ));
-        let task_saver = Arc::clone(&saver);
+        let saver = IncrementalAudioSaver::new(temp.path().to_path_buf(), 48_000).unwrap();
+        let checkpoint_count = Arc::new(AtomicU32::new(0));
+        let task_checkpoint_count = Arc::clone(&checkpoint_count);
         let (sender, mut receiver) = mpsc::channel(2);
 
         let task = tokio::task::spawn_blocking(move || {
-            drain_audio_chunks(&mut receiver, Some(task_saver), true)
+            drain_audio_chunks(&mut receiver, Some(saver), true, task_checkpoint_count)
         });
         sender
             .send(AudioChunk {
@@ -602,11 +600,12 @@ mod tests {
             .unwrap();
         drop(sender);
 
-        tokio::time::timeout(std::time::Duration::from_secs(2), task)
+        let returned_saver = tokio::time::timeout(std::time::Duration::from_secs(2), task)
             .await
             .expect("accumulator must not deadlock")
-            .expect("accumulator must not panic");
-        assert_eq!(Arc::strong_count(&saver), 1);
-        assert_eq!(saver.lock().unwrap().get_checkpoint_count(), 0);
+            .expect("accumulator must not panic")
+            .expect("accumulator must return saver ownership");
+        assert_eq!(returned_saver.get_checkpoint_count(), 0);
+        assert_eq!(checkpoint_count.load(Ordering::Relaxed), 0);
     }
 }

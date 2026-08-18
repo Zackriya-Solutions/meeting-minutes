@@ -81,7 +81,9 @@ impl AudioError {
             AudioError::InitializationFailed => "Failed to initialize audio system",
             AudioError::ConfigurationError => "Audio configuration error",
             AudioError::PermissionDenied => "Microphone permission denied",
-            AudioError::BufferOverflow => "Audio buffer overflow",
+            AudioError::BufferOverflow => {
+                "Recording could not keep up; a small part of the audio may be missing"
+            }
             AudioError::SampleRateUnsupported => "Audio sample rate not supported",
         }
     }
@@ -290,6 +292,7 @@ impl RecordingState {
                         log::warn!(
                             "Audio pipeline backlog is full; dropped {dropped} raw chunks this session"
                         );
+                        self.report_non_fatal_warning(AudioError::BufferOverflow);
                     }
                     return Ok(());
                 }
@@ -359,6 +362,15 @@ impl RecordingState {
                 count
             );
             self.stop_recording();
+        }
+    }
+
+    /// Notify the UI about recoverable degradation without incrementing fatal-error
+    /// thresholds. This is used for bounded-queue drops: the session should continue, but
+    /// the user must know the saved audio may contain a gap.
+    pub fn report_non_fatal_warning(&self, warning: AudioError) {
+        if let Some(callback) = self.error_callback.lock().unwrap().as_ref() {
+            callback(&warning);
         }
     }
 
