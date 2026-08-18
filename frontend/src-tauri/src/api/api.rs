@@ -471,6 +471,24 @@ pub async fn api_remove_meeting_tag<R: Runtime>(
         .map(|_| ()).map_err(|e| e.to_string())
 }
 
+fn strip_list_marker(candidate: &str) -> &str {
+    let trimmed = candidate.trim_start();
+    if let Some(rest) = trimmed.strip_prefix(['-', '*', '•']) {
+        if rest.starts_with(char::is_whitespace) {
+            return rest.trim_start();
+        }
+    }
+    let digit_count = trimmed.chars().take_while(|c| c.is_ascii_digit()).count();
+    if digit_count > 0 {
+        if let Some(rest) = trimmed[digit_count..].strip_prefix(['.', ')']) {
+            if rest.starts_with(char::is_whitespace) {
+                return rest.trim_start();
+            }
+        }
+    }
+    trimmed
+}
+
 fn is_plausible_tag(tag: &str) -> bool {
     !tag.is_empty()
         && tag.chars().count() <= 40
@@ -490,7 +508,7 @@ fn parse_suggested_tags(raw: &str) -> Vec<String> {
     };
     let mut result: Vec<String> = Vec::new();
     for candidate in candidates {
-        let tag = candidate.trim().trim_start_matches('#').trim().to_string();
+        let tag = strip_list_marker(candidate.trim()).trim_start_matches('#').trim().to_string();
         if !is_plausible_tag(&tag) || result.iter().any(|existing| existing.eq_ignore_ascii_case(&tag)) {
             continue;
         }
@@ -1659,6 +1677,42 @@ mod tests {
                 "roadmap".to_string(),
                 "alpha-release".to_string(),
                 "mobile".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn strips_numbered_and_bulleted_list_markers_from_fallback_candidates() {
+        assert_eq!(
+            parse_suggested_tags("1. roadmap\n2. alpha-release\n3. mobile"),
+            vec![
+                "roadmap".to_string(),
+                "alpha-release".to_string(),
+                "mobile".to_string()
+            ]
+        );
+        assert_eq!(
+            parse_suggested_tags("- roadmap\n* alpha-release\n• mobile"),
+            vec![
+                "roadmap".to_string(),
+                "alpha-release".to_string(),
+                "mobile".to_string()
+            ]
+        );
+        assert_eq!(
+            parse_suggested_tags("1) roadmap\n2) #mobile"),
+            vec!["roadmap".to_string(), "mobile".to_string()]
+        );
+    }
+
+    #[test]
+    fn keeps_tags_whose_own_text_starts_with_digits_or_punctuation() {
+        assert_eq!(
+            parse_suggested_tags("2024-planning, 2.0-release, 3d-printing"),
+            vec![
+                "2024-planning".to_string(),
+                "2.0-release".to_string(),
+                "3d-printing".to_string()
             ]
         );
     }

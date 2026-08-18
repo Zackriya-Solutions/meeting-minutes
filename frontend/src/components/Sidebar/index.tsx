@@ -282,7 +282,7 @@ const Sidebar: React.FC = () => {
   const filteredSidebarItems = useMemo(() => {
     const matchedMeetingIds = new Set(searchResults.map(result => result.id));
     return filterSidebarItems(sidebarItems, searchQuery, matchedMeetingIds);
-  }, [sidebarItems, searchQuery, searchResults, expandedFolders]);
+  }, [sidebarItems, searchQuery, searchResults]);
 
 
   const handleDelete = async (itemId: string) => {

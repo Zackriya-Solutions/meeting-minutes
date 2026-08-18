@@ -23,11 +23,6 @@ export interface ProjectFolder {
 
 export const UNFILED_FOLDER_VALUE = 'unfiled';
 
-export interface MeetingTag {
-  id: string;
-  name: string;
-}
-
 export interface CurrentMeeting {
   id: string;
   title: string;
