@@ -1330,6 +1330,12 @@ async fn run_import<R: Runtime>(
     // variant that does not already exist. This policy is selected by the native
     // command path, not by a frontend flag; callers cannot disable idempotency.
     if let Some(canonical) = find_existing_audio_meeting(pool, &source_sha256).await? {
+        // Historical imports predate denoise provenance. Treat unknown as an
+        // existing match for either mode: guessing that it differs would create
+        // a speculative duplicate that the user cannot meaningfully compare.
+        if canonical.denoise_applied.is_none() {
+            return Ok(ImportRunOutcome::AlreadyImported(canonical));
+        }
         let same_processing =
             crate::database::repositories::audio_identity::find_processing_variant(
                 pool,
@@ -2015,6 +2021,17 @@ async fn create_meeting_with_transcripts(
     // index on (sha256, denoise_applied) is the concurrent safety net; this read
     // is the normal fast path and returns the most useful meeting to the caller.
     if keep_duplicate {
+        if let Some(canonical) =
+            crate::database::repositories::audio_identity::find_canonical_meeting(
+                pool,
+                source_sha256,
+            )
+            .await?
+        {
+            if canonical.denoise_applied.is_none() {
+                return Ok(CreateMeetingOutcome::AlreadyImported(canonical));
+            }
+        }
         if let Some(existing) =
             crate::database::repositories::audio_identity::find_processing_variant(
                 pool,
@@ -3769,6 +3786,60 @@ mod tests {
             panic!("unchanged processing unexpectedly created another take");
         };
         assert_eq!(existing.meeting_id, "meeting-raw");
+
+        let meetings: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM meetings")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(meetings, 1);
+    }
+
+    #[tokio::test]
+    async fn legacy_unknown_processing_never_creates_a_speculative_variant() {
+        const HASH: &str = "fe432cb211dac676fcd7d2f05033f82be9fd8325923e6e3a322758fee60e94cf";
+        let pool = import_identity_test_pool().await;
+        sqlx::query(
+            "INSERT INTO meetings(id,title,created_at,updated_at,folder_path) \
+             VALUES('meeting-legacy','Legacy','2026-01-01','2026-01-01','/tmp/legacy')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let mut tx = pool.begin().await.unwrap();
+        crate::database::repositories::audio_identity::register_import_identity(
+            &mut tx,
+            "meeting-legacy",
+            HASH,
+            7,
+            Some(1_000),
+            None,
+        )
+        .await
+        .unwrap();
+        tx.commit().await.unwrap();
+
+        for (meeting_id, denoise_applied) in
+            [("meeting-raw-guess", false), ("meeting-denoised-guess", true)]
+        {
+            let outcome = create_meeting_with_transcripts(
+                &pool,
+                meeting_id,
+                "Speculative",
+                &[],
+                format!("/tmp/{meeting_id}"),
+                HASH,
+                7,
+                Some(1_000),
+                denoise_applied,
+                true,
+            )
+            .await
+            .unwrap();
+            let CreateMeetingOutcome::AlreadyImported(existing) = outcome else {
+                panic!("legacy unknown processing unexpectedly created {meeting_id}");
+            };
+            assert_eq!(existing.meeting_id, "meeting-legacy");
+        }
 
         let meetings: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM meetings")
             .fetch_one(&pool)

@@ -129,11 +129,12 @@ export function ImportAudioDialog({
         ? t('imported with denoising')
         : t('imported without denoising');
     const wantsDenoise = loadBetaFeatures().noisyAudioDenoising;
-    const sameAsNow = existing.denoise_applied === wantsDenoise;
+    const canRedoWithCurrentSettings =
+      existing.denoise_applied !== null && existing.denoise_applied !== wantsDenoise;
     const pending = pendingImportRef.current;
     toast.info(t('Audio already imported'), {
       description: `${existing.title} — ${processedAs}`,
-      action: pending && !sameAsNow
+      action: pending && canRedoWithCurrentSettings
         ? {
             label: t('Redo with current settings'),
             onClick: () => {
@@ -443,7 +444,8 @@ export function ImportAudioDialog({
                       >
                         {t('Open existing meeting')}
                       </Button>
-                      {fileInfo.existing_meeting.denoise_applied !== loadBetaFeatures().noisyAudioDenoising && (
+                      {fileInfo.existing_meeting.denoise_applied !== null
+                        && fileInfo.existing_meeting.denoise_applied !== loadBetaFeatures().noisyAudioDenoising && (
                         <Button
                           variant="secondary"
                           size="md"
