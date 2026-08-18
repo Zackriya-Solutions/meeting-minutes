@@ -106,12 +106,15 @@ pub fn request_permission() -> Result<LocalOutlookCalendarStatus, String> {
     Ok(status())
 }
 
-pub fn upcoming_meetings(days: u32) -> Result<Vec<LocalOutlookMeeting>, String> {
+pub fn upcoming_meetings(
+    days: u32,
+    include_attendees: bool,
+) -> Result<Vec<LocalOutlookMeeting>, String> {
     if accessibility_only() {
         return macos_outlook::upcoming_meetings(days);
     }
 
-    match macos_outlook_events::upcoming_meetings(days) {
+    match macos_outlook_events::upcoming_meetings(days, include_attendees) {
         Ok(meetings) => Ok(meetings),
         Err(error) => {
             // Accessibility is a strictly worse connector — it moves Outlook's

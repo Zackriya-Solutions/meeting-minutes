@@ -14,6 +14,7 @@ const {
   PENDING_ROSTER_KEY,
   SOURCE_MANUAL_ROSTER,
   readMeetingRoster,
+  readMeetingParticipants,
   rememberMeetingParticipants,
   saveMeetingParticipants,
   takeMeetingParticipants,
@@ -41,6 +42,14 @@ function fakeStorage(initial: Record<string, string> = {}): Storage {
 }
 
 describe("the pending participants slot", () => {
+  test("can be inspected without consuming it before a fallible meeting save", () => {
+    const storage = fakeStorage();
+    rememberMeetingParticipants(storage, ["Мария Петрова"]);
+
+    expect(readMeetingParticipants(storage)).toEqual(["Мария Петрова"]);
+    expect(takeMeetingParticipants(storage)).toEqual(["Мария Петрова"]);
+  });
+
   test("survives from the start of a recording to the save that follows it", () => {
     const storage = fakeStorage();
     rememberMeetingParticipants(storage, ["Андрей Евлампиев", "Мария Петрова"]);

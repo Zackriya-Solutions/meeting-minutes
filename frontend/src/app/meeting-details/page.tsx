@@ -60,18 +60,27 @@ function UpcomingMeetingPreview() {
     : '';
 
   // Who the invitation names. The row that opened this screen cannot carry a list
-  // through the query string, so the entry is looked up again by id — the calendar
-  // read is cached, so this is normally free.
+  // through the query string, so the entry is looked up again by id. Background calendar
+  // refreshes intentionally omit recipients; this one user-initiated lookup enriches the
+  // selected entry without repeatedly blocking Outlook.
   const [participants, setParticipants] = useState<string[]>([]);
+  const [participantsResolved, setParticipantsResolved] = useState(false);
   useEffect(() => {
-    if (!calendarId) return;
+    if (!calendarId) {
+      setParticipantsResolved(true);
+      return;
+    }
     let cancelled = false;
+    setParticipantsResolved(false);
     findLocalOutlookMeeting(calendarId)
       .then((meeting) => {
         if (!cancelled) setParticipants(meeting?.attendees ?? []);
       })
       .catch((error) => {
         console.warn('Could not read the invited participants:', error);
+      })
+      .finally(() => {
+        if (!cancelled) setParticipantsResolved(true);
       });
     return () => {
       cancelled = true;
@@ -86,7 +95,9 @@ function UpcomingMeetingPreview() {
   const inProgress = hasStart
     && start.getTime() <= now
     && (!hasEnd || end.getTime() > now);
-  const canRecord = canStartRecordingNow(isRecording, status);
+  // Do not let a fast click outrun the attendee lookup. An empty resolved list is valid
+  // (for example with the Accessibility fallback); only the in-flight state blocks.
+  const canRecord = participantsResolved && canStartRecordingNow(isRecording, status);
 
   const recordThisMeeting = () => {
     if (!canRecord) return;

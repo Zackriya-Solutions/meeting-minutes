@@ -7,6 +7,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react';
 import { toast } from 'sonner';
@@ -23,6 +24,7 @@ import {
   needsOutlookPermission,
   requestOutlookCalendarPermission,
   setLocalOutlookCalendarEnabled,
+  shouldAutomaticallyRefreshOutlookCalendar,
 } from '@/lib/localOutlookCalendar';
 
 const HOME_MEETING_LIMIT = 2;
@@ -34,10 +36,12 @@ interface LocalOutlookCalendarContextValue {
   enabled: boolean;
   upcomingMeetings: LocalOutlookMeeting[];
   loading: boolean;
+  refreshing: boolean;
   saving: boolean;
   homeCardVisible: boolean;
   setHomeCardVisible: (visible: boolean) => void;
   toggleEnabled: (enabled: boolean) => Promise<void>;
+  refresh: () => Promise<void>;
 }
 
 const LocalOutlookCalendarContext = createContext<LocalOutlookCalendarContextValue | null>(null);
@@ -64,6 +68,8 @@ export function LocalOutlookCalendarProvider({ children }: { children: ReactNode
   const [enabled, setEnabled] = useState(false);
   const [upcomingMeetings, setUpcomingMeetings] = useState<LocalOutlookMeeting[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const refreshInFlight = useRef(false);
   const [saving, setSaving] = useState(false);
   const [homeCardVisible, setHomeCardVisible] = useState(false);
   const [homeCardDismissed, setHomeCardDismissed] = useState(false);
@@ -130,7 +136,12 @@ export function LocalOutlookCalendarProvider({ children }: { children: ReactNode
       });
 
     const refresh = () => {
-      void loadCalendarState(true).catch(() => undefined);
+      // A focus change is common when joining a meeting from Outlook. Respect the
+      // calendar cache instead of synchronously rescanning Outlook on every switch.
+      // The Accessibility fallback manipulates the visible Outlook window, so it is
+      // deliberately user/initial-load driven and never runs on focus.
+      if (!shouldAutomaticallyRefreshOutlookCalendar(status)) return;
+      void loadCalendarState().catch(() => undefined);
     };
     window.addEventListener('focus', refresh);
     window.addEventListener(LOCAL_OUTLOOK_SETTING_CHANGED_EVENT, refresh);
@@ -139,17 +150,17 @@ export function LocalOutlookCalendarProvider({ children }: { children: ReactNode
       window.removeEventListener('focus', refresh);
       window.removeEventListener(LOCAL_OUTLOOK_SETTING_CHANGED_EVENT, refresh);
     };
-  }, [loadCalendarState, t]);
+  }, [loadCalendarState, status?.provider, t]);
 
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled || !shouldAutomaticallyRefreshOutlookCalendar(status)) return;
 
     const refresh = () => {
-      void loadCalendarState(true).catch(() => undefined);
+      void loadCalendarState().catch(() => undefined);
     };
     const interval = window.setInterval(refresh, OUTLOOK_CALENDAR_REFRESH_INTERVAL_MS);
     return () => window.clearInterval(interval);
-  }, [enabled, loadCalendarState]);
+  }, [enabled, loadCalendarState, status?.provider]);
 
   useEffect(() => {
     if (!enabled || upcomingMeetings.length === 0) return;
@@ -164,7 +175,8 @@ export function LocalOutlookCalendarProvider({ children }: { children: ReactNode
     if (!Number.isFinite(nextEnd)) return;
 
     const timer = window.setTimeout(() => {
-      void loadCalendarState(true).catch(() => undefined);
+      // Filtering the cached list is enough when an entry ends; do not wake Outlook.
+      void loadCalendarState().catch(() => undefined);
     }, Math.max(MEETING_END_REFRESH_PADDING_MS, nextEnd - now + MEETING_END_REFRESH_PADDING_MS));
 
     return () => window.clearTimeout(timer);
@@ -218,20 +230,43 @@ export function LocalOutlookCalendarProvider({ children }: { children: ReactNode
     }
   }, [enabled, homeCardDismissed, refreshStatus, status, t]);
 
+  const refresh = useCallback(async () => {
+    // React state is intentionally reflected in the button, but it does not update
+    // synchronously between two clicks in the same event turn. The ref closes that
+    // small window so only one forced Outlook read can start.
+    if (!enabled || saving || refreshInFlight.current) return;
+    refreshInFlight.current = true;
+    setRefreshing(true);
+    try {
+      await loadCalendarState(true);
+    } catch (error) {
+      toast.error(t('Could not check the local Outlook calendar'), {
+        description: String(error),
+      });
+    } finally {
+      refreshInFlight.current = false;
+      setRefreshing(false);
+    }
+  }, [enabled, loadCalendarState, saving, t]);
+
   const value = useMemo<LocalOutlookCalendarContextValue>(() => ({
     status,
     enabled,
     upcomingMeetings,
     loading,
+    refreshing,
     saving,
     homeCardVisible,
     setHomeCardVisible: setHomeCardVisiblePersistently,
     toggleEnabled,
+    refresh,
   }), [
     enabled,
     homeCardVisible,
     setHomeCardVisiblePersistently,
     loading,
+    refresh,
+    refreshing,
     saving,
     status,
     toggleEnabled,

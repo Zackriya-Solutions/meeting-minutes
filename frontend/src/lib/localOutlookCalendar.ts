@@ -2,22 +2,24 @@ import { invoke } from '@tauri-apps/api/core';
 
 const ENABLED_SETTING = 'calendar.local_outlook_enabled';
 export const LOCAL_OUTLOOK_SETTING_CHANGED_EVENT = 'memento:local-outlook-setting-changed';
-const CACHE_TTL_MS = 30 * 1000;
+// Outlook's local automation APIs are synchronous inside Outlook. Keep background reads
+// sparse; a user can still explicitly refresh, and attendee enrichment has its own cache.
+const CACHE_TTL_MS = 15 * 60 * 1000;
 // Calendar fixtures are useful for an isolated UI demo, but must never be enabled
 // merely because the app is running in development. They otherwise replace the
 // user's real Outlook entries and also become the title source for recordings.
 const USE_DEV_OUTLOOK_MOCKS = process.env.NEXT_PUBLIC_USE_DEV_OUTLOOK_MOCKS === 'true';
 
-export const OUTLOOK_CALENDAR_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
-export const OUTLOOK_CALENDAR_EMPTY_RETRY_INTERVAL_MS = 60 * 1000;
+export const OUTLOOK_CALENDAR_REFRESH_INTERVAL_MS = 15 * 60 * 1000;
+export const OUTLOOK_CALENDAR_EMPTY_RETRY_INTERVAL_MS = 5 * 60 * 1000;
 
 interface MeetingCacheEntry {
   fetchedAt: number;
   meetings: LocalOutlookMeeting[];
 }
 
-const meetingCache = new Map<number, MeetingCacheEntry>();
-const inFlightRequests = new Map<number, Promise<LocalOutlookMeeting[]>>();
+const meetingCache = new Map<string, MeetingCacheEntry>();
+const inFlightRequests = new Map<string, Promise<LocalOutlookMeeting[]>>();
 
 export type LocalOutlookPermission = 'none' | 'automation' | 'accessibility';
 export type LocalOutlookPermissionState = 'granted' | 'denied' | 'undetermined' | 'unknown';
@@ -51,6 +53,28 @@ export function canReadOutlookCalendar(status: LocalOutlookCalendarStatus): bool
 export function needsOutlookPermission(status: LocalOutlookCalendarStatus): boolean {
   if (!status.supported || !status.installed || status.permission === 'none') return false;
   return status.permission_state === 'denied' || status.permission_state === 'undetermined';
+}
+
+/** Accessibility sees only the rendered grid and cannot expose invitee records. */
+export function canReadOutlookAttendees(status: LocalOutlookCalendarStatus): boolean {
+  return status.provider !== 'macos-outlook-accessibility';
+}
+
+/** Accessibility reads/navigates Outlook's visible UI and must remain user-driven. */
+export function shouldAutomaticallyRefreshOutlookCalendar(
+  status: LocalOutlookCalendarStatus | null,
+): boolean {
+  return status?.provider !== 'macos-outlook-accessibility';
+}
+
+export function manualOutlookRefreshControlState(
+  refreshing: boolean,
+  saving: boolean,
+): { loading: boolean; disabled: boolean } {
+  return {
+    loading: refreshing,
+    disabled: refreshing || saving,
+  };
 }
 
 export interface LocalOutlookMeeting {
@@ -172,33 +196,38 @@ export async function requestOutlookCalendarPermission(): Promise<LocalOutlookCa
 
 export async function getUpcomingLocalOutlookMeetings(
   days = 7,
-  options: { force?: boolean } = {},
+  options: { force?: boolean; includeAttendees?: boolean } = {},
 ): Promise<LocalOutlookMeeting[]> {
   if (USE_DEV_OUTLOOK_MOCKS) return devOutlookMeetings();
 
-  const cached = meetingCache.get(days);
+  const includeAttendees = options.includeAttendees === true;
+  const cacheKey = `${days}:${includeAttendees ? 'attendees' : 'summary'}`;
+  const cached = meetingCache.get(cacheKey);
   if (!options.force && cached && Date.now() - cached.fetchedAt < CACHE_TTL_MS) {
     return cached.meetings;
   }
 
-  const existingRequest = inFlightRequests.get(days);
+  const existingRequest = inFlightRequests.get(cacheKey);
   if (existingRequest) return existingRequest;
 
-  const request = invoke<LocalOutlookMeeting[]>('get_upcoming_local_outlook_meetings', { days })
+  const request = invoke<LocalOutlookMeeting[]>('get_upcoming_local_outlook_meetings', {
+    days,
+    includeAttendees,
+  })
     .then((meetings) => {
-      meetingCache.set(days, {
+      meetingCache.set(cacheKey, {
         fetchedAt: Date.now(),
         meetings,
       });
       return meetings;
     })
     .finally(() => {
-      if (inFlightRequests.get(days) === request) {
-        inFlightRequests.delete(days);
+      if (inFlightRequests.get(cacheKey) === request) {
+        inFlightRequests.delete(cacheKey);
       }
     });
 
-  inFlightRequests.set(days, request);
+  inFlightRequests.set(cacheKey, request);
   return request;
 }
 
@@ -234,7 +263,10 @@ export function selectMeetingInProgress(
 /** One calendar entry by the id the upcoming list handed out, or null. */
 export async function findLocalOutlookMeeting(id: string): Promise<LocalOutlookMeeting | null> {
   if (!await isLocalOutlookCalendarEnabled()) return null;
-  const meetings = await getUpcomingLocalOutlookMeetings();
+  const status = await getLocalOutlookCalendarStatus();
+  const meetings = await getUpcomingLocalOutlookMeetings(7, {
+    includeAttendees: canReadOutlookAttendees(status),
+  });
   return meetings.find((meeting) => meeting.id === id) ?? null;
 }
 
@@ -251,8 +283,14 @@ export async function getCurrentLocalOutlookMeeting(
 ): Promise<LocalOutlookMeeting | null> {
   try {
     if (!await isLocalOutlookCalendarEnabled()) return null;
+    const status = await getLocalOutlookCalendarStatus();
     const meetings = await Promise.race([
-      getUpcomingLocalOutlookMeetings(),
+      // Only the current day needs enrichment here. The seven-day metadata list is for
+      // browsing; walking every future invitation while the Record button waits adds
+      // avoidable work inside Outlook.
+      getUpcomingLocalOutlookMeetings(1, {
+        includeAttendees: canReadOutlookAttendees(status),
+      }),
       new Promise<null>((resolve) => { window.setTimeout(() => resolve(null), timeoutMs); }),
     ]);
     return meetings ? selectMeetingInProgress(meetings) : null;

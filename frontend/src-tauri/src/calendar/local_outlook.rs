@@ -89,9 +89,21 @@ where
     attendees
 }
 
+pub(super) fn attendees_for_calendar_read(
+    include_attendees: bool,
+    read_attendees: impl FnOnce() -> Vec<String>,
+) -> Vec<String> {
+    if include_attendees {
+        read_attendees()
+    } else {
+        Vec::new()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::Cell;
 
     #[test]
     fn normalizes_an_invitee_list() {
@@ -117,6 +129,26 @@ mod tests {
         let attendees = normalize_attendees(&many);
         assert_eq!(attendees.len(), MAX_ATTENDEES);
         assert_eq!(attendees[0], "Person 0");
+    }
+
+    #[test]
+    fn metadata_only_reads_do_not_touch_provider_attendee_properties() {
+        let called = Cell::new(false);
+        let attendees = attendees_for_calendar_read(false, || {
+            called.set(true);
+            vec!["Should not be read".to_string()]
+        });
+
+        assert!(attendees.is_empty());
+        assert!(!called.get());
+    }
+
+    #[test]
+    fn enriched_reads_return_provider_attendees() {
+        let attendees =
+            attendees_for_calendar_read(true, || vec!["Maria Example".to_string()]);
+
+        assert_eq!(attendees, vec!["Maria Example".to_string()]);
     }
 }
 
@@ -169,13 +201,15 @@ pub async fn request_outlook_calendar_permission() -> Result<LocalOutlookCalenda
 #[tauri::command]
 pub async fn get_upcoming_local_outlook_meetings(
     days: Option<u32>,
+    include_attendees: Option<bool>,
 ) -> Result<Vec<LocalOutlookMeeting>, String> {
     let days = days.unwrap_or(7).clamp(1, 31);
+    let include_attendees = include_attendees.unwrap_or(false);
 
     #[cfg(target_os = "windows")]
     {
         return tauri::async_runtime::spawn_blocking(move || {
-            super::windows_outlook::upcoming_meetings(days)
+            super::windows_outlook::upcoming_meetings(days, include_attendees)
         })
         .await
         .map_err(|error| format!("local Outlook calendar task failed: {error}"))?;
@@ -184,7 +218,7 @@ pub async fn get_upcoming_local_outlook_meetings(
     #[cfg(target_os = "macos")]
     {
         return tauri::async_runtime::spawn_blocking(move || {
-            super::macos_provider::upcoming_meetings(days)
+            super::macos_provider::upcoming_meetings(days, include_attendees)
         })
         .await
         .map_err(|error| format!("local Outlook calendar task failed: {error}"))?;
@@ -192,7 +226,7 @@ pub async fn get_upcoming_local_outlook_meetings(
 
     #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     {
-        let _ = days;
+        let _ = (days, include_attendees);
         Err(UNSUPPORTED_MESSAGE.to_string())
     }
 }

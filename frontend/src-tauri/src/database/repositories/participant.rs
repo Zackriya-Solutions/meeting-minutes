@@ -8,8 +8,10 @@
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, SqlitePool};
 
-/// Where a participant came from. Only calendar invitations are recorded today.
+/// Where a participant came from. Calendar invitations and an explicitly entered live
+/// roster remain distinct claims even though speaker naming can use both as hints.
 pub const SOURCE_OUTLOOK_CALENDAR: &str = "outlook_calendar";
+pub const SOURCE_MANUAL_ROSTER: &str = "manual_roster";
 
 /// A participant list longer than this is a distribution list, not a meeting, and is
 /// no use to speaker naming.
@@ -161,6 +163,57 @@ mod tests {
                 "Андрей Евлампиев".to_string(),
                 "Мария Петрова".to_string(),
                 "Гость".to_string(),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn retries_and_cross_source_overlap_remain_one_person() {
+        let pool = pool_with_meeting().await;
+        let invited = vec![
+            "Мария Петрова".to_string(),
+            "Андрей Евлампиев".to_string(),
+        ];
+
+        assert_eq!(
+            ParticipantsRepository::add(&pool, "m1", &invited, SOURCE_OUTLOOK_CALENDAR)
+                .await
+                .unwrap(),
+            2
+        );
+        // A client retry after the meeting save committed is idempotent.
+        assert_eq!(
+            ParticipantsRepository::add(&pool, "m1", &invited, SOURCE_OUTLOOK_CALENDAR)
+                .await
+                .unwrap(),
+            0
+        );
+
+        // The live roster can repeat an invitee with different case/spacing. The unique
+        // key deliberately excludes source: one human remains one meeting participant,
+        // and the first provenance claim is preserved.
+        let roster = vec!["  мария   петрова ".to_string(), "Гость".to_string()];
+        assert_eq!(
+            ParticipantsRepository::add(&pool, "m1", &roster, SOURCE_MANUAL_ROSTER)
+                .await
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            ParticipantsRepository::list(&pool, "m1").await.unwrap(),
+            vec![
+                MeetingParticipant {
+                    name: "Мария Петрова".to_string(),
+                    source: SOURCE_OUTLOOK_CALENDAR.to_string(),
+                },
+                MeetingParticipant {
+                    name: "Андрей Евлампиев".to_string(),
+                    source: SOURCE_OUTLOOK_CALENDAR.to_string(),
+                },
+                MeetingParticipant {
+                    name: "Гость".to_string(),
+                    source: SOURCE_MANUAL_ROSTER.to_string(),
+                },
             ]
         );
     }

@@ -16,10 +16,10 @@ import { migrateStandupLiveState } from '@/lib/standupLiveState';
 import { migrateInterviewLiveState } from '@/lib/interviewLiveState';
 import { takeDiarizationPrefs } from '@/lib/diarizationPrefs';
 import {
-  saveMeetingParticipants,
+  readMeetingParticipants,
+  readMeetingRoster,
   takeMeetingParticipants,
   takeMeetingRoster,
-  SOURCE_MANUAL_ROSTER,
 } from '@/lib/meetingParticipants';
 import {
   saveMeetingCalendarSchedule,
@@ -322,10 +322,18 @@ export function useRecordingStop(
         });
 
         try {
+          // Carry people into the same native save that creates the meeting. Native
+          // refinement starts before this command returns, so a second IPC call is too
+          // late for a fast speaker-naming pass. Read without consuming first: if saving
+          // fails, the pending identity still belongs to the recording retry.
+          const invitedParticipants = readMeetingParticipants(sessionStorage);
+          const roster = readMeetingRoster(sessionStorage);
           const responseData = await storageService.saveMeeting(
             savedMeetingName || meetingTitle || 'New Meeting',  // PREFER savedMeetingName (backend source)
             freshTranscripts,
-            folderPath
+            folderPath,
+            invitedParticipants,
+            roster,
           );
 
           const meetingId = responseData.meeting_id;
@@ -339,29 +347,10 @@ export function useRecordingStop(
             saveMeetingCalendarSchedule(localStorage, meetingId, calendarSchedule);
           }
 
-          // Who the calendar invited, learned when the recording started. Attaching it
-          // now is what lets speaker naming put those names to the voices; a failure
-          // here costs names, never the meeting.
-          const invitedParticipants = takeMeetingParticipants(sessionStorage);
-          if (invitedParticipants.length > 0) {
-            try {
-              await saveMeetingParticipants(meetingId, invitedParticipants);
-            } catch (error) {
-              console.warn('Failed to attach the invited participants:', error);
-            }
-          }
-
-          // Who the user said was in the room, typed during the recording. Stored under its
-          // own source: an invitation says who was asked, a roster says who turned up, and
-          // the naming pass is better off knowing which claim it is reading.
-          const roster = takeMeetingRoster(sessionStorage);
-          if (roster.length > 0) {
-            try {
-              await saveMeetingParticipants(meetingId, roster, SOURCE_MANUAL_ROSTER);
-            } catch (error) {
-              console.warn('Failed to attach the meeting roster:', error);
-            }
-          }
+          // The native save persisted both lists before starting refinement. Consume the
+          // one-recording hand-off only after that save succeeded.
+          takeMeetingParticipants(sessionStorage);
+          takeMeetingRoster(sessionStorage);
 
           const autoListeningSessionId = sessionStorage.getItem('autoListeningSessionId');
           if (autoListeningSessionId) {

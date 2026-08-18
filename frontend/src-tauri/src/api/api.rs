@@ -10,6 +10,7 @@ use crate::{
         models::MeetingModel,
         repositories::{
             meeting::MeetingsRepository,
+            participant::{ParticipantsRepository, SOURCE_MANUAL_ROSTER, SOURCE_OUTLOOK_CALENDAR},
             setting::{is_secret_sentinel, redact_secret, SettingsRepository},
             transcript::TranscriptsRepository,
         },
@@ -1151,6 +1152,43 @@ pub async fn api_save_meeting_title<R: Runtime>(
     }
 }
 
+async fn save_meeting_participants_best_effort(
+    pool: &sqlx::SqlitePool,
+    meeting_id: &str,
+    invited_participants: Option<&[String]>,
+    manual_roster: Option<&[String]>,
+) {
+    if let Some(participants) = invited_participants.filter(|names| !names.is_empty()) {
+        if let Err(error) = ParticipantsRepository::add(
+            pool,
+            meeting_id,
+            participants,
+            SOURCE_OUTLOOK_CALENDAR,
+        )
+        .await
+        {
+            // The transcript and recording are already durable. Keep the command
+            // successful so a retry cannot create a duplicate meeting.
+            log_warn!("Failed to save Outlook participants: {}", error);
+        }
+    }
+    if let Some(roster) = manual_roster.filter(|names| !names.is_empty()) {
+        if let Err(error) =
+            ParticipantsRepository::add(pool, meeting_id, roster, SOURCE_MANUAL_ROSTER).await
+        {
+            log_warn!("Failed to save the meeting roster: {}", error);
+        }
+    }
+}
+
+fn successful_transcript_save_response(meeting_id: String) -> serde_json::Value {
+    serde_json::json!({
+        "status": "success",
+        "message": "Transcript saved successfully",
+        "meeting_id": meeting_id
+    })
+}
+
 #[tauri::command]
 pub async fn api_save_transcript<R: Runtime>(
     app: AppHandle<R>,
@@ -1158,6 +1196,8 @@ pub async fn api_save_transcript<R: Runtime>(
     meeting_title: String,
     transcripts: Vec<serde_json::Value>,
     folder_path: Option<String>,
+    invited_participants: Option<Vec<String>>,
+    manual_roster: Option<Vec<String>>,
     auth_token: Option<String>,
 ) -> Result<serde_json::Value, String> {
     log_info!(
@@ -1212,6 +1252,18 @@ pub async fn api_save_transcript<R: Runtime>(
     .await
     {
         Ok(meeting_id) => {
+            // Calendar invitees and the in-recording roster must exist before refinement
+            // starts. Diarization queues speaker naming, and that pass reads these rows as
+            // its candidate names; attaching them from the frontend after this command
+            // returned left a race where naming saw an empty list.
+            save_meeting_participants_best_effort(
+                pool,
+                &meeting_id,
+                invited_participants.as_deref(),
+                manual_roster.as_deref(),
+            )
+            .await;
+
             if let Some(folder) = provenance_folder.filter(|value| !value.trim().is_empty()) {
                 match sqlx::query_as::<_, (String, String)>(
                     "SELECT provider, model FROM transcript_settings WHERE id='1'",
@@ -1265,11 +1317,7 @@ pub async fn api_save_transcript<R: Runtime>(
                 meeting_id.clone(),
             );
 
-            Ok(serde_json::json!({
-                "status": "success",
-                "message": "Transcript saved successfully",
-                "meeting_id": meeting_id
-            }))
+            Ok(successful_transcript_save_response(meeting_id))
         }
         Err(e) => {
             log_error!(
@@ -1752,5 +1800,43 @@ mod delete_recording_folder_tests {
 
         assert!(error.contains("symlink"));
         assert!(recording.exists());
+    }
+}
+
+#[cfg(test)]
+mod save_meeting_participants_tests {
+    use super::{
+        save_meeting_participants_best_effort, successful_transcript_save_response,
+    };
+    use sqlx::SqlitePool;
+
+    #[tokio::test]
+    async fn participant_failure_does_not_abort_an_already_saved_meeting() {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        let invited = vec!["Outlook Guest".to_string()];
+        let roster = vec!["Room Guest".to_string()];
+
+        // Deliberately omit meeting_participants so both inserts fail. The helper has no
+        // error channel by design: api_save_transcript has already made the transcript
+        // durable and must still return its successful response.
+        save_meeting_participants_best_effort(
+            &pool,
+            "saved-meeting",
+            Some(&invited),
+            Some(&roster),
+        )
+        .await;
+
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("SELECT 1")
+                .fetch_one(&pool)
+                .await
+                .unwrap(),
+            1
+        );
+
+        let response = successful_transcript_save_response("saved-meeting".to_string());
+        assert_eq!(response["status"], "success");
+        assert_eq!(response["meeting_id"], "saved-meeting");
     }
 }

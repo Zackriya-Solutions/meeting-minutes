@@ -39,12 +39,9 @@ const SCRIPT_TIMEOUT: StdDuration = StdDuration::from_secs(150);
 /// query remains unbounded and still returns every event Outlook exposes there.
 const MAX_RECURRING_OCCURRENCE_PROBES: u32 = 640;
 const MAX_RECURRING_SERIES_PROBES: u32 = 64;
-/// Invitee names one calendar read may fetch in total.
-///
-/// Every name is two Apple Event round trips, so a full week of large invitations could
-/// otherwise turn a background refresh into a minute of automation traffic. A calendar
-/// busy enough to exhaust this budget still returns every meeting, with the later
-/// entries simply carrying no invitee list.
+/// Invitee names one user-initiated enrichment read may return in total. A calendar busy
+/// enough to exhaust this budget still returns every meeting, with later entries simply
+/// carrying no invitee list. Background refreshes never request these names.
 const ATTENDEE_NAME_BUDGET: usize = 400;
 /// Meetings that already started are still worth offering as a recording target.
 const LOOKBEHIND_HOURS: i64 = 2;
@@ -195,7 +192,10 @@ pub fn request_permission() -> Result<AutomationPermission, String> {
     Ok(permission)
 }
 
-pub fn upcoming_meetings(days: u32) -> Result<Vec<LocalOutlookMeeting>, String> {
+pub fn upcoming_meetings(
+    days: u32,
+    include_attendees: bool,
+) -> Result<Vec<LocalOutlookMeeting>, String> {
     if !outlook_installed() {
         return Err("Microsoft Outlook for Mac is not installed.".to_string());
     }
@@ -232,25 +232,29 @@ pub fn upcoming_meetings(days: u32) -> Result<Vec<LocalOutlookMeeting>, String> 
         }
     }
 
-    let script = render_calendar_script(days);
+    let script = render_calendar_script(days, include_attendees);
     let output = run_osascript(&script, SCRIPT_TIMEOUT)?;
 
     let now = Local::now();
     let range_start = now - Duration::hours(LOOKBEHIND_HOURS);
     let range_end = now + Duration::days(i64::from(days));
 
-    let mut meetings = parse_records(&output, range_start, range_end)?;
+    let mut meetings = parse_records(&output, range_start, range_end, include_attendees)?;
     sort_and_dedup_meetings(&mut meetings);
     Ok(meetings)
 }
 
-fn render_calendar_script(days: u32) -> String {
+fn render_calendar_script(days: u32, include_attendees: bool) -> String {
     let series_probe_budget = recurring_series_probe_budget(days);
     CALENDAR_SCRIPT
         .replace("__DAYS__", &days.to_string())
         .replace("__SERIES_PROBE_BUDGET__", &series_probe_budget.to_string())
         .replace("__MAX_ATTENDEES__", &MAX_ATTENDEES.to_string())
         .replace("__ATTENDEE_BUDGET__", &ATTENDEE_NAME_BUDGET.to_string())
+        .replace(
+            "__INCLUDE_ATTENDEES__",
+            if include_attendees { "true" } else { "false" },
+        )
 }
 
 fn recurring_series_probe_budget(days: u32) -> u32 {
@@ -276,6 +280,7 @@ fn parse_records(
     output: &str,
     range_start: DateTime<Local>,
     range_end: DateTime<Local>,
+    include_attendees: bool,
 ) -> Result<Vec<LocalOutlookMeeting>, String> {
     let mut meetings = Vec::new();
     for record in output.split(RECORD_SEPARATOR) {
@@ -286,7 +291,12 @@ fn parse_records(
         if let Some(message) = record.strip_prefix("ERROR\u{1f}") {
             return Err(format!("Outlook rejected the calendar query: {message}"));
         }
-        if let Some(meeting) = parse_record(record, range_start, range_end) {
+        if let Some(mut meeting) = parse_record(record, range_start, range_end) {
+            // Defense in depth: background callers requested metadata only. Even if a
+            // future script revision accidentally emits names, do not return or cache them.
+            if !include_attendees {
+                meeting.attendees.clear();
+            }
             meetings.push(meeting);
         }
     }
@@ -490,6 +500,7 @@ set rangeEnd to rightNow + (__DAYS__ * days)
 set collected to {}
 set failureText to ""
 set attendeeBudget to __ATTENDEE_BUDGET__
+set includeAttendees to __INCLUDE_ATTENDEES__
 set seriesProbeBudget to __SERIES_PROBE_BUDGET__
 
 tell application "Microsoft Outlook"
@@ -617,36 +628,58 @@ tell application "Microsoft Outlook"
 					-- distribution list from spending the whole Apple Events budget.
 					set attendeeTotal to 0
 					set attendeeNames to {}
+					set eventAttendees to {}
 					try
 						set eventAttendees to attendees of currentEvent
 						set attendeeTotal to (count of eventAttendees)
+					end try
+					if includeAttendees and attendeeTotal > 0 and attendeeBudget > 0 then
+						try
 						set attendeeLimit to attendeeTotal
 						if attendeeLimit > __MAX_ATTENDEES__ then set attendeeLimit to __MAX_ATTENDEES__
 						if attendeeLimit > attendeeBudget then set attendeeLimit to attendeeBudget
 						set attendeeBudget to attendeeBudget - attendeeLimit
+
+						-- Ask Outlook for each property as one vectorized Apple Event. The old
+						-- per-attendee loop made two synchronous automation calls per person and
+						-- repeatedly stalled Outlook's UI thread during a background refresh.
+						set attendeeEmails to {}
+						set displayNames to {}
+						set addresses to {}
+						try
+							-- Raw property codes avoid AppleScript's ambiguity between Outlook's
+							-- `email address` property and its `email address` record type.
+							set attendeeEmails to «class emad» of every item in eventAttendees
+							set displayNames to «class pnam» of every item in attendeeEmails
+						end try
+						try
+							set addresses to «class radd» of every item in attendeeEmails
+						end try
 						repeat with attendeeIndex from 1 to attendeeLimit
 							set attendeeName to ""
-							try
-								set attendeeAddress to email address of item attendeeIndex of eventAttendees
+							if attendeeIndex <= (count of displayNames) then
 								try
-									set attendeeName to my textOrEmpty(name of attendeeAddress)
+									set attendeeName to my textOrEmpty(item attendeeIndex of displayNames)
 								end try
-								if attendeeName is "" then
-									try
-										set attendeeName to my textOrEmpty(address of attendeeAddress)
-									end try
-								end if
-							end try
+							end if
+							if attendeeName is "" and attendeeIndex <= (count of addresses) then
+								try
+									set attendeeName to my textOrEmpty(item attendeeIndex of addresses)
+								end try
+							end if
 							if attendeeName is not "" then set end of attendeeNames to attendeeName
 						end repeat
-					end try
+						end try
+					end if
 
 					-- `organizer` is plain display text on a calendar event, unlike an
 					-- attendee's `email address` record.
 					set organizerName to ""
-					try
-						set organizerName to my textOrEmpty(organizer of currentEvent)
-					end try
+					if includeAttendees then
+						try
+							set organizerName to my textOrEmpty(organizer of currentEvent)
+						end try
+					end if
 					if organizerName is not "" then set beginning of attendeeNames to organizerName
 
 					set attendeeText to ""
@@ -704,6 +737,7 @@ mod tests {
             ]),
             range_start,
             range_end,
+            true,
         )
         .unwrap();
 
@@ -752,6 +786,7 @@ mod tests {
             ]),
             range_start,
             range_end,
+            true,
         )
         .unwrap();
 
@@ -763,6 +798,67 @@ mod tests {
                 "guest@example.com".to_string(),
             ]
         );
+    }
+
+    #[test]
+    fn attendee_properties_are_vectorized_instead_of_queried_person_by_person() {
+        assert!(CALENDAR_SCRIPT
+            .contains("set attendeeEmails to «class emad» of every item in eventAttendees"));
+        assert!(CALENDAR_SCRIPT
+            .contains("set displayNames to «class pnam» of every item in attendeeEmails"));
+        assert!(!CALENDAR_SCRIPT.contains("email address of item attendeeIndex of eventAttendees"));
+    }
+
+    #[test]
+    fn vectorized_attendee_lists_are_bounds_checked_independently() {
+        // Outlook may omit a display name while still returning an address. Each vector
+        // must be checked against its own length before indexing, so one short property
+        // list cannot abort attendee enrichment for the whole event.
+        assert!(CALENDAR_SCRIPT
+            .contains("if attendeeIndex <= (count of displayNames) then"));
+        assert!(CALENDAR_SCRIPT
+            .contains("if attendeeName is \"\" and attendeeIndex <= (count of addresses) then"));
+
+        // A failed attendee collection leaves both guards closed.
+        let initialization = CALENDAR_SCRIPT
+            .find("set eventAttendees to {}")
+            .expect("attendee list must be initialized");
+        let guarded_read = CALENDAR_SCRIPT
+            .find("if includeAttendees and attendeeTotal > 0 and attendeeBudget > 0 then")
+            .expect("attendee vectors must only be read after a successful count");
+        assert!(initialization < guarded_read);
+    }
+
+    #[test]
+    fn metadata_only_reads_discard_attendee_fields_even_if_the_script_emits_them() {
+        let range_start = Local
+            .with_ymd_and_hms(2026, 7, 28, 0, 0, 0)
+            .single()
+            .unwrap();
+        let range_end = range_start + Duration::days(7);
+        let meetings = parse_records(
+            &record(&[
+                "42",
+                "Calendar",
+                "key",
+                "Weekly sync",
+                "2026-07-29T10:30:00",
+                "2026-07-29T11:00:00",
+                "false",
+                "false",
+                "",
+                "2",
+                "Maria Example",
+            ]),
+            range_start,
+            range_end,
+            false,
+        )
+        .unwrap();
+
+        assert_eq!(meetings.len(), 1);
+        assert!(meetings[0].is_meeting);
+        assert!(meetings[0].attendees.is_empty());
     }
 
     #[test]
@@ -789,6 +885,7 @@ mod tests {
             ]),
             range_start,
             range_end,
+            true,
         )
         .unwrap();
         assert!(meetings[0].is_meeting);
@@ -816,6 +913,7 @@ mod tests {
             ]),
             range_start,
             range_end,
+            true,
         )
         .unwrap();
         assert!(meetings.is_empty());
@@ -829,6 +927,7 @@ mod tests {
             &format!("ERROR{UNIT_SEPARATOR}Outlook got an error: Access denied."),
             range_start,
             range_end,
+            true,
         )
         .unwrap_err();
         assert!(error.contains("Access denied"));
@@ -868,7 +967,7 @@ mod tests {
                 "0",
             ]),
         );
-        let meetings = parse_records(&payload, range_start, range_end).unwrap();
+        let meetings = parse_records(&payload, range_start, range_end, true).unwrap();
         assert_eq!(meetings.len(), 2);
         assert_eq!(meetings[0].subject, "First");
         // An event without a location must arrive as an empty field, never as
@@ -916,7 +1015,7 @@ mod tests {
             ]),
         );
 
-        let meetings = parse_records(&payload, range_start, range_end).unwrap();
+        let meetings = parse_records(&payload, range_start, range_end, true).unwrap();
         assert_eq!(meetings.len(), 2);
         assert_ne!(meetings[0].id, meetings[1].id);
         assert!(meetings.iter().all(|meeting| meeting.is_recurring));
@@ -971,7 +1070,7 @@ mod tests {
             ]),
         );
 
-        let mut meetings = parse_records(&payload, range_start, range_end).unwrap();
+        let mut meetings = parse_records(&payload, range_start, range_end, true).unwrap();
         let duplicate_id = meetings[0].id.clone();
         sort_and_dedup_meetings(&mut meetings);
 
@@ -990,13 +1089,14 @@ mod tests {
 
     #[test]
     fn calendar_script_expands_occurrences_without_reading_event_bodies() {
-        let script = render_calendar_script(7);
+        let script = render_calendar_script(7, true);
         assert!(script.contains("get occurrence of currentSeries at probeDate"));
         assert!(script.contains("repeat with dayOffset from 0 to (7 + 1)"));
         assert!(!script.contains("__DAYS__"));
         assert!(!script.contains("__SERIES_PROBE_BUDGET__"));
         assert!(!script.contains("__MAX_ATTENDEES__"));
         assert!(!script.contains("__ATTENDEE_BUDGET__"));
+        assert!(!script.contains("__INCLUDE_ATTENDEES__"));
         assert!(script.contains("set seriesProbeBudget to 64"));
         assert!(script.contains("if seriesProbeBudget <= 0 then exit repeat"));
         assert!(!script.contains("content of currentEvent"));
@@ -1034,6 +1134,7 @@ mod tests {
             ]),
             range_start,
             range_end,
+            true,
         )
         .unwrap();
         assert_eq!(meetings.len(), 1);
@@ -1044,7 +1145,8 @@ mod tests {
     #[test]
     #[ignore = "requires a running classic Outlook and Automation consent"]
     fn reads_the_local_outlook_calendar() {
-        let meetings = upcoming_meetings(7).expect("Apple Events calendar read should succeed");
+        let meetings =
+            upcoming_meetings(7, true).expect("Apple Events calendar read should succeed");
         eprintln!("Apple Events returned {} meeting(s)", meetings.len());
     }
 }
