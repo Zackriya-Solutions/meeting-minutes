@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { ChevronDown, ChevronRight, File, Settings, ChevronLeftCircle, ChevronRightCircle, Calendar, StickyNote, Home, Trash2, Mic, Square, Plus, Search, Pencil, NotebookPen, SearchIcon, X, Upload, FolderPlus } from 'lucide-react';
 import { useRouter, usePathname } from 'next/navigation';
 import { useSidebar } from './SidebarProvider';
@@ -97,11 +97,16 @@ const Sidebar: React.FC = () => {
     }
   }, [expandedFolders]);
 
+  const seenProjectFolderIdsRef = useRef<Set<string>>(new Set());
+
   useEffect(() => {
+    const freshFolderIds = ['unfiled', ...projectFolders.map(folder => folder.id)]
+      .filter(id => !seenProjectFolderIdsRef.current.has(id));
+    if (freshFolderIds.length === 0) return;
+    freshFolderIds.forEach(id => seenProjectFolderIdsRef.current.add(id));
     setExpandedFolders(previous => {
       const next = new Set(previous);
-      next.add('unfiled');
-      projectFolders.forEach(folder => next.add(folder.id));
+      freshFolderIds.forEach(id => next.add(id));
       return next;
     });
   }, [projectFolders]);
@@ -357,6 +362,15 @@ const Sidebar: React.FC = () => {
       toast.success('Project folder deleted', { description: 'Its meetings were returned to Unfiled.' });
     } catch (error) {
       toast.error('Could not delete project folder', { description: error instanceof Error ? error.message : String(error) });
+    }
+  };
+
+  const handleMeetingMove = async (meetingId: string, folderId: string | null) => {
+    try {
+      await invoke('api_move_meeting_to_project_folder', { meetingId, folderId });
+      await refetchOrganization();
+    } catch (error) {
+      toast.error('Could not move meeting', { description: error instanceof Error ? error.message : String(error) });
     }
   };
 
@@ -650,7 +664,7 @@ const Sidebar: React.FC = () => {
               {isMeetingItem && (
                 <div className="ml-8 mt-1 flex flex-wrap gap-1">
                   {(item.tags ?? []).map(tag => <span key={tag} className="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] text-gray-600">#{tag}</span>)}
-                  <select aria-label="Move meeting to project folder" className="max-w-[120px] rounded border border-gray-200 bg-white px-1 text-[10px] text-gray-500" value={meetings.find(meeting => meeting.id === item.id)?.project_folder_id ?? ''} onClick={(event) => event.stopPropagation()} onChange={async (event) => { event.stopPropagation(); await invoke('api_move_meeting_to_project_folder', { meetingId: item.id, folderId: event.target.value || null }); await refetchOrganization(); }}>
+                  <select aria-label="Move meeting to project folder" className="max-w-[120px] rounded border border-gray-200 bg-white px-1 text-[10px] text-gray-500" value={meetings.find(meeting => meeting.id === item.id)?.project_folder_id ?? ''} onClick={(event) => event.stopPropagation()} onChange={(event) => { event.stopPropagation(); void handleMeetingMove(item.id, event.target.value || null); }}>
                     <option value="">Unfiled</option>
                     {projectFolders.map(folder => <option key={folder.id} value={folder.id}>{folder.name}</option>)}
                   </select>

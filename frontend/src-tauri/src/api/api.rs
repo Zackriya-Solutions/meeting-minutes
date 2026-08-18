@@ -365,21 +365,26 @@ pub async fn api_get_meetings<R: Runtime>(
         Ok(meeting_models) => {
             log_info!("Successfully got {} meetings", meeting_models.len());
 
-            let mut result = Vec::with_capacity(meeting_models.len());
-            for m in meeting_models {
-                let tags = OrganizationRepository::get_tags_for_meeting(pool, &m.id)
-                    .await
-                    .map_err(|e| e.to_string())?
-                    .into_iter()
-                    .map(|tag| tag.name)
-                    .collect();
-                result.push(Meeting {
-                    id: m.id,
-                    title: m.title,
-                    project_folder_id: m.project_folder_id,
-                    tags,
-                });
-            }
+            let mut tags_by_meeting = OrganizationRepository::get_tags_for_all_meetings(pool)
+                .await
+                .map_err(|e| e.to_string())?;
+            let result: Vec<Meeting> = meeting_models
+                .into_iter()
+                .map(|m| {
+                    let tags = tags_by_meeting
+                        .remove(&m.id)
+                        .unwrap_or_default()
+                        .into_iter()
+                        .map(|tag| tag.name)
+                        .collect();
+                    Meeting {
+                        id: m.id,
+                        title: m.title,
+                        project_folder_id: m.project_folder_id,
+                        tags,
+                    }
+                })
+                .collect();
             Ok(result)
         }
         Err(e) => {
@@ -517,8 +522,8 @@ pub async fn api_suggest_meeting_tags<R: Runtime>(
     ).bind(&meeting_id).fetch_optional(pool).await.map_err(|e| e.to_string())?;
     let transcript = transcript_rows.into_iter().map(|row| row.0).collect::<Vec<_>>().join("\n");
     let summary = summary_row.and_then(|row| row.0).unwrap_or_default();
+    if transcript.trim().len() + summary.trim().len() < 20 { return Ok(Vec::new()); }
     let content = format!("Transcript:\n{}\n\nSummary:\n{}", transcript, summary);
-    if content.trim().len() < 20 { return Ok(Vec::new()); }
 
     let config = SettingsRepository::get_model_config(pool).await.map_err(|e| e.to_string())?
         .ok_or_else(|| "No summary model configured".to_string())?;
@@ -1218,7 +1223,7 @@ pub async fn open_meeting_folder<R: Runtime>(
 
     // Get meeting with folder_path
     let meeting: Option<MeetingModel> = sqlx::query_as(
-        "SELECT id, title, created_at, updated_at, folder_path FROM meetings WHERE id = ?",
+        "SELECT id, title, created_at, updated_at, folder_path, project_folder_id FROM meetings WHERE id = ?",
     )
     .bind(&meeting_id)
     .fetch_optional(pool)

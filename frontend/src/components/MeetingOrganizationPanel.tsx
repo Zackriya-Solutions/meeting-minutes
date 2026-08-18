@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Check, Plus, X } from 'lucide-react';
+import { Check, Plus, Sparkles, X } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
@@ -15,23 +15,89 @@ interface MeetingOrganizationPanelProps {
   hasContent: boolean;
 }
 
-export function MeetingOrganizationPanel({ meetingId, folderId, tags: initialTags = [], hasContent }: MeetingOrganizationPanelProps) {
+interface StoredTagSuggestions {
+  status: 'generated' | 'dismissed';
+  suggestions: string[];
+}
+
+const EMPTY_TAGS: OrganizationTag[] = [];
+
+function suggestionsStorageKey(meetingId: string): string {
+  return `meetingTagSuggestions:${meetingId}`;
+}
+
+function readStoredSuggestions(meetingId: string): StoredTagSuggestions | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(suggestionsStorageKey(meetingId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as StoredTagSuggestions;
+    if (parsed.status !== 'generated' && parsed.status !== 'dismissed') return null;
+    return {
+      status: parsed.status,
+      suggestions: Array.isArray(parsed.suggestions) ? parsed.suggestions.filter(item => typeof item === 'string') : [],
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredSuggestions(meetingId: string, value: StoredTagSuggestions): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(suggestionsStorageKey(meetingId), JSON.stringify(value));
+  } catch {
+    // Suggestion caching is best-effort; manual tags are unaffected.
+  }
+}
+
+export function MeetingOrganizationPanel({ meetingId, folderId, tags: initialTags = EMPTY_TAGS, hasContent }: MeetingOrganizationPanelProps) {
   const { projectFolders, refetchOrganization } = useSidebar();
   const [tags, setTags] = useState<OrganizationTag[]>(initialTags);
   const [newTag, setNewTag] = useState('');
+  const [selectedFolderId, setSelectedFolderId] = useState<string | null>(folderId ?? null);
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [suggestionsDismissed, setSuggestionsDismissed] = useState(false);
+  const [isSuggesting, setIsSuggesting] = useState(false);
 
   useEffect(() => setTags(initialTags), [initialTags]);
+  useEffect(() => setSelectedFolderId(folderId ?? null), [folderId]);
 
   useEffect(() => {
-    if (!hasContent || suggestionsDismissed) return;
+    const stored = readStoredSuggestions(meetingId);
+    setSuggestions(stored?.status === 'generated' ? stored.suggestions : []);
+    setSuggestionsDismissed(stored?.status === 'dismissed');
+  }, [meetingId]);
+
+  useEffect(() => {
+    if (!hasContent || readStoredSuggestions(meetingId) !== null) return;
+    writeStoredSuggestions(meetingId, { status: 'generated', suggestions: [] });
     let cancelled = false;
     void invoke('api_suggest_meeting_tags', { meetingId }).then((result) => {
-      if (!cancelled) setSuggestions(result as string[]);
+      const generated = result as string[];
+      writeStoredSuggestions(meetingId, { status: 'generated', suggestions: generated });
+      if (!cancelled) setSuggestions(generated);
     }).catch(() => { /* Optional enhancement: manual tags still work. */ });
     return () => { cancelled = true; };
-  }, [meetingId, hasContent, suggestionsDismissed]);
+  }, [meetingId, hasContent]);
+
+  const updateSuggestions = (next: string[], dismissed: boolean) => {
+    setSuggestions(next);
+    setSuggestionsDismissed(dismissed);
+    writeStoredSuggestions(meetingId, { status: dismissed ? 'dismissed' : 'generated', suggestions: dismissed ? [] : next });
+  };
+
+  const requestSuggestions = async () => {
+    setIsSuggesting(true);
+    try {
+      const generated = await invoke('api_suggest_meeting_tags', { meetingId }) as string[];
+      updateSuggestions(generated, false);
+    } catch (error) {
+      toast.error('Could not suggest tags', { description: error instanceof Error ? error.message : String(error) });
+    } finally {
+      setIsSuggesting(false);
+    }
+  };
 
   const addTag = async (name: string) => {
     const trimmed = name.trim();
@@ -40,7 +106,9 @@ export function MeetingOrganizationPanel({ meetingId, folderId, tags: initialTag
       const tag = await invoke('api_add_meeting_tag', { meetingId, name: trimmed }) as OrganizationTag;
       setTags(previous => [...previous, tag].sort((left, right) => left.name.localeCompare(right.name)));
       setNewTag('');
-      setSuggestions(previous => previous.filter(suggestion => suggestion.toLowerCase() !== trimmed.toLowerCase()));
+      if (!suggestionsDismissed) {
+        updateSuggestions(suggestions.filter(suggestion => suggestion.toLowerCase() !== trimmed.toLowerCase()), false);
+      }
       await refetchOrganization();
     } catch (error) { toast.error('Could not add tag', { description: error instanceof Error ? error.message : String(error) }); }
   };
@@ -56,15 +124,18 @@ export function MeetingOrganizationPanel({ meetingId, folderId, tags: initialTag
   const moveMeeting = async (value: string) => {
     try {
       await invoke('api_move_meeting_to_project_folder', { meetingId, folderId: value || null });
+      setSelectedFolderId(value || null);
       await refetchOrganization();
     } catch (error) { toast.error('Could not move meeting', { description: error instanceof Error ? error.message : String(error) }); }
   };
+
+  const visibleSuggestions = suggestions.filter(suggestion => !tags.some(tag => tag.name.toLowerCase() === suggestion.toLowerCase()));
 
   return (
     <div className="mt-3 rounded-lg border border-gray-200 bg-gray-50 p-3 text-left">
       <div className="flex flex-wrap items-center gap-2">
         <label htmlFor="meeting-project-folder" className="text-xs font-medium text-gray-600">Project</label>
-        <select id="meeting-project-folder" value={folderId ?? ''} onChange={(event) => void moveMeeting(event.target.value)} className="rounded border border-gray-200 bg-white px-2 py-1 text-xs">
+        <select id="meeting-project-folder" value={selectedFolderId ?? ''} onChange={(event) => void moveMeeting(event.target.value)} className="rounded border border-gray-200 bg-white px-2 py-1 text-xs">
           <option value="">Unfiled</option>
           {projectFolders.map(folder => <option key={folder.id} value={folder.id}>{folder.name}</option>)}
         </select>
@@ -75,11 +146,16 @@ export function MeetingOrganizationPanel({ meetingId, folderId, tags: initialTag
           <input aria-label="Add meeting tag" value={newTag} onChange={(event) => setNewTag(event.target.value)} placeholder="Add tag" className="w-24 rounded border border-gray-200 bg-white px-2 py-1 text-xs" />
           <button type="submit" aria-label="Add tag" className="rounded p-1 text-gray-500 hover:bg-white hover:text-blue-600"><Plus className="h-3.5 w-3.5" /></button>
         </form>
+        {hasContent && (
+          <button onClick={() => void requestSuggestions()} disabled={isSuggesting} className="inline-flex items-center gap-1 rounded border border-gray-200 bg-white px-2 py-1 text-xs text-gray-600 hover:text-blue-600 disabled:opacity-50">
+            <Sparkles className="h-3 w-3" />{isSuggesting ? 'Suggesting...' : 'Suggest tags'}
+          </button>
+        )}
       </div>
-      {!suggestionsDismissed && suggestions.length > 0 && (
+      {!suggestionsDismissed && visibleSuggestions.length > 0 && (
         <div className="mt-2 border-t border-gray-200 pt-2">
-          <div className="flex items-center justify-between text-xs text-gray-500"><span>Suggested tags</span><button onClick={() => setSuggestionsDismissed(true)} className="hover:text-gray-800">Discard</button></div>
-          <div className="mt-1 flex flex-wrap gap-1.5">{suggestions.map(suggestion => <span key={suggestion} className="inline-flex items-center gap-1 rounded-full border border-dashed border-blue-300 bg-white px-2 py-1 text-xs text-blue-700"><button onClick={() => void addTag(suggestion)} className="inline-flex items-center gap-1 hover:text-blue-900"><Check className="h-3 w-3" />{suggestion}</button><button onClick={() => setNewTag(suggestion)} className="border-l border-blue-200 pl-1 text-[10px] hover:text-blue-900">Edit</button></span>)}</div>
+          <div className="flex items-center justify-between text-xs text-gray-500"><span>Suggested tags</span><button onClick={() => updateSuggestions([], true)} className="hover:text-gray-800">Discard</button></div>
+          <div className="mt-1 flex flex-wrap gap-1.5">{visibleSuggestions.map(suggestion => <span key={suggestion} className="inline-flex items-center gap-1 rounded-full border border-dashed border-blue-300 bg-white px-2 py-1 text-xs text-blue-700"><button onClick={() => void addTag(suggestion)} className="inline-flex items-center gap-1 hover:text-blue-900"><Check className="h-3 w-3" />{suggestion}</button><button onClick={() => setNewTag(suggestion)} className="border-l border-blue-200 pl-1 text-[10px] hover:text-blue-900">Edit</button></span>)}</div>
         </div>
       )}
     </div>

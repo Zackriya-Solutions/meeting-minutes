@@ -1,6 +1,7 @@
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, SqlitePool};
+use std::collections::HashMap;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
@@ -118,6 +119,24 @@ impl OrganizationRepository {
         .bind(meeting_id).fetch_all(pool).await
     }
 
+    pub async fn get_tags_for_all_meetings(
+        pool: &SqlitePool,
+    ) -> Result<HashMap<String, Vec<Tag>>, sqlx::Error> {
+        let rows: Vec<(String, String, String)> = sqlx::query_as(
+            "SELECT mt.meeting_id, t.id, t.name FROM tags t JOIN meeting_tags mt ON mt.tag_id = t.id ORDER BY t.name COLLATE NOCASE",
+        )
+        .fetch_all(pool)
+        .await?;
+        let mut tags_by_meeting: HashMap<String, Vec<Tag>> = HashMap::new();
+        for (meeting_id, id, name) in rows {
+            tags_by_meeting
+                .entry(meeting_id)
+                .or_default()
+                .push(Tag { id, name });
+        }
+        Ok(tags_by_meeting)
+    }
+
     pub async fn get_all_tags(pool: &SqlitePool) -> Result<Vec<Tag>, sqlx::Error> {
         sqlx::query_as::<_, Tag>("SELECT id, name FROM tags ORDER BY name COLLATE NOCASE")
             .fetch_all(pool)
@@ -216,5 +235,41 @@ mod tests {
                 .id,
             tag.id
         );
+    }
+
+    #[tokio::test]
+    async fn get_tags_for_all_meetings_groups_tags_by_meeting() {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+        sqlx::query("INSERT INTO meetings (id, title, created_at, updated_at) VALUES ('meeting-1', 'Planning', '2026-08-18T10:00:00Z', '2026-08-18T10:00:00Z'), ('meeting-2', 'Retro', '2026-08-18T11:00:00Z', '2026-08-18T11:00:00Z'), ('meeting-3', 'Untagged', '2026-08-18T12:00:00Z', '2026-08-18T12:00:00Z')").execute(&pool).await.unwrap();
+        let shared = OrganizationRepository::add_tag(&pool, "meeting-1", "roadmap")
+            .await
+            .unwrap();
+        OrganizationRepository::add_tag(&pool, "meeting-2", "roadmap")
+            .await
+            .unwrap();
+        OrganizationRepository::add_tag(&pool, "meeting-2", "alpha")
+            .await
+            .unwrap();
+
+        let tags_by_meeting = OrganizationRepository::get_tags_for_all_meetings(&pool)
+            .await
+            .unwrap();
+
+        assert_eq!(tags_by_meeting.len(), 2);
+        assert_eq!(tags_by_meeting["meeting-1"].len(), 1);
+        assert_eq!(tags_by_meeting["meeting-1"][0].id, shared.id);
+        assert_eq!(
+            tags_by_meeting["meeting-2"]
+                .iter()
+                .map(|tag| tag.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["alpha", "roadmap"]
+        );
+        assert!(!tags_by_meeting.contains_key("meeting-3"));
     }
 }
