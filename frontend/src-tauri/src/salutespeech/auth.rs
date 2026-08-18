@@ -29,7 +29,14 @@ impl SaluteSpeechAuth {
     pub fn new(auth_key: String, oauth_url: String, scope: Option<String>) -> Self {
         Self {
             // System trust roots verify Sber's chain (checked live); verification stays ON.
-            client: reqwest::Client::new(),
+            client: reqwest::Client::builder()
+                .connect_timeout(Duration::from_secs(10))
+                .timeout(Duration::from_secs(20))
+                .build()
+                .unwrap_or_else(|error| {
+                    log::warn!("Could not configure SaluteSpeech token timeouts: {error}");
+                    reqwest::Client::new()
+                }),
             auth_key,
             oauth_url,
             scope: scope.filter(|s| !s.trim().is_empty()),

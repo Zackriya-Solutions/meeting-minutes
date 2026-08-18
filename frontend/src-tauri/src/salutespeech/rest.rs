@@ -7,6 +7,7 @@
 //! speaker attribution is handled by the app's local diarization / channel tagging.
 
 use async_trait::async_trait;
+use std::time::Duration;
 
 use super::auth::SaluteSpeechAuth;
 use super::{map_language, SaluteSpeechConfig};
@@ -29,7 +30,16 @@ impl SaluteSpeechProvider {
     pub fn new(cfg: SaluteSpeechConfig) -> Self {
         Self {
             auth: SaluteSpeechAuth::new(cfg.auth_key, cfg.oauth_url, cfg.scope),
-            client: reqwest::Client::new(),
+            // reqwest has no total request timeout by default. A dead VPN/proxy used to hold
+            // the only ordered live worker forever, making every later segment appear stuck.
+            client: reqwest::Client::builder()
+                .connect_timeout(Duration::from_secs(10))
+                .timeout(Duration::from_secs(45))
+                .build()
+                .unwrap_or_else(|error| {
+                    log::warn!("Could not configure SaluteSpeech request timeouts: {error}");
+                    reqwest::Client::new()
+                }),
             recognize_url: cfg.recognize_url,
             model: cfg.model,
         }

@@ -29,6 +29,45 @@ pub struct TranscriptSegment {
     pub speaker: Option<String>,
 }
 
+/// Cloneable persistence handle used by the transcript event listener. It deliberately does
+/// not borrow the global recording manager, so transcript completions remain writable while
+/// shutdown temporarily moves that manager out to stop streams and finalize files.
+#[derive(Clone)]
+pub struct TranscriptSink {
+    segments: Arc<Mutex<Vec<TranscriptSegment>>>,
+    meeting_folder: Option<PathBuf>,
+}
+
+impl TranscriptSink {
+    pub fn add(&self, segment: TranscriptSegment) {
+        if let Ok(mut segments) = self.segments.lock() {
+            if let Some(existing) = segments
+                .iter_mut()
+                .find(|existing| existing.sequence_id == segment.sequence_id)
+            {
+                *existing = segment.clone();
+            } else {
+                segments.push(segment.clone());
+            }
+            info!(
+                "Persisted transcript segment {} (seq: {}) - total segments: {}",
+                segment.id,
+                segment.sequence_id,
+                segments.len()
+            );
+        } else {
+            error!("Failed to lock transcript segments for {}", segment.id);
+            return;
+        }
+
+        if let Some(folder) = &self.meeting_folder {
+            if let Err(e) = write_transcripts_json_from_segments(folder, &self.segments) {
+                warn!("Failed to write incremental transcript update: {e}");
+            }
+        }
+    }
+}
+
 /// Meeting metadata structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MeetingMetadata {
@@ -58,8 +97,8 @@ pub struct RecordingSaver {
     meeting_name: Option<String>,
     metadata: Option<MeetingMetadata>,
     transcript_segments: Arc<Mutex<Vec<TranscriptSegment>>>,
-    chunk_receiver: Option<mpsc::UnboundedReceiver<AudioChunk>>,
-    is_saving: Arc<Mutex<bool>>,
+    chunk_receiver: Option<mpsc::Receiver<AudioChunk>>,
+    accumulation_task: Option<tokio::task::JoinHandle<()>>,
 }
 
 impl RecordingSaver {
@@ -71,7 +110,7 @@ impl RecordingSaver {
             metadata: None,
             transcript_segments: Arc::new(Mutex::new(Vec::new())),
             chunk_receiver: None,
-            is_saving: Arc::new(Mutex::new(false)),
+            accumulation_task: None,
         }
     }
 
@@ -99,41 +138,13 @@ impl RecordingSaver {
     /// Add or update a structured transcript segment (upserts based on sequence_id)
     /// Also saves incrementally to disk
     pub fn add_transcript_segment(&self, segment: TranscriptSegment) {
-        if let Ok(mut segments) = self.transcript_segments.lock() {
-            // Check if segment with same sequence_id exists (update it)
-            if let Some(existing) = segments
-                .iter_mut()
-                .find(|s| s.sequence_id == segment.sequence_id)
-            {
-                *existing = segment.clone();
-                info!(
-                    "Updated transcript segment {} (seq: {}) - total segments: {}",
-                    segment.id,
-                    segment.sequence_id,
-                    segments.len()
-                );
-            } else {
-                // New segment, add it
-                segments.push(segment.clone());
-                info!(
-                    "Added new transcript segment {} (seq: {}) - total segments: {}",
-                    segment.id,
-                    segment.sequence_id,
-                    segments.len()
-                );
-            }
-        } else {
-            error!(
-                "Failed to lock transcript segments for adding segment {}",
-                segment.id
-            );
-        }
+        self.transcript_sink().add(segment);
+    }
 
-        // NEW: Save incrementally to disk
-        if let Some(folder) = &self.meeting_folder {
-            if let Err(e) = self.write_transcripts_json(folder) {
-                warn!("Failed to write incremental transcript update: {}", e);
-            }
+    pub fn transcript_sink(&self) -> TranscriptSink {
+        TranscriptSink {
+            segments: Arc::clone(&self.transcript_segments),
+            meeting_folder: self.meeting_folder.clone(),
         }
     }
 
@@ -157,7 +168,7 @@ impl RecordingSaver {
     ///
     /// # Arguments
     /// * `auto_save` - If true, creates checkpoints and enables saving. If false, audio chunks are discarded.
-    pub fn start_accumulation(&mut self, auto_save: bool) -> mpsc::UnboundedSender<AudioChunk> {
+    pub fn start_accumulation(&mut self, auto_save: bool) -> mpsc::Sender<AudioChunk> {
         if auto_save {
             info!("Initializing incremental audio saver for recording (auto-save ENABLED)");
         } else {
@@ -167,7 +178,9 @@ impl RecordingSaver {
         }
 
         // Create channel for receiving audio chunks
-        let (sender, receiver) = mpsc::unbounded_channel::<AudioChunk>();
+        // Enough for more than a minute of 600ms mixed windows while FFmpeg writes a
+        // checkpoint, but bounded so a wedged encoder cannot exhaust process memory.
+        let (sender, receiver) = mpsc::channel::<AudioChunk>(128);
         self.chunk_receiver = Some(receiver);
 
         // Initialize meeting folder and incremental saver ONLY if auto_save is enabled
@@ -195,34 +208,28 @@ impl RecordingSaver {
         }
 
         // Start accumulation task
-        let is_saving_clone = self.is_saving.clone();
         let incremental_saver_arc = self.incremental_saver.clone();
         let save_audio = auto_save;
 
         if let Some(mut receiver) = self.chunk_receiver.take() {
-            tokio::spawn(async move {
+            // Checkpoint encoding launches FFmpeg and waits synchronously. Keep the entire
+            // accumulation loop on the blocking pool so a 30-second checkpoint cannot stall
+            // audio/VAD/transcript tasks on Tokio's async workers.
+            self.accumulation_task = Some(tokio::task::spawn_blocking(move || {
                 info!(
                     "Recording saver accumulation task started (save_audio: {})",
                     save_audio
                 );
 
-                while let Some(chunk) = receiver.recv().await {
-                    // Check if we should continue
-                    let should_continue = if let Ok(is_saving) = is_saving_clone.lock() {
-                        *is_saving
-                    } else {
-                        false
-                    };
-
-                    if !should_continue {
-                        break;
-                    }
-
+                // Drain through channel closure. The pipeline owns the sender and drops it
+                // only after all mixed audio has been forwarded, which gives shutdown a real
+                // completion signal instead of a timing-dependent sleep.
+                while let Some(chunk) = receiver.blocking_recv() {
                     // Only process audio chunks if auto_save is enabled
                     if save_audio {
                         // Add chunk to incremental saver
                         if let Some(saver_arc) = &incremental_saver_arc {
-                            let mut saver_guard = saver_arc.lock().await;
+                            let mut saver_guard = saver_arc.blocking_lock();
                             if let Err(e) = saver_guard.add_chunk(chunk) {
                                 error!("Failed to add chunk to incremental saver: {}", e);
                             }
@@ -236,12 +243,7 @@ impl RecordingSaver {
                 }
 
                 info!("Recording saver accumulation task ended");
-            });
-        }
-
-        // Set saving flag
-        if let Ok(mut is_saving) = self.is_saving.lock() {
-            *is_saving = true;
+            }));
         }
 
         sender
@@ -320,71 +322,7 @@ impl RecordingSaver {
 
     /// Write transcripts.json to disk (atomic write with temp file and validation)
     fn write_transcripts_json(&self, folder: &PathBuf) -> Result<()> {
-        // Clone segments to avoid holding lock during I/O
-        let segments_clone = if let Ok(segments) = self.transcript_segments.lock() {
-            segments.clone()
-        } else {
-            error!("Failed to lock transcript segments for writing");
-            return Err(anyhow::anyhow!("Failed to lock transcript segments"));
-        };
-
-        info!(
-            "Writing {} transcript segments to JSON",
-            segments_clone.len()
-        );
-
-        let transcript_path = folder.join("transcripts.json");
-        let temp_path = folder.join(".transcripts.json.tmp");
-
-        // Create JSON structure
-        let json = serde_json::json!({
-            "version": "1.0",
-            "segments": segments_clone,
-            "last_updated": chrono::Utc::now().to_rfc3339(),
-            "total_segments": segments_clone.len()
-        });
-
-        // Serialize to pretty JSON string
-        let json_string = serde_json::to_string_pretty(&json).map_err(|e| {
-            error!("Failed to serialize transcripts to JSON: {}", e);
-            anyhow::anyhow!("JSON serialization failed: {}", e)
-        })?;
-
-        // Write to temp file with error handling
-        std::fs::write(&temp_path, &json_string).map_err(|e| {
-            error!(
-                "Failed to write transcript temp file to {}: {}",
-                temp_path.display(),
-                e
-            );
-            anyhow::anyhow!("Failed to write temp file: {}", e)
-        })?;
-
-        // Verify temp file was written correctly
-        if !temp_path.exists() {
-            error!(
-                "Temp transcript file does not exist after write: {}",
-                temp_path.display()
-            );
-            return Err(anyhow::anyhow!("Temp file verification failed"));
-        }
-
-        // Atomic rename
-        std::fs::rename(&temp_path, &transcript_path).map_err(|e| {
-            error!(
-                "Failed to rename transcript file from {} to {}: {}",
-                temp_path.display(),
-                transcript_path.display(),
-                e
-            );
-            anyhow::anyhow!("Failed to rename transcript file: {}", e)
-        })?;
-
-        info!(
-            "✅ Successfully wrote transcripts.json with {} segments",
-            segments_clone.len()
-        );
-        Ok(())
+        write_transcripts_json_from_segments(folder, &self.transcript_segments)
     }
 
     // in frontend/src-tauri/src/audio/recording_saver.rs
@@ -412,13 +350,15 @@ impl RecordingSaver {
     ) -> Result<Option<String>, String> {
         info!("Stopping recording saver");
 
-        // Stop accumulation
-        if let Ok(mut is_saving) = self.is_saving.lock() {
-            *is_saving = false;
+        // The audio pipeline has already stopped and dropped its sender. Wait until the
+        // accumulator observes channel closure and drains every queued mixed chunk before
+        // finalizing checkpoints. The former boolean + 200ms sleep could discard the tail,
+        // or even let the receiver exit immediately due to a startup race.
+        if let Some(task) = self.accumulation_task.take() {
+            if let Err(e) = task.await {
+                warn!("Recording accumulation task failed: {e}");
+            }
         }
-
-        // Give time for final chunks
-        tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
 
         // Check if incremental saver exists (indicates auto_save was enabled)
         let should_save_audio = self.incremental_saver.is_some();
@@ -537,8 +477,82 @@ impl RecordingSaver {
     }
 }
 
+fn write_transcripts_json_from_segments(
+    folder: &PathBuf,
+    segments: &Arc<Mutex<Vec<TranscriptSegment>>>,
+) -> Result<()> {
+    // Clone segments to avoid holding the mutex during serialization and file I/O.
+    let segments_clone = segments
+        .lock()
+        .map_err(|_| anyhow::anyhow!("Failed to lock transcript segments"))?
+        .clone();
+
+    let transcript_path = folder.join("transcripts.json");
+    let temp_path = folder.join(".transcripts.json.tmp");
+    let json = serde_json::json!({
+        "version": "1.0",
+        "segments": segments_clone,
+        "last_updated": chrono::Utc::now().to_rfc3339(),
+        "total_segments": segments_clone.len()
+    });
+    let json_string = serde_json::to_string_pretty(&json)
+        .map_err(|e| anyhow::anyhow!("JSON serialization failed: {e}"))?;
+
+    std::fs::write(&temp_path, json_string)
+        .map_err(|e| anyhow::anyhow!("Failed to write {}: {e}", temp_path.display()))?;
+    std::fs::rename(&temp_path, &transcript_path).map_err(|e| {
+        anyhow::anyhow!(
+            "Failed to replace transcript file {}: {e}",
+            transcript_path.display()
+        )
+    })?;
+
+    Ok(())
+}
+
 impl Default for RecordingSaver {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn segment(sequence_id: u64, text: &str) -> TranscriptSegment {
+        TranscriptSegment {
+            id: format!("seg_{sequence_id}"),
+            text: text.to_string(),
+            audio_start_time: sequence_id as f64,
+            audio_end_time: sequence_id as f64 + 1.0,
+            duration: 1.0,
+            display_time: "00:00:00".to_string(),
+            confidence: 0.9,
+            sequence_id,
+            speaker: Some("mic".to_string()),
+        }
+    }
+
+    #[test]
+    fn transcript_sink_persists_and_upserts_without_recording_manager() {
+        let temp = tempfile::tempdir().unwrap();
+        let segments = Arc::new(Mutex::new(Vec::new()));
+        let sink = TranscriptSink {
+            segments: Arc::clone(&segments),
+            meeting_folder: Some(temp.path().to_path_buf()),
+        };
+
+        sink.add(segment(7, "first"));
+        sink.add(segment(7, "corrected"));
+        sink.add(segment(8, "next"));
+
+        let persisted: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(temp.path().join("transcripts.json")).unwrap())
+                .unwrap();
+        assert_eq!(persisted["total_segments"], 2);
+        assert_eq!(persisted["segments"][0]["text"], "corrected");
+        assert_eq!(persisted["segments"][1]["text"], "next");
+        assert_eq!(segments.lock().unwrap().len(), 2);
     }
 }

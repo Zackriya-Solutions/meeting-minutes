@@ -273,6 +273,7 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
         .start_recording(microphone_device, system_device, auto_save)
         .await
         .map_err(|e| format!("Failed to start recording: {}", e))?;
+    let transcript_sink = manager.transcript_sink();
 
     // Store the manager globally to keep it alive
     {
@@ -314,12 +315,7 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
                     speaker: update.speaker.clone(),
                 };
 
-                // Save to recording manager
-                if let Ok(manager_guard) = RECORDING_MANAGER.lock() {
-                    if let Some(manager) = manager_guard.as_ref() {
-                        manager.add_transcript_segment(segment);
-                    }
-                }
+                transcript_sink.add(segment);
             }
         });
         let mut global_listener = TRANSCRIPT_LISTENER_ID.lock().unwrap();
@@ -328,15 +324,18 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
     }
 
     // Emit success event
-    app.emit(
+    if let Err(error) = app.emit(
         "recording-started",
         serde_json::json!({
             "message": "Recording started successfully with parallel processing",
             "devices": ["Default Microphone", "Default System Audio"],
             "workers": 3
         }),
-    )
-    .map_err(|e| e.to_string())?;
+    ) {
+        // Capture is already active at this point. Treating a UI notification failure as a
+        // failed start would leave an invisible recording running in the background.
+        warn!("Failed to emit recording-started event: {error}");
+    }
 
     // Update tray menu to reflect recording state
     crate::tray::update_tray_menu(&app);
@@ -456,6 +455,7 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
         .start_recording(mic_device, system_device, auto_save)
         .await
         .map_err(|e| format!("Failed to start recording: {}", e))?;
+    let transcript_sink = manager.transcript_sink();
 
     // Store the manager globally to keep it alive
     {
@@ -497,12 +497,7 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
                     speaker: update.speaker.clone(),
                 };
 
-                // Save to recording manager
-                if let Ok(manager_guard) = RECORDING_MANAGER.lock() {
-                    if let Some(manager) = manager_guard.as_ref() {
-                        manager.add_transcript_segment(segment);
-                    }
-                }
+                transcript_sink.add(segment);
             }
         });
         let mut global_listener = TRANSCRIPT_LISTENER_ID.lock().unwrap();
@@ -511,7 +506,7 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
     }
 
     // Emit success event
-    app.emit(
+    if let Err(error) = app.emit(
         "recording-started",
         serde_json::json!({
             "message": "Recording started with custom devices and parallel processing",
@@ -521,8 +516,11 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
             ],
             "workers": 3
         }),
-    )
-    .map_err(|e| e.to_string())?;
+    ) {
+        // Capture is already active at this point. Treating a UI notification failure as a
+        // failed start would leave an invisible recording running in the background.
+        warn!("Failed to emit recording-started event: {error}");
+    }
 
     // Update tray menu to reflect recording state
     crate::tray::update_tray_menu(&app);
@@ -532,7 +530,7 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
     Ok(())
 }
 
-/// Stop recording with optimized graceful shutdown ensuring NO transcript chunks are lost
+/// Stop recording with a graceful, bounded shutdown that drains accepted transcript chunks.
 pub async fn stop_recording<R: Runtime>(
     app: AppHandle<R>,
     _args: RecordingArgs,
@@ -541,8 +539,14 @@ pub async fn stop_recording<R: Runtime>(
         "🛑 Starting optimized recording shutdown - ensuring ALL transcript chunks are preserved"
     );
 
-    // Check if recording is active
-    if !IS_RECORDING.load(Ordering::SeqCst) {
+    // Serialize stop against model validation/startup, then atomically claim the active
+    // session. This prevents two stop commands from taking different halves of the global
+    // manager/task state, and ensures a stop arriving during startup waits for that startup.
+    let _engine_lifecycle_guard = super::common::acquire_engine_lifecycle_lock().await;
+    if IS_RECORDING
+        .compare_exchange(true, false, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
         info!("Recording was not active");
         return Ok(());
     }
@@ -558,24 +562,19 @@ pub async fn stop_recording<R: Runtime>(
     );
 
     // Step 1: Stop audio capture immediately (no more new chunks) with proper error handling
-    let manager_for_cleanup = {
+    let mut manager_for_stop = {
         let mut global_manager = RECORDING_MANAGER.lock().unwrap();
         global_manager.take()
     };
 
-    let stop_result = if let Some(mut manager) = manager_for_cleanup {
+    let stop_result = if let Some(ref mut manager) = manager_for_stop {
         // Use FORCE FLUSH to immediately process all accumulated audio - eliminates 30s delay!
         info!("🚀 Using FORCE FLUSH to eliminate pipeline accumulation delays");
-        let result = manager.stop_streams_and_force_flush().await;
-        // Store manager back for later cleanup
-        let manager_for_cleanup = Some(manager);
-        (result, manager_for_cleanup)
+        manager.stop_streams_and_force_flush().await
     } else {
         warn!("No recording manager found to stop");
-        (Ok(()), None)
+        Ok(())
     };
-
-    let (stop_result, manager_for_cleanup) = stop_result;
 
     match stop_result {
         Ok(_) => {
@@ -583,18 +582,16 @@ pub async fn stop_recording<R: Runtime>(
         }
         Err(e) => {
             error!("❌ Failed to stop audio streams: {}", e);
-            return Err(format!("Failed to stop audio streams: {}", e));
+            // Continue draining transcription and saving whatever was captured. Returning
+            // here used to strand the session in a half-stopped global state.
         }
     }
 
-    // Step 1.5: Clean up transcript listener to release microphone
-    // Unlisten transcript-update event to prevent lingering references
+    // Keep the stopped manager globally visible while queued transcription drains so reload
+    // history remains available. The event listener writes through its independent sink.
     {
-        use tauri::Listener;
-        if let Some(listener_id) = TRANSCRIPT_LISTENER_ID.lock().unwrap().take() {
-            app.unlisten(listener_id);
-            info!("✅ Transcript-update listener removed");
-        }
+        let mut global_manager = RECORDING_MANAGER.lock().unwrap();
+        *global_manager = manager_for_stop;
     }
 
     // Step 2: Signal transcription workers to finish processing ALL queued chunks
@@ -607,14 +604,14 @@ pub async fn stop_recording<R: Runtime>(
         }),
     );
 
-    // Wait for transcription task with enhanced progress monitoring (NO TIMEOUT - we must process all chunks)
+    // Wait for the transcription task with progress monitoring and a hard shutdown bound.
     let transcription_task = {
         let mut global_task = TRANSCRIPTION_TASK.lock().unwrap();
         global_task.take()
     };
 
     if let Some(task_handle) = transcription_task {
-        info!("⏳ Waiting for ALL transcription chunks to be processed (no timeout - preserving every chunk)");
+        info!("⏳ Waiting for accepted transcription chunks to finish processing");
 
         // Enhanced progress monitoring during shutdown
         let progress_app = app.clone();
@@ -647,7 +644,7 @@ pub async fn stop_recording<R: Runtime>(
         .await
         {
             Ok(Ok(())) => {
-                info!("✅ ALL transcription chunks processed successfully - no data lost");
+                info!("✅ All accepted transcription chunks processed successfully");
             }
             Ok(Err(e)) => {
                 warn!("⚠️ Transcription task completed with error: {:?}", e);
@@ -664,6 +661,20 @@ pub async fn stop_recording<R: Runtime>(
     } else {
         info!("ℹ️ No transcription task found to wait for");
     }
+
+    // No more transcript events can be produced now. Remove the persistence listener and
+    // reclaim the manager for final save/cleanup.
+    {
+        use tauri::Listener;
+        if let Some(listener_id) = TRANSCRIPT_LISTENER_ID.lock().unwrap().take() {
+            app.unlisten(listener_id);
+            info!("✅ Transcript-update listener removed");
+        }
+    }
+    let manager_for_cleanup = {
+        let mut global_manager = RECORDING_MANAGER.lock().unwrap();
+        global_manager.take()
+    };
 
     // Step 3: Now safely unload Whisper model after ALL chunks are processed
     let _ = app.emit(
@@ -910,9 +921,7 @@ pub async fn stop_recording<R: Runtime>(
         (None, None)
     };
 
-    // Set recording flag to false
-    info!("🔍 Setting IS_RECORDING to false");
-    IS_RECORDING.store(false, Ordering::SeqCst);
+    info!("🔍 Recording session is fully finalized");
 
     // Step 4.5: Prepare metadata for frontend (NO database save)
     // NOTE: We do NOT save to database here. The frontend will save after all transcripts are displayed.
@@ -953,7 +962,7 @@ pub async fn stop_recording<R: Runtime>(
     // Update tray menu to reflect stopped state
     crate::tray::update_tray_menu(&app);
 
-    info!("🎉 Recording stopped successfully with ZERO transcript chunks lost");
+    info!("🎉 Recording stopped successfully and accepted transcript chunks were drained");
     Ok(())
 }
 

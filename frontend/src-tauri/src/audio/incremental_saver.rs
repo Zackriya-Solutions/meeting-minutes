@@ -67,8 +67,12 @@ impl IncrementalAudioSaver {
 
         // Save checkpoint when buffer reaches threshold (30 seconds)
         if total_samples >= self.checkpoint_interval_samples {
-            self.save_checkpoint()?;
+            // Always release this 30-second buffer. Retrying a failed FFmpeg encode on every
+            // subsequent audio callback made the buffer grow without limit and repeatedly
+            // encoded an ever-larger payload, which could take down the whole recording.
+            let save_result = self.save_checkpoint();
             self.checkpoint_buffer.clear();
+            save_result?;
         }
 
         Ok(())
