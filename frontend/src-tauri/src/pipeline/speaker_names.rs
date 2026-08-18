@@ -465,9 +465,9 @@ fn extract_title_candidates(title: &str) -> Vec<ExtractedCandidate> {
         .collect()
 }
 
-#[cfg(not(test))]
+#[cfg(all(not(test), not(debug_assertions)))]
 const REJECTION_SALT_SERVICE: &str = "meetily.speaker-names";
-#[cfg(not(test))]
+#[cfg(all(not(test), not(debug_assertions)))]
 const REJECTION_SALT_ACCOUNT: &str = "rejection-salt-v1";
 #[cfg(not(test))]
 static REJECTION_SALT_CACHE: tokio::sync::OnceCell<String> = tokio::sync::OnceCell::const_new();
@@ -477,7 +477,7 @@ static REJECTION_SALT_ATTEMPT: Lazy<tokio::sync::Mutex<Option<(Instant, String)>
 #[cfg(not(test))]
 const REJECTION_SALT_RETRY_COOLDOWN: Duration = Duration::from_secs(30);
 
-#[cfg(not(test))]
+#[cfg(all(not(test), not(debug_assertions)))]
 async fn rejection_salt_from_vault(pool: &SqlitePool) -> Result<String, String> {
     let stored = tauri::async_runtime::spawn_blocking(|| {
         let entry = keyring::Entry::new(REJECTION_SALT_SERVICE, REJECTION_SALT_ACCOUNT)
@@ -530,7 +530,38 @@ async fn rejection_salt_from_vault(pool: &SqlitePool) -> Result<String, String> 
     Ok(salt)
 }
 
-#[cfg(not(test))]
+#[cfg(all(not(test), debug_assertions))]
+async fn rejection_salt_from_database(pool: &SqlitePool) -> Result<String, String> {
+    if let Some(value) = sqlx::query_scalar::<_, String>(
+        "SELECT value FROM app_settings_kv WHERE key='speaker_alias.rejection_salt.secret'",
+    )
+    .fetch_optional(pool)
+    .await
+    .map_err(|error| error.to_string())?
+    .filter(|value| !value.is_empty())
+    {
+        return Ok(value);
+    }
+
+    let salt = uuid::Uuid::new_v4().to_string();
+    sqlx::query(
+        "INSERT OR IGNORE INTO app_settings_kv(key, value, updated_at) \
+         VALUES('speaker_alias.rejection_salt.secret', ?, datetime('now'))",
+    )
+    .bind(&salt)
+    .execute(pool)
+    .await
+    .map_err(|error| error.to_string())?;
+
+    sqlx::query_scalar::<_, String>(
+        "SELECT value FROM app_settings_kv WHERE key='speaker_alias.rejection_salt.secret'",
+    )
+    .fetch_one(pool)
+    .await
+    .map_err(|error| error.to_string())
+}
+
+#[cfg(all(not(test), not(debug_assertions)))]
 async fn rejection_salt(pool: &SqlitePool) -> Result<String, String> {
     if let Some(value) = REJECTION_SALT_CACHE.get() {
         return Ok(value.clone());
@@ -549,6 +580,38 @@ async fn rejection_salt(pool: &SqlitePool) -> Result<String, String> {
     }
 
     match rejection_salt_from_vault(pool).await {
+        Ok(value) => {
+            let _ = REJECTION_SALT_CACHE.set(value.clone());
+            *failure = None;
+            Ok(value)
+        }
+        Err(error) => {
+            *failure = Some((
+                Instant::now() + REJECTION_SALT_RETRY_COOLDOWN,
+                error.clone(),
+            ));
+            Err(error)
+        }
+    }
+}
+
+#[cfg(all(not(test), debug_assertions))]
+async fn rejection_salt(pool: &SqlitePool) -> Result<String, String> {
+    if let Some(value) = REJECTION_SALT_CACHE.get() {
+        return Ok(value.clone());
+    }
+
+    let mut failure = REJECTION_SALT_ATTEMPT.lock().await;
+    if let Some(value) = REJECTION_SALT_CACHE.get() {
+        return Ok(value.clone());
+    }
+    if let Some((retry_after, message)) = failure.as_ref() {
+        if Instant::now() < *retry_after {
+            return Err(message.clone());
+        }
+    }
+
+    match rejection_salt_from_database(pool).await {
         Ok(value) => {
             let _ = REJECTION_SALT_CACHE.set(value.clone());
             *failure = None;

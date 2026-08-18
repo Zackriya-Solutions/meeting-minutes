@@ -151,6 +151,7 @@ interface MeetingConversationProps {
   onRenameSpeaker?: (speakerId: number, displayName: string) => Promise<void> | void;
   onSetSelfSpeaker?: (speakerId: number, isSelf: boolean) => Promise<void> | void;
   onAssignSegmentSpeaker?: (transcriptId: string, speakerId: number) => Promise<void> | void;
+  onAddAndAssignSegmentSpeaker?: (transcriptId: string, displayName: string) => Promise<void> | void;
   onSpeakersDetected?: () => Promise<void> | void;
 }
 
@@ -189,6 +190,7 @@ export function MeetingConversation({
   onRenameSpeaker,
   onSetSelfSpeaker,
   onAssignSegmentSpeaker,
+  onAddAndAssignSegmentSpeaker,
   onSpeakersDetected,
 }: MeetingConversationProps) {
   const { t, lang } = useLanguage();
@@ -384,6 +386,7 @@ export function MeetingConversation({
     [summaryPanelProps, focusComposer],
   );
   const isSummaryGenerating = ['processing', 'summarizing', 'regenerating'].includes(summaryPanelProps.summaryStatus);
+  const isSummaryLoading = summaryPanelProps.summaryLoadStatus === 'loading' || isSummaryGenerating;
   const showSummaryContent = hasSummary
     || summaryPanelProps.summaryLoadStatus === 'loading'
     || isSummaryGenerating
@@ -538,7 +541,7 @@ export function MeetingConversation({
                     {showSummaryContent && (
                       <MessageScrollerItem
                         messageId={`${meetingId}-summary`}
-                        className={isSummaryGenerating ? 'flex min-h-full flex-1 flex-col' : undefined}
+                        className={isSummaryLoading ? 'flex min-h-full flex-1 flex-col' : undefined}
                       >
                         <SummaryMessage
                           summaryPanelProps={summaryProps}
@@ -607,6 +610,7 @@ export function MeetingConversation({
             onRenameSpeaker={onRenameSpeaker}
             onSetSelfSpeaker={onSetSelfSpeaker}
             onAssignSegmentSpeaker={onAssignSegmentSpeaker}
+            onAddAndAssignSegmentSpeaker={onAddAndAssignSegmentSpeaker}
             onSpeakersDetected={onSpeakersDetected}
             transcriptViewportClassName="px-[var(--drawer-content-inset)]"
           />

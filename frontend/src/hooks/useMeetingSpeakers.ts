@@ -28,6 +28,8 @@ interface UseMeetingSpeakersReturn {
     renameSpeaker: (speakerId: number, displayName: string) => Promise<void>;
     /** Attribute a single unattributed transcript line to a voice the user picked. */
     assignSegmentSpeaker: (transcriptId: string, speakerId: number) => Promise<void>;
+    /** Create a confirmed named speaker and attribute one unattributed line to them. */
+    addAndAssignSegmentSpeaker: (transcriptId: string, displayName: string) => Promise<void>;
     /** Persist the owner identity on the voice profile, never on an audio channel. */
     setSelfSpeaker: (speakerId: number, isSelf: boolean) => Promise<void>;
 }
@@ -86,6 +88,15 @@ export function useMeetingSpeakers({
     const assignSegmentSpeaker = useCallback(async (transcriptId: string, speakerId: number) => {
         if (!meetingId) return;
         await invoke("assign_segment_speaker", { meetingId, transcriptId, speakerId });
+    }, [meetingId]);
+
+    const addAndAssignSegmentSpeaker = useCallback(async (transcriptId: string, displayName: string) => {
+        if (!meetingId) return;
+        await invoke("add_and_assign_segment_speaker", {
+            meetingId,
+            transcriptId,
+            displayName: displayName.trim(),
+        });
     }, [meetingId]);
 
     const renameSpeaker = useCallback(async (speakerId: number, displayName: string) => {
@@ -176,6 +187,7 @@ export function useMeetingSpeakers({
         selfSpeakerIds,
         refetchSpeakers,
         assignSegmentSpeaker,
+        addAndAssignSegmentSpeaker,
         renameSpeaker,
         setSelfSpeaker,
     };

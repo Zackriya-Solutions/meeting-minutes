@@ -49,8 +49,6 @@ import { spring } from '@/lib/fluid/springs';
 import { CalendarSettings } from '@/components/CalendarSettings';
 import type { LocalOutlookMeeting } from '@/lib/localOutlookCalendar';
 
-const MINIMUM_HOME_MEETING_DURATION_SECONDS = 2 * 60;
-
 interface CalendarMeeting {
   meeting: CurrentMeeting;
   title: string;
@@ -341,13 +339,10 @@ export function HomeMeetingList({ animateOnMount = true }: { animateOnMount?: bo
   const { isRecording, status } = useRecordingState();
   const { t, lang } = useLanguage();
   const hasActiveRecording = isRecordingSessionBusy(isRecording, status);
-  const visibleMeetings = useMemo(
-    () => meetings.filter((meeting) => (
-      meeting.durationSeconds == null
-      || meeting.durationSeconds >= MINIMUM_HOME_MEETING_DURATION_SECONDS
-    )),
-    [meetings],
-  );
+  // Keep every saved meeting in the archive, including short test or one-minute
+  // recordings. A live recording is added separately below and remains first in
+  // today's group while it is active.
+  const visibleMeetings = meetings;
   const [question, setQuestion] = useState('');
   const [meetingToDelete, setMeetingToDelete] = useState<CalendarMeeting | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);

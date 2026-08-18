@@ -27,6 +27,7 @@ import {
 
 const HOME_MEETING_LIMIT = 2;
 const MEETING_END_REFRESH_PADDING_MS = 500;
+const HOME_OUTLOOK_CARD_DISMISSED_KEY = 'memento:home-outlook-card-dismissed:v1';
 
 interface LocalOutlookCalendarContextValue {
   status: LocalOutlookCalendarStatus | null;
@@ -65,6 +66,30 @@ export function LocalOutlookCalendarProvider({ children }: { children: ReactNode
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [homeCardVisible, setHomeCardVisible] = useState(false);
+  const [homeCardDismissed, setHomeCardDismissed] = useState(false);
+  const [homeCardPreferenceLoaded, setHomeCardPreferenceLoaded] = useState(false);
+
+  useEffect(() => {
+    try {
+      setHomeCardDismissed(window.localStorage.getItem(HOME_OUTLOOK_CARD_DISMISSED_KEY) === 'true');
+    } catch {
+      // The in-memory state still dismisses the card for this session when storage is unavailable.
+    } finally {
+      setHomeCardPreferenceLoaded(true);
+    }
+  }, []);
+
+  const setHomeCardVisiblePersistently = useCallback((visible: boolean) => {
+    if (!visible) {
+      try {
+        window.localStorage.setItem(HOME_OUTLOOK_CARD_DISMISSED_KEY, 'true');
+      } catch {
+        // Best effort: the local state still hides the card until the app is reloaded.
+      }
+      setHomeCardDismissed(true);
+    }
+    setHomeCardVisible(visible);
+  }, []);
 
   const refreshStatus = useCallback(async () => {
     const nextStatus = await getLocalOutlookCalendarStatus();
@@ -146,10 +171,10 @@ export function LocalOutlookCalendarProvider({ children }: { children: ReactNode
   }, [enabled, loadCalendarState, upcomingMeetings]);
 
   useEffect(() => {
-    if (loading) return;
+    if (loading || !homeCardPreferenceLoaded) return;
 
     if (!enabled) {
-      setHomeCardVisible(true);
+      setHomeCardVisible(!homeCardDismissed);
       return;
     }
 
@@ -157,13 +182,13 @@ export function LocalOutlookCalendarProvider({ children }: { children: ReactNode
 
     const hideTimer = window.setTimeout(() => setHomeCardVisible(false), 1_000);
     return () => window.clearTimeout(hideTimer);
-  }, [enabled, loading, saving]);
+  }, [enabled, homeCardDismissed, homeCardPreferenceLoaded, loading, saving]);
 
   const toggleEnabled = useCallback(async (next: boolean) => {
     const previous = enabled;
     setEnabled(next);
     setSaving(true);
-    setHomeCardVisible(true);
+    if (!homeCardDismissed) setHomeCardVisible(true);
 
     try {
       if (next) {
@@ -191,7 +216,7 @@ export function LocalOutlookCalendarProvider({ children }: { children: ReactNode
     } finally {
       setSaving(false);
     }
-  }, [enabled, refreshStatus, status, t]);
+  }, [enabled, homeCardDismissed, refreshStatus, status, t]);
 
   const value = useMemo<LocalOutlookCalendarContextValue>(() => ({
     status,
@@ -200,11 +225,12 @@ export function LocalOutlookCalendarProvider({ children }: { children: ReactNode
     loading,
     saving,
     homeCardVisible,
-    setHomeCardVisible,
+    setHomeCardVisible: setHomeCardVisiblePersistently,
     toggleEnabled,
   }), [
     enabled,
     homeCardVisible,
+    setHomeCardVisiblePersistently,
     loading,
     saving,
     status,

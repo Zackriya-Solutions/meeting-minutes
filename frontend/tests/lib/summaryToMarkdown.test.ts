@@ -1,5 +1,25 @@
 import { describe, expect, test } from 'bun:test';
-import { extractSummaryAgreementRows } from '../../src/lib/summaryToMarkdown';
+import {
+  extractSummaryAgreementRows,
+  extractSummaryAgreements,
+} from '../../src/lib/summaryToMarkdown';
+
+describe('extractSummaryAgreements', () => {
+  test('renders one agreement without a bullet', () => {
+    expect(extractSummaryAgreements(`
+## Договорённости
+- Анна подготовит релиз к пятнице.
+`)).toBe('Анна подготовит релиз к пятнице.');
+  });
+
+  test('keeps bullets when there are multiple agreements', () => {
+    expect(extractSummaryAgreements(`
+## Договорённости
+- Анна подготовит релиз к пятнице.
+- Игорь проверит сборку сегодня.
+`)).toBe('- Анна подготовит релиз к пятнице.\n- Игорь проверит сборку сегодня.');
+  });
+});
 
 describe('extractSummaryAgreementRows', () => {
   test('keeps recognized owners first and clears unknown metadata', () => {

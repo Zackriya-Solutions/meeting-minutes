@@ -18,6 +18,13 @@ const DeslopTable = Table as unknown as ComponentType<{
   className?: string;
 }>;
 
+function capitalizeMetric(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) return value;
+  const characters = Array.from(trimmed);
+  return `${characters[0].toLocaleUpperCase('ru-RU')}${characters.slice(1).join('')}`;
+}
+
 export function MeetingNumbersPanel({
   numbers,
   onSeek,
@@ -43,7 +50,7 @@ export function MeetingNumbersPanel({
           className="meeting-numbers-table"
           head={[t('Metric'), t('Figure'), t('Moment')]}
           rows={numbers.map((row) => [
-            row.metric,
+            capitalizeMetric(row.metric),
             <span key="value">{row.value}</span>,
             <MomentLink
               key="moment"

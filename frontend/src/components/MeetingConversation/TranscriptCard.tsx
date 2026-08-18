@@ -35,6 +35,7 @@ interface TranscriptCardProps {
   onRenameSpeaker?: (speakerId: number, displayName: string) => Promise<void> | void;
   onSetSelfSpeaker?: (speakerId: number, isSelf: boolean) => Promise<void> | void;
   onAssignSegmentSpeaker?: (transcriptId: string, speakerId: number) => Promise<void> | void;
+  onAddAndAssignSegmentSpeaker?: (transcriptId: string, displayName: string) => Promise<void> | void;
   onSpeakersDetected?: () => Promise<void> | void;
   transcriptViewportClassName?: string;
 }
@@ -61,6 +62,7 @@ export function TranscriptCard({
   onRenameSpeaker,
   onSetSelfSpeaker,
   onAssignSegmentSpeaker,
+  onAddAndAssignSegmentSpeaker,
   onSpeakersDetected,
   transcriptViewportClassName,
 }: TranscriptCardProps) {
@@ -96,6 +98,7 @@ export function TranscriptCard({
         onRenameSpeaker={onRenameSpeaker}
         onSetSelfSpeaker={onSetSelfSpeaker}
         onAssignSegmentSpeaker={onAssignSegmentSpeaker}
+        onAddAndAssignSegmentSpeaker={onAddAndAssignSegmentSpeaker}
         onSpeakersDetected={onSpeakersDetected}
         showToolbar={false}
         showContextField={false}
