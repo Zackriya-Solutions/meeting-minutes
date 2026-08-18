@@ -99,9 +99,18 @@ export class RecordingService {
    * @returns Final shutdown status, including any non-fatal device-stop warning
    */
   async stopRecording(savePath: string): Promise<RecordingStopOutcome> {
-    return invoke<RecordingStopOutcome>('stop_recording', {
+    const outcome = await invoke<RecordingStopOutcome | null>('stop_recording', {
       args: { save_path: savePath }
     });
+
+    // Older/mismatched native wrappers returned unit (`null` over Tauri IPC) even though the
+    // recorder had stopped successfully. Never let that compatibility case abort persistence
+    // of the meeting in the frontend.
+    return outcome ?? {
+      status: 'success',
+      message: 'Recording stopped successfully',
+      stop_error: null,
+    };
   }
 
   /**

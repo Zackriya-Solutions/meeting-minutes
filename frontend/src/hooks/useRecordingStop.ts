@@ -294,7 +294,10 @@ export function useRecordingStop(
       // Save to SQLite
       // NOTE: enabled to save COMPLETE transcripts after frontend receives all updates
       // This ensures user sees all transcripts streaming in before database save
-      if (isCallApi && transcriptionComplete == true) {
+      if (isCallApi) {
+        if (!transcriptionComplete) {
+          console.warn('Saving the meeting with the transcripts available after the frontend wait timeout');
+        }
 
         setStatus(RecordingStatus.SAVING, 'Saving meeting to database...');
 

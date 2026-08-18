@@ -23,6 +23,14 @@ export function isRecordingSessionBusy(
   return isRecording || BUSY_STATUSES.has(status);
 }
 
+/** Keep the live transcript visible until capture and post-processing are both settled. */
+export function canDismissRecordingDrawer(
+  isRecording: boolean,
+  status: RecordingStatus,
+): boolean {
+  return !isRecordingSessionBusy(isRecording, status);
+}
+
 const STARTABLE_STATUSES = new Set<RecordingStatus>([
   RecordingStatus.IDLE,
   RecordingStatus.COMPLETED,

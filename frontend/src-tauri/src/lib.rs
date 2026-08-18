@@ -146,13 +146,22 @@ async fn start_recording<R: Runtime>(
 }
 
 #[tauri::command]
-async fn stop_recording<R: Runtime>(app: AppHandle<R>, args: RecordingArgs) -> Result<(), String> {
+async fn stop_recording<R: Runtime>(
+    app: AppHandle<R>,
+    args: RecordingArgs,
+) -> Result<audio::recording_commands::StopRecordingOutcome, String> {
     log_info!("Attempting to stop recording...");
 
     // Check the actual audio recording system state instead of the flag
     if !audio::recording_commands::is_recording().await {
         log_info!("Recording is already stopped");
-        return Ok(());
+        RECORDING_FLAG.store(false, Ordering::SeqCst);
+        tray::update_tray_menu(&app);
+        return Ok(audio::recording_commands::StopRecordingOutcome {
+            status: "success".to_string(),
+            message: "Recording was already stopped".to_string(),
+            stop_error: None,
+        });
     }
 
     // Call the actual audio recording system to stop
@@ -164,7 +173,7 @@ async fn stop_recording<R: Runtime>(app: AppHandle<R>, args: RecordingArgs) -> R
     )
     .await
     {
-        Ok(_) => {
+        Ok(outcome) => {
             RECORDING_FLAG.store(false, Ordering::SeqCst);
             tray::update_tray_menu(&app);
 
@@ -180,7 +189,7 @@ async fn stop_recording<R: Runtime>(app: AppHandle<R>, args: RecordingArgs) -> R
                 }
             }
 
-            Ok(())
+            Ok(outcome)
         }
         Err(e) => {
             log_error!("Failed to stop audio recording: {}", e);
