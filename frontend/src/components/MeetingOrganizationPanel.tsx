@@ -75,6 +75,7 @@ export function MeetingOrganizationPanel({ meetingId, folderId, tags: initialTag
     setSuggestions(stored?.status === 'generated' ? stored.suggestions : []);
     setSuggestionsDismissed(stored?.status === 'dismissed');
     setNoSuggestionsFound(false);
+    setIsSuggesting(false);
   }, [meetingId]);
 
   useEffect(() => {
