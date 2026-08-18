@@ -67,6 +67,16 @@ export function shouldAutomaticallyRefreshOutlookCalendar(
   return status?.provider !== 'macos-outlook-accessibility';
 }
 
+export function manualOutlookRefreshControlState(
+  refreshing: boolean,
+  saving: boolean,
+): { loading: boolean; disabled: boolean } {
+  return {
+    loading: refreshing,
+    disabled: refreshing || saving,
+  };
+}
+
 export interface LocalOutlookMeeting {
   id: string;
   calendar_id: string;

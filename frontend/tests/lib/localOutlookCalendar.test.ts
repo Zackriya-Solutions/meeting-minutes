@@ -1,11 +1,35 @@
 import { describe, expect, test } from "bun:test";
 import {
   canReadOutlookAttendees,
+  manualOutlookRefreshControlState,
   MEETING_IN_PROGRESS_GRACE_MS,
   selectMeetingInProgress,
   shouldAutomaticallyRefreshOutlookCalendar,
   type LocalOutlookMeeting,
 } from "../../src/lib/localOutlookCalendar";
+
+describe("manualOutlookRefreshControlState", () => {
+  test("shows loading and blocks repeated clicks while a refresh is running", () => {
+    expect(manualOutlookRefreshControlState(true, false)).toEqual({
+      loading: true,
+      disabled: true,
+    });
+  });
+
+  test("blocks refresh while the calendar toggle is saving", () => {
+    expect(manualOutlookRefreshControlState(false, true)).toEqual({
+      loading: false,
+      disabled: true,
+    });
+  });
+
+  test("enables an idle refresh", () => {
+    expect(manualOutlookRefreshControlState(false, false)).toEqual({
+      loading: false,
+      disabled: false,
+    });
+  });
+});
 
 describe("canReadOutlookAttendees", () => {
   test("does not rescan the visible Outlook UI for names Accessibility cannot expose", () => {

@@ -810,6 +810,26 @@ mod tests {
     }
 
     #[test]
+    fn vectorized_attendee_lists_are_bounds_checked_independently() {
+        // Outlook may omit a display name while still returning an address. Each vector
+        // must be checked against its own length before indexing, so one short property
+        // list cannot abort attendee enrichment for the whole event.
+        assert!(CALENDAR_SCRIPT
+            .contains("if attendeeIndex <= (count of displayNames) then"));
+        assert!(CALENDAR_SCRIPT
+            .contains("if attendeeName is \"\" and attendeeIndex <= (count of addresses) then"));
+
+        // A failed attendee collection leaves both guards closed.
+        let initialization = CALENDAR_SCRIPT
+            .find("set eventAttendees to {}")
+            .expect("attendee list must be initialized");
+        let guarded_read = CALENDAR_SCRIPT
+            .find("if includeAttendees and attendeeTotal > 0 and attendeeBudget > 0 then")
+            .expect("attendee vectors must only be read after a successful count");
+        assert!(initialization < guarded_read);
+    }
+
+    #[test]
     fn metadata_only_reads_discard_attendee_fields_even_if_the_script_emits_them() {
         let range_start = Local
             .with_ymd_and_hms(2026, 7, 28, 0, 0, 0)

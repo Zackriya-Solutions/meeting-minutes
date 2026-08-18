@@ -7,6 +7,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react';
 import { toast } from 'sonner';
@@ -68,6 +69,7 @@ export function LocalOutlookCalendarProvider({ children }: { children: ReactNode
   const [upcomingMeetings, setUpcomingMeetings] = useState<LocalOutlookMeeting[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const refreshInFlight = useRef(false);
   const [saving, setSaving] = useState(false);
   const [homeCardVisible, setHomeCardVisible] = useState(false);
   const [homeCardDismissed, setHomeCardDismissed] = useState(false);
@@ -229,7 +231,11 @@ export function LocalOutlookCalendarProvider({ children }: { children: ReactNode
   }, [enabled, homeCardDismissed, refreshStatus, status, t]);
 
   const refresh = useCallback(async () => {
-    if (!enabled || refreshing) return;
+    // React state is intentionally reflected in the button, but it does not update
+    // synchronously between two clicks in the same event turn. The ref closes that
+    // small window so only one forced Outlook read can start.
+    if (!enabled || saving || refreshInFlight.current) return;
+    refreshInFlight.current = true;
     setRefreshing(true);
     try {
       await loadCalendarState(true);
@@ -238,9 +244,10 @@ export function LocalOutlookCalendarProvider({ children }: { children: ReactNode
         description: String(error),
       });
     } finally {
+      refreshInFlight.current = false;
       setRefreshing(false);
     }
-  }, [enabled, loadCalendarState, refreshing, t]);
+  }, [enabled, loadCalendarState, saving, t]);
 
   const value = useMemo<LocalOutlookCalendarContextValue>(() => ({
     status,

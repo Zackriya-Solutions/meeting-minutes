@@ -7,7 +7,8 @@
 //! never requested.
 
 use super::local_outlook::{
-    normalize_attendees, LocalOutlookCalendarStatus, LocalOutlookMeeting,
+    attendees_for_calendar_read, normalize_attendees, LocalOutlookCalendarStatus,
+    LocalOutlookMeeting,
 };
 use chrono::{DateTime, Duration, Local, LocalResult, NaiveDate, NaiveDateTime, TimeZone};
 use std::collections::{HashMap, HashSet};
@@ -460,11 +461,9 @@ fn query_calendar(
                         .optional_string("Location")
                         .map(|value| trimmed_bounded(value, 500)),
                     response_status: response_status_label(response_status).to_string(),
-                    attendees: if include_attendees {
+                    attendees: attendees_for_calendar_read(include_attendees, || {
                         attendee_names(&item)
-                    } else {
-                        Vec::new()
-                    },
+                    }),
                 });
             }
         }

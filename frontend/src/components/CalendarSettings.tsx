@@ -9,6 +9,7 @@ import { useLanguage } from '@/lib/i18n';
 import {
   canReadOutlookCalendar,
   type LocalOutlookMeeting,
+  manualOutlookRefreshControlState,
   needsOutlookPermission,
 } from '@/lib/localOutlookCalendar';
 import { IconCross } from '@/vendor/deslop/primitives/material-symbols-react';
@@ -71,6 +72,7 @@ export function CalendarSettings({ variant = 'settings', onOpenMeeting }: Calend
       : unavailable
         ? t('Outlook is unavailable')
         : t('To see upcoming meetings');
+  const refreshControl = manualOutlookRefreshControlState(refreshing, saving);
 
   if (variant === 'home') {
     if (homeCardVisible) {
@@ -173,8 +175,8 @@ export function CalendarSettings({ variant = 'settings', onOpenMeeting }: Calend
               type="button"
               variant="ghost"
               size="icon-sm"
-              loading={refreshing}
-              disabled={refreshing || saving}
+              loading={refreshControl.loading}
+              disabled={refreshControl.disabled}
               onClick={() => void refresh()}
               aria-label={t('Refresh')}
               title={t('Refresh')}
