@@ -23,9 +23,11 @@ pub async fn find_canonical_meeting(
 ) -> Result<Option<ExistingAudioMeeting>, sqlx::Error> {
     sqlx::query_as::<_, ExistingAudioMeeting>(
         "SELECT m.id AS meeting_id, m.title, CAST(m.created_at AS TEXT) AS created_at, \
-                ai.denoise_applied \
+                mai.denoise_applied \
          FROM audio_identities ai \
          JOIN meetings m ON m.id = ai.canonical_meeting_id \
+         LEFT JOIN meeting_audio_identities mai \
+           ON mai.meeting_id = ai.canonical_meeting_id \
          WHERE ai.sha256 = ?",
     )
     .bind(sha256)
@@ -171,10 +173,13 @@ pub async fn register_backfilled_identity(
         });
     }
 
+    // Per-meeting provenance lives in meeting_audio_identities. Keep the
+    // registry's last known value when a richer legacy meeting is promoted;
+    // callers still see the promoted meeting's own (possibly unknown) value.
     sqlx::query(
-        "UPDATE audio_identities SET canonical_meeting_id = ?, denoise_applied = ( \
+        "UPDATE audio_identities SET canonical_meeting_id = ?, denoise_applied = COALESCE(( \
              SELECT denoise_applied FROM meeting_audio_identities WHERE meeting_id = ? \
-         ) WHERE sha256 = ?",
+         ), denoise_applied) WHERE sha256 = ?",
     )
     .bind(meeting_id)
     .bind(meeting_id)
@@ -308,10 +313,13 @@ pub async fn release_meeting_identity(
         .await?;
 
         if let Some(replacement_id) = replacement {
+            // Preserve the registry's last known processing value when the
+            // replacement is a legacy meeting. Its per-meeting mapping remains
+            // NULL, so find_canonical_meeting still reports provenance honestly.
             sqlx::query(
-                "UPDATE audio_identities SET canonical_meeting_id = ?, denoise_applied = ( \
+                "UPDATE audio_identities SET canonical_meeting_id = ?, denoise_applied = COALESCE(( \
                      SELECT denoise_applied FROM meeting_audio_identities WHERE meeting_id = ? \
-                 ) WHERE sha256 = ?",
+                 ), denoise_applied) WHERE sha256 = ?",
             )
             .bind(&replacement_id)
             .bind(&replacement_id)
@@ -523,6 +531,43 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(role, "canonical");
+    }
+
+    #[tokio::test]
+    async fn promoting_legacy_duplicate_preserves_known_registry_provenance() {
+        let pool = pool().await;
+
+        let mut tx = pool.begin().await.unwrap();
+        register_import_identity(&mut tx, "m1", HASH, 7, None, Some(true))
+            .await
+            .unwrap();
+        register_import_identity(&mut tx, "m2", HASH, 7, None, None)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+
+        let mut tx = pool.begin().await.unwrap();
+        release_meeting_identity(&mut tx, "m1").await.unwrap();
+        sqlx::query("DELETE FROM meetings WHERE id='m1'")
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+
+        let promoted = find_canonical_meeting(&pool, HASH).await.unwrap().unwrap();
+        assert_eq!(promoted.meeting_id, "m2");
+        assert_eq!(
+            promoted.denoise_applied, None,
+            "the legacy meeting's own provenance must not be invented"
+        );
+
+        let last_known: Option<i64> =
+            sqlx::query_scalar("SELECT denoise_applied FROM audio_identities WHERE sha256 = ?")
+                .bind(HASH)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(last_known, Some(1));
     }
 
     #[tokio::test]
