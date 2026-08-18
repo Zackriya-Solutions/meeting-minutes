@@ -409,6 +409,7 @@ fn query_calendar(
     folder: &CalendarFolder,
     range_start: DateTime<Local>,
     range_end: DateTime<Local>,
+    include_attendees: bool,
 ) -> Result<Vec<LocalOutlookMeeting>, String> {
     let items = folder.object.get_object("Items")?;
     items.call("Sort", vec!["[Start]".into(), false.into()])?;
@@ -459,7 +460,11 @@ fn query_calendar(
                         .optional_string("Location")
                         .map(|value| trimmed_bounded(value, 500)),
                     response_status: response_status_label(response_status).to_string(),
-                    attendees: attendee_names(&item),
+                    attendees: if include_attendees {
+                        attendee_names(&item)
+                    } else {
+                        Vec::new()
+                    },
                 });
             }
         }
@@ -504,7 +509,10 @@ pub fn status() -> Result<LocalOutlookCalendarStatus, String> {
     })
 }
 
-pub fn upcoming_meetings(days: u32) -> Result<Vec<LocalOutlookMeeting>, String> {
+pub fn upcoming_meetings(
+    days: u32,
+    include_attendees: bool,
+) -> Result<Vec<LocalOutlookMeeting>, String> {
     let _apartment = ComApartment::initialize()?;
     let clsid = outlook_clsid()?;
     let outlook = open_outlook(&clsid)?;
@@ -518,7 +526,7 @@ pub fn upcoming_meetings(days: u32) -> Result<Vec<LocalOutlookMeeting>, String> 
     let mut last_error = None;
 
     for calendar in calendars {
-        match query_calendar(&calendar, range_start, range_end) {
+        match query_calendar(&calendar, range_start, range_end, include_attendees) {
             Ok(events) => {
                 readable_calendars += 1;
                 for event in events {

@@ -12,6 +12,8 @@ export interface SaveMeetingRequest {
   meetingTitle: string;
   transcripts: Transcript[];
   folderPath: string | null;
+  invitedParticipants?: string[];
+  manualRoster?: string[];
 }
 
 export interface SaveMeetingResponse {
@@ -34,17 +36,23 @@ export class StorageService {
    * @param meetingTitle - Title of the meeting
    * @param transcripts - Array of transcript segments
    * @param folderPath - Optional folder path for audio file
+   * @param invitedParticipants - Outlook invitees available to speaker naming
+   * @param manualRoster - People the user entered during the recording
    * @returns Promise with { meeting_id: string }
    */
   async saveMeeting(
     meetingTitle: string,
     transcripts: Transcript[],
-    folderPath: string | null
+    folderPath: string | null,
+    invitedParticipants: readonly string[] = [],
+    manualRoster: readonly string[] = [],
   ): Promise<SaveMeetingResponse> {
     return invoke<SaveMeetingResponse>('api_save_transcript', {
       meetingTitle,
       transcripts,
       folderPath,
+      invitedParticipants,
+      manualRoster,
     });
   }
 

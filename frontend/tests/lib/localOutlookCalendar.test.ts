@@ -1,9 +1,25 @@
 import { describe, expect, test } from "bun:test";
 import {
+  canReadOutlookAttendees,
   MEETING_IN_PROGRESS_GRACE_MS,
   selectMeetingInProgress,
   type LocalOutlookMeeting,
 } from "../../src/lib/localOutlookCalendar";
+
+describe("canReadOutlookAttendees", () => {
+  test("does not rescan the visible Outlook UI for names Accessibility cannot expose", () => {
+    expect(canReadOutlookAttendees({
+      supported: true,
+      installed: true,
+      running: true,
+      permission: "accessibility",
+      permission_state: "granted",
+      requires_admin: true,
+      provider: "macos-outlook-accessibility",
+      detail: "",
+    })).toBe(false);
+  });
+});
 
 const NOON = new Date("2026-08-06T12:00:00Z").getTime();
 

@@ -33,13 +33,10 @@ const RECORD_SEPARATOR: char = '\u{1e}';
 const UNIT_SEPARATOR: char = '\u{1f}';
 /// Separates the invitee names inside a record's attendee field.
 const GROUP_SEPARATOR: char = '\u{1d}';
-const SCRIPT_TIMEOUT: StdDuration = StdDuration::from_secs(150);
-/// Invitee names one calendar read may fetch in total.
-///
-/// Every name is two Apple Event round trips, so a full week of large invitations could
-/// otherwise turn a background refresh into a minute of automation traffic. A calendar
-/// busy enough to exhaust this budget still returns every meeting, with the later
-/// entries simply carrying no invitee list.
+const SCRIPT_TIMEOUT: StdDuration = StdDuration::from_secs(45);
+/// Invitee names one user-initiated enrichment read may return in total. A calendar busy
+/// enough to exhaust this budget still returns every meeting, with later entries simply
+/// carrying no invitee list. Background refreshes never request these names.
 const ATTENDEE_NAME_BUDGET: usize = 400;
 /// Meetings that already started are still worth offering as a recording target.
 const LOOKBEHIND_HOURS: i64 = 2;
@@ -190,7 +187,10 @@ pub fn request_permission() -> Result<AutomationPermission, String> {
     Ok(permission)
 }
 
-pub fn upcoming_meetings(days: u32) -> Result<Vec<LocalOutlookMeeting>, String> {
+pub fn upcoming_meetings(
+    days: u32,
+    include_attendees: bool,
+) -> Result<Vec<LocalOutlookMeeting>, String> {
     if !outlook_installed() {
         return Err("Microsoft Outlook for Mac is not installed.".to_string());
     }
@@ -230,7 +230,11 @@ pub fn upcoming_meetings(days: u32) -> Result<Vec<LocalOutlookMeeting>, String> 
     let script = CALENDAR_SCRIPT
         .replace("__DAYS__", &days.to_string())
         .replace("__MAX_ATTENDEES__", &MAX_ATTENDEES.to_string())
-        .replace("__ATTENDEE_BUDGET__", &ATTENDEE_NAME_BUDGET.to_string());
+        .replace("__ATTENDEE_BUDGET__", &ATTENDEE_NAME_BUDGET.to_string())
+        .replace(
+            "__INCLUDE_ATTENDEES__",
+            if include_attendees { "true" } else { "false" },
+        );
     let output = run_osascript(&script, SCRIPT_TIMEOUT)?;
 
     let now = Local::now();
@@ -465,6 +469,7 @@ set rangeEnd to rightNow + (__DAYS__ * days)
 set collected to {}
 set failureText to ""
 set attendeeBudget to __ATTENDEE_BUDGET__
+set includeAttendees to __INCLUDE_ATTENDEES__
 
 tell application "Microsoft Outlook"
 	launch
@@ -532,36 +537,58 @@ tell application "Microsoft Outlook"
 					-- distribution list from spending the whole Apple Events budget.
 					set attendeeTotal to 0
 					set attendeeNames to {}
+					set eventAttendees to {}
 					try
 						set eventAttendees to attendees of currentEvent
 						set attendeeTotal to (count of eventAttendees)
+					end try
+					if includeAttendees and attendeeTotal > 0 and attendeeBudget > 0 then
+						try
 						set attendeeLimit to attendeeTotal
 						if attendeeLimit > __MAX_ATTENDEES__ then set attendeeLimit to __MAX_ATTENDEES__
 						if attendeeLimit > attendeeBudget then set attendeeLimit to attendeeBudget
 						set attendeeBudget to attendeeBudget - attendeeLimit
+
+						-- Ask Outlook for each property as one vectorized Apple Event. The old
+						-- per-attendee loop made two synchronous automation calls per person and
+						-- repeatedly stalled Outlook's UI thread during a background refresh.
+						set attendeeEmails to {}
+						set displayNames to {}
+						set addresses to {}
+						try
+							-- Raw property codes avoid AppleScript's ambiguity between Outlook's
+							-- `email address` property and its `email address` record type.
+							set attendeeEmails to «class emad» of every item in eventAttendees
+							set displayNames to «class pnam» of every item in attendeeEmails
+						end try
+						try
+							set addresses to «class radd» of every item in attendeeEmails
+						end try
 						repeat with attendeeIndex from 1 to attendeeLimit
 							set attendeeName to ""
-							try
-								set attendeeAddress to email address of item attendeeIndex of eventAttendees
+							if attendeeIndex <= (count of displayNames) then
 								try
-									set attendeeName to my textOrEmpty(name of attendeeAddress)
+									set attendeeName to my textOrEmpty(item attendeeIndex of displayNames)
 								end try
-								if attendeeName is "" then
-									try
-										set attendeeName to my textOrEmpty(address of attendeeAddress)
-									end try
-								end if
-							end try
+							end if
+							if attendeeName is "" and attendeeIndex <= (count of addresses) then
+								try
+									set attendeeName to my textOrEmpty(item attendeeIndex of addresses)
+								end try
+							end if
 							if attendeeName is not "" then set end of attendeeNames to attendeeName
 						end repeat
-					end try
+						end try
+					end if
 
 					-- `organizer` is plain display text on a calendar event, unlike an
 					-- attendee's `email address` record.
 					set organizerName to ""
-					try
-						set organizerName to my textOrEmpty(organizer of currentEvent)
-					end try
+					if includeAttendees then
+						try
+							set organizerName to my textOrEmpty(organizer of currentEvent)
+						end try
+					end if
 					if organizerName is not "" then set beginning of attendeeNames to organizerName
 
 					set attendeeText to ""
@@ -678,6 +705,19 @@ mod tests {
                 "guest@example.com".to_string(),
             ]
         );
+    }
+
+    #[test]
+    fn attendee_properties_are_vectorized_instead_of_queried_person_by_person() {
+        assert!(CALENDAR_SCRIPT.contains(
+            "set attendeeEmails to «class emad» of every item in eventAttendees"
+        ));
+        assert!(CALENDAR_SCRIPT.contains(
+            "set displayNames to «class pnam» of every item in attendeeEmails"
+        ));
+        assert!(!CALENDAR_SCRIPT.contains(
+            "email address of item attendeeIndex of eventAttendees"
+        ));
     }
 
     #[test]
@@ -828,7 +868,8 @@ mod tests {
     #[test]
     #[ignore = "requires a running classic Outlook and Automation consent"]
     fn reads_the_local_outlook_calendar() {
-        let meetings = upcoming_meetings(7).expect("Apple Events calendar read should succeed");
+        let meetings =
+            upcoming_meetings(7, true).expect("Apple Events calendar read should succeed");
         eprintln!("Apple Events returned {} meeting(s)", meetings.len());
     }
 }

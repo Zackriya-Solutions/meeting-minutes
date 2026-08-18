@@ -32,11 +32,17 @@ calendar endpoint in this path.
 The user must explicitly enable the integration in **Settings → Calendar**.
 Until then, Memento checks only whether the required Outlook application is
 installed; it does not launch Outlook or read the calendar. After enabling it,
-the home screen and Calendar settings read the next seven days when opened,
-refresh when Memento returns to the foreground, and refresh every five minutes
-while visible. When the calendar is empty or a read fails, Memento retries every
-minute. Manual refresh remains available, and concurrent reads are coalesced so
-the two screens cannot trigger duplicate Outlook automation.
+the home screen and Calendar settings read the next seven days when opened.
+Automatic reads share a fifteen-minute cache, including across focus changes;
+an empty or failed calendar is retried after five minutes. Manual refresh remains
+available, and concurrent reads are coalesced so two screens cannot trigger
+duplicate Outlook automation.
+
+Background reads fetch event metadata and attendee counts only. Invitee names are
+enriched on demand when the user opens a calendar entry or starts the meeting. This
+keeps Outlook's synchronous automation thread out of the recurring refresh path.
+The New Outlook Accessibility fallback is not polled on an interval or on focus at all,
+because reading it requires traversing and sometimes navigating the visible Outlook UI.
 
 On macOS, the user approves one **Automation** consent alert ("Memento wants
 access to control Microsoft Outlook"). Memento then starts Outlook in the
@@ -81,8 +87,9 @@ cannot otherwise know:
   every Tauri command argument, is read under its camelCase name; because it is
   an `Option`, a mis-cased key is not an error and silently costs the title.
 - the **participants**: the invitee names are held in the pending slot in
-  `lib/meetingParticipants.ts` until the stop sequence has saved the meeting,
-  then attached with `set_meeting_participants`. Automatic speaker naming reads
+  `lib/meetingParticipants.ts` until the stop sequence saves the meeting. They
+  are included in that same native save, before diarization or speaker naming can
+  start, rather than attached by a later IPC call. Automatic speaker naming reads
   them as hints (`report::prompts::invited_participants`), which is how an
   invited person who never says their own name can still be recognized. The
   transcript remains the only evidence: a name is applied only when the
@@ -148,7 +155,9 @@ The Apple Events connector asks Outlook for each calendar's events in the
 requested window through the documented Calendar Suite (`calendar event`:
 `subject`, `start time`, `end time`, `location`, `all day flag`,
 `is recurring`, `exchange id`, `organizer`, and the `name` / `address` of each
-attendee's `email address`). It never reads `content` or `plain text content`,
+attendee's `email address`). Attendee display names and fallback addresses are
+requested as vectorized property lists rather than one synchronous Apple Event per
+person. It never reads `content` or `plain text content`,
 which are the appointment body. Unlike the Accessibility
 connector it is not limited to the rendered week and does not depend on
 localized VoiceOver label wording.

@@ -10,6 +10,7 @@ use crate::{
         models::MeetingModel,
         repositories::{
             meeting::MeetingsRepository,
+            participant::{ParticipantsRepository, SOURCE_MANUAL_ROSTER, SOURCE_OUTLOOK_CALENDAR},
             setting::{is_secret_sentinel, redact_secret, SettingsRepository},
             transcript::TranscriptsRepository,
         },
@@ -1158,6 +1159,8 @@ pub async fn api_save_transcript<R: Runtime>(
     meeting_title: String,
     transcripts: Vec<serde_json::Value>,
     folder_path: Option<String>,
+    invited_participants: Option<Vec<String>>,
+    manual_roster: Option<Vec<String>>,
     auth_token: Option<String>,
 ) -> Result<serde_json::Value, String> {
     log_info!(
@@ -1212,6 +1215,33 @@ pub async fn api_save_transcript<R: Runtime>(
     .await
     {
         Ok(meeting_id) => {
+            // Calendar invitees and the in-recording roster must exist before refinement
+            // starts. Diarization queues speaker naming, and that pass reads these rows as
+            // its candidate names; attaching them from the frontend after this command
+            // returned left a race where naming saw an empty list.
+            if let Some(participants) = invited_participants.filter(|names| !names.is_empty()) {
+                if let Err(error) = ParticipantsRepository::add(
+                    pool,
+                    &meeting_id,
+                    &participants,
+                    SOURCE_OUTLOOK_CALENDAR,
+                )
+                .await
+                {
+                    // The transcript and recording are already durable. Keep the command
+                    // successful so a retry cannot create a duplicate meeting.
+                    log_warn!("Failed to save Outlook participants: {}", error);
+                }
+            }
+            if let Some(roster) = manual_roster.filter(|names| !names.is_empty()) {
+                if let Err(error) =
+                    ParticipantsRepository::add(pool, &meeting_id, &roster, SOURCE_MANUAL_ROSTER)
+                        .await
+                {
+                    log_warn!("Failed to save the meeting roster: {}", error);
+                }
+            }
+
             if let Some(folder) = provenance_folder.filter(|value| !value.trim().is_empty()) {
                 match sqlx::query_as::<_, (String, String)>(
                     "SELECT provider, model FROM transcript_settings WHERE id='1'",

@@ -130,7 +130,12 @@ export function LocalOutlookCalendarProvider({ children }: { children: ReactNode
       });
 
     const refresh = () => {
-      void loadCalendarState(true).catch(() => undefined);
+      // A focus change is common when joining a meeting from Outlook. Respect the
+      // calendar cache instead of synchronously rescanning Outlook on every switch.
+      // The Accessibility fallback manipulates the visible Outlook window, so it is
+      // deliberately user/initial-load driven and never runs on focus.
+      if (status?.provider === 'macos-outlook-accessibility') return;
+      void loadCalendarState().catch(() => undefined);
     };
     window.addEventListener('focus', refresh);
     window.addEventListener(LOCAL_OUTLOOK_SETTING_CHANGED_EVENT, refresh);
@@ -139,17 +144,17 @@ export function LocalOutlookCalendarProvider({ children }: { children: ReactNode
       window.removeEventListener('focus', refresh);
       window.removeEventListener(LOCAL_OUTLOOK_SETTING_CHANGED_EVENT, refresh);
     };
-  }, [loadCalendarState, t]);
+  }, [loadCalendarState, status?.provider, t]);
 
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled || status?.provider === 'macos-outlook-accessibility') return;
 
     const refresh = () => {
-      void loadCalendarState(true).catch(() => undefined);
+      void loadCalendarState().catch(() => undefined);
     };
     const interval = window.setInterval(refresh, OUTLOOK_CALENDAR_REFRESH_INTERVAL_MS);
     return () => window.clearInterval(interval);
-  }, [enabled, loadCalendarState]);
+  }, [enabled, loadCalendarState, status?.provider]);
 
   useEffect(() => {
     if (!enabled || upcomingMeetings.length === 0) return;
@@ -164,7 +169,8 @@ export function LocalOutlookCalendarProvider({ children }: { children: ReactNode
     if (!Number.isFinite(nextEnd)) return;
 
     const timer = window.setTimeout(() => {
-      void loadCalendarState(true).catch(() => undefined);
+      // Filtering the cached list is enough when an entry ends; do not wake Outlook.
+      void loadCalendarState().catch(() => undefined);
     }, Math.max(MEETING_END_REFRESH_PADDING_MS, nextEnd - now + MEETING_END_REFRESH_PADDING_MS));
 
     return () => window.clearTimeout(timer);

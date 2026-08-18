@@ -8,8 +8,10 @@
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, SqlitePool};
 
-/// Where a participant came from. Only calendar invitations are recorded today.
+/// Where a participant came from. Calendar invitations and an explicitly entered live
+/// roster remain distinct claims even though speaker naming can use both as hints.
 pub const SOURCE_OUTLOOK_CALENDAR: &str = "outlook_calendar";
+pub const SOURCE_MANUAL_ROSTER: &str = "manual_roster";
 
 /// A participant list longer than this is a distribution list, not a meeting, and is
 /// no use to speaker naming.

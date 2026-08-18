@@ -66,10 +66,9 @@ export function rememberMeetingParticipants(
   }
 }
 
-/** The remembered people, read once and cleared. Empty when there are none. */
-export function takeMeetingParticipants(storage: Storage): string[] {
+/** Read the invited people without consuming them, so a failed save can be retried. */
+export function readMeetingParticipants(storage: Storage): string[] {
   const stored = storage.getItem(PENDING_PARTICIPANTS_KEY);
-  storage.removeItem(PENDING_PARTICIPANTS_KEY);
   if (!stored) return [];
   try {
     const parsed: unknown = JSON.parse(stored);
@@ -77,6 +76,13 @@ export function takeMeetingParticipants(storage: Storage): string[] {
   } catch {
     return [];
   }
+}
+
+/** The remembered people, read once and cleared. Empty when there are none. */
+export function takeMeetingParticipants(storage: Storage): string[] {
+  const participants = readMeetingParticipants(storage);
+  storage.removeItem(PENDING_PARTICIPANTS_KEY);
+  return participants;
 }
 
 /** Attach the invited people to a saved meeting. No-op for an empty list. */
