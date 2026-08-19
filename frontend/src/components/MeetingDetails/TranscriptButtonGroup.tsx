@@ -6,7 +6,6 @@ import { ButtonGroup } from '@/components/ui/button-group';
 import { Copy, FolderOpen, RefreshCw } from 'lucide-react';
 import Analytics from '@/lib/analytics';
 import { RetranscribeDialog } from './RetranscribeDialog';
-import { useConfig } from '@/contexts/ConfigContext';
 
 
 interface TranscriptButtonGroupProps {
@@ -27,15 +26,12 @@ export function TranscriptButtonGroup({
   meetingFolderPath,
   onRefetchTranscripts,
 }: TranscriptButtonGroupProps) {
-  const { betaFeatures } = useConfig();
   const [showRetranscribeDialog, setShowRetranscribeDialog] = useState(false);
 
-  // A meeting with zero transcript segments has no prior transcript to overwrite — most
-  // likely recorded in "record only" mode. Surface the transcribe action unconditionally
-  // for that case (no beta gate needed, there's nothing to accidentally clobber); meetings
-  // that already have a transcript keep the existing beta-gated "Retranscribe" behavior.
+  // Always available (not beta-gated) as long as we have somewhere to read audio from —
+  // lets you regenerate a transcript with a different model/language to compare quality,
+  // whether or not one already exists.
   const isFirstTranscription = transcriptCount === 0;
-  const canTranscribe = (betaFeatures.importAndRetranscribe || isFirstTranscription) && meetingId && meetingFolderPath;
 
   const handleRetranscribeComplete = useCallback(async () => {
     // Refetch transcripts to show the updated data
@@ -75,7 +71,7 @@ export function TranscriptButtonGroup({
           <span className="hidden lg:inline">Recording</span>
         </Button>
 
-        {canTranscribe && (
+        {meetingId && meetingFolderPath && (
           <Button
             size="sm"
             variant="outline"
@@ -84,15 +80,15 @@ export function TranscriptButtonGroup({
               Analytics.trackButtonClick(isFirstTranscription ? 'transcribe_now' : 'enhance_transcript', 'meeting_details');
               setShowRetranscribeDialog(true);
             }}
-            title={isFirstTranscription ? 'Transcribe this recording' : 'Retranscribe to enhance your recorded audio'}
+            title={isFirstTranscription ? 'Transcribe this recording' : 'Regenerate the transcript with a different model or language — useful for comparing quality'}
           >
             <RefreshCw className="xl:mr-2" size={18} />
-            <span className="hidden lg:inline">{isFirstTranscription ? 'Transcribe Now' : 'Enhance'}</span>
+            <span className="hidden lg:inline">{isFirstTranscription ? 'Transcribe Now' : 'Regenerate'}</span>
           </Button>
         )}
       </ButtonGroup>
 
-      {canTranscribe && (
+      {meetingId && meetingFolderPath && (
         <RetranscribeDialog
           open={showRetranscribeDialog}
           onOpenChange={setShowRetranscribeDialog}

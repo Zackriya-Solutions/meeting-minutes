@@ -304,7 +304,7 @@ export function RetranscribeDialog({
                 ? `An error occurred during ${isFirstTranscription ? 'transcription' : 'retranscription'}`
                 : isFirstTranscription
                   ? 'This recording was captured audio-only — transcribe it now'
-                  : 'Re-process the audio with different language settings'}
+                  : 'Re-process the audio with a different model or language — compare quality against the existing transcript'}
           </DialogDescription>
         </DialogHeader>
 
