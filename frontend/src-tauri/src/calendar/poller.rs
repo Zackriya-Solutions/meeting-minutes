@@ -98,7 +98,12 @@ async fn sync_once<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
         set_active_auto_event(None);
     }
 
-    let time_min = now - ChronoDuration::minutes(5);
+    // Look back far enough that an event whose end_time has already passed doesn't drop out
+    // of Google's response before its auto-stop grace period elapses — timeMin excludes
+    // events that ended before it, so a too-short lookback here silently prevents auto-stop
+    // from ever firing (this was the bug: fixed 5-minute lookback vs. a configurable grace
+    // period that can be up to 60 minutes).
+    let time_min = now - ChronoDuration::minutes(5 + account.auto_stop_grace_minutes);
     let time_max = now + ChronoDuration::hours(2);
 
     let events = match client::list_events(&access_token, time_min, time_max).await {

@@ -268,8 +268,14 @@ export function useRecordingStart(
       }
 
       try {
-        // Generate meeting title
-        const generatedMeetingTitle = generateMeetingTitle();
+        // Use a calendar-provided title if one was set (e.g. from a calendar auto-start —
+        // CalendarAutoStartProvider dispatches this same event as a fallback for when the
+        // user is already on the home page, racing with the sessionStorage-effect path
+        // below; both need to honor the override so the calendar event's title wins
+        // regardless of which path actually fires the start).
+        const overrideTitle = sessionStorage.getItem('autoStartMeetingTitle');
+        sessionStorage.removeItem('autoStartMeetingTitle');
+        const generatedMeetingTitle = overrideTitle || generateMeetingTitle();
 
         // Set STARTING status before initiating backend recording
         setStatus(RecordingStatus.STARTING, 'Initializing recording...');
