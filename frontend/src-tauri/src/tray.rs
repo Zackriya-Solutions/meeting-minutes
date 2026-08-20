@@ -40,6 +40,7 @@ fn handle_menu_event<R: Runtime>(app: &AppHandle<R>, item_id: &str) {
         "pause_recording" => pause_recording_handler(app),
         "resume_recording" => resume_recording_handler(app),
         "stop_recording" => stop_recording_handler(app),
+        "toggle_dictation" => toggle_dictation_handler(app),
         "open_window" => focus_main_window(app),
         "settings" => {
             focus_main_window(app);
@@ -51,6 +52,72 @@ fn handle_menu_event<R: Runtime>(app: &AppHandle<R>, item_id: &str) {
         "quit" => app.exit(0),
         _ => {}
     }
+}
+
+/// Whether live dictation is currently listening. Cheap, synchronous (a
+/// single atomic load), safe to call from menu-building code.
+fn current_dictation_active<R: Runtime>(app: &AppHandle<R>) -> bool {
+    app.try_state::<crate::dictation::DictationManagerState<R>>()
+        .map(|state| state.is_active())
+        .unwrap_or(false)
+}
+
+fn dictation_tooltip(active: bool) -> &'static str {
+    if active {
+        "Meetily — Live Dictation Listening"
+    } else {
+        "Meetily"
+    }
+}
+
+/// Toggle live dictation on/off from the tray menu item or the global
+/// hotkey. Persists the resulting `enabled` state so it is remembered across
+/// restarts, and refreshes the tray to keep the persistent indicator (Fix's
+/// persistent-indicator requirement) accurate.
+pub(crate) fn toggle_dictation_handler<R: Runtime>(app: &AppHandle<R>) {
+    let app_clone = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let Some(manager) = app_clone.try_state::<crate::dictation::DictationManagerState<R>>()
+        else {
+            log::warn!("Dictation: manager not initialized, ignoring toggle");
+            return;
+        };
+        let manager = manager.inner().clone();
+
+        let now_active = if manager.is_active() {
+            manager.stop().await;
+            false
+        } else {
+            match manager.start().await {
+                Ok(()) => true,
+                Err(e) => {
+                    log::warn!("Dictation: failed to start ({})", e);
+                    if let Some(window) = app_clone.get_webview_window("main") {
+                        let _ = window.eval(&format!(
+                            "window.dispatchEvent(new CustomEvent('dictation-error', {{ detail: {:?} }}))",
+                            e.to_string()
+                        ));
+                    }
+                    false
+                }
+            }
+        };
+
+        let mut settings = crate::dictation::settings::load_dictation_settings(&app_clone)
+            .await
+            .unwrap_or_default();
+        settings.enabled = now_active;
+        if let Err(e) =
+            crate::dictation::settings::save_dictation_settings(&app_clone, &settings).await
+        {
+            log::warn!("Dictation: failed to persist toggled state: {}", e);
+        }
+
+        if let Some(tray) = app_clone.tray_by_id("main-tray") {
+            let _ = tray.set_tooltip(Some(dictation_tooltip(now_active)));
+        }
+        update_tray_menu_async(&app_clone).await;
+    });
 }
 fn toggle_recording_handler<R: Runtime>(app: &AppHandle<R>) {
     focus_main_window(app);
@@ -305,6 +372,7 @@ pub async fn update_tray_menu_async<R: Runtime>(app: &AppHandle<R>) {
         if let Some(tray) = app.tray_by_id("main-tray") {
             let result = tray.set_menu(Some(menu));
             log::info!("Tray: Menu update result: {:?}", result);
+            let _ = tray.set_tooltip(Some(dictation_tooltip(current_dictation_active(app))));
         } else {
             log::warn!("Tray: Could not find tray with id 'main-tray'");
         }
@@ -381,7 +449,16 @@ fn build_menu<R: Runtime>(
         }
     }
 
+    let dictation_active = current_dictation_active(app);
+    let dictation_label = if dictation_active {
+        "🎙 Stop Live Dictation"
+    } else {
+        "🎙 Start Live Dictation"
+    };
+
     builder
+        .item(&PredefinedMenuItem::separator(app)?)
+        .item(&MenuItemBuilder::with_id("toggle_dictation", dictation_label).build(app)?)
         .item(&PredefinedMenuItem::separator(app)?)
         .item(&MenuItemBuilder::with_id("open_window", "Open Main Window").build(app)?)
         .item(&MenuItemBuilder::with_id("settings", "Settings").build(app)?)

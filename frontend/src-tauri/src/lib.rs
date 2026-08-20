@@ -41,6 +41,7 @@ pub mod audio;
 pub mod config;
 pub mod console_utils;
 pub mod database;
+pub mod dictation;
 pub mod notifications;
 pub mod ollama;
 pub mod onboarding;
@@ -411,19 +412,58 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(|app, _shortcut, event| {
+                    if event.state() == tauri_plugin_global_shortcut::ShortcutState::Pressed {
+                        tray::toggle_dictation_handler(app);
+                    }
+                })
+                .build(),
+        )
         .manage(whisper_engine::parallel_commands::ParallelProcessorState::new())
         .manage(Arc::new(RwLock::new(
             None::<notifications::manager::NotificationManager<tauri::Wry>>,
         )) as NotificationManagerState<tauri::Wry>)
         .manage(audio::init_system_audio_state())
         .manage(summary::summary_engine::ModelManagerState(Arc::new(tokio::sync::Mutex::new(None))))
+        .manage(Arc::new(dictation::DictationBridge::new()) as dictation::manager::DictationBridgeState)
         .setup(|_app| {
             log::info!("Application setup complete");
+
+            // Initialize the live dictation manager (issue #719) before the tray is
+            // created, so the tray's initial menu/tooltip can already query it.
+            let dictation_bridge = _app.state::<dictation::manager::DictationBridgeState>().inner().clone();
+            let dictation_manager = std::sync::Arc::new(dictation::DictationManager::new(
+                _app.handle().clone(),
+                dictation_bridge,
+            ));
+            _app.manage(dictation_manager as dictation::manager::DictationManagerState<tauri::Wry>);
 
             // Initialize system tray
             if let Err(e) = tray::create_tray(_app.handle()) {
                 log::error!("Failed to create system tray: {}", e);
             }
+
+            // Load persisted dictation settings, register the global hotkey (if any),
+            // and auto-start dictation if it was left enabled last session.
+            let app_for_dictation = _app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                let settings = dictation::settings::load_dictation_settings(&app_for_dictation)
+                    .await
+                    .unwrap_or_default();
+                dictation::commands::apply_hotkey(&app_for_dictation, &settings).await;
+                if settings.enabled {
+                    let manager = app_for_dictation
+                        .state::<dictation::manager::DictationManagerState<tauri::Wry>>();
+                    if let Err(e) = manager.start().await {
+                        log::warn!("Dictation: failed to auto-start on launch: {}", e);
+                    }
+                }
+                tray::update_tray_menu_async(&app_for_dictation).await;
+            });
+
 
             // Initialize notification system with proper defaults
             log::info!("Initializing notification system...");
@@ -748,6 +788,12 @@ pub fn run() {
             audio::import::start_import_audio_command,
             audio::import::cancel_import_command,
             audio::import::is_import_in_progress_command,
+            // Live dictation commands (issue #719)
+            dictation::commands::start_dictation,
+            dictation::commands::stop_dictation,
+            dictation::commands::get_dictation_state,
+            dictation::commands::get_dictation_settings,
+            dictation::commands::set_dictation_settings,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

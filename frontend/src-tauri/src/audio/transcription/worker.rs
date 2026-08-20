@@ -9,7 +9,7 @@ use log::{error, info, warn};
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
-use tauri::{AppHandle, Emitter, Runtime};
+use tauri::{AppHandle, Emitter, Manager, Runtime};
 
 // Sequence counter for transcript updates
 static SEQUENCE_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -225,6 +225,18 @@ pub fn start_transcription_task<R: Runtime>(
                                                 "Worker {}: Failed to emit transcript update: {}",
                                                 worker_id, e
                                             );
+                                        }
+
+                                        // Live dictation (issue #719): hand the finished segment to
+                                        // the dictation queue via a non-blocking push, never inline.
+                                        // NOTE: no `is_partial` filter here -- `is_partial` (set in
+                                        // whisper_engine.rs) reflects chunk *duration*, not whether a
+                                        // corrected re-emission is coming; each chunk is transcribed
+                                        // exactly once, so every segment reaching this point is final.
+                                        if let Some(bridge) = app_clone.try_state::<crate::dictation::DictationBridgeState>() {
+                                            if bridge.active.load(Ordering::Relaxed) {
+                                                bridge.queue.push(update.text.clone());
+                                            }
                                         }
                                         // PERFORMANCE: Removed verbose logging of every emission
                                     } else if !transcript.trim().is_empty() && should_log_this_chunk
