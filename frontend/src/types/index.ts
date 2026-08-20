@@ -242,4 +242,6 @@ export interface TranscriptSegmentData {
   speaker?: string | null;
   // Resolved diarized speaker profile id (takes precedence once available)
   speaker_id?: number | null;
+  /** DeepSeek-selected avatar animation for this transcript segment. */
+  reaction?: import('@/components/MeetingConversation/ProceduralSpeakerAvatar').TranscriptReaction;
 }

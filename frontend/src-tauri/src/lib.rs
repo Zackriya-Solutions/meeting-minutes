@@ -65,6 +65,7 @@ pub mod openai;
 pub mod openrouter;
 pub mod parakeet_engine;
 pub mod pipeline;
+pub mod reactions;
 pub mod report;
 pub mod salutespeech;
 pub mod search;
@@ -1024,6 +1025,7 @@ pub fn run() {
             report::commands::submit_analytics_answers,
             report::commands::reveal_report_in_folder,
             report::commands::download_analytics_report,
+            reactions::classify_transcript_reactions,
             // Telegram sharing
             telegram::commands::telegram_share_text,
             telegram::commands::save_summary_markdown_file,

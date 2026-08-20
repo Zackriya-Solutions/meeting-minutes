@@ -2,6 +2,30 @@
 @tailwind components;
 @tailwind utilities;
 
+/* The exact Avatar Lab runtime: reaction clips and idle both come from the
+   exported studio definition. Keep the Lab renderer, only adapt its filled
+   surfaces to Memento's outlined visual treatment. */
+.avatar-lab-runtime,
+.avatar-lab-runtime__canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.avatar-lab-runtime__canvas > svg > path {
+  fill: transparent !important;
+  stroke: var(--bs-avatar-body-color, currentColor);
+  stroke-width: var(--memento-avatar-stroke-width, 3px);
+  vector-effect: non-scaling-stroke;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.avatar-lab-runtime__canvas > svg > g path {
+  fill: var(--bs-avatar-eye-color, currentColor) !important;
+  stroke: none;
+}
+
 /* Keep every rotating status indicator on its own visual centre. Font-based
    symbols otherwise inherit the glyph baseline and can appear to orbit. */
 .animate-spin {

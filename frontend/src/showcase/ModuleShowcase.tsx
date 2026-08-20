@@ -106,6 +106,46 @@ function defaultProps(name: string): Record<string, unknown> {
     };
   }
 
+  if (name === 'VirtualizedTranscriptView') {
+    return {
+      ...common,
+      segments: [
+        {
+          id: 'showcase-segment-1',
+          text: 'Давайте начнём с главного результата встречи.',
+          timestamp: 12,
+          recognizedAt: '10:24',
+          speaker_id: 0,
+          reaction: 'angry',
+        },
+        {
+          id: 'showcase-segment-2',
+          text: 'Макет готов, осталось проверить поведение на длинной стенограмме.',
+          timestamp: 19,
+          recognizedAt: '10:25',
+          speaker_id: 1,
+          reaction: 'scared',
+        },
+        {
+          id: 'showcase-segment-3',
+          text: 'После проверки можно отдавать обновление пользователям.',
+          timestamp: 31,
+          recognizedAt: '10:26',
+          speaker_id: 2,
+          reaction: 'happy',
+        },
+      ],
+      speakersById: new Map([
+        [0, 'Анна'],
+        [1, 'Михаил'],
+        [2, 'София'],
+      ]),
+      selfSpeakerIds: new Set([0]),
+      isRecording: false,
+      disableAutoScroll: true,
+    };
+  }
+
   return common;
 }
 

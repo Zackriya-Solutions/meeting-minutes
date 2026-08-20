@@ -5,6 +5,7 @@ settings:
   excludeLinksFromLockfile: false
 
 overrides:
+  '@bible-strong/avatar-core': file:vendor/avatar-lab/bible-strong-avatar-core-0.1.0.tgz
   prosemirror-model: 1.25.3
   prosemirror-state: 1.4.3
   prosemirror-view: 1.41.3
@@ -18,6 +19,12 @@ importers:
       '@base-ui/react':
         specifier: ^1.6.0
         version: 1.6.0(@types/react@18.3.28)(date-fns@4.1.0)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      '@bible-strong/avatar-core':
+        specifier: file:vendor/avatar-lab/bible-strong-avatar-core-0.1.0.tgz
+        version: file:vendor/avatar-lab/bible-strong-avatar-core-0.1.0.tgz
+      '@bible-strong/avatar-web':
+        specifier: file:vendor/avatar-lab/bible-strong-avatar-web-0.1.0.tgz
+        version: file:vendor/avatar-lab/bible-strong-avatar-web-0.1.0.tgz
       '@blocknote/core':
         specifier: 0.36.0
         version: 0.36.0(@types/hast@3.0.4)
@@ -956,6 +963,16 @@ packages:
     peerDependenciesMeta:
       '@types/react':
         optional: true
+
+  '@bible-strong/avatar-core@file:vendor/avatar-lab/bible-strong-avatar-core-0.1.0.tgz':
+    resolution: {integrity: sha512-whCrquWZe06nnRQMIX13OrM0QPj7y8ZkrisoLwRNKoqfXGHPILQyN27S/Xl8mjgvQJSAG06aLO/q1ehwSQJEzA==, tarball: file:vendor/avatar-lab/bible-strong-avatar-core-0.1.0.tgz}
+    version: 0.1.0
+    engines: {node: '>=22.12.0'}
+
+  '@bible-strong/avatar-web@file:vendor/avatar-lab/bible-strong-avatar-web-0.1.0.tgz':
+    resolution: {integrity: sha512-rYmnIv3Y2jnym5MgP5sh0HkFRywEzDoFXJwb30W1chGOUv8NSMXEIozLiR2IdbM4RAoj6juizQIcNY/NcgjEaA==, tarball: file:vendor/avatar-lab/bible-strong-avatar-web-0.1.0.tgz}
+    version: 0.1.0
+    engines: {node: '>=22.12.0'}
 
   '@blocknote/core@0.36.0':
     resolution: {integrity: sha512-Zb4gEjE0zvQyvHRI/i8qOSDOyH9M+hVS7GrhfJmA4TgooGOr8B4J3hILxsEVGQM6mQh6uGzkBWyBStd3WHRwdA==}
@@ -7498,6 +7515,14 @@ snapshots:
       use-sync-external-store: 1.6.0(react@18.3.1)
     optionalDependencies:
       '@types/react': 18.3.28
+
+  '@bible-strong/avatar-core@file:vendor/avatar-lab/bible-strong-avatar-core-0.1.0.tgz':
+    dependencies:
+      ajv: 8.20.0
+
+  '@bible-strong/avatar-web@file:vendor/avatar-lab/bible-strong-avatar-web-0.1.0.tgz':
+    dependencies:
+      '@bible-strong/avatar-core': file:vendor/avatar-lab/bible-strong-avatar-core-0.1.0.tgz
 
   '@blocknote/core@0.36.0(@types/hast@3.0.4)':
     dependencies:

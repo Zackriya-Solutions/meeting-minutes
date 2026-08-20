@@ -9,6 +9,9 @@ import { useT } from "@/lib/i18n";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "./ui/dialog";
 import { Bubble, BubbleContent } from "./ui/bubble";
 import { Message, MessageAvatar, MessageContent } from "./ui/message";
+import { ProceduralSpeakerAvatar } from "./MeetingConversation/ProceduralSpeakerAvatar";
+import type { TranscriptReaction } from "./MeetingConversation/ProceduralSpeakerAvatar";
+import { useTranscriptReactions } from "@/hooks/useTranscriptReactions";
 import {
     MessageScroller,
     MessageScrollerButton,
@@ -19,7 +22,6 @@ import {
     useMessageScrollerScrollable,
 } from "./ui/message-scroller";
 import { cn } from "@/lib/utils";
-import { avatarGradients } from "@/vendor/deslop/primitives/tokens.js";
 import StreamingText from "@/vendor/deslop/mini-app/StreamingText";
 import { Icon } from "@/components/memento/Icon";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -130,11 +132,6 @@ function cleanStopWords(text: string): string {
     return cleanedText.replace(WHITESPACE_RUN, ' ').trim();
 }
 
-function speakerInitials(label: string): string {
-    const firstCharacter = Array.from(label.trim())[0];
-    return firstCharacter?.toLocaleUpperCase() ?? '?';
-}
-
 function formatRecognitionTime(value?: string | null): string | null {
     const source = value?.trim();
     if (!source) return null;
@@ -160,19 +157,15 @@ function formatRecognitionTime(value?: string | null): string | null {
 
 function RollCallTip({ onDismiss }: { onDismiss: () => void }) {
     const t = useT();
-    const avatarGradient = avatarGradients[2];
 
     return (
-        <Message align="start" role="listitem" className="mb-3">
+        <Message align="start" role="listitem" className="mb-3 gap-0">
             <MessageAvatar
                 aria-label="Memento"
                 title="Memento"
-                className="mr-2 h-10 w-10 min-w-10 text-sm font-bold text-white"
-                style={{
-                    background: `linear-gradient(180deg, ${avatarGradient.top} 0%, ${avatarGradient.bottom} 100%)`,
-                }}
+                className="h-[60px] w-[60px] min-w-[60px] rounded-none bg-transparent"
             >
-                <span aria-hidden="true">M</span>
+                <ProceduralSpeakerAvatar speakerId={8} preset="sphere" />
             </MessageAvatar>
             <MessageContent className="items-start">
                 <Bubble
@@ -224,6 +217,7 @@ const TranscriptSegment = memo(function TranscriptSegment({
     onAssignClick,
     playbackActive = false,
     isOwn = false,
+    reaction = 'neutral',
 }: {
     id: string;
     text: string;
@@ -238,6 +232,7 @@ const TranscriptSegment = memo(function TranscriptSegment({
     onAssignClick?: () => void;
     playbackActive?: boolean;
     isOwn?: boolean;
+    reaction?: TranscriptReaction;
 }) {
     const t = useT();
     const displayText = cleanStopWords(text) || (text.trim() === '' ? t('[Silence]') : text);
@@ -250,15 +245,7 @@ const TranscriptSegment = memo(function TranscriptSegment({
     // placeholder or confirmed name replaces it through `speakerLabel`.
     const avatarLabel = speakerLabel ?? localizeSpeakerLabel('Speaker 1', t) ?? t('Unrecognized voice');
     const visibleSpeakerLabel = avatarLabel;
-    const avatarInitials = speakerInitials(avatarLabel);
-    // IlyaGrshin/wallet_animations InitialsAvatar assigns one of seven colors by
-    // `userId % 7`. Diarized speaker ids preserve that mapping; channel-only
-    // transcripts use stable ids for the local and remote sides.
     const avatarUserId = speakerId ?? (isOwn ? 0 : 1);
-    const avatarGradient = avatarGradients[
-        ((Math.trunc(avatarUserId) % avatarGradients.length) + avatarGradients.length)
-        % avatarGradients.length
-    ];
 
     return (
         <Message
@@ -266,22 +253,16 @@ const TranscriptSegment = memo(function TranscriptSegment({
             align={align}
             role="listitem"
             className={cn(
-                'mb-3 rounded-lg px-1 py-0.5 transition-colors duration-300',
+                'mb-3 gap-0 rounded-lg px-1 py-0.5 transition-colors duration-300',
                 playbackActive && !highlight && 'bg-primary/10',
             )}
         >
             <MessageAvatar
                 aria-label={avatarLabel}
                 title={avatarLabel}
-                style={{
-                    background: `linear-gradient(180deg, ${avatarGradient.top} 0%, ${avatarGradient.bottom} 100%)`,
-                }}
-                className={cn(
-                    'h-10 w-10 min-w-10 text-sm font-bold text-white',
-                    isOwn ? 'ml-2' : 'mr-2',
-                )}
+                className="h-[60px] w-[60px] min-w-[60px] rounded-none bg-transparent"
             >
-                <span aria-hidden="true">{avatarInitials}</span>
+                <ProceduralSpeakerAvatar speakerId={avatarUserId} reaction={reaction} />
             </MessageAvatar>
             <MessageContent className={cn('gap-0.5', isOwn ? 'items-end' : 'items-start')}>
                 <Bubble
@@ -497,6 +478,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
         isRecording,
         enableStreaming
     );
+    const reactionsBySegmentId = useTranscriptReactions(segments, streamingSegmentId);
 
     // Jump-to-timestamp: scroll to and briefly highlight the segment at `scrollToTimestamp`
     // (seconds). Consumed once per target so pagination re-renders don't re-trigger it.
@@ -643,6 +625,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                         }
                                         playbackActive={activePlaybackIds.has(segment.id)}
                                         isOwn={isOwnSegment}
+                                        reaction={reactionsBySegmentId.get(segment.id)}
                                     />
                                   </div>
                                 </MessageScrollerItem>

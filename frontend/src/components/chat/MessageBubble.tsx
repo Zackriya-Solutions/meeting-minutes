@@ -5,10 +5,10 @@ import { motion } from 'framer-motion';
 import { Icon } from '@/components/memento/Icon';
 import { cn } from '@/lib/utils';
 import { useT } from '@/lib/i18n';
-import { avatarGradients } from '@/vendor/deslop/primitives/tokens.js';
 import { Bubble, BubbleContent } from '@/components/ui/bubble';
 import { Badge } from '@/components/ui/fluid-badge';
 import { Message, MessageAvatar, MessageContent } from '@/components/ui/message';
+import { ProceduralSpeakerAvatar } from '@/components/MeetingConversation/ProceduralSpeakerAvatar';
 import { ChatMarkdown } from './ChatMarkdown';
 import type { ChatMessage, Citation, RetrievalDiagnostics } from '@/hooks/useMeetingChat';
 import StreamingText from '@/vendor/deslop/mini-app/StreamingText';
@@ -36,8 +36,6 @@ export function MessageBubble({
   const isUser = msg.role === 'user';
   const notFound = msg.role === 'assistant' && msg.found === false && !msg.error;
   const senderName = isUser ? t('You') : 'Memento';
-  const avatarGradient = avatarGradients[isUser ? 0 : 2];
-  const avatarInitials = isUser ? senderName.slice(0, 1).toUpperCase() : 'M';
   const [showFormattedAnswer, setShowFormattedAnswer] = useState(!msg.animate);
 
   return (
@@ -47,21 +45,30 @@ export function MessageBubble({
       transition={{ duration: 0.18 }}
       className="w-full"
     >
-      <Message align={isUser ? 'end' : 'start'}>
+      <Message
+        align={isUser ? 'end' : 'start'}
+        className="mb-3 gap-0 rounded-lg px-1 py-0.5"
+      >
         <MessageAvatar
           aria-label={senderName}
           title={senderName}
-          className="h-8 w-8 text-xs font-bold text-white"
-          style={{
-            background: `linear-gradient(180deg, ${avatarGradient.top} 0%, ${avatarGradient.bottom} 100%)`,
-          }}
+          className="h-[60px] w-[60px] min-w-[60px] rounded-none bg-transparent"
         >
-          <span aria-hidden="true">{avatarInitials}</span>
+          <ProceduralSpeakerAvatar
+            speakerId={0}
+            preset={isUser ? 'participant' : 'sphere'}
+          />
         </MessageAvatar>
-        <MessageContent>
+        <MessageContent className="gap-0.5">
           <Bubble
             align={isUser ? 'end' : 'start'}
             variant={msg.error ? 'destructive' : isUser ? 'default' : 'muted'}
+            className={cn(
+              'max-w-[82%]',
+              isUser
+                ? 'rounded-[16px_16px_4px_16px]'
+                : 'rounded-[16px_16px_16px_4px]',
+            )}
           >
             <BubbleContent
               className={cn(
@@ -192,22 +199,26 @@ export function RetrievalExplanation({ diagnostics }: { diagnostics: RetrievalDi
 
 export function TypingIndicator() {
   const t = useT();
-  const avatarGradient = avatarGradients[2];
 
   return (
-    <Message align="start" role="status" aria-label={t('Assistant is typing')}>
+    <Message
+      align="start"
+      role="status"
+      aria-label={t('Assistant is typing')}
+      className="mb-3 gap-0 rounded-lg px-1 py-0.5"
+    >
       <MessageAvatar
         aria-label="Memento"
         title="Memento"
-        className="h-8 w-8 text-xs font-bold text-white"
-        style={{
-          background: `linear-gradient(180deg, ${avatarGradient.top} 0%, ${avatarGradient.bottom} 100%)`,
-        }}
+        className="h-[60px] w-[60px] min-w-[60px] rounded-none bg-transparent"
       >
-        <span aria-hidden="true">M</span>
+        <ProceduralSpeakerAvatar speakerId={0} preset="sphere" />
       </MessageAvatar>
-      <MessageContent>
-        <Bubble variant="muted">
+      <MessageContent className="gap-0.5">
+        <Bubble
+          variant="muted"
+          className="max-w-[82%] rounded-[16px_16px_16px_4px]"
+        >
           <BubbleContent className="flex flex-col items-start gap-1">
             <span className="text-xs font-medium text-[var(--deslop-primary-60)]">
               Memento

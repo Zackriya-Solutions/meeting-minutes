@@ -33,8 +33,8 @@ import { isUnresolvedSpeakerLabel, type SpeakerInfo } from '@/types';
 import type { AnalyticsRoleRow } from '@/hooks/meeting-details/useMeetingAnalyticsSections';
 import Cell, { CellText } from '@/vendor/deslop/mini-app/Cell';
 import CellStack from '@/vendor/deslop/mini-app/components/CellStack';
-import InitialsAvatar from '@/vendor/deslop/mini-app/components/InitialsAvatar';
 import MotionProvider from '@/vendor/deslop/mini-app/components/MotionProvider';
+import { ProceduralSpeakerAvatar } from './ProceduralSpeakerAvatar';
 
 /**
  * Summary for the meeting conversation (variant 3a): flows as content in the feed —
@@ -57,8 +57,16 @@ const RegenerateIcon = ({ size = 16, strokeWidth = 1.5, className }: ActionIconP
 );
 
 function ParticipantAvatar({ userId, name }: { userId: number; name: string }) {
-  const firstWord = name.trim().split(/\s+/, 1)[0] ?? name;
-  return <InitialsAvatar size={32} userId={userId} name={firstWord} />;
+  return (
+    <span
+      className="block h-8 w-8 shrink-0"
+      role="img"
+      aria-label={name}
+      title={name}
+    >
+      <ProceduralSpeakerAvatar speakerId={userId} strokeWidth={2} />
+    </span>
+  );
 }
 
 function RenameHint({ children, onClick }: { children: ReactNode; onClick: () => void }) {

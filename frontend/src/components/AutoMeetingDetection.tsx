@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
 import { usePathname, useRouter } from 'next/navigation';
@@ -8,10 +8,6 @@ import { toast } from 'sonner';
 import { useRecordingState } from '@/contexts/RecordingStateContext';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
 import { useT } from '@/lib/i18n';
-import {
-  MeetingDetectionBanner,
-  type MeetingDetectionBannerState,
-} from '@/components/MeetingDetectionBanner';
 
 type MeetingApp =
   | 'zoom'
@@ -47,43 +43,15 @@ const AUTO_LISTENING_SESSION_KEY = 'autoListeningSessionId';
 const AUTO_LISTENING_REPORTED_KEY = 'autoListeningStartReported';
 const AUTO_LISTENING_STOP_KEY = 'autoStopRecordingSessionId';
 
-interface DetectionBannerData {
-  apps: MeetingApp[];
-  state: MeetingDetectionBannerState;
-}
-
 export function AutoMeetingDetection() {
   const pathname = usePathname();
   const router = useRouter();
   const recordingState = useRecordingState();
   const { refetchMeetings } = useSidebar();
   const t = useT();
-  const [banner, setBanner] = useState<DetectionBannerData | null>(null);
-
-  const appName = (app: MeetingApp): string => {
-    switch (app) {
-      case 'zoom': return 'Zoom';
-      case 'microsoft_teams': return 'Microsoft Teams';
-      case 'telegram': return 'Telegram';
-      case 'yandex_telemost': return t('Yandex Telemost');
-      case 'salute_jazz': return 'SaluteJazz';
-      case 'browser_call': return 'браузере';
-    }
-  };
-
-  const startRecording = () => {
-    setBanner((current) => current ? { ...current, state: 'starting' } : current);
-    if (pathname === '/') {
-      window.dispatchEvent(new CustomEvent('start-recording-from-sidebar'));
-    } else {
-      sessionStorage.setItem('autoStartRecording', 'true');
-      router.push('/');
-    }
-  };
 
   useEffect(() => {
     if (recordingState.isRecording) {
-      setBanner(null);
       const sessionId = sessionStorage.getItem(AUTO_LISTENING_SESSION_KEY);
       const alreadyReported = sessionStorage.getItem(AUTO_LISTENING_REPORTED_KEY) === sessionId;
       if (sessionId && !alreadyReported) {
@@ -101,37 +69,12 @@ export function AutoMeetingDetection() {
     let disposed = false;
     const unlisteners: Array<() => void> = [];
 
-    // Only reaches us when the user's "When a call is detected" setting is on: the
-    // detector emits nothing while `auto_meeting_detection` is off, and this prompt
-    // only offers to record — starting one is still a tap.
-    listen<MeetingDetectedEvent>('auto-meeting-detected', (event) => {
-      if (recordingState.isRecording) return;
-      setBanner({ apps: event.payload.apps, state: 'suggestion' });
-    }).then((unsubscribe) => {
-      if (disposed) unsubscribe();
-      else unlisteners.push(unsubscribe);
-    }).catch((error) => {
-      console.error('Failed to subscribe to meeting detection events:', error);
-    });
-
-    // The call ended, or detection was switched off, with the prompt unanswered.
-    // A suggestion outlives its call otherwise, since nothing else clears it.
-    listen('auto-meeting-detection-ended', () => {
-      setBanner((current) => (current?.state === 'suggestion' ? null : current));
-    }).then((unsubscribe) => {
-      if (disposed) unsubscribe();
-      else unlisteners.push(unsubscribe);
-    }).catch((error) => {
-      console.error('Failed to subscribe to meeting detection end events:', error);
-    });
-
     listen<AutoListeningEvent>('auto-listening-start-requested', (event) => {
       if (recordingState.isRecording) return;
       const sessionId = event.payload.session_id;
       sessionStorage.setItem(AUTO_LISTENING_SESSION_KEY, sessionId);
       sessionStorage.removeItem(AUTO_LISTENING_REPORTED_KEY);
       sessionStorage.setItem('autoListeningStart', 'true');
-      setBanner({ apps: event.payload.apps, state: 'starting' });
 
       if (pathname === '/') {
         sessionStorage.removeItem('autoStartRecording');
@@ -171,7 +114,6 @@ export function AutoMeetingDetection() {
     listen<AutoListeningStopEvent>('auto-listening-stop-requested', (event) => {
       const sessionId = event.payload.session_id;
       if (sessionStorage.getItem(AUTO_LISTENING_SESSION_KEY) !== sessionId) return;
-      setBanner(null);
       sessionStorage.setItem(AUTO_LISTENING_STOP_KEY, sessionId);
       if (pathname === '/') {
         window.dispatchEvent(new CustomEvent('stop-recording-from-auto-listening'));
@@ -191,13 +133,5 @@ export function AutoMeetingDetection() {
     };
   }, [pathname, recordingState.isRecording, refetchMeetings, router, t]);
 
-  return (
-    <MeetingDetectionBanner
-      open={banner !== null}
-      state={banner?.state ?? 'suggestion'}
-      appNames={banner ? Array.from(new Set(banner.apps.map(appName))) : []}
-      onPrimaryAction={startRecording}
-      onDismiss={() => setBanner(null)}
-    />
-  );
+  return null;
 }

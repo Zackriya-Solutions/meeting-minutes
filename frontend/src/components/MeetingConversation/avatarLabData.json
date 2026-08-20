@@ -1,0 +1,1957 @@
+{
+  "source": "bible-strong-avatar-lab/simpleBundledAvatarIds",
+  "avatars": [
+    {
+      "id": "avatar-4b9ea0c1-286f-4aa1-b053-61fcc416ba7e",
+      "name": "Onee",
+      "body": {
+        "primary": {
+          "type": "cone",
+          "width": 250,
+          "height": 182.006640625,
+          "depth": 225,
+          "roundness": 0,
+          "morphRoundness": 1.2003515624999999,
+          "tipRoundness": 2,
+          "baseRoundness": 2
+        },
+        "nodes": []
+      },
+      "colors": {
+        "body": "#1a9cff",
+        "eyes": "#1a9cff"
+      },
+      "eyes": {
+        "widthLeft": 13.389062500000001,
+        "widthRight": 19.10390625,
+        "heightLeft": 44.011328125000006,
+        "heightRight": 37.198828125000006,
+        "spacing": 21.41328125,
+        "positionXLeft": 0,
+        "positionXRight": 0,
+        "positionYLeft": 18.613671875,
+        "positionYRight": 18.613671875,
+        "leftAngle": 6.980078125,
+        "rightAngle": -7.012890625000001
+      }
+    },
+    {
+      "id": "avatar-2739f2c2-a5b4-45d9-8915-c9d6101d4d3b",
+      "name": "Cubee",
+      "body": {
+        "primary": {
+          "type": "cube",
+          "width": 191.49921875,
+          "height": 191.49921875,
+          "depth": 171.95848214285726,
+          "roundness": 0.73265625
+        },
+        "nodes": []
+      },
+      "colors": {
+        "body": "#ff5558",
+        "eyes": "#ff5558"
+      },
+      "eyes": {
+        "widthLeft": 19.975390625,
+        "widthRight": 28.008984374999997,
+        "heightLeft": 29.983984375,
+        "heightRight": 36.986718749999994,
+        "spacing": 16.812109375,
+        "positionXLeft": 0,
+        "positionXRight": 0,
+        "positionYLeft": -7,
+        "positionYRight": -7,
+        "leftAngle": 0,
+        "rightAngle": 0
+      }
+    },
+    {
+      "id": "avatar-1786600724626",
+      "name": "Nova",
+      "body": {
+        "primary": {
+          "type": "capsule",
+          "width": 205,
+          "height": 270,
+          "depth": 205,
+          "roundness": 1
+        },
+        "nodes": []
+      },
+      "colors": {
+        "body": "#1ad7e3",
+        "eyes": "#1ad7e3"
+      },
+      "eyes": {
+        "widthLeft": 13.26171875,
+        "widthRight": 13.26171875,
+        "heightLeft": 26.074181467301138,
+        "heightRight": 46.98897797482194,
+        "spacing": 19.765234375,
+        "positionXLeft": -12.965625,
+        "positionXRight": -12.965625,
+        "positionYLeft": 0.7968750000000009,
+        "positionYRight": -6.371484375,
+        "leftAngle": -7.4886718750000005,
+        "rightAngle": -7.796875
+      }
+    },
+    {
+      "id": "avatar-295e74a7-5d70-4d61-83d4-7beebb22bdd8",
+      "name": "Citrus",
+      "body": {
+        "primary": {
+          "type": "cone",
+          "width": 252.708984375,
+          "height": 274.9671875,
+          "depth": 225,
+          "roundness": 0,
+          "morphRoundness": 1.1473828125,
+          "tipRoundness": 0.743515625,
+          "baseRoundness": 1.34375
+        },
+        "nodes": []
+      },
+      "colors": {
+        "body": "#ffda1a",
+        "eyes": "#ffda1a"
+      },
+      "eyes": {
+        "widthLeft": 20,
+        "widthRight": 20,
+        "heightLeft": 50,
+        "heightRight": 50,
+        "spacing": 35,
+        "positionXLeft": 0,
+        "positionXRight": 0,
+        "positionYLeft": 22.954687500000002,
+        "positionYRight": 22.954687500000002,
+        "leftAngle": 0,
+        "rightAngle": 0
+      }
+    },
+    {
+      "id": "primitive-sphere",
+      "name": "Sphere",
+      "body": {
+        "primary": {
+          "type": "sphere",
+          "width": 240,
+          "height": 240,
+          "depth": 240,
+          "roundness": 1
+        },
+        "nodes": []
+      },
+      "colors": {
+        "body": "#7c89ff",
+        "eyes": "#7c89ff"
+      },
+      "eyes": {
+        "widthLeft": 20,
+        "widthRight": 20,
+        "heightLeft": 50,
+        "heightRight": 50,
+        "spacing": 35,
+        "positionXLeft": 0,
+        "positionXRight": 0,
+        "positionYLeft": -7,
+        "positionYRight": -7,
+        "leftAngle": 0,
+        "rightAngle": 0
+      },
+      "renderStyle": {
+        "type": "vector"
+      }
+    },
+    {
+      "id": "primitive-cube",
+      "name": "Cube",
+      "body": {
+        "primary": {
+          "type": "cube",
+          "width": 191.1,
+          "height": 191.1,
+          "depth": 171.6,
+          "roundness": 0
+        },
+        "nodes": []
+      },
+      "colors": {
+        "body": "#ff9d45",
+        "eyes": "#ff9d45"
+      },
+      "eyes": {
+        "widthLeft": 20,
+        "widthRight": 20,
+        "heightLeft": 50,
+        "heightRight": 50,
+        "spacing": 35,
+        "positionXLeft": 0,
+        "positionXRight": 0,
+        "positionYLeft": -7,
+        "positionYRight": -7,
+        "leftAngle": 0,
+        "rightAngle": 0
+      },
+      "renderStyle": {
+        "type": "vector"
+      }
+    },
+    {
+      "id": "primitive-capsule",
+      "name": "Capsule",
+      "body": {
+        "primary": {
+          "type": "capsule",
+          "width": 205,
+          "height": 270,
+          "depth": 205,
+          "roundness": 1
+        },
+        "nodes": []
+      },
+      "colors": {
+        "body": "#59e075",
+        "eyes": "#59e075"
+      },
+      "eyes": {
+        "widthLeft": 20,
+        "widthRight": 20,
+        "heightLeft": 50,
+        "heightRight": 50,
+        "spacing": 35,
+        "positionXLeft": 0,
+        "positionXRight": 0,
+        "positionYLeft": -7,
+        "positionYRight": -7,
+        "leftAngle": 0,
+        "rightAngle": 0
+      },
+      "renderStyle": {
+        "type": "vector"
+      }
+    },
+    {
+      "id": "primitive-cylinder",
+      "name": "Cylinder",
+      "body": {
+        "primary": {
+          "type": "cylinder",
+          "width": 192.7,
+          "height": 205,
+          "depth": 176.29999999999998,
+          "roundness": 0.45,
+          "morphRoundness": 0
+        },
+        "nodes": []
+      },
+      "colors": {
+        "body": "#1adec9",
+        "eyes": "#1adec9"
+      },
+      "eyes": {
+        "widthLeft": 20,
+        "widthRight": 20,
+        "heightLeft": 50,
+        "heightRight": 50,
+        "spacing": 35,
+        "positionXLeft": 0,
+        "positionXRight": 0,
+        "positionYLeft": -7,
+        "positionYRight": -7,
+        "leftAngle": 0,
+        "rightAngle": 0
+      },
+      "renderStyle": {
+        "type": "vector"
+      }
+    },
+    {
+      "id": "primitive-cone",
+      "name": "Cone",
+      "body": {
+        "primary": {
+          "type": "cone",
+          "width": 205,
+          "height": 217.29999999999998,
+          "depth": 184.5,
+          "roundness": 0,
+          "morphRoundness": 0,
+          "tipRoundness": 0.55,
+          "baseRoundness": 0.45
+        },
+        "nodes": []
+      },
+      "colors": {
+        "body": "#df48f3",
+        "eyes": "#df48f3"
+      },
+      "eyes": {
+        "widthLeft": 20,
+        "widthRight": 20,
+        "heightLeft": 50,
+        "heightRight": 50,
+        "spacing": 35,
+        "positionXLeft": 0,
+        "positionXRight": 0,
+        "positionYLeft": -7,
+        "positionYRight": -7,
+        "leftAngle": 0,
+        "rightAngle": 0
+      },
+      "renderStyle": {
+        "type": "vector"
+      }
+    },
+    {
+      "id": "primitive-diamond",
+      "name": "Diamond",
+      "body": {
+        "primary": {
+          "type": "diamond",
+          "width": 235,
+          "height": 260,
+          "depth": 215,
+          "roundness": 0
+        },
+        "nodes": []
+      },
+      "colors": {
+        "body": "#ff4b6f",
+        "eyes": "#ff4b6f"
+      },
+      "eyes": {
+        "widthLeft": 20,
+        "widthRight": 20,
+        "heightLeft": 50,
+        "heightRight": 50,
+        "spacing": 35,
+        "positionXLeft": 0,
+        "positionXRight": 0,
+        "positionYLeft": -7,
+        "positionYRight": -7,
+        "leftAngle": 0,
+        "rightAngle": 0
+      },
+      "renderStyle": {
+        "type": "vector"
+      }
+    },
+    {
+      "id": "primitive-willy",
+      "name": "Willy",
+      "body": {
+        "primary": {
+          "type": "capsule",
+          "width": 122,
+          "height": 190,
+          "depth": 115,
+          "roundness": 1
+        },
+        "nodes": [
+          {
+            "id": "willy-left-sphere",
+            "name": "Left cap",
+            "surface": {
+              "type": "cone",
+              "width": 112,
+              "height": 58,
+              "depth": 100,
+              "roundness": 0,
+              "morphRoundness": 1.2,
+              "tipRoundness": 2,
+              "baseRoundness": 2
+            },
+            "position": [
+              -47,
+              95,
+              -22
+            ],
+            "rotation": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "id": "willy-right-sphere",
+            "name": "Right cap",
+            "surface": {
+              "type": "cone",
+              "width": 112,
+              "height": 58,
+              "depth": 100,
+              "roundness": 0,
+              "morphRoundness": 1.2,
+              "tipRoundness": 2,
+              "baseRoundness": 2
+            },
+            "position": [
+              47,
+              95,
+              -22
+            ],
+            "rotation": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "id": "willy-cap",
+            "name": "Rounded cap",
+            "layer": "front",
+            "surface": {
+              "type": "cone",
+              "width": 178,
+              "height": 86,
+              "depth": 156,
+              "roundness": 0,
+              "morphRoundness": 1.2,
+              "tipRoundness": 2,
+              "baseRoundness": 2
+            },
+            "position": [
+              0,
+              -94,
+              0
+            ],
+            "rotation": [
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      },
+      "colors": {
+        "body": "#ff5558",
+        "eyes": "#ff5558"
+      },
+      "eyes": {
+        "widthLeft": 20,
+        "widthRight": 20,
+        "heightLeft": 50,
+        "heightRight": 50,
+        "spacing": 35,
+        "positionXLeft": 0,
+        "positionXRight": 0,
+        "positionYLeft": -7,
+        "positionYRight": -7,
+        "leftAngle": 0,
+        "rightAngle": 0
+      },
+      "renderStyle": {
+        "type": "vector"
+      }
+    }
+  ],
+  "expressions": [
+    {
+      "id": "expression-00",
+      "semanticKey": "upward-side-glance",
+      "headX": 7.3,
+      "headY": 27.8,
+      "headZ": -16.1,
+      "widthLeft": 22.501171874999997,
+      "widthRight": 22.501171874999997,
+      "heightLeft": 42.377734374999996,
+      "heightRight": 42.377734374999996,
+      "spacing": 54.3,
+      "positionXLeft": 0,
+      "positionXRight": 0,
+      "positionYLeft": -20.5,
+      "positionYRight": -20.5,
+      "leftAngle": 0,
+      "rightAngle": 0,
+      "perspective": 1,
+      "eyeMotion": "none",
+      "bodyMotion": "none"
+    },
+    {
+      "id": "expression-01",
+      "semanticKey": "downward-gaze",
+      "headX": -15.057812500000004,
+      "headY": 0.14296874999999964,
+      "headZ": -14.549218750000001,
+      "widthLeft": 22.401171875,
+      "widthRight": 22.401171875,
+      "heightLeft": 54.5703125,
+      "heightRight": 54.5703125,
+      "spacing": 57.7,
+      "positionXLeft": 0,
+      "positionXRight": 0,
+      "positionYLeft": 0,
+      "positionYRight": 0,
+      "leftAngle": 0,
+      "rightAngle": 0,
+      "perspective": 1,
+      "eyeMotion": "none",
+      "bodyMotion": "none"
+    },
+    {
+      "id": "expression-05",
+      "semanticKey": "skeptical-right",
+      "headX": -16.528515625,
+      "headY": -3.7679687499999996,
+      "headZ": -13.7296875,
+      "widthLeft": 23.090625,
+      "widthRight": 49.924609375,
+      "heightLeft": 57.6796875,
+      "heightRight": 12.431640625,
+      "spacing": 56.3,
+      "positionXLeft": 0,
+      "positionXRight": 0,
+      "positionYLeft": 0,
+      "positionYRight": 0,
+      "leftAngle": 0,
+      "rightAngle": 0,
+      "perspective": 1,
+      "eyeMotion": "none",
+      "bodyMotion": "none"
+    },
+    {
+      "id": "expression-06",
+      "semanticKey": "small-attentive",
+      "headX": -4.232421875000001,
+      "headY": 14.362109375000003,
+      "headZ": 11.204296875,
+      "widthLeft": 22.066796874999998,
+      "widthRight": 22.066796874999998,
+      "heightLeft": 39.59921875,
+      "heightRight": 39.59921875,
+      "spacing": 50.9,
+      "positionXLeft": 0,
+      "positionXRight": 0,
+      "positionYLeft": 0,
+      "positionYRight": 0,
+      "leftAngle": 0,
+      "rightAngle": 0,
+      "perspective": 1,
+      "eyeMotion": "none",
+      "bodyMotion": "none"
+    },
+    {
+      "id": "expression-12",
+      "semanticKey": "wide-downward-gaze",
+      "headX": -19.20859375,
+      "headY": 15.2,
+      "headZ": 11.8,
+      "widthLeft": 52.084765625,
+      "widthRight": 53.11410881916995,
+      "heightLeft": 51.467159708498066,
+      "heightRight": 52.187699944416956,
+      "spacing": 69.5,
+      "positionXLeft": 0,
+      "positionXRight": 0,
+      "positionYLeft": 0,
+      "positionYRight": 0,
+      "leftAngle": 0,
+      "rightAngle": 0,
+      "perspective": 1,
+      "eyeMotion": "none",
+      "bodyMotion": "none"
+    },
+    {
+      "id": "expression-03",
+      "semanticKey": "surprised-left",
+      "headX": 2.9468749999999986,
+      "headY": -16.051171875,
+      "headZ": -20.916015625,
+      "widthLeft": 51.68336723153048,
+      "widthRight": 51.68336723153048,
+      "heightLeft": 51.74054108796297,
+      "heightRight": 51.74054108796297,
+      "spacing": 70.9,
+      "positionXLeft": 0,
+      "positionXRight": 0,
+      "positionYLeft": 0,
+      "positionYRight": 0,
+      "leftAngle": 0,
+      "rightAngle": 0,
+      "perspective": 1,
+      "eyeMotion": "none",
+      "bodyMotion": "none"
+    },
+    {
+      "id": "expression-04",
+      "semanticKey": "sleepy-squint",
+      "headX": 3.4,
+      "headY": 13.22578125,
+      "headZ": 8.976953125,
+      "widthLeft": 51.775,
+      "widthRight": 51.775,
+      "heightLeft": 13.02734375,
+      "heightRight": 13.02734375,
+      "spacing": 63.872265625,
+      "positionXLeft": 0,
+      "positionXRight": 0,
+      "positionYLeft": 0,
+      "positionYRight": 0,
+      "leftAngle": 0,
+      "rightAngle": 0,
+      "perspective": 1,
+      "eyeMotion": "none",
+      "bodyMotion": "none"
+    },
+    {
+      "id": "expression-07",
+      "semanticKey": "angry-right",
+      "headX": 8.063671874999999,
+      "headY": 17.626562500000002,
+      "headZ": -11.116796874999999,
+      "widthLeft": 20.908203124999996,
+      "widthRight": 20.908203124999996,
+      "heightLeft": 40.40078125,
+      "heightRight": 40.40078125,
+      "spacing": 52.059765625,
+      "positionXLeft": 0,
+      "positionXRight": 0,
+      "positionYLeft": 0,
+      "positionYRight": 0,
+      "leftAngle": -30.865625,
+      "rightAngle": 28.781640625,
+      "perspective": 1,
+      "eyeMotion": "none",
+      "bodyMotion": "none"
+    },
+    {
+      "id": "expression-08",
+      "semanticKey": "curious-left",
+      "headX": -12.303515625,
+      "headY": -17.601171875,
+      "headZ": 5.9109375,
+      "widthLeft": 20.605859374999994,
+      "widthRight": 20.605859374999994,
+      "heightLeft": 47.769921874999994,
+      "heightRight": 47.769921874999994,
+      "spacing": 54.9,
+      "positionXLeft": 0,
+      "positionXRight": 0,
+      "positionYLeft": 0,
+      "positionYRight": 0,
+      "leftAngle": 23.523046875000002,
+      "rightAngle": -24.042578125000002,
+      "perspective": 1,
+      "eyeMotion": "none",
+      "bodyMotion": "none"
+    },
+    {
+      "id": "expression-09",
+      "semanticKey": "asymmetric-down-right",
+      "headX": -20.058203125,
+      "headY": 12.607421875,
+      "headZ": -12.7,
+      "widthLeft": 42.5,
+      "widthRight": 22.1,
+      "heightLeft": 41.8,
+      "heightRight": 22.2,
+      "spacing": 61.7,
+      "positionXLeft": 0,
+      "positionXRight": 0,
+      "positionYLeft": 0,
+      "positionYRight": 0,
+      "leftAngle": 0,
+      "rightAngle": 0,
+      "perspective": 1,
+      "eyeMotion": "none",
+      "bodyMotion": "none"
+    },
+    {
+      "id": "expression-10",
+      "semanticKey": "attentive-left",
+      "headX": 1.43359375,
+      "headY": 6.194140624999999,
+      "headZ": 10.56015625,
+      "widthLeft": 23.836718749999996,
+      "widthRight": 23.836718749999996,
+      "heightLeft": 58.130078125,
+      "heightRight": 58.130078125,
+      "spacing": 56.8,
+      "positionXLeft": 0,
+      "positionXRight": 0,
+      "positionYLeft": 0,
+      "positionYRight": 0,
+      "leftAngle": 0,
+      "rightAngle": 0,
+      "perspective": 1,
+      "eyeMotion": "none",
+      "bodyMotion": "none"
+    },
+    {
+      "id": "expression-11",
+      "semanticKey": "joyful-wide",
+      "headX": -2.092968750000001,
+      "headY": -15.899609374999999,
+      "headZ": -14.469921875,
+      "widthLeft": 34.20086765973213,
+      "widthRight": 34.20086765973213,
+      "heightLeft": 85.330859375,
+      "heightRight": 83.17775668160692,
+      "spacing": 59.414453125,
+      "positionXLeft": 0,
+      "positionXRight": 0,
+      "positionYLeft": 0,
+      "positionYRight": 0,
+      "leftAngle": 0,
+      "rightAngle": 0,
+      "perspective": 1,
+      "eyeMotion": "none",
+      "bodyMotion": "none"
+    },
+    {
+      "id": "expression-13",
+      "semanticKey": "eyes-closed",
+      "headX": -8.752343750000001,
+      "headY": -8.743359375,
+      "headZ": -10.773828125000001,
+      "widthLeft": 56.133984375,
+      "widthRight": 56.133984375,
+      "heightLeft": 15.5,
+      "heightRight": 15.15546875,
+      "spacing": 69.276171875,
+      "positionXLeft": 0,
+      "positionXRight": 0,
+      "positionYLeft": 0,
+      "positionYRight": 0,
+      "leftAngle": 0,
+      "rightAngle": 0,
+      "perspective": 1,
+      "eyeMotion": "none",
+      "bodyMotion": "none"
+    },
+    {
+      "id": "expression-02",
+      "semanticKey": "joyful-down-right",
+      "headX": -15.287109375000002,
+      "headY": 15.006640625,
+      "headZ": 12.787890625,
+      "widthLeft": 31.253906249999996,
+      "widthRight": 31.253906249999996,
+      "heightLeft": 76.720703125,
+      "heightRight": 76.720703125,
+      "spacing": 68.7,
+      "positionXLeft": 0,
+      "positionXRight": 0,
+      "positionYLeft": 0,
+      "positionYRight": 0,
+      "leftAngle": 0,
+      "rightAngle": 0,
+      "perspective": 1,
+      "eyeMotion": "none",
+      "bodyMotion": "none"
+    },
+    {
+      "id": "expression-14",
+      "semanticKey": "skeptical-left",
+      "headX": 3.5292968750000004,
+      "headY": -7.0765625,
+      "headZ": 9.830078125,
+      "widthLeft": 24.306250000000002,
+      "widthRight": 48.92421875000001,
+      "heightLeft": 59.281640624999994,
+      "heightRight": 13.408203124999996,
+      "spacing": 62.218359375,
+      "positionXLeft": 0,
+      "positionXRight": 0,
+      "positionYLeft": 0,
+      "positionYRight": 0,
+      "leftAngle": 0,
+      "rightAngle": 0,
+      "perspective": 1,
+      "eyeMotion": "none",
+      "bodyMotion": "none"
+    },
+    {
+      "id": "expression-15",
+      "semanticKey": "far-right-glance",
+      "headX": 0.31914062500000184,
+      "headY": 35.307421874999996,
+      "headZ": -10.904296875,
+      "widthLeft": 22.4609375,
+      "widthRight": 22.4609375,
+      "heightLeft": 39.820703125,
+      "heightRight": 39.820703125,
+      "spacing": 53.9,
+      "positionXLeft": 0,
+      "positionXRight": 0,
+      "positionYLeft": 0,
+      "positionYRight": 0,
+      "leftAngle": 0,
+      "rightAngle": 0,
+      "perspective": 1,
+      "eyeMotion": "none",
+      "bodyMotion": "none"
+    },
+    {
+      "id": "expression-16",
+      "semanticKey": "angry-left",
+      "headX": -14.750781250000001,
+      "headY": -19.350000000000005,
+      "headZ": 5.631640624999998,
+      "widthLeft": 19.602343750000003,
+      "widthRight": 19.602343750000003,
+      "heightLeft": 48.63984375,
+      "heightRight": 48.63984375,
+      "spacing": 55.1,
+      "positionXLeft": 0,
+      "positionXRight": 0,
+      "positionYLeft": 0,
+      "positionYRight": 0,
+      "leftAngle": -27.606640625,
+      "rightAngle": 26.1484375,
+      "perspective": 1,
+      "eyeMotion": "none",
+      "bodyMotion": "none"
+    },
+    {
+      "id": "expression-17",
+      "semanticKey": "playful-right",
+      "headX": -4.3953125,
+      "headY": 14.07265625,
+      "headZ": -16.126171874999997,
+      "widthLeft": 19.045145681988206,
+      "widthRight": 19.045145681988206,
+      "heightLeft": 43.370703125,
+      "heightRight": 43.370703125,
+      "spacing": 51.731249999999996,
+      "positionXLeft": 0,
+      "positionXRight": 0,
+      "positionYLeft": 0,
+      "positionYRight": 0,
+      "leftAngle": 26.2921875,
+      "rightAngle": -20.249218750000004,
+      "perspective": 1,
+      "eyeMotion": "none",
+      "bodyMotion": "none"
+    },
+    {
+      "id": "expression-18",
+      "semanticKey": "asymmetric-up-left",
+      "headX": 6.585546875,
+      "headY": 4.737109375000001,
+      "headZ": 12.840234374999998,
+      "widthLeft": 42.1,
+      "widthRight": 22.2,
+      "heightLeft": 41.7,
+      "heightRight": 22.1,
+      "spacing": 60.4,
+      "positionXLeft": 0,
+      "positionXRight": 0,
+      "positionYLeft": 0,
+      "positionYRight": 0,
+      "leftAngle": 0,
+      "rightAngle": 0,
+      "perspective": 1,
+      "eyeMotion": "none",
+      "bodyMotion": "none"
+    },
+    {
+      "id": "expression-19",
+      "semanticKey": "gentle-downward-gaze",
+      "headX": -6.077734375000001,
+      "headY": -11.03515625,
+      "headZ": -13.965625000000001,
+      "widthLeft": 23.045703125,
+      "widthRight": 23.045703125,
+      "heightLeft": 58.68515625,
+      "heightRight": 58.68515625,
+      "spacing": 56.2,
+      "positionXLeft": 0,
+      "positionXRight": 0,
+      "positionYLeft": 0,
+      "positionYRight": 0,
+      "leftAngle": 0,
+      "rightAngle": 0,
+      "perspective": 1,
+      "eyeMotion": "none",
+      "bodyMotion": "none"
+    },
+    {
+      "id": "expression-20",
+      "semanticKey": "wide-down-left",
+      "headX": -17.127734375000003,
+      "headY": 18.070703124999998,
+      "headZ": 13.891796875,
+      "widthLeft": 35.452734375,
+      "widthRight": 35.452734375,
+      "heightLeft": 79.104296875,
+      "heightRight": 79.104296875,
+      "spacing": 70.8,
+      "positionXLeft": 0,
+      "positionXRight": 0,
+      "positionYLeft": 0,
+      "positionYRight": 0,
+      "leftAngle": 0,
+      "rightAngle": 0,
+      "perspective": 1,
+      "eyeMotion": "none",
+      "bodyMotion": "none"
+    },
+    {
+      "id": "expression-21",
+      "semanticKey": "surprised-wide-left",
+      "headX": -5.428125,
+      "headY": -11.71328125,
+      "headZ": -13.472265625000002,
+      "widthLeft": 51.4,
+      "widthRight": 50.5,
+      "heightLeft": 50.1,
+      "heightRight": 49.4,
+      "spacing": 69,
+      "positionXLeft": 0,
+      "positionXRight": 0,
+      "positionYLeft": 0,
+      "positionYRight": 0,
+      "leftAngle": 0,
+      "rightAngle": 0,
+      "perspective": 1,
+      "eyeMotion": "none",
+      "bodyMotion": "none"
+    },
+    {
+      "id": "expression-22",
+      "semanticKey": "drowsy-closed",
+      "headX": 10.292578125,
+      "headY": 3.39921875,
+      "headZ": 7.583203125,
+      "widthLeft": 55.672265625,
+      "widthRight": 55.672265625,
+      "heightLeft": 14.616015625,
+      "heightRight": 14.616015625,
+      "spacing": 68.416796875,
+      "positionXLeft": 0,
+      "positionXRight": 0,
+      "positionYLeft": 0,
+      "positionYRight": 0,
+      "leftAngle": 0,
+      "rightAngle": 0,
+      "perspective": 1,
+      "eyeMotion": "none",
+      "bodyMotion": "none"
+    },
+    {
+      "id": "expression-23",
+      "semanticKey": "suspicious-right",
+      "headX": -17.8,
+      "headY": 10,
+      "headZ": -10.894921875,
+      "widthLeft": 23.969921875,
+      "widthRight": 53.56328125,
+      "heightLeft": 55.89296875,
+      "heightRight": 13.333593750000002,
+      "spacing": 59.94375,
+      "positionXLeft": 0,
+      "positionXRight": 0,
+      "positionYLeft": -9.8,
+      "positionYRight": -9.8,
+      "leftAngle": 0,
+      "rightAngle": 0,
+      "perspective": 1,
+      "eyeMotion": "none",
+      "bodyMotion": "none"
+    },
+    {
+      "id": "expression-24",
+      "semanticKey": "shy-downward",
+      "headX": 7.131640624999998,
+      "headY": 7.7828124999999995,
+      "headZ": 3.935546874999999,
+      "widthLeft": 21.5,
+      "widthRight": 23.2,
+      "heightLeft": 32,
+      "heightRight": 33.5,
+      "spacing": 51.2,
+      "positionXLeft": 0,
+      "positionXRight": 0,
+      "positionYLeft": 40,
+      "positionYRight": 40,
+      "leftAngle": 0,
+      "rightAngle": 0,
+      "perspective": 1,
+      "eyeMotion": "none",
+      "bodyMotion": "none"
+    },
+    {
+      "id": "expression-3d2bed26-f97c-477d-922f-77600cb10e92",
+      "semanticKey": "angry-brows",
+      "headX": 10.473974503042374,
+      "headY": 5.087293619785961,
+      "headZ": 4.698252132317348,
+      "widthLeft": 27.126562499999995,
+      "widthRight": 27.126562499999995,
+      "heightLeft": 63.028125,
+      "heightRight": 63.028125,
+      "spacing": 68.7,
+      "positionXLeft": 0,
+      "positionXRight": 0,
+      "positionYLeft": 0,
+      "positionYRight": 0,
+      "leftAngle": -36.244531249999994,
+      "rightAngle": 27.730078125000002,
+      "perspective": 1,
+      "eyeMotion": "none",
+      "bodyMotion": "shake",
+      "bodyColor": "#ba3636",
+      "eyeColor": "#610000"
+    },
+    {
+      "id": "expression-5220eaee-32fe-4bd8-ad31-432189534cc8",
+      "semanticKey": "uneasy-left",
+      "headX": -12.303515625,
+      "headY": -17.601171875,
+      "headZ": 5.9109375,
+      "widthLeft": 20.605859374999994,
+      "widthRight": 20.605859374999994,
+      "heightLeft": 47.769921874999994,
+      "heightRight": 47.769921874999994,
+      "spacing": 54.9,
+      "positionXLeft": 0,
+      "positionXRight": 0,
+      "positionYLeft": 0,
+      "positionYRight": 0,
+      "leftAngle": 23.523046875000002,
+      "rightAngle": -24.042578125000002,
+      "perspective": 1,
+      "eyeMotion": "shake",
+      "bodyMotion": "slowDrift",
+      "bodyColor": "#adc3ff"
+    }
+  ],
+  "animations": [
+    {
+      "id": "sleeping",
+      "semanticKey": "sleeping",
+      "name": "sleeping",
+      "group": "Cycle de vie",
+      "description": "Yeux presque fermés, respiration lente et expression de sommeil.",
+      "builtIn": true,
+      "playbackMode": "loop",
+      "steps": [
+        {
+          "id": "sleeping-step-0",
+          "expressionId": "expression-13",
+          "holdMs": 3600,
+          "transitionMs": 500,
+          "transition": "smooth"
+        },
+        {
+          "id": "sleeping-step-1",
+          "expressionId": "expression-22",
+          "holdMs": 3600,
+          "transitionMs": 500,
+          "transition": "smooth"
+        },
+        {
+          "id": "sleeping-step-2",
+          "expressionId": "expression-04",
+          "holdMs": 3600,
+          "transitionMs": 500,
+          "transition": "smooth"
+        }
+      ],
+      "blink": {
+        "enabled": true,
+        "initialDelayMs": 4800,
+        "minIntervalMs": 6500,
+        "maxIntervalMs": 9500,
+        "durationMs": 420
+      }
+    },
+    {
+      "id": "waking",
+      "semanticKey": "waking",
+      "name": "waking",
+      "group": "Cycle de vie",
+      "description": "Séquence courte de réveil avant retour vers une expression neutre.",
+      "builtIn": true,
+      "playbackMode": "loop",
+      "steps": [
+        {
+          "id": "waking-step-0",
+          "expressionId": "expression-13",
+          "holdMs": 2300,
+          "transitionMs": 500,
+          "transition": "smooth"
+        }
+      ],
+      "blink": {
+        "enabled": true,
+        "initialDelayMs": 1200,
+        "minIntervalMs": 1800,
+        "maxIntervalMs": 3600,
+        "durationMs": 220
+      }
+    },
+    {
+      "id": "idle",
+      "semanticKey": "idle",
+      "name": "idle",
+      "group": "Cycle de vie",
+      "description": "Micro-mouvements lents, expressions 00 et 08, clignement rare.",
+      "builtIn": true,
+      "playbackMode": "loop",
+      "steps": [
+        {
+          "id": "idle-step-0",
+          "expressionId": "expression-00",
+          "holdMs": 5200,
+          "transitionMs": 500,
+          "transition": "smooth"
+        },
+        {
+          "id": "idle-step-1",
+          "expressionId": "expression-08",
+          "holdMs": 5200,
+          "transitionMs": 500,
+          "transition": "smooth"
+        }
+      ],
+      "blink": {
+        "enabled": true,
+        "initialDelayMs": 2600,
+        "minIntervalMs": 3400,
+        "maxIntervalMs": 6200,
+        "durationMs": 280
+      }
+    },
+    {
+      "id": "listening",
+      "semanticKey": "listening",
+      "name": "listening",
+      "group": "Cycle de vie",
+      "description": "Expressions 10, 01 et 19, regard stable et clignement attentif.",
+      "builtIn": true,
+      "playbackMode": "loop",
+      "steps": [
+        {
+          "id": "listening-step-0",
+          "expressionId": "expression-10",
+          "holdMs": 2300,
+          "transitionMs": 500,
+          "transition": "smooth"
+        },
+        {
+          "id": "listening-step-1",
+          "expressionId": "expression-01",
+          "holdMs": 2300,
+          "transitionMs": 500,
+          "transition": "smooth"
+        },
+        {
+          "id": "listening-step-2",
+          "expressionId": "expression-19",
+          "holdMs": 2300,
+          "transitionMs": 500,
+          "transition": "smooth"
+        }
+      ],
+      "blink": {
+        "enabled": true,
+        "initialDelayMs": 3200,
+        "minIntervalMs": 4800,
+        "maxIntervalMs": 7200,
+        "durationMs": 240
+      }
+    },
+    {
+      "id": "thinking",
+      "semanticKey": "thinking",
+      "name": "thinking",
+      "group": "Cycle de vie",
+      "description": "Regard haut et latéral, expressions asymétriques et changements fréquents.",
+      "builtIn": true,
+      "playbackMode": "loop",
+      "steps": [
+        {
+          "id": "thinking-step-0",
+          "expressionId": "expression-08",
+          "holdMs": 2300,
+          "transitionMs": 500,
+          "transition": "smooth"
+        },
+        {
+          "id": "thinking-step-1",
+          "expressionId": "expression-16",
+          "holdMs": 2300,
+          "transitionMs": 500,
+          "transition": "smooth"
+        },
+        {
+          "id": "thinking-step-2",
+          "expressionId": "expression-14",
+          "holdMs": 2300,
+          "transitionMs": 500,
+          "transition": "smooth"
+        },
+        {
+          "id": "thinking-step-3",
+          "expressionId": "expression-17",
+          "holdMs": 2300,
+          "transitionMs": 500,
+          "transition": "smooth"
+        },
+        {
+          "id": "thinking-step-4",
+          "expressionId": "expression-05",
+          "holdMs": 2300,
+          "transitionMs": 500,
+          "transition": "smooth"
+        }
+      ],
+      "blink": {
+        "enabled": true,
+        "initialDelayMs": 2100,
+        "minIntervalMs": 2800,
+        "maxIntervalMs": 5000,
+        "durationMs": 260
+      }
+    },
+    {
+      "id": "searching",
+      "semanticKey": "searching",
+      "name": "searching",
+      "group": "Cycle de vie",
+      "description": "Balayage rapide et changements très fréquents.",
+      "builtIn": true,
+      "playbackMode": "loop",
+      "steps": [
+        {
+          "id": "searching-step-0",
+          "expressionId": "expression-15",
+          "holdMs": 2300,
+          "transitionMs": 500,
+          "transition": "smooth"
+        },
+        {
+          "id": "searching-step-1",
+          "expressionId": "expression-09",
+          "holdMs": 2300,
+          "transitionMs": 500,
+          "transition": "smooth"
+        },
+        {
+          "id": "searching-step-2",
+          "expressionId": "expression-03",
+          "holdMs": 2300,
+          "transitionMs": 500,
+          "transition": "smooth"
+        },
+        {
+          "id": "searching-step-3",
+          "expressionId": "expression-20",
+          "holdMs": 2300,
+          "transitionMs": 500,
+          "transition": "smooth"
+        },
+        {
+          "id": "searching-step-4",
+          "expressionId": "expression-12",
+          "holdMs": 2300,
+          "transitionMs": 500,
+          "transition": "smooth"
+        },
+        {
+          "id": "searching-step-5",
+          "expressionId": "expression-18",
+          "holdMs": 2300,
+          "transitionMs": 500,
+          "transition": "smooth"
+        }
+      ],
+      "blink": {
+        "enabled": true,
+        "initialDelayMs": 2100,
+        "minIntervalMs": 2800,
+        "maxIntervalMs": 5000,
+        "durationMs": 260
+      }
+    },
+    {
+      "id": "working",
+      "semanticKey": "working",
+      "name": "working",
+      "group": "Cycle de vie",
+      "description": "Rythme régulier et expressions concentrées.",
+      "builtIn": true,
+      "playbackMode": "loop",
+      "steps": [
+        {
+          "id": "working-step-0",
+          "expressionId": "expression-07",
+          "holdMs": 2300,
+          "transitionMs": 500,
+          "transition": "smooth"
+        },
+        {
+          "id": "working-step-1",
+          "expressionId": "expression-16",
+          "holdMs": 2300,
+          "transitionMs": 500,
+          "transition": "smooth"
+        },
+        {
+          "id": "working-step-2",
+          "expressionId": "expression-11",
+          "holdMs": 2300,
+          "transitionMs": 500,
+          "transition": "smooth"
+        },
+        {
+          "id": "working-step-3",
+          "expressionId": "expression-10",
+          "holdMs": 2300,
+          "transitionMs": 500,
+          "transition": "smooth"
+        }
+      ],
+      "blink": {
+        "enabled": true,
+        "initialDelayMs": 2100,
+        "minIntervalMs": 2800,
+        "maxIntervalMs": 5000,
+        "durationMs": 260
+      }
+    },
+    {
+      "id": "excited",
+      "semanticKey": "excited",
+      "name": "excited",
+      "group": "Réactions",
+      "description": "Grandes expressions et transitions rapides.",
+      "builtIn": true,
+      "playbackMode": "loop",
+      "steps": [
+        {
+          "id": "excited-step-0",
+          "expressionId": "expression-02",
+          "holdMs": 2300,
+          "transitionMs": 500,
+          "transition": "smooth"
+        },
+        {
+          "id": "excited-step-1",
+          "expressionId": "expression-17",
+          "holdMs": 2300,
+          "transitionMs": 500,
+          "transition": "smooth"
+        },
+        {
+          "id": "excited-step-2",
+          "expressionId": "expression-21",
+          "holdMs": 2300,
+          "transitionMs": 500,
+          "transition": "smooth"
+        },
+        {
+          "id": "excited-step-3",
+          "expressionId": "expression-03",
+          "holdMs": 2300,
+          "transitionMs": 500,
+          "transition": "smooth"
+        },
+        {
+          "id": "excited-step-4",
+          "expressionId": "expression-11",
+          "holdMs": 2300,
+          "transitionMs": 500,
+          "transition": "smooth"
+        }
+      ],
+      "blink": {
+        "enabled": true,
+        "initialDelayMs": 1200,
+        "minIntervalMs": 1800,
+        "maxIntervalMs": 3600,
+        "durationMs": 220
+      }
+    },
+    {
+      "id": "bored",
+      "semanticKey": "bored",
+      "name": "bored",
+      "group": "Réactions",
+      "description": "Cet état enchaîne un pool de presets et des clignements.",
+      "builtIn": true,
+      "playbackMode": "loop",
+      "steps": [
+        {
+          "id": "bored-step-0",
+          "expressionId": "expression-04",
+          "holdMs": 3600,
+          "transitionMs": 500,
+          "transition": "smooth"
+        },
+        {
+          "id": "bored-step-1",
+          "expressionId": "expression-22",
+          "holdMs": 3600,
+          "transitionMs": 500,
+          "transition": "smooth"
+        },
+        {
+          "id": "bored-step-2",
+          "expressionId": "expression-00",
+          "holdMs": 3600,
+          "transitionMs": 500,
+          "transition": "smooth"
+        }
+      ],
+      "blink": {
+        "enabled": true,
+        "initialDelayMs": 4800,
+        "minIntervalMs": 6500,
+        "maxIntervalMs": 9500,
+        "durationMs": 420
+      }
+    },
+    {
+      "id": "suspicious",
+      "semanticKey": "suspicious",
+      "name": "suspicious",
+      "group": "Réactions",
+      "description": "Cet état enchaîne un pool de presets et des clignements.",
+      "builtIn": true,
+      "playbackMode": "loop",
+      "steps": [
+        {
+          "id": "suspicious-step-0",
+          "expressionId": "expression-14",
+          "holdMs": 2300,
+          "transitionMs": 500,
+          "transition": "smooth"
+        },
+        {
+          "id": "suspicious-step-1",
+          "expressionId": "expression-05",
+          "holdMs": 2300,
+          "transitionMs": 500,
+          "transition": "smooth"
+        },
+        {
+          "id": "suspicious-step-2",
+          "expressionId": "expression-23",
+          "holdMs": 2300,
+          "transitionMs": 500,
+          "transition": "smooth"
+        }
+      ],
+      "blink": {
+        "enabled": true,
+        "initialDelayMs": 2100,
+        "minIntervalMs": 2800,
+        "maxIntervalMs": 5000,
+        "durationMs": 260
+      }
+    },
+    {
+      "id": "angry",
+      "semanticKey": "angry",
+      "name": "angry",
+      "group": "Réactions",
+      "description": "Cet état enchaîne un pool de presets et des clignements.",
+      "builtIn": true,
+      "playbackMode": "loop",
+      "steps": [
+        {
+          "id": "angry-step-0",
+          "expressionId": "expression-07",
+          "holdMs": 2300,
+          "transitionMs": 500,
+          "transition": "smooth"
+        },
+        {
+          "id": "angry-step-1",
+          "expressionId": "expression-3d2bed26-f97c-477d-922f-77600cb10e92",
+          "holdMs": 2300,
+          "transitionMs": 500,
+          "transition": "smooth"
+        }
+      ],
+      "blink": {
+        "enabled": true,
+        "initialDelayMs": 2100,
+        "minIntervalMs": 2800,
+        "maxIntervalMs": 5000,
+        "durationMs": 260
+      }
+    },
+    {
+      "id": "drowsy",
+      "semanticKey": "drowsy",
+      "name": "drowsy",
+      "group": "Réactions",
+      "description": "Cet état enchaîne un pool de presets et des clignements.",
+      "builtIn": true,
+      "playbackMode": "loop",
+      "steps": [
+        {
+          "id": "drowsy-step-0",
+          "expressionId": "expression-04",
+          "holdMs": 3600,
+          "transitionMs": 500,
+          "transition": "smooth"
+        },
+        {
+          "id": "drowsy-step-1",
+          "expressionId": "expression-22",
+          "holdMs": 3600,
+          "transitionMs": 500,
+          "transition": "smooth"
+        },
+        {
+          "id": "drowsy-step-2",
+          "expressionId": "expression-13",
+          "holdMs": 3600,
+          "transitionMs": 500,
+          "transition": "smooth"
+        }
+      ],
+      "blink": {
+        "enabled": true,
+        "initialDelayMs": 4800,
+        "minIntervalMs": 6500,
+        "maxIntervalMs": 9500,
+        "durationMs": 420
+      }
+    },
+    {
+      "id": "happy",
+      "semanticKey": "happy",
+      "name": "happy",
+      "group": "Réactions",
+      "description": "Cet état enchaîne un pool de presets et des clignements.",
+      "builtIn": true,
+      "playbackMode": "loop",
+      "steps": [
+        {
+          "id": "happy-step-0",
+          "expressionId": "expression-02",
+          "holdMs": 2300,
+          "transitionMs": 500,
+          "transition": "smooth"
+        },
+        {
+          "id": "happy-step-1",
+          "expressionId": "expression-11",
+          "holdMs": 2300,
+          "transitionMs": 500,
+          "transition": "smooth"
+        },
+        {
+          "id": "happy-step-2",
+          "expressionId": "expression-17",
+          "holdMs": 2300,
+          "transitionMs": 500,
+          "transition": "smooth"
+        },
+        {
+          "id": "happy-step-3",
+          "expressionId": "expression-19",
+          "holdMs": 2300,
+          "transitionMs": 500,
+          "transition": "smooth"
+        }
+      ],
+      "blink": {
+        "enabled": true,
+        "initialDelayMs": 2100,
+        "minIntervalMs": 2800,
+        "maxIntervalMs": 5000,
+        "durationMs": 260
+      }
+    },
+    {
+      "id": "curious",
+      "semanticKey": "curious",
+      "name": "curious",
+      "group": "Réactions",
+      "description": "Inclinaisons et forte asymétrie.",
+      "builtIn": true,
+      "playbackMode": "loop",
+      "steps": [
+        {
+          "id": "curious-step-0",
+          "expressionId": "expression-03",
+          "holdMs": 2300,
+          "transitionMs": 500,
+          "transition": "smooth"
+        },
+        {
+          "id": "curious-step-1",
+          "expressionId": "expression-21",
+          "holdMs": 2300,
+          "transitionMs": 500,
+          "transition": "smooth"
+        },
+        {
+          "id": "curious-step-2",
+          "expressionId": "expression-00",
+          "holdMs": 2300,
+          "transitionMs": 500,
+          "transition": "smooth"
+        },
+        {
+          "id": "curious-step-3",
+          "expressionId": "expression-15",
+          "holdMs": 2300,
+          "transitionMs": 500,
+          "transition": "smooth"
+        }
+      ],
+      "blink": {
+        "enabled": true,
+        "initialDelayMs": 2100,
+        "minIntervalMs": 2800,
+        "maxIntervalMs": 5000,
+        "durationMs": 260
+      }
+    },
+    {
+      "id": "confused",
+      "semanticKey": "confused",
+      "name": "confused",
+      "group": "Réactions",
+      "description": "Cet état enchaîne un pool de presets et des clignements.",
+      "builtIn": true,
+      "playbackMode": "loop",
+      "steps": [
+        {
+          "id": "confused-step-0",
+          "expressionId": "expression-14",
+          "holdMs": 2300,
+          "transitionMs": 500,
+          "transition": "smooth"
+        },
+        {
+          "id": "confused-step-1",
+          "expressionId": "expression-05",
+          "holdMs": 2300,
+          "transitionMs": 500,
+          "transition": "smooth"
+        },
+        {
+          "id": "confused-step-2",
+          "expressionId": "expression-08",
+          "holdMs": 2300,
+          "transitionMs": 500,
+          "transition": "smooth"
+        }
+      ],
+      "blink": {
+        "enabled": true,
+        "initialDelayMs": 2100,
+        "minIntervalMs": 2800,
+        "maxIntervalMs": 5000,
+        "durationMs": 260
+      }
+    },
+    {
+      "id": "surprised",
+      "semanticKey": "surprised",
+      "name": "surprised",
+      "group": "Réactions",
+      "description": "Cet état enchaîne un pool de presets et des clignements.",
+      "builtIn": true,
+      "playbackMode": "loop",
+      "steps": [
+        {
+          "id": "surprised-step-0",
+          "expressionId": "expression-03",
+          "holdMs": 2300,
+          "transitionMs": 500,
+          "transition": "smooth"
+        },
+        {
+          "id": "surprised-step-1",
+          "expressionId": "expression-21",
+          "holdMs": 2300,
+          "transitionMs": 500,
+          "transition": "smooth"
+        }
+      ],
+      "blink": {
+        "enabled": true,
+        "initialDelayMs": 1200,
+        "minIntervalMs": 1800,
+        "maxIntervalMs": 3600,
+        "durationMs": 220
+      }
+    },
+    {
+      "id": "proud",
+      "semanticKey": "proud",
+      "name": "proud",
+      "group": "Réactions",
+      "description": "Cet état enchaîne un pool de presets et des clignements.",
+      "builtIn": true,
+      "playbackMode": "loop",
+      "steps": [
+        {
+          "id": "proud-step-0",
+          "expressionId": "expression-15",
+          "holdMs": 2300,
+          "transitionMs": 500,
+          "transition": "smooth"
+        },
+        {
+          "id": "proud-step-1",
+          "expressionId": "expression-08",
+          "holdMs": 2300,
+          "transitionMs": 500,
+          "transition": "smooth"
+        },
+        {
+          "id": "proud-step-2",
+          "expressionId": "expression-02",
+          "holdMs": 2300,
+          "transitionMs": 500,
+          "transition": "smooth"
+        }
+      ],
+      "blink": {
+        "enabled": true,
+        "initialDelayMs": 2100,
+        "minIntervalMs": 2800,
+        "maxIntervalMs": 5000,
+        "durationMs": 260
+      }
+    },
+    {
+      "id": "shy",
+      "semanticKey": "shy",
+      "name": "shy",
+      "group": "Réactions",
+      "description": "Cet état enchaîne un pool de presets et des clignements.",
+      "builtIn": true,
+      "playbackMode": "loop",
+      "steps": [
+        {
+          "id": "shy-step-0",
+          "expressionId": "expression-00",
+          "holdMs": 2300,
+          "transitionMs": 500,
+          "transition": "smooth"
+        },
+        {
+          "id": "shy-step-1",
+          "expressionId": "expression-24",
+          "holdMs": 2300,
+          "transitionMs": 500,
+          "transition": "smooth"
+        },
+        {
+          "id": "shy-step-2",
+          "expressionId": "expression-13",
+          "holdMs": 2300,
+          "transitionMs": 500,
+          "transition": "smooth"
+        }
+      ],
+      "blink": {
+        "enabled": true,
+        "initialDelayMs": 2100,
+        "minIntervalMs": 2800,
+        "maxIntervalMs": 5000,
+        "durationMs": 260
+      }
+    },
+    {
+      "id": "sad",
+      "semanticKey": "sad",
+      "name": "sad",
+      "group": "Réactions",
+      "description": "Cet état enchaîne un pool de presets et des clignements.",
+      "builtIn": true,
+      "playbackMode": "loop",
+      "steps": [
+        {
+          "id": "sad-step-0",
+          "expressionId": "expression-04",
+          "holdMs": 3600,
+          "transitionMs": 500,
+          "transition": "smooth"
+        },
+        {
+          "id": "sad-step-1",
+          "expressionId": "expression-13",
+          "holdMs": 3600,
+          "transitionMs": 500,
+          "transition": "smooth"
+        },
+        {
+          "id": "sad-step-2",
+          "expressionId": "expression-22",
+          "holdMs": 3600,
+          "transitionMs": 500,
+          "transition": "smooth"
+        }
+      ],
+      "blink": {
+        "enabled": true,
+        "initialDelayMs": 4800,
+        "minIntervalMs": 6500,
+        "maxIntervalMs": 9500,
+        "durationMs": 420
+      }
+    },
+    {
+      "id": "laughing",
+      "semanticKey": "laughing",
+      "name": "laughing",
+      "group": "Réactions",
+      "description": "Cet état enchaîne un pool de presets et des clignements.",
+      "builtIn": true,
+      "playbackMode": "loop",
+      "steps": [
+        {
+          "id": "laughing-step-0",
+          "expressionId": "expression-02",
+          "holdMs": 2300,
+          "transitionMs": 500,
+          "transition": "smooth"
+        },
+        {
+          "id": "laughing-step-1",
+          "expressionId": "expression-11",
+          "holdMs": 2300,
+          "transitionMs": 500,
+          "transition": "smooth"
+        },
+        {
+          "id": "laughing-step-2",
+          "expressionId": "expression-17",
+          "holdMs": 2300,
+          "transitionMs": 500,
+          "transition": "smooth"
+        }
+      ],
+      "blink": {
+        "enabled": true,
+        "initialDelayMs": 1200,
+        "minIntervalMs": 1800,
+        "maxIntervalMs": 3600,
+        "durationMs": 220
+      }
+    },
+    {
+      "id": "scared",
+      "semanticKey": "scared",
+      "name": "scared",
+      "group": "Réactions",
+      "description": "Cet état enchaîne un pool de presets et des clignements.",
+      "builtIn": true,
+      "playbackMode": "loop",
+      "steps": [
+        {
+          "id": "scared-step-0",
+          "expressionId": "expression-03",
+          "holdMs": 2300,
+          "transitionMs": 500,
+          "transition": "smooth"
+        },
+        {
+          "id": "scared-step-1",
+          "expressionId": "expression-5220eaee-32fe-4bd8-ad31-432189534cc8",
+          "holdMs": 2300,
+          "transitionMs": 500,
+          "transition": "smooth"
+        }
+      ],
+      "blink": {
+        "enabled": true,
+        "initialDelayMs": 1200,
+        "minIntervalMs": 1800,
+        "maxIntervalMs": 3600,
+        "durationMs": 220
+      }
+    },
+    {
+      "id": "playful",
+      "semanticKey": "playful",
+      "name": "playful",
+      "group": "Réactions",
+      "description": "Cet état enchaîne un pool de presets et des clignements.",
+      "builtIn": true,
+      "playbackMode": "loop",
+      "steps": [
+        {
+          "id": "playful-step-0",
+          "expressionId": "expression-02",
+          "holdMs": 2300,
+          "transitionMs": 500,
+          "transition": "smooth"
+        },
+        {
+          "id": "playful-step-1",
+          "expressionId": "expression-17",
+          "holdMs": 2300,
+          "transitionMs": 500,
+          "transition": "smooth"
+        },
+        {
+          "id": "playful-step-2",
+          "expressionId": "expression-11",
+          "holdMs": 2300,
+          "transitionMs": 500,
+          "transition": "smooth"
+        },
+        {
+          "id": "playful-step-3",
+          "expressionId": "expression-08",
+          "holdMs": 2300,
+          "transitionMs": 500,
+          "transition": "smooth"
+        }
+      ],
+      "blink": {
+        "enabled": true,
+        "initialDelayMs": 2100,
+        "minIntervalMs": 2800,
+        "maxIntervalMs": 5000,
+        "durationMs": 260
+      }
+    },
+    {
+      "id": "celebrate",
+      "semanticKey": "celebrate",
+      "name": "celebrate",
+      "group": "Réactions",
+      "description": "Cet état enchaîne un pool de presets et des clignements.",
+      "builtIn": true,
+      "playbackMode": "loop",
+      "steps": [
+        {
+          "id": "celebrate-step-0",
+          "expressionId": "expression-02",
+          "holdMs": 2300,
+          "transitionMs": 500,
+          "transition": "smooth"
+        },
+        {
+          "id": "celebrate-step-1",
+          "expressionId": "expression-08",
+          "holdMs": 2300,
+          "transitionMs": 500,
+          "transition": "smooth"
+        },
+        {
+          "id": "celebrate-step-2",
+          "expressionId": "expression-17",
+          "holdMs": 2300,
+          "transitionMs": 500,
+          "transition": "smooth"
+        }
+      ],
+      "blink": {
+        "enabled": true,
+        "initialDelayMs": 1200,
+        "minIntervalMs": 1800,
+        "maxIntervalMs": 3600,
+        "durationMs": 220
+      }
+    }
+  ]
+}

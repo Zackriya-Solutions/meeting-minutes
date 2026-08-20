@@ -40,6 +40,8 @@
     },
     "dependencies": {
         "@base-ui/react": "^1.6.0",
+        "@bible-strong/avatar-core": "file:vendor/avatar-lab/bible-strong-avatar-core-0.1.0.tgz",
+        "@bible-strong/avatar-web": "file:vendor/avatar-lab/bible-strong-avatar-web-0.1.0.tgz",
         "@blocknote/core": "0.36.0",
         "@blocknote/react": "0.36.0",
         "@blocknote/shadcn": "0.36.0",
@@ -110,6 +112,16 @@
         "tailwind-merge": "^3.3.1",
         "tailwindcss-animate": "^1.0.7",
         "zod": "^3.25.71"
+    },
+    "pnpm": {
+        "overrides": {
+            "@bible-strong/avatar-core": "file:vendor/avatar-lab/bible-strong-avatar-core-0.1.0.tgz",
+            "prosemirror-model": "1.25.3",
+            "prosemirror-state": "1.4.3",
+            "prosemirror-view": "1.41.3",
+            "prosemirror-transform": "1.10.4",
+            "prosemirror-tables": "1.8.1"
+        }
     },
     "devDependencies": {
         "@storybook/nextjs": "10.5.5",
