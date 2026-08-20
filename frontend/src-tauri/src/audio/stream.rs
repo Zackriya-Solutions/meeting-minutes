@@ -13,6 +13,9 @@ use super::capture::{AudioCaptureBackend, get_current_backend};
 #[cfg(target_os = "macos")]
 use super::capture::CoreAudioCapture;
 
+#[cfg(target_os = "linux")]
+use super::capture::pulse;
+
 /// Stream backend implementation
 pub enum StreamBackend {
     /// CPAL-based stream (ScreenCaptureKit or default)
@@ -20,6 +23,12 @@ pub enum StreamBackend {
     /// Core Audio direct implementation (macOS only)
     #[cfg(target_os = "macos")]
     CoreAudio {
+        task: Option<tokio::task::JoinHandle<()>>,
+    },
+    /// PulseAudio/PipeWire `parec` subprocess implementation (Linux system audio only)
+    #[cfg(target_os = "linux")]
+    Pulse {
+        child: std::process::Child,
         task: Option<tokio::task::JoinHandle<()>>,
     },
 }
@@ -85,6 +94,15 @@ impl AudioStream {
         if use_core_audio {
             info!("🎵 Stream: Using Core Audio backend (cidre) for system audio");
             return Self::create_core_audio_stream(device, state, device_type, recording_sender).await;
+        }
+
+        // Linux has no cpal loopback backend: system audio must always go
+        // through PulseAudio/PipeWire monitor sources (see audio::capture::pulse),
+        // never CPAL/ALSA.
+        #[cfg(target_os = "linux")]
+        if device_type == DeviceType::System {
+            info!("🎵 Stream: Using PulseAudio/PipeWire monitor capture for system audio");
+            return Self::create_pulse_stream(device, state, device_type, recording_sender).await;
         }
 
         // Default path: use CPAL
@@ -233,6 +251,104 @@ impl AudioStream {
         })
     }
 
+    /// Create a PulseAudio/PipeWire monitor-source stream (Linux system audio only)
+    ///
+    /// cpal's ALSA backend has no loopback capability, so system audio is
+    /// captured by spawning `parec` against the resolved monitor source and
+    /// reading raw interleaved f32le PCM from its stdout.
+    #[cfg(target_os = "linux")]
+    async fn create_pulse_stream(
+        device: Arc<AudioDevice>,
+        state: Arc<RecordingState>,
+        device_type: DeviceType,
+        recording_sender: Option<mpsc::UnboundedSender<super::recording_state::AudioChunk>>,
+    ) -> Result<Self> {
+        const SAMPLE_RATE: u32 = 48000;
+        const CHANNELS: u16 = 2;
+
+        info!("🔊 Stream: Resolving PulseAudio/PipeWire monitor source for: {}", device.name);
+        let source_name = pulse::resolve_monitor_source_name(&device.name).map_err(|e| {
+            error!("❌ Stream: Failed to resolve monitor source '{}': {}", device.name, e);
+            anyhow::anyhow!("Failed to resolve system audio monitor source '{}': {}", device.name, e)
+        })?;
+
+        info!("🔊 Stream: Spawning parec capture for monitor source: {}", source_name);
+        let mut child = pulse::spawn_monitor_capture(&source_name, SAMPLE_RATE, CHANNELS).map_err(|e| {
+            error!("❌ Stream: Failed to spawn parec: {}", e);
+            anyhow::anyhow!("Failed to start system audio capture: {}", e)
+        })?;
+
+        let mut stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| anyhow::anyhow!("Failed to capture stdout from parec process"))?;
+
+        let capture = AudioCapture::new(
+            device.clone(),
+            state.clone(),
+            SAMPLE_RATE,
+            CHANNELS,
+            device_type,
+            recording_sender,
+        );
+
+        let device_name = device.name.clone();
+        info!("🔊 Stream: Spawning blocking task to read parec output...");
+        let task = tokio::task::spawn_blocking(move || {
+            use std::io::Read;
+
+            const FRAMES_PER_CHUNK: usize = 1024;
+            let bytes_per_frame = CHANNELS as usize * 4;
+            let mut raw = vec![0u8; FRAMES_PER_CHUNK * bytes_per_frame];
+            let mut filled = 0usize;
+
+            info!("✅ Stream: PulseAudio capture task started for {}", device_name);
+
+            loop {
+                match stdout.read(&mut raw[filled..]) {
+                    Ok(0) => break, // EOF: parec exited (killed on stop, or crashed)
+                    Ok(n) => {
+                        filled += n;
+                        if filled == raw.len() {
+                            let samples: Vec<f32> = raw
+                                .chunks_exact(4)
+                                .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+                                .collect();
+                            capture.process_audio_data(&samples);
+                            filled = 0;
+                        }
+                    }
+                    Err(e) => {
+                        warn!("PulseAudio capture read error for {}: {}", device_name, e);
+                        break;
+                    }
+                }
+            }
+
+            // Process any trailing partial chunk
+            let usable = filled - (filled % 4);
+            if usable > 0 {
+                let samples: Vec<f32> = raw[..usable]
+                    .chunks_exact(4)
+                    .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+                    .collect();
+                capture.process_audio_data(&samples);
+            }
+
+            info!("⚠️ Stream: PulseAudio capture task ended for {}", device_name);
+        });
+
+        info!("✅ Stream: PulseAudio stream fully initialized for device: {}", device.name);
+
+        Ok(Self {
+            device,
+            backend: StreamBackend::Pulse {
+                child,
+                task: Some(task),
+            },
+        })
+    }
+
     /// Build stream based on sample format
     fn build_stream(
         device: &Device,
@@ -342,6 +458,23 @@ impl AudioStream {
                     std::thread::sleep(std::time::Duration::from_millis(50));
                     info!("Core Audio task aborted");
                 }
+            }
+            #[cfg(target_os = "linux")]
+            StreamBackend::Pulse { mut child, task } => {
+                // Kill parec first: this makes its stdout pipe hit EOF, which
+                // unblocks the reader thread's blocking read() and lets the
+                // task finish on its own (spawn_blocking tasks can't be
+                // preempted mid-syscall, so abort() alone would not help).
+                info!("Stopping PulseAudio capture (parec)...");
+                if let Err(e) = child.kill() {
+                    warn!("Failed to kill parec process: {}", e);
+                }
+                if let Err(e) = child.wait() {
+                    warn!("Failed to reap parec process: {}", e);
+                }
+                drop(task);
+                std::thread::sleep(std::time::Duration::from_millis(50));
+                info!("PulseAudio capture stopped");
             }
         }
 

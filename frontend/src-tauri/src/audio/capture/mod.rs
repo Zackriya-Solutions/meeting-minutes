@@ -7,6 +7,9 @@ pub mod backend_config;
 #[cfg(target_os = "macos")]
 pub mod core_audio;
 
+#[cfg(target_os = "linux")]
+pub mod pulse;
+
 // Re-export capture functionality
 pub use system::{
     SystemAudioCapture, SystemAudioStream,
@@ -16,6 +19,9 @@ pub use system::{
 
 #[cfg(target_os = "macos")]
 pub use core_audio::{CoreAudioCapture, CoreAudioStream};
+
+#[cfg(target_os = "linux")]
+pub use pulse::PulseMonitorSource;
 
 // Re-export backend configuration
 pub use backend_config::{

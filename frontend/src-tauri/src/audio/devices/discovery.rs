@@ -2,7 +2,9 @@ use anyhow::Result;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use log::error;
 
-use super::configuration::{AudioDevice, DeviceType};
+use super::configuration::AudioDevice;
+#[cfg(not(target_os = "linux"))]
+use super::configuration::DeviceType;
 use super::platform;
 
 /// List all available audio devices on the system
@@ -10,6 +12,7 @@ pub async fn list_audio_devices() -> Result<Vec<AudioDevice>> {
     let host = cpal::default_host();
 
     // Platform-specific device enumeration
+    #[cfg_attr(target_os = "linux", allow(unused_mut))]
     let mut devices = {
         #[cfg(target_os = "windows")]
         {
@@ -27,7 +30,11 @@ pub async fn list_audio_devices() -> Result<Vec<AudioDevice>> {
         }
     };
 
-    // Add any additional devices from the default host
+    // Add any additional devices from the default host. Skipped on Linux:
+    // raw ALSA/cpal output devices are playback sinks, not usable for
+    // system-audio capture (only real PulseAudio/PipeWire monitor sources,
+    // already added by configure_linux_audio, are usable there).
+    #[cfg(not(target_os = "linux"))]
     if let Ok(other_devices) = host.devices() {
         for device in other_devices {
             if let Ok(name) = device.name() {

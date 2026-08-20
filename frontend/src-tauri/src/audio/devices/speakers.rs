@@ -4,6 +4,9 @@ use log::{info, warn};
 
 use super::configuration::{AudioDevice, DeviceType};
 
+#[cfg(target_os = "linux")]
+use crate::audio::capture::pulse;
+
 /// Get the default output (speaker/system audio) device for the system
 pub fn default_output_device() -> Result<AudioDevice> {
     #[cfg(target_os = "macos")]
@@ -35,7 +38,17 @@ pub fn default_output_device() -> Result<AudioDevice> {
         return Ok(AudioDevice::new(device.name()?, DeviceType::Output));
     }
 
-    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    #[cfg(target_os = "linux")]
+    {
+        // cpal has no ALSA loopback backend; the default system-audio
+        // device is the PulseAudio/PipeWire monitor source for whatever
+        // sink is currently the default playback device.
+        let monitor = pulse::default_monitor_source()
+            .map_err(|e| anyhow!("No system audio monitor source available: {}", e))?;
+        return Ok(AudioDevice::new(monitor.description, DeviceType::Output));
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
     {
         let host = cpal::default_host();
         let device = host
