@@ -267,7 +267,16 @@ impl AudioStream {
         const CHANNELS: u16 = 2;
 
         info!("🔊 Stream: Resolving PulseAudio/PipeWire monitor source for: {}", device.name);
-        let source_name = pulse::resolve_monitor_source_name(&device.name).map_err(|e| {
+        // resolve_monitor_source_name() shells out to `pactl` synchronously;
+        // run it via spawn_blocking so it can't stall a tokio worker thread,
+        // matching the pattern already used below for the parec reader loop.
+        let device_name_for_resolve = device.name.clone();
+        let source_name = tokio::task::spawn_blocking(move || {
+            pulse::resolve_monitor_source_name(&device_name_for_resolve)
+        })
+        .await
+        .map_err(|e| anyhow::anyhow!("Monitor source resolution task panicked: {}", e))?
+        .map_err(|e| {
             error!("❌ Stream: Failed to resolve monitor source '{}': {}", device.name, e);
             anyhow::anyhow!("Failed to resolve system audio monitor source '{}': {}", device.name, e)
         })?;
