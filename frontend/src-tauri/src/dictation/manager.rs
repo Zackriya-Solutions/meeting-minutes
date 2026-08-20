@@ -13,7 +13,7 @@ use std::time::Duration;
 use tauri::{AppHandle, Runtime};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 use tauri_plugin_notification::NotificationExt;
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 
 use super::queue::DictationQueue;
 use super::types::DictationState;
@@ -82,6 +82,7 @@ impl<R: Runtime> FallbackHandler<R> {
             }
         };
 
+        let written_text = text.clone();
         match clipboard.write_text(text) {
             Ok(()) => {
                 log::info!("Dictation fallback: copied segment to clipboard ({})", reason);
@@ -96,7 +97,7 @@ impl<R: Runtime> FallbackHandler<R> {
         let body = format!(
             "Couldn't type into the focused field ({reason}). The dictated text was copied to \
              your clipboard instead -- paste it now. Your previous clipboard content will be \
-             restored in {restore_secs} seconds."
+             restored in {restore_secs} seconds, unless you copy something else first."
         );
         if let Err(e) = self
             .app_handle
@@ -113,6 +114,31 @@ impl<R: Runtime> FallbackHandler<R> {
         tauri::async_runtime::spawn(async move {
             tokio::time::sleep(CLIPBOARD_RESTORE_DELAY).await;
             let clipboard = app_for_restore.clipboard();
+
+            // Only restore if the clipboard still holds exactly the text we
+            // wrote. If the user copied something else in the meantime (the
+            // whole point of this fallback is "paste it now", so they may
+            // well have gone on to copy something unrelated before the
+            // delay elapses), restoring unconditionally would silently
+            // destroy that newer content instead of the stale pre-dictation
+            // snapshot -- so leave it alone in that case.
+            match clipboard.read_text() {
+                Ok(current) if current != written_text => {
+                    log::debug!(
+                        "Dictation fallback: clipboard changed since the fallback write, skipping restore"
+                    );
+                    return;
+                }
+                Err(e) => {
+                    log::debug!(
+                        "Dictation fallback: clipboard unreadable at restore time ({}), skipping restore",
+                        e
+                    );
+                    return;
+                }
+                Ok(_) => {}
+            }
+
             let restore_result = match prior_clipboard {
                 Some(prior_text) => clipboard.write_text(prior_text),
                 None => clipboard.clear(),
@@ -135,6 +161,17 @@ pub struct DictationManager<R: Runtime> {
     state: Arc<RwLock<DictationState>>,
     #[cfg(target_os = "linux")]
     tasks: Arc<parking_lot::Mutex<Vec<tauri::async_runtime::JoinHandle<()>>>>,
+    // Serializes start()/stop() end to end (held across every .await in
+    // both) so a concurrent toggle -- tray menu double-click before its
+    // label flips, the global hotkey firing while a Settings-page save is
+    // in flight, start() racing stop() -- can never interleave. Without
+    // this, two overlapping start() calls could both observe is_active()
+    // == false, each open its own AT-SPI connection and spawn its own
+    // focus/injector tasks, and the second one's unconditional
+    // `*self.tasks.lock() = ...` would silently orphan the first pair of
+    // tasks (and their live D-Bus subscription) with no way for a later
+    // stop() to ever reach and abort them.
+    lifecycle_lock: Arc<Mutex<()>>,
 }
 
 impl<R: Runtime> DictationManager<R> {
@@ -145,6 +182,7 @@ impl<R: Runtime> DictationManager<R> {
             state: Arc::new(RwLock::new(DictationState::Idle)),
             #[cfg(target_os = "linux")]
             tasks: Arc::new(parking_lot::Mutex::new(Vec::new())),
+            lifecycle_lock: Arc::new(Mutex::new(())),
         }
     }
 
@@ -163,6 +201,7 @@ impl<R: Runtime> DictationManager<R> {
 
     #[cfg(target_os = "linux")]
     pub async fn start(&self) -> Result<(), DictationError> {
+        let _guard = self.lifecycle_lock.lock().await;
         if self.is_active() {
             return Ok(());
         }
@@ -210,6 +249,7 @@ impl<R: Runtime> DictationManager<R> {
     }
 
     pub async fn stop(&self) {
+        let _guard = self.lifecycle_lock.lock().await;
         if !self.is_active() {
             return;
         }
