@@ -37,6 +37,13 @@ pub struct PulseMonitorSource {
 pub fn list_monitor_sources() -> Result<Vec<PulseMonitorSource>> {
     let output = Command::new("pactl")
         .args(["list", "sources"])
+        // pactl's field labels ("Name:", "Description:", "Monitor of Sink:")
+        // are gettext-translated based on the desktop locale. Force C so the
+        // labels parse_source_list() matches on stay in English regardless
+        // of the user's LANG/LC_ALL -- otherwise this silently returns an
+        // empty Vec on any non-English desktop, reproducing the exact
+        // silent mic-only fallback this module exists to fix.
+        .env("LC_ALL", "C")
         .output()
         .map_err(|e| {
             anyhow!(
@@ -134,6 +141,7 @@ pub fn default_monitor_source() -> Result<PulseMonitorSource> {
 fn default_sink_name() -> Result<String> {
     let output = Command::new("pactl")
         .arg("get-default-sink")
+        .env("LC_ALL", "C")
         .output()
         .map_err(|e| anyhow!("Failed to run `pactl get-default-sink`: {e}"))?;
 
@@ -192,6 +200,7 @@ pub fn spawn_monitor_capture(source_name: &str, sample_rate: u32, channels: u16)
 pub fn is_available() -> bool {
     Command::new("pactl")
         .arg("--version")
+        .env("LC_ALL", "C")
         .output()
         .map(|o| o.status.success())
         .unwrap_or(false)
@@ -222,5 +231,32 @@ Source #2520
         assert_eq!(sources[0].name, "alsa_output.usb-Apple__Inc._EarPods_N9FYLVQL6F-00.analog-stereo.monitor");
         assert_eq!(sources[0].description, "Monitor of EarPods Analog Stereo");
         assert_eq!(sources[0].monitor_of_sink, "alsa_output.usb-Apple__Inc._EarPods_N9FYLVQL6F-00.analog-stereo");
+    }
+
+    /// Regression test for the locale bug found in Gate B review: pactl's
+    /// field labels are gettext-translated, so without forcing LC_ALL=C on
+    /// the spawned process, list_monitor_sources() would silently return an
+    /// empty Vec on any non-English desktop (reproducing issue #701's
+    /// silent mic-only fallback under a different trigger). This sets the
+    /// *test process's own* environment to German and confirms
+    /// list_monitor_sources() still finds sources -- i.e. that the `.env()`
+    /// override on the Command actually wins over an inherited LANG/LC_ALL,
+    /// not just that it's present in the source.
+    #[test]
+    fn list_monitor_sources_ignores_process_locale() {
+        if !is_available() {
+            eprintln!("pactl not available, skipping live locale test");
+            return;
+        }
+        std::env::set_var("LC_ALL", "de_DE.UTF-8");
+        std::env::set_var("LANG", "de_DE.UTF-8");
+        let result = list_monitor_sources();
+        std::env::remove_var("LC_ALL");
+        std::env::remove_var("LANG");
+        let sources = result.expect("list_monitor_sources should succeed under a non-English process locale");
+        assert!(
+            !sources.is_empty(),
+            "expected at least one monitor source even with the test process's own LANG/LC_ALL set to German"
+        );
     }
 }
