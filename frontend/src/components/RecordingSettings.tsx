@@ -136,6 +136,7 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
   };
 
   const handleWidgetToggle = async (enabled: boolean) => {
+    const previousValue = showFloatingWidget;
     try {
       setShowFloatingWidget(enabled);
       const currentPrefs = await invoke<{ show_widget: boolean; position_x: number | null; position_y: number | null }>(
@@ -151,6 +152,11 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
       });
     } catch (error) {
       console.error('Failed to save widget preference:', error);
+      // Revert the optimistic update: without this, the switch stays on
+      // whatever value was attempted even though the backend never
+      // actually reached that state, desyncing the UI from both the
+      // persisted preference and the widget window's real visibility.
+      setShowFloatingWidget(previousValue);
       toast.error('Failed to save preference');
     }
   };
