@@ -1,6 +1,6 @@
 'use client'
 
-import './globals.css'
+import '../globals.css'
 import { Source_Sans_3 } from 'next/font/google'
 import Sidebar from '@/components/Sidebar'
 import { SidebarProvider } from '@/components/Sidebar/SidebarProvider'

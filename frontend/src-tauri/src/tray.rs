@@ -48,6 +48,7 @@ fn handle_menu_event<R: Runtime>(app: &AppHandle<R>, item_id: &str) {
             }
         }
         "check_updates" => check_updates_handler(app),
+        "toggle_widget" => toggle_widget_handler(app),
         "quit" => app.exit(0),
         _ => {}
     }
@@ -207,6 +208,23 @@ fn check_updates_handler<R: Runtime>(app: &AppHandle<R>) {
             "window.dispatchEvent(new CustomEvent('check-updates-from-tray'))"
         );
     }
+}
+
+fn toggle_widget_handler<R: Runtime>(app: &AppHandle<R>) {
+    let currently_visible = app
+        .get_webview_window("widget")
+        .and_then(|w| w.is_visible().ok())
+        .unwrap_or(false);
+    let show = !currently_visible;
+
+    let app_clone = app.clone();
+    tauri::async_runtime::spawn(async move {
+        if let Err(e) = crate::toggle_widget_window(app_clone.clone(), show).await {
+            log::error!("Tray: Failed to toggle widget window: {}", e);
+        }
+        // Refresh menu label (Show <-> Hide Floating Widget)
+        update_tray_menu(&app_clone);
+    });
 }
 
 pub fn update_tray_menu<R: Runtime>(app: &AppHandle<R>) {
@@ -381,9 +399,20 @@ fn build_menu<R: Runtime>(
         }
     }
 
+    let widget_visible = app
+        .get_webview_window("widget")
+        .and_then(|w| w.is_visible().ok())
+        .unwrap_or(false);
+    let widget_label = if widget_visible {
+        "Hide Floating Widget"
+    } else {
+        "Show Floating Widget"
+    };
+
     builder
         .item(&PredefinedMenuItem::separator(app)?)
         .item(&MenuItemBuilder::with_id("open_window", "Open Main Window").build(app)?)
+        .item(&MenuItemBuilder::with_id("toggle_widget", widget_label).build(app)?)
         .item(&MenuItemBuilder::with_id("settings", "Settings").build(app)?)
         .item(&MenuItemBuilder::with_id("check_updates", "Check for Updates").build(app)?)
         .item(&PredefinedMenuItem::separator(app)?)

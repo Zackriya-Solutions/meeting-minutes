@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex as StdMutex;
 // Removed unused import
 
@@ -59,10 +59,15 @@ use audio::{list_audio_devices, AudioDevice, trigger_audio_permission};
 use log::{error as log_error, info as log_info};
 use notifications::commands::NotificationManagerState;
 use std::sync::Arc;
-use tauri::{AppHandle, Manager, Runtime};
+use tauri::{AppHandle, Emitter, Manager, Runtime};
 use tokio::sync::RwLock;
 
 static RECORDING_FLAG: AtomicBool = AtomicBool::new(false);
+
+// Monotonic generation counter used to debounce widget window position persistence:
+// each `Moved` event bumps this, and a delayed save only writes to disk if no newer
+// move superseded it in the meantime.
+static WIDGET_POSITION_GENERATION: AtomicU64 = AtomicU64::new(0);
 
 // Global language preference storage (default to "auto-translate" for automatic translation to English)
 static LANGUAGE_PREFERENCE: std::sync::LazyLock<StdMutex<String>> =
@@ -203,6 +208,114 @@ async fn stop_recording<R: Runtime>(app: AppHandle<R>, args: RecordingArgs) -> R
             Err(format!("Failed to stop recording: {}", e))
         }
     }
+}
+
+/// Stop recording from the floating widget window.
+///
+/// Mirrors `tray.rs::stop_recording_handler` exactly (same save_path generation,
+/// same `audio::recording_commands::stop_recording` call, same
+/// `recording-stop-complete` emit) instead of the plain `stop_recording` command
+/// that `RecordingControls.tsx` calls, because that plain command only stops the
+/// backend recorder: it never fires the event that `RecordingPostProcessingProvider`
+/// (mounted only in the main window's React tree) listens for to actually save and
+/// finalize the meeting. A bare `stop_recording` invoke from the widget's separate
+/// JS runtime would stop audio capture but silently drop the meeting.
+#[tauri::command]
+async fn stop_recording_from_widget<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
+    log_info!("Widget: Stopping recording...");
+
+    let data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to get app data dir: {}", e))?;
+
+    let timestamp = chrono::Local::now().format("%Y-%m-%dT%H-%M-%S").to_string();
+    let save_path = data_dir.join(format!("recording-{}.wav", timestamp));
+
+    match audio::recording_commands::stop_recording(
+        app.clone(),
+        audio::recording_commands::RecordingArgs {
+            save_path: save_path.to_string_lossy().to_string(),
+        },
+    )
+    .await
+    {
+        Ok(_) => {
+            RECORDING_FLAG.store(false, Ordering::SeqCst);
+            tray::update_tray_menu(&app);
+            log_info!("Widget: Recording stopped successfully");
+
+            // Trigger frontend post-processing via event (works from any window),
+            // same as tray.rs's stop handlers.
+            if let Err(e) = app.emit("recording-stop-complete", true) {
+                log_error!("Widget: Failed to emit recording-stop-complete event: {}", e);
+            }
+
+            Ok(())
+        }
+        Err(e) => {
+            log_error!("Widget: Failed to stop recording: {}", e);
+            RECORDING_FLAG.store(false, Ordering::SeqCst);
+            tray::update_tray_menu(&app);
+            Err(format!("Failed to stop recording: {}", e))
+        }
+    }
+}
+
+/// Show or hide the floating widget window, restoring its persisted position on show.
+#[tauri::command]
+async fn toggle_widget_window<R: Runtime>(app: AppHandle<R>, show: bool) -> Result<(), String> {
+    let widget = app
+        .get_webview_window("widget")
+        .ok_or_else(|| "Widget window not found".to_string())?;
+
+    if show {
+        let prefs = audio::widget_preferences::load_widget_preferences(&app)
+            .await
+            .unwrap_or_default();
+
+        if let (Some(x), Some(y)) = (prefs.position_x, prefs.position_y) {
+            if let Err(e) = widget.set_position(tauri::PhysicalPosition::new(x as i32, y as i32)) {
+                log_error!("Failed to restore widget position: {}", e);
+            }
+        }
+
+        widget.show().map_err(|e| e.to_string())?;
+        // Linux/GTK's WebKitWebView natural-size proposal can override a small
+        // requested height on first map even with resizable(false) + min/max size
+        // hints set in config; re-assert the size explicitly post-show.
+        if let Err(e) = widget.set_size(tauri::LogicalSize::new(260.0, 70.0)) {
+            log_error!("Failed to re-assert widget window size: {}", e);
+        }
+        widget.set_focus().map_err(|e| e.to_string())?;
+    } else {
+        widget.hide().map_err(|e| e.to_string())?;
+    }
+
+    Ok(())
+}
+
+/// Debounce persisting the widget window's position: only the last `Moved` event
+/// within a 500ms quiet period actually gets written to disk.
+fn persist_widget_position<R: Runtime>(app: AppHandle<R>, x: f64, y: f64) {
+    let generation = WIDGET_POSITION_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+        if WIDGET_POSITION_GENERATION.load(Ordering::SeqCst) != generation {
+            // A newer move superseded this one; drop the stale write.
+            return;
+        }
+
+        let mut prefs = audio::widget_preferences::load_widget_preferences(&app)
+            .await
+            .unwrap_or_default();
+        prefs.position_x = Some(x);
+        prefs.position_y = Some(y);
+
+        if let Err(e) = audio::widget_preferences::save_widget_preferences(&app, &prefs).await {
+            log_error!("Failed to persist widget position: {}", e);
+        }
+    });
 }
 
 #[tauri::command]
@@ -509,10 +622,23 @@ pub fn run() {
                 log::warn!("Failed to resolve resource directory for templates");
             }
 
+            // Restore the floating widget window's visibility from last session.
+            let app_for_widget = _app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                let prefs = audio::widget_preferences::load_widget_preferences(&app_for_widget)
+                    .await
+                    .unwrap_or_default();
+                if prefs.show_widget {
+                    if let Err(e) = toggle_widget_window(app_for_widget, true).await {
+                        log::error!("Failed to restore floating widget on startup: {}", e);
+                    }
+                }
+            });
+
             Ok(())
         })
-        .on_window_event(|window, event| {
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+        .on_window_event(|window, event| match event {
+            tauri::WindowEvent::CloseRequested { api, .. } => {
                 if window.label() == "main" {
                     api.prevent_close();
                     if let Err(e) = window.hide() {
@@ -520,13 +646,29 @@ pub fn run() {
                     } else {
                         log::info!("Main window hidden to tray on close request");
                     }
+                } else if window.label() == "widget" {
+                    api.prevent_close();
+                    if let Err(e) = window.hide() {
+                        log::error!("Failed to hide widget window on close request: {}", e);
+                    }
                 }
             }
+            tauri::WindowEvent::Moved(position) => {
+                if window.label() == "widget" {
+                    persist_widget_position(window.app_handle().clone(), position.x as f64, position.y as f64);
+                }
+            }
+            _ => {}
         })
         .invoke_handler(tauri::generate_handler![
             start_recording,
             stop_recording,
             is_recording,
+            // Floating widget window commands (issue #718)
+            stop_recording_from_widget,
+            toggle_widget_window,
+            audio::widget_preferences::get_widget_preferences,
+            audio::widget_preferences::set_widget_preferences,
             get_transcription_status,
             read_audio_file,
             save_transcript,

@@ -19,6 +19,23 @@
                 "fullscreen": false,
                 "theme": "Light",
                 "decorations": true
+            },
+            {
+                "label": "widget",
+                "title": "Meetily Widget",
+                "width": 260,
+                "height": 70,
+                "minWidth": 260,
+                "minHeight": 70,
+                "maxWidth": 260,
+                "maxHeight": 70,
+                "resizable": false,
+                "decorations": false,
+                "transparent": true,
+                "alwaysOnTop": true,
+                "skipTaskbar": true,
+                "visible": false,
+                "url": "/widget"
             }
         ],
         "macOSPrivateApi": true,
@@ -73,6 +90,19 @@
                                 }
                             ]
                         }
+                    ]
+                },
+                {
+                    "identifier": "widget",
+                    "description": "Floating recording widget window capability",
+                    "windows": [
+                        "widget"
+                    ],
+                    "permissions": [
+                        "core:event:default",
+                        "core:window:default",
+                        "core:app:default",
+                        "core:window:allow-set-title"
                     ]
                 }
             ]

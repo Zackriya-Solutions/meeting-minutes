@@ -29,6 +29,7 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [showRecordingNotification, setShowRecordingNotification] = useState(true);
+  const [showFloatingWidget, setShowFloatingWidget] = useState(false);
 
   // Load recording preferences on component mount
   useEffect(() => {
@@ -66,6 +67,19 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
       }
     };
     loadNotificationPref();
+  }, []);
+
+  // Load floating widget preference (issue #718)
+  useEffect(() => {
+    const loadWidgetPref = async () => {
+      try {
+        const prefs = await invoke<{ show_widget: boolean }>('get_widget_preferences');
+        setShowFloatingWidget(prefs.show_widget);
+      } catch (error) {
+        console.error('Failed to load widget preference:', error);
+      }
+    };
+    loadWidgetPref();
   }, []);
 
   const handleAutoSaveToggle = async (enabled: boolean) => {
@@ -117,6 +131,26 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
       });
     } catch (error) {
       console.error('Failed to save notification preference:', error);
+      toast.error('Failed to save preference');
+    }
+  };
+
+  const handleWidgetToggle = async (enabled: boolean) => {
+    try {
+      setShowFloatingWidget(enabled);
+      const currentPrefs = await invoke<{ show_widget: boolean; position_x: number | null; position_y: number | null }>(
+        'get_widget_preferences'
+      );
+      await invoke('set_widget_preferences', {
+        preferences: { ...currentPrefs, show_widget: enabled }
+      });
+      await invoke('toggle_widget_window', { show: enabled });
+      toast.success('Preference saved');
+      await Analytics.track('floating_widget_preference_changed', {
+        enabled: enabled.toString()
+      });
+    } catch (error) {
+      console.error('Failed to save widget preference:', error);
       toast.error('Failed to save preference');
     }
   };
@@ -224,6 +258,20 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
         <Switch
           checked={showRecordingNotification}
           onCheckedChange={handleNotificationToggle}
+        />
+      </div>
+
+      {/* Floating Recording Widget Toggle (issue #718) */}
+      <div className="flex items-center justify-between p-4 border rounded-lg">
+        <div className="flex-1">
+          <div className="font-medium">Show floating recording widget</div>
+          <div className="text-sm text-gray-600">
+            Show a small always-on-top pill with elapsed time and pause/resume/stop controls
+          </div>
+        </div>
+        <Switch
+          checked={showFloatingWidget}
+          onCheckedChange={handleWidgetToggle}
         />
       </div>
 
