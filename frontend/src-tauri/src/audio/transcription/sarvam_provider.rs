@@ -38,6 +38,7 @@ struct SarvamResponse {
 pub struct SarvamProvider {
     api_key: String,
     model: String,
+    endpoint: String,
     client: reqwest::Client,
 }
 
@@ -45,6 +46,12 @@ impl SarvamProvider {
     /// `model` is the Sarvam model id (e.g. "saaras:v3" / "saaras:v4"); falls
     /// back to the recommended default when empty.
     pub fn new(api_key: String, model: String) -> Self {
+        Self::with_endpoint(api_key, model, SARVAM_ENDPOINT.to_string())
+    }
+
+    /// Same as `new` but with a custom endpoint URL. Primarily used to point at
+    /// a local mock server in integration tests; production code uses `new`.
+    pub fn with_endpoint(api_key: String, model: String, endpoint: String) -> Self {
         let model = if model.trim().is_empty() {
             DEFAULT_MODEL.to_string()
         } else {
@@ -53,6 +60,7 @@ impl SarvamProvider {
         Self {
             api_key,
             model,
+            endpoint,
             client: reqwest::Client::new(),
         }
     }
@@ -179,7 +187,7 @@ impl TranscriptionProvider for SarvamProvider {
 
         let response = self
             .client
-            .post(SARVAM_ENDPOINT)
+            .post(&self.endpoint)
             .header("api-subscription-key", &self.api_key)
             .multipart(form)
             .timeout(REQUEST_TIMEOUT)
@@ -357,5 +365,133 @@ mod tests {
         assert!(with_key.is_model_loaded().await);
         let no_key = SarvamProvider::new("   ".to_string(), String::new());
         assert!(!no_key.is_model_loaded().await);
+    }
+
+    // --- Integration-boundary tests against a local mock HTTP server ---------
+    //
+    // These exercise the real reqwest multipart POST + response parsing without
+    // needing a Sarvam key or network. A tiny one-shot TCP server reads the
+    // request, captures it for assertions, and replies with a canned response.
+
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::sync::mpsc as std_mpsc;
+
+    /// Spawns a one-shot HTTP/1.1 server on an ephemeral port. Returns the base
+    /// URL and a receiver that yields the raw request bytes once received.
+    fn spawn_once(response: &'static str) -> (String, std_mpsc::Receiver<String>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (tx, rx) = std_mpsc::channel();
+        std::thread::spawn(move || {
+            if let Ok((mut stream, _)) = listener.accept() {
+                // Read until we have headers + body. reqwest sends Content-Length,
+                // so read that many body bytes after the header terminator.
+                let mut buf = Vec::new();
+                let mut tmp = [0u8; 4096];
+                loop {
+                    let n = stream.read(&mut tmp).unwrap_or(0);
+                    if n == 0 {
+                        break;
+                    }
+                    buf.extend_from_slice(&tmp[..n]);
+                    let text = String::from_utf8_lossy(&buf);
+                    if let Some(hdr_end) = text.find("\r\n\r\n") {
+                        // Determine expected body length from Content-Length.
+                        let headers = &text[..hdr_end];
+                        let content_len = headers
+                            .lines()
+                            .find_map(|l| {
+                                let l = l.to_ascii_lowercase();
+                                l.strip_prefix("content-length:")
+                                    .map(|v| v.trim().parse::<usize>().unwrap_or(0))
+                            })
+                            .unwrap_or(0);
+                        let body_start = hdr_end + 4;
+                        if buf.len() >= body_start + content_len {
+                            break;
+                        }
+                    }
+                }
+                let _ = tx.send(String::from_utf8_lossy(&buf).to_string());
+                let _ = stream.write_all(response.as_bytes());
+                let _ = stream.flush();
+            }
+        });
+        (format!("http://{}/speech-to-text", addr), rx)
+    }
+
+    #[tokio::test]
+    async fn transcribe_sends_expected_request_and_parses_response() {
+        let body = "{\"request_id\":\"r1\",\"transcript\":\"hello world\",\"language_code\":\"en-IN\"}";
+        let response_owned = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        // Leak to obtain the 'static lifetime required by the server thread.
+        let response_static: &'static str = Box::leak(response_owned.into_boxed_str());
+
+        let (url, rx) = spawn_once(response_static);
+        let provider = SarvamProvider::with_endpoint(
+            "secret-key-xyz".to_string(),
+            "saaras:v4".to_string(),
+            url,
+        );
+
+        let audio = vec![0.1f32; MIN_SAMPLES + 100];
+        let result = provider
+            .transcribe(audio, Some("en".to_string()))
+            .await
+            .expect("transcribe should succeed against mock");
+
+        // Response parsing
+        assert_eq!(result.text, "hello world");
+        assert!(!result.is_partial);
+        assert_eq!(result.confidence, None);
+
+        // Request assertions
+        let req = rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+        let head = req.splitn(2, "\r\n\r\n").next().unwrap().to_ascii_lowercase();
+        assert!(head.contains("post /speech-to-text"), "method/path: {}", head);
+        assert!(
+            head.contains("api-subscription-key: secret-key-xyz"),
+            "auth header missing: {}",
+            head
+        );
+        assert!(head.contains("content-type: multipart/form-data"), "not multipart: {}", head);
+        // Multipart field values appear in the body
+        assert!(req.contains("name=\"model\""), "model field missing");
+        assert!(req.contains("saaras:v4"), "model value missing");
+        assert!(req.contains("name=\"language_code\""), "language_code field missing");
+        assert!(req.contains("en-IN"), "mapped language missing");
+        assert!(req.contains("name=\"file\""), "file field missing");
+        assert!(req.contains("filename=\"chunk.wav\""), "wav filename missing");
+        assert!(req.contains("RIFF"), "wav payload missing");
+    }
+
+    #[tokio::test]
+    async fn transcribe_maps_401_to_key_error() {
+        let body = "{\"error\":\"unauthorized\"}";
+        let response_owned = format!(
+            "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        let response_static: &'static str = Box::leak(response_owned.into_boxed_str());
+        let (url, _rx) = spawn_once(response_static);
+        let provider =
+            SarvamProvider::with_endpoint("bad".to_string(), "saaras:v3".to_string(), url);
+
+        let err = provider
+            .transcribe(vec![0.0f32; MIN_SAMPLES + 1], None)
+            .await
+            .expect_err("401 should be an error");
+        match err {
+            TranscriptionError::EngineFailed(msg) => {
+                assert!(msg.contains("API key"), "expected key-hint message, got: {}", msg);
+            }
+            other => panic!("expected EngineFailed, got {:?}", other),
+        }
     }
 }
