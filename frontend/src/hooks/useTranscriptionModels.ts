@@ -8,7 +8,7 @@ export interface RawModelInfo {
 }
 
 export interface ModelOption {
-  provider: 'whisper' | 'parakeet';
+  provider: 'whisper' | 'parakeet' | 'sarvam';
   name: string;
   displayName: string;
   size_mb: number;
@@ -77,6 +77,23 @@ export function useTranscriptionModels(transcriptModelConfig: TranscriptModelCon
       console.error('Failed to fetch Parakeet models:', err);
     }
 
+    // Sarvam (online). There is no local model list to query; offer the
+    // configured Sarvam model (or the default) so cloud transcription is
+    // selectable in the import/retranscribe dialogs, mirroring live recording.
+    {
+      const configuredProvider = transcriptModelConfig?.provider || '';
+      const sarvamModel =
+        configuredProvider === 'sarvam' && transcriptModelConfig?.model
+          ? transcriptModelConfig.model
+          : 'saaras:v3';
+      allModels.push({
+        provider: 'sarvam' as const,
+        name: sarvamModel,
+        displayName: `🌐 Sarvam: ${sarvamModel}`,
+        size_mb: 0,
+      });
+    }
+
     setAvailableModels(allModels);
 
     // Set default model based on user's saved configuration
@@ -88,7 +105,8 @@ export function useTranscriptionModels(transcriptModelConfig: TranscriptModelCon
     const configuredMatch = allModels.find(
       (m) =>
         (configuredProvider === 'localWhisper' && m.provider === 'whisper' && m.name === configuredModel) ||
-        (configuredProvider === 'parakeet' && m.provider === 'parakeet' && m.name === configuredModel)
+        (configuredProvider === 'parakeet' && m.provider === 'parakeet' && m.name === configuredModel) ||
+        (configuredProvider === 'sarvam' && m.provider === 'sarvam')
     );
 
     // Only set default model if user hasn't manually selected one

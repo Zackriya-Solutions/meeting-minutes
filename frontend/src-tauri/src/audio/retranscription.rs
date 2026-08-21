@@ -299,7 +299,17 @@ async fn run_retranscription<R: Runtime>(
     emit_progress(&app, &meeting_id, "transcribing", 25, "Loading transcription engine...");
 
     // Initialize the appropriate engine once (not per-segment)
-    let whisper_engine = if !use_parakeet {
+    let use_sarvam = provider.as_deref() == Some("sarvam");
+    let sarvam_provider = if use_sarvam {
+        let (api_key, sarvam_model) = super::common::get_sarvam_config(&app).await?;
+        Some(crate::audio::transcription::sarvam_provider::SarvamProvider::new(
+            api_key,
+            sarvam_model,
+        ))
+    } else {
+        None
+    };
+    let whisper_engine = if !use_parakeet && !use_sarvam {
         Some(get_or_init_whisper(&app, model.as_deref()).await?)
     } else {
         None
@@ -368,7 +378,15 @@ async fn run_retranscription<R: Runtime>(
         }
 
         // Transcribe this segment
-        let (text, conf) = if use_parakeet {
+        let (text, conf) = if use_sarvam {
+            let provider = sarvam_provider.as_ref().unwrap();
+            use crate::audio::transcription::TranscriptionProvider;
+            let result = provider
+                .transcribe(segment.samples.clone(), language.clone())
+                .await
+                .map_err(|e| anyhow!("Sarvam transcription failed on segment {}: {}", i, e))?;
+            (result.text, result.confidence.unwrap_or(0.9))
+        } else if use_parakeet {
             let engine = parakeet_engine.as_ref().unwrap();
             let text = engine
                 .transcribe_audio(segment.samples.clone())

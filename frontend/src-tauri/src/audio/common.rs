@@ -211,6 +211,36 @@ pub(crate) fn split_segment_at_silence(
     result
 }
 
+/// Read the saved Sarvam API key + model from `transcript_settings` (id='1').
+/// Returns (api_key, model). Errors if the key is missing/empty so batch jobs
+/// fail fast with a clear message instead of hitting the API unauthenticated.
+pub(crate) async fn get_sarvam_config<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> Result<(String, String)> {
+    use tauri::Manager;
+    let app_state = app
+        .try_state::<crate::state::AppState>()
+        .ok_or_else(|| anyhow::anyhow!("App state not available"))?;
+
+    let row: Option<(Option<String>, Option<String>)> = sqlx::query_as(
+        "SELECT sarvamApiKey, model FROM transcript_settings WHERE id = '1'",
+    )
+    .fetch_optional(app_state.db_manager.pool())
+    .await
+    .map_err(|e| anyhow::anyhow!("Failed to query Sarvam config: {}", e))?;
+
+    let (key, model) = row.unwrap_or((None, None));
+    let key = key
+        .map(|k| k.trim().to_string())
+        .filter(|k| !k.is_empty())
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "Sarvam is selected but no API key is set. Paste your Sarvam API key in Transcript settings."
+            )
+        })?;
+    Ok((key, model.unwrap_or_default()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
