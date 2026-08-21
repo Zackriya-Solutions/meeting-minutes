@@ -184,6 +184,7 @@ impl SettingsRepository {
             "elevenLabs" => "elevenLabsApiKey",
             "groq" => "groqApiKey",
             "openai" => "openaiApiKey",
+            "sarvam" => "sarvamApiKey",
             _ => {
                 return Err(sqlx::Error::Protocol(
                     format!("Invalid provider: {}", provider).into(),
@@ -216,6 +217,7 @@ impl SettingsRepository {
             "elevenLabs" => "elevenLabsApiKey",
             "groq" => "groqApiKey",
             "openai" => "openaiApiKey",
+            "sarvam" => "sarvamApiKey",
             _ => {
                 return Err(sqlx::Error::Protocol(
                     format!("Invalid provider: {}", provider).into(),

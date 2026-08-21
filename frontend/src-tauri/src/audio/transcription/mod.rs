@@ -5,6 +5,7 @@
 pub mod provider;
 pub mod whisper_provider;
 pub mod parakeet_provider;
+pub mod sarvam_provider;
 pub mod engine;
 pub mod worker;
 
@@ -12,6 +13,7 @@ pub mod worker;
 pub use provider::{TranscriptionError, TranscriptionProvider, TranscriptResult};
 pub use whisper_provider::WhisperProvider;
 pub use parakeet_provider::ParakeetProvider;
+pub use sarvam_provider::SarvamProvider;
 pub use engine::{
     TranscriptionEngine,
     validate_transcription_model_ready,

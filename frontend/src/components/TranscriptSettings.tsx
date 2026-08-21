@@ -10,7 +10,7 @@ import { ParakeetModelManager } from './ParakeetModelManager';
 
 
 export interface TranscriptModelProps {
-    provider: 'localWhisper' | 'parakeet' | 'deepgram' | 'elevenLabs' | 'groq' | 'openai';
+    provider: 'localWhisper' | 'parakeet' | 'sarvam' | 'deepgram' | 'elevenLabs' | 'groq' | 'openai';
     model: string;
     apiKey?: string | null;
 }
@@ -53,17 +53,45 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
     const modelOptions = {
         localWhisper: [], // Model selection handled by ModelManager component
         parakeet: [], // Model selection handled by ParakeetModelManager component
+        sarvam: ['saaras:v3', 'saaras:v2', 'saaras:v1'],
         deepgram: ['nova-2-phonecall'],
         elevenLabs: ['eleven_multilingual_v2'],
         groq: ['llama-3.3-70b-versatile'],
         openai: ['gpt-4o'],
     };
-    const requiresApiKey = transcriptModelConfig.provider === 'deepgram' || transcriptModelConfig.provider === 'elevenLabs' || transcriptModelConfig.provider === 'openai' || transcriptModelConfig.provider === 'groq';
+    const requiresApiKey = uiProvider === 'sarvam' || uiProvider === 'deepgram' || uiProvider === 'elevenLabs' || uiProvider === 'openai' || uiProvider === 'groq';
 
     const handleInputClick = () => {
         if (isApiKeyLocked) {
             setIsLockButtonVibrating(true);
             setTimeout(() => setIsLockButtonVibrating(false), 500);
+        }
+    };
+
+    // Persist the selected online provider + model + API key. Local engines
+    // (whisper/parakeet) save via their own model-manager components, so this
+    // is only wired for the API-key providers.
+    const [isSavingKey, setIsSavingKey] = useState<boolean>(false);
+    const [saveStatus, setSaveStatus] = useState<'idle' | 'saved' | 'error'>('idle');
+    const handleSaveApiKeyConfig = async () => {
+        setIsSavingKey(true);
+        setSaveStatus('idle');
+        try {
+            const model = transcriptModelConfig.model || modelOptions[uiProvider]?.[0] || '';
+            await invoke('api_save_transcript_config', {
+                provider: uiProvider,
+                model,
+                apiKey: apiKey ?? null,
+            });
+            // Reflect saved values in shared config so the rest of the app sees them.
+            setTranscriptModelConfig({ ...transcriptModelConfig, provider: uiProvider, model, apiKey: apiKey ?? null });
+            setSaveStatus('saved');
+            setIsApiKeyLocked(true);
+        } catch (err) {
+            console.error('Failed to save transcript API key config:', err);
+            setSaveStatus('error');
+        } finally {
+            setIsSavingKey(false);
         }
     };
 
@@ -123,6 +151,7 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                 <SelectContent>
                                     <SelectItem value="parakeet">⚡ Parakeet (Recommended - Real-time / Accurate)</SelectItem>
                                     <SelectItem value="localWhisper">🏠 Local Whisper (High Accuracy)</SelectItem>
+                                    <SelectItem value="sarvam">☁️ Sarvam AI (Online - Indic languages)</SelectItem>
                                     {/* <SelectItem value="deepgram">☁️ Deepgram (Backup)</SelectItem>
                                     <SelectItem value="elevenLabs">☁️ ElevenLabs</SelectItem>
                                     <SelectItem value="groq">☁️ Groq</SelectItem>
@@ -217,6 +246,27 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                     </Button>
                                 </div>
                             </div>
+                            <div className="mt-3 mx-1 flex items-center gap-3">
+                                <Button
+                                    type="button"
+                                    onClick={handleSaveApiKeyConfig}
+                                    disabled={isSavingKey || !apiKey}
+                                    className="bg-blue-600 text-white hover:bg-blue-700"
+                                >
+                                    {isSavingKey ? 'Saving...' : 'Save API Key'}
+                                </Button>
+                                {saveStatus === 'saved' && (
+                                    <span className="text-sm text-green-600">Saved</span>
+                                )}
+                                {saveStatus === 'error' && (
+                                    <span className="text-sm text-red-600">Failed to save</span>
+                                )}
+                            </div>
+                            {uiProvider === 'sarvam' && (
+                                <p className="mt-2 mx-1 text-xs text-gray-500">
+                                    Online transcription via Sarvam AI. Audio is sent to Sarvam's servers. Get a key at platform.sarvam.ai.
+                                </p>
+                            )}
                         </div>
                     )}
                 </div>

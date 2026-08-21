@@ -135,10 +135,25 @@ pub async fn validate_transcription_model_ready<R: Runtime>(app: &AppHandle<R>) 
                 }
             }
         }
+        "sarvam" => {
+            info!("🌐 Validating Sarvam online transcription config...");
+            // Online provider: nothing to load locally. Just ensure an API key
+            // is present so we fail fast in the UI instead of mid-recording.
+            match config.api_key {
+                Some(ref key) if !key.trim().is_empty() => {
+                    info!("✅ Sarvam API key present, online transcription ready");
+                    Ok(())
+                }
+                _ => Err(
+                    "Sarvam is selected but no API key is set. Paste your Sarvam API key in Transcript settings."
+                        .to_string(),
+                ),
+            }
+        }
         other => {
             warn!("❌ Unsupported transcription provider for local recording: {}", other);
             Err(format!(
-                "Provider '{}' is not supported for local transcription. Please select 'localWhisper' or 'parakeet'.",
+                "Provider '{}' is not supported for local transcription. Please select 'localWhisper', 'parakeet', or 'sarvam'.",
                 other
             ))
         }
@@ -211,6 +226,18 @@ pub async fn get_or_init_transcription_engine<R: Runtime>(
                     Err("Parakeet engine not initialized. This should not happen after validation.".to_string())
                 }
             }
+        }
+        "sarvam" => {
+            info!("🌐 Initializing Sarvam online transcription engine");
+            let api_key = config
+                .api_key
+                .clone()
+                .filter(|k| !k.trim().is_empty())
+                .ok_or_else(|| {
+                    "Sarvam selected but no API key configured. Paste your key in Transcript settings.".to_string()
+                })?;
+            let provider = super::sarvam_provider::SarvamProvider::new(api_key, config.model.clone());
+            Ok(TranscriptionEngine::Provider(Arc::new(provider)))
         }
         "localWhisper" | _ => {
             info!("🎤 Initializing Whisper transcription engine");
