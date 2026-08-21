@@ -234,3 +234,128 @@ impl TranscriptionProvider for SarvamProvider {
         "Sarvam"
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn read_u32_le(b: &[u8], off: usize) -> u32 {
+        u32::from_le_bytes([b[off], b[off + 1], b[off + 2], b[off + 3]])
+    }
+    fn read_u16_le(b: &[u8], off: usize) -> u16 {
+        u16::from_le_bytes([b[off], b[off + 1]])
+    }
+
+    #[test]
+    fn wav_header_is_well_formed_16k_mono_pcm16() {
+        let samples = vec![0.0f32; 8];
+        let wav = encode_wav_16k_mono(&samples);
+
+        // RIFF/WAVE container
+        assert_eq!(&wav[0..4], b"RIFF");
+        assert_eq!(&wav[8..12], b"WAVE");
+        assert_eq!(&wav[12..16], b"fmt ");
+        // fmt chunk size = 16, PCM format = 1, mono = 1
+        assert_eq!(read_u32_le(&wav, 16), 16);
+        assert_eq!(read_u16_le(&wav, 20), 1);
+        assert_eq!(read_u16_le(&wav, 22), 1);
+        // sample rate 16k, bits 16
+        assert_eq!(read_u32_le(&wav, 24), 16_000);
+        assert_eq!(read_u16_le(&wav, 34), 16);
+        // byte_rate = 16000 * 1 * 2, block_align = 2
+        assert_eq!(read_u32_le(&wav, 28), 32_000);
+        assert_eq!(read_u16_le(&wav, 32), 2);
+        // data chunk
+        assert_eq!(&wav[36..40], b"data");
+        assert_eq!(read_u32_le(&wav, 40), (samples.len() * 2) as u32);
+        // total length = 44 header + data
+        assert_eq!(wav.len(), 44 + samples.len() * 2);
+        // riff length = 36 + data
+        assert_eq!(read_u32_le(&wav, 4), 36 + (samples.len() * 2) as u32);
+    }
+
+    #[test]
+    fn wav_encodes_samples_and_clamps_out_of_range() {
+        // 1.0 -> i16::MAX, -1.0 -> -i16::MAX (symmetric scaling), 2.0 clamps to max
+        let samples = vec![1.0f32, -1.0, 2.0, -2.0, 0.0];
+        let wav = encode_wav_16k_mono(&samples);
+        let data = &wav[44..];
+        let s0 = i16::from_le_bytes([data[0], data[1]]);
+        let s1 = i16::from_le_bytes([data[2], data[3]]);
+        let s2 = i16::from_le_bytes([data[4], data[5]]);
+        let s3 = i16::from_le_bytes([data[6], data[7]]);
+        let s4 = i16::from_le_bytes([data[8], data[9]]);
+        assert_eq!(s0, i16::MAX);
+        assert_eq!(s1, -i16::MAX);
+        assert_eq!(s2, i16::MAX); // clamped
+        assert_eq!(s3, -i16::MAX); // clamped
+        assert_eq!(s4, 0);
+    }
+
+    #[test]
+    fn language_none_or_empty_maps_to_unknown() {
+        assert_eq!(SarvamProvider::sarvam_language_code(&None), "unknown");
+        assert_eq!(
+            SarvamProvider::sarvam_language_code(&Some("   ".to_string())),
+            "unknown"
+        );
+        assert_eq!(
+            SarvamProvider::sarvam_language_code(&Some("zz".to_string())),
+            "unknown"
+        );
+    }
+
+    #[test]
+    fn language_short_hints_map_to_bcp47() {
+        assert_eq!(
+            SarvamProvider::sarvam_language_code(&Some("en".to_string())),
+            "en-IN"
+        );
+        assert_eq!(
+            SarvamProvider::sarvam_language_code(&Some("HI".to_string())),
+            "hi-IN"
+        );
+        assert_eq!(
+            SarvamProvider::sarvam_language_code(&Some("ta".to_string())),
+            "ta-IN"
+        );
+    }
+
+    #[test]
+    fn language_existing_bcp47_is_normalized_passthrough() {
+        assert_eq!(
+            SarvamProvider::sarvam_language_code(&Some("en-in".to_string())),
+            "en-IN"
+        );
+        assert_eq!(
+            SarvamProvider::sarvam_language_code(&Some("hi-IN".to_string())),
+            "hi-IN"
+        );
+    }
+
+    #[test]
+    fn empty_model_falls_back_to_default() {
+        let p = SarvamProvider::new("k".to_string(), "".to_string());
+        assert_eq!(p.model, DEFAULT_MODEL);
+        let p2 = SarvamProvider::new("k".to_string(), "saaras:v4".to_string());
+        assert_eq!(p2.model, "saaras:v4");
+    }
+
+    #[tokio::test]
+    async fn short_audio_is_rejected() {
+        let p = SarvamProvider::new("k".to_string(), "saaras:v3".to_string());
+        let res = p.transcribe(vec![0.0f32; 10], None).await;
+        assert!(matches!(
+            res,
+            Err(TranscriptionError::AudioTooShort { .. })
+        ));
+    }
+
+    #[tokio::test]
+    async fn is_model_loaded_requires_api_key() {
+        let with_key = SarvamProvider::new("k".to_string(), String::new());
+        assert!(with_key.is_model_loaded().await);
+        let no_key = SarvamProvider::new("   ".to_string(), String::new());
+        assert!(!no_key.is_model_loaded().await);
+    }
+}
