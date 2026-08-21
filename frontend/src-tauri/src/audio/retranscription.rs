@@ -301,7 +301,10 @@ async fn run_retranscription<R: Runtime>(
     // Initialize the appropriate engine once (not per-segment)
     let use_sarvam = provider.as_deref() == Some("sarvam");
     let sarvam_provider = if use_sarvam {
-        let (api_key, sarvam_model) = super::common::get_sarvam_config(&app).await?;
+        let (api_key, settings_model) = super::common::get_sarvam_config(&app).await?;
+        // Prefer the model chosen in the dialog dropdown; fall back to the saved
+        // settings model. The provider sanitizes it against Sarvam's valid list.
+        let sarvam_model = model.clone().unwrap_or(settings_model);
         Some(crate::audio::transcription::sarvam_provider::SarvamProvider::new(
             api_key,
             sarvam_model,

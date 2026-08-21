@@ -19,6 +19,19 @@ use std::time::Duration;
 
 const SARVAM_ENDPOINT: &str = "https://api.sarvam.ai/speech-to-text";
 const DEFAULT_MODEL: &str = "saaras:v3";
+/// Model ids the Sarvam /speech-to-text endpoint accepts. Anything else (e.g. a
+/// leaked local Whisper model like "large-v3") is coerced to DEFAULT_MODEL so we
+/// never send an invalid model and get a 400.
+const VALID_MODELS: &[&str] = &[
+    "saarika:v2.5",
+    "saaras:v3",
+    "saaras:v3-realtime",
+    "saaras:v4",
+    "saaras:v4-multispk",
+    "saarika:v1",
+    "saarika:v2",
+    "saarika:flash",
+];
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 /// Sarvam's REST endpoint targets clips under ~30s; below this many samples a
 /// request is wasteful/noisy, so we skip it (mirrors the other providers'
@@ -52,16 +65,30 @@ impl SarvamProvider {
     /// Same as `new` but with a custom endpoint URL. Primarily used to point at
     /// a local mock server in integration tests; production code uses `new`.
     pub fn with_endpoint(api_key: String, model: String, endpoint: String) -> Self {
-        let model = if model.trim().is_empty() {
-            DEFAULT_MODEL.to_string()
-        } else {
-            model
-        };
         Self {
             api_key,
-            model,
+            model: Self::sanitize_model(&model),
             endpoint,
             client: reqwest::Client::new(),
+        }
+    }
+
+    /// Coerce a requested model id to one Sarvam actually accepts. Empty or
+    /// unrecognized values (e.g. a local Whisper model id like "large-v3" that
+    /// leaked in from shared settings) fall back to DEFAULT_MODEL, preventing a
+    /// 400 from the API.
+    fn sanitize_model(model: &str) -> String {
+        let trimmed = model.trim();
+        if VALID_MODELS.contains(&trimmed) {
+            trimmed.to_string()
+        } else {
+            if !trimmed.is_empty() {
+                warn!(
+                    "Sarvam: model '{}' is not a valid Sarvam model; falling back to '{}'",
+                    trimmed, DEFAULT_MODEL
+                );
+            }
+            DEFAULT_MODEL.to_string()
         }
     }
 
@@ -373,6 +400,20 @@ mod tests {
         assert_eq!(p.model, DEFAULT_MODEL);
         let p2 = SarvamProvider::new("k".to_string(), "saaras:v4".to_string());
         assert_eq!(p2.model, "saaras:v4");
+    }
+
+    #[test]
+    fn invalid_model_is_coerced_to_default() {
+        // A local Whisper model id leaking in from shared settings must never be
+        // sent to Sarvam (it returns HTTP 400). It is coerced to the default.
+        let p = SarvamProvider::new("k".to_string(), "large-v3".to_string());
+        assert_eq!(p.model, DEFAULT_MODEL);
+        // Whitespace around a valid id is tolerated.
+        let p2 = SarvamProvider::new("k".to_string(), "  saaras:v4  ".to_string());
+        assert_eq!(p2.model, "saaras:v4");
+        // Other valid ids pass through.
+        let p3 = SarvamProvider::new("k".to_string(), "saarika:v2.5".to_string());
+        assert_eq!(p3.model, "saarika:v2.5");
     }
 
     #[tokio::test]
