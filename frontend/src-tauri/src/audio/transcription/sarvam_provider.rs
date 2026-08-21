@@ -74,6 +74,13 @@ impl SarvamProvider {
             _ => return "unknown".to_string(),
         };
 
+        // Meetily's synthetic hints for auto-detection map to Sarvam's "unknown"
+        // (it auto-detects). "auto-translate" is Meetily-specific and not a real
+        // BCP-47 code, so it must be caught before the hyphen passthrough below.
+        if lang == "auto" || lang == "auto-translate" || lang == "unknown" {
+            return "unknown".to_string();
+        }
+
         // Already a BCP-47 code like "en-IN"? pass through.
         if lang.contains('-') {
             return lang
@@ -309,6 +316,25 @@ mod tests {
         );
         assert_eq!(
             SarvamProvider::sarvam_language_code(&Some("zz".to_string())),
+            "unknown"
+        );
+    }
+
+    #[test]
+    fn language_auto_hints_map_to_unknown() {
+        // Meetily's auto-detect codes must not be sent to Sarvam verbatim.
+        // "auto-translate" has a hyphen and would otherwise pass through the
+        // BCP-47 branch as an invalid code.
+        assert_eq!(
+            SarvamProvider::sarvam_language_code(&Some("auto".to_string())),
+            "unknown"
+        );
+        assert_eq!(
+            SarvamProvider::sarvam_language_code(&Some("auto-translate".to_string())),
+            "unknown"
+        );
+        assert_eq!(
+            SarvamProvider::sarvam_language_code(&Some("AUTO-TRANSLATE".to_string())),
             "unknown"
         );
     }
