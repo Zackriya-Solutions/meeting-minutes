@@ -256,15 +256,33 @@ impl ContinuousVadProcessor {
                     };
 
                     if !speech_samples.is_empty() {
+                        // silero occasionally emits inconsistent timestamps (e.g. an
+                        // end that precedes the start, producing a huge negative
+                        // duration like -945000ms in the segment stats). The sample
+                        // buffer is always correct, so treat it as the source of
+                        // truth and rebuild a self-consistent window when needed.
+                        let sample_count = speech_samples.len();
+                        let (start_ms, end_ms, was_fixed) = normalize_segment_window(
+                            start_timestamp_ms as f64,
+                            end_timestamp_ms as f64,
+                            sample_count,
+                        );
+                        if was_fixed {
+                            warn!(
+                                "VAD: Ignoring inconsistent silero timestamps (start={}ms, end={}ms) for a {}-sample segment; using sample-derived {:.0}ms window",
+                                start_timestamp_ms, end_timestamp_ms, sample_count, end_ms - start_ms
+                            );
+                        }
+
                         let segment = SpeechSegment {
                             samples: speech_samples,
-                            start_timestamp_ms: start_timestamp_ms as f64,
-                            end_timestamp_ms: end_timestamp_ms as f64,
+                            start_timestamp_ms: start_ms,
+                            end_timestamp_ms: end_ms,
                             confidence: 0.9, // VAD confidence
                         };
 
                         info!("VAD: Completed speech segment: {:.1}ms duration, {} samples",
-                              end_timestamp_ms - start_timestamp_ms, segment.samples.len());
+                              end_ms - start_ms, segment.samples.len());
 
                         self.speech_segments.push_back(segment);
                     }
@@ -408,9 +426,87 @@ where
     Ok(all_segments)
 }
 
+/// Returns a self-consistent `(start_ms, end_ms, was_fixed)` window for a speech
+/// segment given silero's reported timestamps and the true sample count.
+///
+/// silero can emit inconsistent timestamps where the end precedes the start
+/// (observed as a ~ -945000ms duration in aggregate VAD stats). Since the audio
+/// sample buffer is always correct, we detect a non-positive or wildly-off
+/// reported duration and rebuild the window from the sample count. `was_fixed`
+/// is true when the reported timestamps were overridden.
+pub(crate) fn normalize_segment_window(
+    reported_start_ms: f64,
+    reported_end_ms: f64,
+    sample_count: usize,
+) -> (f64, f64, bool) {
+    let sample_duration_ms = (sample_count as f64 / 16000.0) * 1000.0;
+    let reported_ms = reported_end_ms - reported_start_ms;
+    // Accept the reported window only when it is positive and roughly matches
+    // the sample count (padding can add up to ~1s of slack on either side).
+    let consistent =
+        reported_ms > 0.0 && (reported_ms - sample_duration_ms).abs() <= sample_duration_ms + 1000.0;
+    if consistent {
+        // Even a consistent window can start slightly negative due to
+        // pre-speech padding; clamp so timestamps are never negative.
+        if reported_start_ms < 0.0 {
+            let shift = -reported_start_ms;
+            (0.0, (reported_end_ms + shift).max(0.0), true)
+        } else {
+            (reported_start_ms, reported_end_ms, false)
+        }
+    } else {
+        // Anchor to the smaller, non-negative bound, then derive the end from
+        // the true sample count.
+        let start = reported_start_ms.min(reported_end_ms).max(0.0);
+        (start, start + sample_duration_ms, true)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn normalize_keeps_consistent_window() {
+        // 1s of audio (16000 samples) with a matching reported window is kept.
+        let (s, e, fixed) = normalize_segment_window(5000.0, 6000.0, 16000);
+        assert_eq!((s, e), (5000.0, 6000.0));
+        assert!(!fixed);
+    }
+
+    #[test]
+    fn normalize_fixes_backwards_timestamps() {
+        // The bug we saw: end precedes start by ~945s. Rebuild from samples.
+        let sample_count = 32000; // 2s at 16kHz
+        let (s, e, fixed) = normalize_segment_window(950_000.0, 5_000.0, sample_count);
+        assert!(fixed);
+        assert_eq!(s, 5_000.0); // anchored to the smaller, non-negative bound
+        assert!((e - s - 2000.0).abs() < 1e-6); // 2s derived from samples
+        assert!(e > s, "end must be after start");
+    }
+
+    #[test]
+    fn normalize_fixes_zero_duration() {
+        let (s, e, fixed) = normalize_segment_window(1000.0, 1000.0, 16000);
+        assert!(fixed);
+        assert!(e > s);
+        assert!((e - s - 1000.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn normalize_never_produces_negative_or_backwards() {
+        // Property: for any inputs, output is non-negative and non-decreasing.
+        for &(a, b, n) in &[
+            (-500.0, -100.0, 8000usize),
+            (1e9, 0.0, 16000),
+            (0.0, 0.0, 1),
+            (100.0, 50.0, 48000),
+        ] {
+            let (s, e, _) = normalize_segment_window(a, b, n);
+            assert!(s >= 0.0, "start {} must be >= 0", s);
+            assert!(e >= s, "end {} must be >= start {}", e, s);
+        }
+    }
 
     /// Generate synthetic speech-like audio with alternating speech/silence
     fn generate_test_audio_with_speech(duration_seconds: f32, sample_rate: u32) -> Vec<f32> {
