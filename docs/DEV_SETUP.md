@@ -75,6 +75,7 @@ Validated against `backend/install_dependancies_for_windows.ps1`. If you prefer,
 | Python 3.11 + pip | Backend Whisper server |
 | Git | Standard |
 | Bun ≥ 1.1.43 | Backend build scripts |
+| **LunarG Vulkan SDK** *(optional)* | Only needed when you explicitly want Vulkan acceleration on Windows. It provides the `VULKAN_SDK` environment variable used by `whisper-rs-sys`. |
 
 Manual install of the Build Tools workload:
 
@@ -85,6 +86,8 @@ choco install visualstudio2022buildtools -y --package-parameters `
 ```
 
 > After installing Build Tools for the first time, open a **new** terminal (or a *Developer Command Prompt*) so the MSVC environment variables are picked up.
+>
+> Windows build behavior: `frontend/build.bat` now uses the repo's auto-detection path by default. If `VULKAN_SDK` is missing, it falls back to non-Vulkan build modes instead of forcing a failing Vulkan build.
 
 ## 🐧 Linux prerequisites (Ubuntu 22.04 — validated)
 
@@ -130,11 +133,19 @@ cd meet4specs/frontend
 # 2. Install frontend dependencies
 pnpm install
 
-# 3. Run in development mode (auto-detects GPU acceleration)
-./dev-gpu.sh          # Linux/macOS
+# 3a. Run in development mode
+./dev-gpu.sh          # Linux/macOS (auto-detects GPU acceleration)
 pnpm tauri:dev        # explicit CPU mode alternative
+```
 
-# Production build
+```bat
+:: 3b. Windows development / build
+build.bat debug       :: auto-detects acceleration; does NOT require Vulkan SDK
+build.bat             :: production build with same fallback behavior
+```
+
+```bash
+# 4. Production build (Linux/macOS)
 ./build-gpu.sh
 ```
 
