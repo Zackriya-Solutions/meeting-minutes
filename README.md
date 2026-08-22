@@ -103,6 +103,8 @@ Whether you're a defense consultant, enterprise executive, legal professional, o
 
 ## Installation
 
+> 📖 **New here?** Read the [Getting Started guide](docs/GETTING_STARTED.md) — requirements per OS, first-run checklist, and how to turn interviews into development specifications.
+
 ### 🪟 **Windows**
 
 1. Download the latest `x64-setup.exe` from [Releases](https://github.com/Zackriya-Solutions/meeting-minutes/releases/latest)
@@ -204,7 +206,7 @@ For more details, see the [Architecture documentation](docs/architecture.md).
 
 ## For Developers
 
-If you want to contribute to Meetily or build it from source, you'll need to have Rust and Node.js installed. For detailed build instructions, please see the [Building from Source guide](docs/BUILDING.md).
+If you want to contribute to Meetily or build it from source, you'll need to have Rust and Node.js installed. Start with the [Developer Setup guide](docs/DEV_SETUP.md) for validated Windows/Linux prerequisites. For detailed build instructions, please see the [Building from Source guide](docs/BUILDING.md).
 
 ## Meetily Pro
 
