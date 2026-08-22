@@ -4,7 +4,7 @@
     "private": true,
     "main": "electron/main.js",
     "scripts": {
-        "dev": "next dev -p 3118",
+        "dev": "next dev -H 127.0.0.1 -p 3118",
         "build": "next build",
         "export": "next export",
         "start": "next start -p 3118",

@@ -113,6 +113,8 @@ tokio-util = "0.7"  # Utilities for tokio including CancellationToken
 async-trait = "0.1"  # Trait abstraction for async methods
 zip = "2.2"
 walkdir = "2.5"
+tar = "0.4"           # TAR extraction (used by openspec::setup for portable Node.js on Linux)
+xz2 = "0.1"           # XZ decompression (used by openspec::setup for portable Node.js on Linux)
 
 reqwest = { version = "0.11", features = ["blocking", "multipart", "json", "stream"] }
 
@@ -178,7 +180,7 @@ futures-channel = "0.3.31"
 
 # PERFORMANCE: Enable Metal GPU + CoreML acceleration automatically on macOS
 # CoreML provides additional acceleration for Apple Silicon chips
-whisper-rs = { version = "0.13.2", features = ["raw-api", "metal", "coreml"] }
+whisper-rs = { version = "0.16.0", features = ["raw-api", "metal", "coreml"] }
 
 # Windows-specific dependencies
 # Default: CPU-only build (no BLAS)
@@ -186,8 +188,15 @@ whisper-rs = { version = "0.13.2", features = ["raw-api", "metal", "coreml"] }
 #   --features cuda     (NVIDIA GPUs)
 #   --features vulkan   (AMD/Intel GPUs)
 #   --features openblas (OpenBLAS optimization, requires BLAS_INCLUDE_DIRS)
+#
+# NOTE: pinned to 0.16.0 (whisper-rs-sys 0.15.x, bindgen 0.72) instead of
+# 0.13.2 (whisper-rs-sys 0.11.1, bindgen 0.69). bindgen 0.69 cannot correctly
+# lay out `struct whisper_full_params` (inline anonymous `greedy`/
+# `beam_search` structs) when paired with a modern libclang (LLVM 20+), and
+# silently emits an opaque `{ _address: u8 }` stub instead, breaking every
+# field access in whisper-rs. bindgen 0.72 fixes this.
 [target.'cfg(target_os = "windows")'.dependencies]
-whisper-rs = { version = "0.13.2", features = ["raw-api"] }
+whisper-rs = { version = "0.16.0", features = ["raw-api"] }
 futures-channel = "0.3.31"
 
 # Linux-specific dependencies
@@ -198,7 +207,7 @@ futures-channel = "0.3.31"
 #   --features hipblas  (AMD ROCm)
 #   --features openblas (OpenBLAS optimization, requires BLAS_INCLUDE_DIRS)
 [target.'cfg(target_os = "linux")'.dependencies]
-whisper-rs = { version = "0.13.2", features = ["raw-api"] }
+whisper-rs = { version = "0.16.0", features = ["raw-api"] }
 futures-channel = "0.3.31"
 
 [dev-dependencies]

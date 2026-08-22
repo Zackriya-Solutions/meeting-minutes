@@ -35,7 +35,8 @@ const messages = {
         recording: 'Grabaciones',
         transcription: 'Transcripción',
         summary: 'Resumen',
-        beta: 'Beta'
+        beta: 'Beta',
+        desktopTools: 'Herramientas'
       },
       audioDeviceTitle: 'Configuración de dispositivos de audio',
       languageTitle: 'Configuración de idioma',
@@ -378,7 +379,19 @@ const messages = {
       genericError: 'No se pudo generar OpenSpec',
       installNode: 'Instalar Node.js',
       downloadOpenSpec: 'OpenSpec',
-      tryAgain: 'Intentar de nuevo'
+      tryAgain: 'Intentar de nuevo',
+      setup: {
+        title: 'Habilitar generación de OpenSpec',
+        description: 'Meetily puede generar propuestas de cambio en formato OpenSpec a partir de tus transcripciones. Para eso necesita el CLI de OpenSpec (y Node.js si no lo tenés instalado).',
+        install: 'Instalar ahora',
+        skip: 'Ahora no',
+        installing: 'Instalando dependencias de OpenSpec...',
+        installed: 'OpenSpec CLI instalado correctamente',
+        failed: 'No se pudo instalar OpenSpec CLI',
+        retry: 'Reintentar',
+        manualInstallHint: 'También podés instalarlo manualmente: npm install -g @fission-ai/openspec@latest',
+        learnMore: 'Ver en GitHub'
+      }
     },
     transcriptionLanguage: {
       title: 'Idioma de transcripción',
@@ -567,7 +580,8 @@ const messages = {
         recording: 'Recordings',
         transcription: 'Transcription',
         summary: 'Summary',
-        beta: 'Beta'
+        beta: 'Beta',
+        desktopTools: 'Tools'
       },
       audioDeviceTitle: 'Audio Device Settings',
       languageTitle: 'Language Settings',
@@ -927,7 +941,19 @@ const messages = {
       genericError: 'Failed to generate OpenSpec',
       installNode: 'Install Node.js',
       downloadOpenSpec: 'OpenSpec',
-      tryAgain: 'Try again'
+      tryAgain: 'Try again',
+      setup: {
+        title: 'Enable OpenSpec generation',
+        description: 'Meetily can generate OpenSpec-format change proposals from your meeting transcripts. This requires the OpenSpec CLI (and Node.js, if not already installed).',
+        install: 'Install now',
+        skip: 'Not now',
+        installing: 'Installing OpenSpec dependencies...',
+        installed: 'OpenSpec CLI installed successfully',
+        failed: 'Failed to install OpenSpec CLI',
+        retry: 'Retry',
+        manualInstallHint: 'You can also install it manually: npm install -g @fission-ai/openspec@latest',
+        learnMore: 'View on GitHub'
+      }
     },
     transcriptionLanguage: {
       title: 'Transcription language',

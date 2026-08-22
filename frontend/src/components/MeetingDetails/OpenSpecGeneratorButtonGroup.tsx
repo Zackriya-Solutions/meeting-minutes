@@ -12,6 +12,7 @@ interface OpenSpecGeneratorButtonGroupProps {
   status: OpenSpecStatus;
   onGenerate: () => Promise<void>;
   onRegenerate: () => Promise<void>;
+  onCancel?: () => Promise<void>;
 }
 
 interface OpenSpecGeneratorButtonGroupViewProps extends OpenSpecGeneratorButtonGroupProps {
@@ -23,6 +24,7 @@ export function OpenSpecGeneratorButtonGroupView({
   status,
   onGenerate,
   onRegenerate,
+  onCancel,
   t,
 }: OpenSpecGeneratorButtonGroupViewProps) {
   if (!hasTranscripts) {
@@ -65,6 +67,11 @@ export function OpenSpecGeneratorButtonGroupView({
           </>
         )}
       </Button>
+      {isGenerating && onCancel && (
+        <Button variant="outline" size="sm" onClick={() => void onCancel()} title="Cancel OpenSpec generation">
+          Cancelar
+        </Button>
+      )}
     </ButtonGroup>
   );
 }
@@ -74,6 +81,7 @@ export function OpenSpecGeneratorButtonGroup({
   status,
   onGenerate,
   onRegenerate,
+  onCancel,
 }: OpenSpecGeneratorButtonGroupProps) {
   const { t } = useI18n();
 
@@ -82,6 +90,7 @@ export function OpenSpecGeneratorButtonGroup({
     status,
     onGenerate,
     onRegenerate,
+    onCancel,
     t,
   });
 }

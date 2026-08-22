@@ -65,6 +65,7 @@ interface SummaryPanelProps {
   openSpecStatus?: 'idle' | 'generating' | 'done' | 'error';
   onGenerateOpenSpec?: () => Promise<void>;
   onRegenerateOpenSpec?: () => Promise<void>;
+  onCancelOpenSpec?: () => Promise<void>;
 }
 
 export function SummaryPanel({
@@ -104,6 +105,7 @@ export function SummaryPanel({
   openSpecStatus = 'idle',
   onGenerateOpenSpec,
   onRegenerateOpenSpec,
+  onCancelOpenSpec,
 }: SummaryPanelProps) {
   const { t } = useI18n();
   const [summaryLang, setSummaryLang] = useState<string | null>(null);
@@ -301,6 +303,7 @@ export function SummaryPanel({
                   status={openSpecStatus}
                   onGenerate={onGenerateOpenSpec}
                   onRegenerate={onRegenerateOpenSpec}
+                  onCancel={onCancelOpenSpec}
                 />
               )}
             </div>
@@ -346,9 +349,10 @@ export function SummaryPanel({
             {onGenerateOpenSpec && onRegenerateOpenSpec && (
               <OpenSpecGeneratorButtonGroup
                 hasTranscripts={transcripts.length > 0}
-                status={openSpecStatus}
-                onGenerate={onGenerateOpenSpec}
-                onRegenerate={onRegenerateOpenSpec}
+                  status={openSpecStatus}
+                  onGenerate={onGenerateOpenSpec}
+                  onRegenerate={onRegenerateOpenSpec}
+                  onCancel={onCancelOpenSpec}
               />
             )}
           </div>
@@ -384,9 +388,10 @@ export function SummaryPanel({
             {onGenerateOpenSpec && onRegenerateOpenSpec && (
               <OpenSpecGeneratorButtonGroup
                 hasTranscripts={transcripts.length > 0}
-                status={openSpecStatus}
-                onGenerate={onGenerateOpenSpec}
-                onRegenerate={onRegenerateOpenSpec}
+                  status={openSpecStatus}
+                  onGenerate={onGenerateOpenSpec}
+                  onRegenerate={onRegenerateOpenSpec}
+                  onCancel={onCancelOpenSpec}
               />
             )}
           </div>
