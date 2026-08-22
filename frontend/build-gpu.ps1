@@ -42,13 +42,13 @@ try {
         exit 1
     }
 
-    Write-Host "Building complete Tauri application with Vulkan acceleration..." -ForegroundColor Cyan
+    Write-Host "Building complete Tauri application with auto-detected acceleration..." -ForegroundColor Cyan
     Write-Host ""
 
     if ($usePnpm) {
-        pnpm run tauri:build:vulkan
+        pnpm run tauri:build
     } else {
-        npm run tauri:build:vulkan
+        npm run tauri:build
     }
 
     if ($LASTEXITCODE -eq 0) {
