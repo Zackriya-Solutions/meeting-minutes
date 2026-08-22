@@ -1,5 +1,5 @@
 @echo off
-REM Meetily GPU-Accelerated Development Script for Windows
+REM Meet4Specs GPU-Accelerated Development Script for Windows
 REM Automatically detects and runs in development mode with optimal GPU features
 REM Based on build-gpu.bat but for development (debug build, tauri dev)
 
@@ -23,7 +23,7 @@ if "%~1" == "help" (
 
 echo.
 echo ========================================
-echo   Meetily GPU-Accelerated Development
+echo   Meet4Specs GPU-Accelerated Development
 echo ========================================
 echo.
 
@@ -79,7 +79,7 @@ set "RUST_ENV_LIB=%LIB%"
 set "RUST_ENV_INCLUDE=%INCLUDE%"
 
 echo.
-echo 📦 Starting Meetily in development mode...
+echo 📦 Starting Meet4Specs in development mode...
 echo.
 
 REM Find package.json location

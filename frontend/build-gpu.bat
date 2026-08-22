@@ -1,5 +1,5 @@
 @echo off
-REM Meetily GPU-Accelerated Build Script for Windows
+REM Meet4Specs GPU-Accelerated Build Script for Windows
 REM Automatically detects and builds with optimal GPU features
 REM Based on the existing build.bat with GPU detection enhancements
 
@@ -23,7 +23,7 @@ if "%~1" == "help" (
 
 echo.
 echo ========================================
-echo   Meetily GPU-Accelerated Build
+echo   Meet4Specs GPU-Accelerated Build
 echo ========================================
 echo.
 
@@ -79,7 +79,7 @@ set "RUST_ENV_LIB=%LIB%"
 set "RUST_ENV_INCLUDE=%INCLUDE%"
 
 echo.
-echo 📦 Building Meetily...
+echo 📦 Building Meet4Specs...
 echo.
 
 REM Find package.json location

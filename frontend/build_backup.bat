@@ -1,5 +1,5 @@
 @echo off
-REM Meetily Build Script for Windows
+REM Meet4Specs Build Script for Windows
 REM This script sets up environment variables and builds the Tauri application
 
 REM Exit on error
@@ -26,7 +26,7 @@ if "%~1" == "debug" (
     set "DEBUG=false"
 )
 
-echo 🚀 Building Meetily application...
+echo 🚀 Building Meet4Specs application...
 echo 🔨 Building Tauri application...
 
 REM Kill any existing processes on port 3118
@@ -150,7 +150,7 @@ if not "%~1" == "debug" (
 :_print_help
 echo.
 echo ========================================
-echo    Meetily Build Script - Help
+echo    Meet4Specs Build Script - Help
 echo ========================================
 echo.
 echo USAGE:

@@ -24,6 +24,10 @@ interface TranscriptContextType {
 
 const TranscriptContext = createContext<TranscriptContextType | undefined>(undefined);
 
+export function shouldAutoScrollOnTranscriptChange(transcriptCount: number, isUserAtBottom: boolean): boolean {
+  return transcriptCount > 0 && isUserAtBottom;
+}
+
 export function TranscriptProvider({ children }: { children: ReactNode }) {
   const [transcripts, setTranscripts] = useState<Transcript[]>([]);
   const [meetingTitle, setMeetingTitle] = useState('+ New Call');
@@ -61,24 +65,25 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  // Auto-scroll when transcripts change (only if user is at bottom)
+  // Auto-scroll when transcripts change (only if user is at bottom and we actually have transcript content)
   useEffect(() => {
-    // Only auto-scroll if user was at the bottom before new content
-    if (isUserAtBottomRef.current && transcriptContainerRef.current) {
-      // Wait for Framer Motion animation to complete (150ms) before scrolling
-      // This ensures scrollHeight includes the full rendered height of the new transcript
-      const scrollTimeout = setTimeout(() => {
-        const container = transcriptContainerRef.current;
-        if (container) {
-          container.scrollTo({
-            top: container.scrollHeight,
-            behavior: 'smooth'
-          });
-        }
-      }, 150); // Match Framer Motion transition duration
-
-      return () => clearTimeout(scrollTimeout);
+    if (!shouldAutoScrollOnTranscriptChange(transcripts.length, isUserAtBottomRef.current) || !transcriptContainerRef.current) {
+      return;
     }
+
+    // Wait for Framer Motion animation to complete (150ms) before scrolling
+    // This ensures scrollHeight includes the full rendered height of the new transcript
+    const scrollTimeout = setTimeout(() => {
+      const container = transcriptContainerRef.current;
+      if (container) {
+        container.scrollTo({
+          top: container.scrollHeight,
+          behavior: 'smooth'
+        });
+      }
+    }, 150); // Match Framer Motion transition duration
+
+    return () => clearTimeout(scrollTimeout);
   }, [transcripts]);
 
   // Initialize IndexedDB and listen for recording-started/stopped events

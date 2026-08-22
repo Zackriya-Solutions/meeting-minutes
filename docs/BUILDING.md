@@ -1,4 +1,4 @@
-# Building Meetily from Source
+# Building Meet4Specs from Source
 
 This guide provides detailed instructions for building Meetily from source on different operating systems.
 
@@ -7,7 +7,7 @@ This guide provides detailed instructions for building Meetily from source on di
 
 ## 🐧 Building on Linux
 
-This guide helps you build Meetily on Linux with **automatic GPU acceleration**. The build system detects your hardware and configures the best performance automatically.
+This guide helps you build Meet4Specs on Linux with **automatic GPU acceleration**. The build system detects your hardware and configures the best performance automatically.
 
 ---
 

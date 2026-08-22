@@ -1,7 +1,7 @@
-# GPU-accelerated build script for Meetily (Windows PowerShell)
+# GPU-accelerated build script for Meet4Specs (Windows PowerShell)
 # Automatically detects and builds with optimal GPU features
 
-Write-Host "GPU-Accelerated Build Script for Meetily" -ForegroundColor Blue
+Write-Host "GPU-Accelerated Build Script for Meet4Specs" -ForegroundColor Blue
 Write-Host ""
 
 # Function to check if command exists
@@ -26,7 +26,7 @@ if (Test-Path "package.json") {
 }
 
 Write-Host ""
-Write-Host "Building Meetily..." -ForegroundColor Blue
+Write-Host "Building Meet4Specs..." -ForegroundColor Blue
 Write-Host ""
 
 # Build command using npm scripts

@@ -61,7 +61,7 @@ echo "Building Tauri app..."
 # Kill any leftover instance (app, orphaned webview, or dev server) from a
 # previous run before starting a new one, so a stale process never leaves the
 # window stuck loading against a dead dev server.
-echo "Stopping any previous Meetily/dev-server instance..."
+echo "Stopping any previous Meet4Specs/dev-server instance..."
 pkill -9 -f 'target/debug/meetily' 2>/dev/null || true
 pkill -9 -f 'target/release/meetily' 2>/dev/null || true
 pkill -9 -f 'next dev -p 3118' 2>/dev/null || true

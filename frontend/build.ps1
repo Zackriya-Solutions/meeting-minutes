@@ -1,10 +1,10 @@
-# Meetily Build Script with Code Signing
+# Meet4Specs Build Script with Code Signing
 # Loads signing credentials from .env file or environment variables
 # Then calls build-gpu.bat to execute the build
 
 Write-Host ""
 Write-Host "========================================"
-Write-Host "   Meetily GPU Build (Signed)"
+Write-Host "   Meet4Specs GPU Build (Signed)"
 Write-Host "========================================"
 Write-Host ""
 

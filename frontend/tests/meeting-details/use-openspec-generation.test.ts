@@ -73,7 +73,9 @@ describe('OpenSpecGeneratorButtonGroup', () => {
       t: (key: string) => key,
     }) as any;
 
-    const buttonElement = rendered.props.children;
+    const buttonElement = Array.isArray(rendered.props.children)
+      ? rendered.props.children[0]
+      : rendered.props.children;
     buttonElement.props.onClick();
 
     expect(regeneratedCalls).toBe(1);
@@ -87,6 +89,10 @@ describe('generateOpenSpecBundle runtime flow', () => {
 
     const invokeFn = mock(async (command: string, args?: Record<string, unknown>) => {
       calls.push({ cmd: command, args });
+      if (command === 'api_get_model_config') {
+        return null;
+      }
+
       if (command === 'api_generate_openspec_bundle') {
         return {
           type: 'success',
@@ -117,10 +123,11 @@ describe('generateOpenSpecBundle runtime flow', () => {
     expect(result.state).toBe('done');
     expect(result.error).toBeNull();
     expect(calls.map(call => call.cmd)).toEqual([
+      'api_get_model_config',
       'api_generate_openspec_bundle',
       'api_save_openspec_bundle_as',
     ]);
-    expect(calls[1]?.args).toEqual({
+    expect(calls[2]?.args).toEqual({
       zipTempPath: '/tmp/demo.zip',
       suggestedFilename: 'demo.zip',
     });
