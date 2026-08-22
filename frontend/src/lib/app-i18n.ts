@@ -465,8 +465,38 @@ const messages = {
       listeningForSpeech: 'Escuchando...',
       clickResumeToContinue: 'Haz clic en reanudar para continuar grabando',
       speakToSeeLive: 'Habla para ver la transcripción en vivo',
-      welcomeTitle: '¡Te damos la bienvenida a Meet4Specs!',
-      welcomeSubtitle: 'Inicia la grabación para ver la transcripción en vivo'
+      welcomeTitle: 'Convierte reuniones y audios en transcripciones y especificaciones',
+      welcomeSubtitle: 'Comienza con una grabación o importa un archivo de audio. Cuando la transcripción esté lista, podrás revisarla y generar especificaciones.',
+      startRecording: 'Comenzar grabación',
+      importAudio: 'Importar audio',
+      howItWorksTitle: 'Cómo funciona',
+      stepRecordTitle: 'Grabar',
+      stepRecordBody: 'Inicia una grabación para capturar tu voz y, si corresponde, el audio del sistema.',
+      stepImportTitle: 'Importar',
+      stepImportBody: 'Si ya tienes un archivo, impórtalo para generar una transcripción sin grabar una nueva reunión.',
+      stepSpecTitle: 'Generar especificaciones',
+      stepSpecBody: 'Después de revisar la transcripción, usa la reunión para crear especificaciones y documentación.',
+      faqTitle: 'Preguntas frecuentes',
+      faqRecordQuestion: '¿Cómo empiezo una grabación?',
+      faqRecordAnswer: 'Usa el botón "Comenzar grabación" o el control de grabación que aparece en la parte inferior. La transcripción se mostrará aquí en tiempo real.',
+      faqImportQuestion: '¿Cuándo conviene importar audio?',
+      faqImportAnswer: 'Importa audio cuando ya tienes una grabación previa, una entrevista, una llamada o cualquier archivo que quieras transcribir. Si la opción no está disponible, actívala en la configuración beta.',
+      faqSpecQuestion: '¿Cómo genero especificaciones con OpenSpec?',
+      faqSpecAnswer: 'Primero genera la transcripción y abre la reunión. Después, antes de usar OpenSpec, ve a Configuración > Herramientas e instala primero Node con npm y luego OpenSpec CLI. Cuando ambas herramientas estén listas, usa las acciones de resumen o generación de especificaciones para crear el entregable.',
+      faqModelsQuestion: '¿Qué hago si tengo dudas sobre modelos o calidad?',
+      faqModelsAnswer: 'Revisa la configuración del modelo y vuelve a procesar el audio si hace falta. Si el contenido está en español, verifica también el idioma y el modelo seleccionado.',
+      faqResultsQuestion: '¿Dónde veo la reunión, la transcripción y las especificaciones?',
+      faqResultsAnswer: 'Después de grabar o importar audio, abre la reunión desde la barra lateral o desde la vista de detalle. Allí podrás revisar la transcripción, generar resúmenes y crear especificaciones.',
+      faqQualityQuestion: '¿Cómo puedo mejorar la calidad de la transcripción?',
+      faqQualityAnswer: 'Usa un audio claro, reduce el ruido de fondo, verifica el idioma correcto y elige el modelo más adecuado antes de volver a procesar el contenido.',
+      faqFeatureQuestion: '¿Qué hago si no veo una función como importar audio?',
+      faqFeatureAnswer: 'Algunas funciones dependen de configuración adicional. Si no ves importar audio, actívalo en Configuración > Beta. Si no puedes usar OpenSpec, instala primero Node con npm y luego OpenSpec CLI en Configuración > Herramientas.',
+      faqLanguageQuestion: '¿Dónde elijo idioma y modelo?',
+      faqLanguageAnswer: 'Puedes revisar y cambiar el modelo de transcripción desde Configuración. Si vuelves a procesar una reunión, también podrás ajustar idioma y modelo antes de generar una nueva transcripción.',
+      faqRetranscribeQuestion: '¿Puedo volver a procesar una reunión?',
+      faqRetranscribeAnswer: 'Sí. Si necesitas otra configuración de idioma o modelo, abre la reunión y usa la opción de volver a procesar para generar una nueva transcripción.',
+      faqSaveQuestion: '¿Se guarda el audio original?',
+      faqSaveAnswer: 'Depende de tu configuración de grabación. Revisa Configuración para decidir si deseas guardar automáticamente los archivos de audio de cada reunión.'
     },
     virtualizedTranscriptView: {
       loadingMore: 'Cargando más...',
@@ -1027,8 +1057,38 @@ const messages = {
       listeningForSpeech: 'Listening for speech...',
       clickResumeToContinue: 'Click resume to continue recording',
       speakToSeeLive: 'Speak to see live transcription',
-      welcomeTitle: 'Welcome to Meet4Specs!',
-      welcomeSubtitle: 'Start recording to see live transcription'
+      welcomeTitle: 'Turn meetings and audio into transcripts and specifications',
+      welcomeSubtitle: 'Start with a recording or import an audio file. When the transcript is ready, you can review it and generate specifications.',
+      startRecording: 'Start recording',
+      importAudio: 'Import audio',
+      howItWorksTitle: 'How it works',
+      stepRecordTitle: 'Record',
+      stepRecordBody: 'Start a recording to capture your voice and, when available, system audio.',
+      stepImportTitle: 'Import',
+      stepImportBody: 'If you already have a file, import it to generate a transcript without recording a new meeting.',
+      stepSpecTitle: 'Generate specifications',
+      stepSpecBody: 'After reviewing the transcript, use the meeting to create specifications and supporting documentation.',
+      faqTitle: 'Frequently asked questions',
+      faqRecordQuestion: 'How do I start a recording?',
+      faqRecordAnswer: 'Use the "Start recording" button or the recording control at the bottom of the screen. The live transcript will appear here.',
+      faqImportQuestion: 'When should I import audio?',
+      faqImportAnswer: 'Import audio when you already have a previous recording, interview, call, or any file you want to transcribe. If the option is not available, enable it in beta settings.',
+      faqSpecQuestion: 'How do I generate specifications with OpenSpec?',
+      faqSpecAnswer: 'Generate the transcript first and open the meeting. Then, before using OpenSpec, go to Settings > Tools and install Node with npm first, and OpenSpec CLI second. When both tools are ready, use the summary or specification actions to create the deliverable.',
+      faqModelsQuestion: 'What if I have questions about models or quality?',
+      faqModelsAnswer: 'Review the model settings and retranscribe the audio if needed. If the content is in Spanish, also verify the selected language and model.',
+      faqResultsQuestion: 'Where can I find the meeting, transcript, and specifications?',
+      faqResultsAnswer: 'After recording or importing audio, open the meeting from the sidebar or from the detail view. There you can review the transcript, generate summaries, and create specifications.',
+      faqQualityQuestion: 'How can I improve transcription quality?',
+      faqQualityAnswer: 'Use clear audio, reduce background noise, verify the correct language, and choose the most suitable model before retranscribing the content.',
+      faqFeatureQuestion: 'What should I do if I cannot see a feature such as import audio?',
+      faqFeatureAnswer: 'Some features depend on additional configuration. If you do not see import audio, enable it in Settings > Beta. If you cannot use OpenSpec, install Node with npm first and then OpenSpec CLI in Settings > Tools.',
+      faqLanguageQuestion: 'Where do I choose language and model?',
+      faqLanguageAnswer: 'You can review and change the transcription model from Settings. If you retranscribe a meeting, you can also adjust language and model before generating a new transcript.',
+      faqRetranscribeQuestion: 'Can I retranscribe a meeting?',
+      faqRetranscribeAnswer: 'Yes. If you need a different language or model setup, open the meeting and use the retranscribe option to generate a new transcript.',
+      faqSaveQuestion: 'Is the original audio saved?',
+      faqSaveAnswer: 'It depends on your recording settings. Review Settings to decide whether audio files should be saved automatically for each meeting.'
     },
     virtualizedTranscriptView: {
       loadingMore: 'Loading more...',
@@ -1129,7 +1189,9 @@ function interpolate(template: string, params?: TranslationParams): string {
 }
 
 export function translate(language: AppLanguage, key: string, params?: TranslationParams): string {
+  // SAFETY: messages is a nested dictionary of translation strings, so each language root matches TranslationTree.
   const primary = getValue(messages[language] as unknown as TranslationTree, key);
+  // SAFETY: English fallback shares the same nested translation tree shape as the active language.
   const fallback = getValue(messages.en as unknown as TranslationTree, key);
   const value = primary ?? fallback;
   if (typeof value !== 'string') return key;

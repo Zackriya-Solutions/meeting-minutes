@@ -25,6 +25,65 @@ export default function AnalyticsProvider({ children }: AnalyticsProviderProps) 
   const initialized = useRef(false);
 
   useEffect(() => {
+    if (process.env.NODE_ENV !== 'production') {
+      return;
+    }
+
+    let cancelled = false;
+
+    const registerCriticalTelemetry = async () => {
+      await Analytics.initCriticalTelemetry();
+
+      const handleWindowError = (event: ErrorEvent) => {
+        void Analytics.trackCriticalError(
+          'frontend_unhandled_error',
+          event.message || 'Unhandled window error',
+          {
+            error_context: 'window.error',
+            source_file: event.filename || 'unknown',
+            source_line: String(event.lineno || 0),
+            source_column: String(event.colno || 0),
+          }
+        );
+      };
+
+      const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
+        const reason = event.reason instanceof Error
+          ? event.reason.message
+          : typeof event.reason === 'string'
+            ? event.reason
+            : JSON.stringify(event.reason ?? 'Unhandled promise rejection');
+
+        void Analytics.trackCriticalError('frontend_unhandled_rejection', reason, {
+          error_context: 'window.unhandledrejection',
+        });
+      };
+
+      if (!cancelled) {
+        window.addEventListener('error', handleWindowError);
+        window.addEventListener('unhandledrejection', handleUnhandledRejection);
+      }
+
+      return () => {
+        window.removeEventListener('error', handleWindowError);
+        window.removeEventListener('unhandledrejection', handleUnhandledRejection);
+      };
+    };
+
+    let cleanup: (() => void) | undefined;
+    registerCriticalTelemetry()
+      .then((fn) => {
+        cleanup = fn;
+      })
+      .catch(console.error);
+
+    return () => {
+      cancelled = true;
+      cleanup?.();
+    };
+  }, []);
+
+  useEffect(() => {
     // Prevent duplicate initialization in React StrictMode
     if (initialized.current) {
       return;

@@ -7,6 +7,7 @@ import {
   isOpenSpecNetworkError,
   isOpenSpecTimeoutError,
 } from '@/lib/utils';
+import Analytics from '@/lib/analytics';
 import { useI18n } from '@/hooks/useI18n';
 
 type OpenSpecStatus = 'idle' | 'generating' | 'done' | 'error';
@@ -170,6 +171,10 @@ export async function generateOpenSpecBundle(
       code: 'cli_failed',
       message: invokeError instanceof Error ? invokeError.message : String(invokeError),
     };
+    await Analytics.trackError('openspec_generation_failed', payload.message, {
+      error_context: 'useOpenSpecGeneration.invoke',
+      error_code: payload.code,
+    });
     await showActionableError(payload);
     return { state: 'error', error: payload };
   }
@@ -180,6 +185,10 @@ export async function generateOpenSpecBundle(
       message: result.message,
       stderr: result.stderr,
     };
+    await Analytics.trackError('openspec_generation_failed', payload.message, {
+      error_context: 'useOpenSpecGeneration.result',
+      error_code: payload.code,
+    });
     await showActionableError(payload);
     return { state: 'error', error: payload };
   }

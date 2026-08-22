@@ -1,273 +1,262 @@
-<div align="center" style="border-bottom: none">
-    <h1>
-        <img src="docs/Meetily-6.png" style="border-radius: 10px;" />
-        <br>
-        Privacy-First AI Meeting Assistant
-    </h1>
-    <a href="https://trendshift.io/repositories/21958" target="_blank"><img src="https://trendshift.io/api/badge/repositories/21958" alt="Zackriya-Solutions%2Fmeetily | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/></a>
-    <br>
-    <br>
-    <a href="https://github.com/Zackriya-Solutions/meeting-minutes/releases/"><img src="https://img.shields.io/badge/Pre_Release-Link-brightgreen" alt="Pre-Release"></a>
-    <a href="https://github.com/Zackriya-Solutions/meeting-minutes/releases"><img alt="GitHub Repo stars" src="https://img.shields.io/github/stars/zackriya-solutions/meeting-minutes?style=flat">
-</a>
- <a href="https://github.com/Zackriya-Solutions/meeting-minutes/releases"> <img alt="GitHub Downloads (all assets, all releases)" src="https://img.shields.io/github/downloads/zackriya-solutions/meeting-minutes/total?style=plastic"> </a>
-    <a href="https://github.com/Zackriya-Solutions/meeting-minutes/releases"><img src="https://img.shields.io/badge/License-MIT-blue" alt="License"></a>
-    <a href="https://github.com/Zackriya-Solutions/meeting-minutes/releases"><img src="https://img.shields.io/badge/Supported_OS-macOS,_Windows-white" alt="Supported OS"></a>
-    <a href="https://github.com/Zackriya-Solutions/meeting-minutes/releases"><img alt="GitHub Tag" src="https://img.shields.io/github/v/tag/zackriya-solutions/meeting-minutes?include_prereleases&color=yellow">
-</a>
-    <br>
-    <h3>
-    <br>
-    Open Source • Privacy-First • Enterprise-Ready
-    </h3>
-    <p align="center">
-    Get latest <a href="https://www.zackriya.com/meetily-subscribe/"><b>Product updates</b></a> <br><br>
-    <a href="https://meetily.ai"><b>Website</b></a> •
-    <a href="https://www.linkedin.com/company/106363062/"><b>LinkedIn</b></a> •
-    <a href="https://discord.gg/crRymMQBFH"><b>Meetily Discord</b></a> •
-    <a href="https://discord.com/invite/vCFJvN4BwJ"><b>Privacy-First AI</b></a> •
-    <a href="https://www.reddit.com/r/meetily/"><b>Reddit</b></a>
-</p>
-    <p align="center">
+<div align="center">
+  <img src="assets/logo_general_meet4specs.png" alt="Meet4Specs logo" width="180" />
 
-A privacy-first AI meeting assistant that captures, transcribes, and summarizes meetings entirely on your infrastructure. Built by expert AI engineers passionate about data sovereignty and open source solutions. Perfect for enterprises that need advanced meeting intelligence without compromising on privacy, compliance, or control.
+# Meet4Specs
 
-</p>
+Turn user interviews into OpenSpec-ready development bundles — locally, privately, and with enough structure to move from conversation to implementation.
 
-<p align="center">
-    <img src="docs/meetily_demo.gif" width="650" alt="Meetily Demo" />
-    <br>
-    <a href="https://youtu.be/6FnhSC_eSz8">View full Demo Video</a>
-</p>
-
+[![GitHub stars](https://img.shields.io/github/stars/xmagcx/meet4specs?style=flat-square)](https://github.com/xmagcx/meet4specs/stargazers)
+[![License](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE.md)
+[![CI](https://img.shields.io/github/actions/workflow/status/xmagcx/meet4specs/build-test.yml?style=flat-square&label=CI)](https://github.com/xmagcx/meet4specs/actions)
+[![Last commit](https://img.shields.io/github/last-commit/xmagcx/meet4specs?style=flat-square)](https://github.com/xmagcx/meet4specs/commits)
+[![Top language](https://img.shields.io/github/languages/top/xmagcx/meet4specs?style=flat-square)](https://github.com/xmagcx/meet4specs)
 </div>
 
----
+## Quick Demo
 
-> **Meetily PRO Upgrade Offer** - Meetily PRO is available for users who need enhanced accuracy, advanced exports, custom summary workflows, and team-ready features. Use coupon code **LAUNCH20** for **20% off** until the next Meetily Community Edition release. Speaker diarization is also planned for PRO in mid-June. [Explore Meetily PRO →](https://meetily.ai/pro/)
+<div align="center">
+  <img src="assets/demo_small.gif" width="600" alt="Meet4Specs short product demo" />
+</div>
 
----
+## Project Description
 
-<details>
-<summary>Table of Contents</summary>
+**Meet4Specs** is a local-first desktop application for product discovery and spec-driven delivery. It records user interviews, transcribes them on-device, generates AI summaries, and turns those conversations into OpenSpec bundles (`proposal`, `spec`, `design`, `tasks`) that development teams can actually use.
 
-- [Introduction](#introduction)
-- [Why Meetily?](#why-meetily)
-- [Features](#features)
-- [Installation](#installation)
-- [Key Features in Action](#key-features-in-action)
-- [System Architecture](#system-architecture)
-- [For Developers](#for-developers)
-- [Meetily PRO](#meetily-pro)
-- [Contributing](#contributing)
-- [License](#license)
+It builds on top of [Meetily](https://github.com/Zackriya-Solutions/meeting-minutes), reoriented from generic meeting intelligence toward requirements capture and specification generation.
 
-</details>
+## Why This Project?
 
-## Introduction
+Most interview notes die in chat threads, docs, or scattered recordings. Teams lose context between discovery and delivery, then rewrite the same intent again when engineering starts.
 
-Meetily is a privacy-first AI meeting assistant that runs entirely on your local machine. It captures your meetings, transcribes them in real-time, and generates summaries, all without sending any data to the cloud. This makes it the perfect solution for professionals and enterprises who need to maintain complete control over their sensitive information.
+Meet4Specs closes that gap. Instead of stopping at transcript or summary, it pushes one step further: interview → structured requirements → OpenSpec-ready artifact bundle. You keep privacy-first local transcription, but get output shaped for real product and engineering workflows.
 
-## Why Meetily?
+## Key Features
 
-While there are many meeting transcription tools available, this solution stands out by offering:
+| Feature | Description |
+| --- | --- |
+| Local-first transcription | Captures microphone + system audio, then transcribes interviews locally with Whisper or Parakeet models. |
+| OpenSpec bundle generation | Produces structured `proposal`, `spec`, `design`, and `tasks` outputs from interview content. |
+| Flexible AI providers | Supports fully local Ollama plus Claude, Groq, OpenRouter, and custom OpenAI-compatible endpoints. |
+| Cross-platform desktop app | Built with Tauri for macOS, Windows, and Linux. |
+| GPU-aware transcription | Uses Metal/CoreML, CUDA, Vulkan, HIP, or OpenBLAS depending on platform and hardware. |
+| Downloadable deliverables | Exports generated specs as a `.zip` bundle ready for review or handoff. |
+| Privacy-preserving workflow | Audio, transcripts, and local processing stay on your machine unless you explicitly choose a cloud model provider. |
 
-- **Privacy First:** All processing happens locally on your device.
-- **Cost-Effective:** Uses open-source AI models instead of expensive APIs.
-- **Flexible:** Works offline and supports multiple meeting platforms.
-- **Customizable:** Self-host and modify for your specific needs.
+## Technology Stack
 
-<details>
-<summary>The Privacy Problem</summary>
+Primary stack, sourced from project manifests and setup docs:
 
-Meeting AI tools create significant privacy and compliance risks across all sectors:
+- **Desktop shell:** Tauri `2.6.x`
+- **Backend:** Rust `edition 2021`, minimum Rust `1.77`
+- **Frontend:** Next.js `14`, React `18`, TypeScript `5`
+- **UI:** Tailwind CSS, shadcn/ui, Radix UI
+- **Local database:** SQLite via `sqlx`
+- **Transcription engines:** `whisper-rs 0.16.0`, Parakeet via ONNX Runtime
+- **Local AI option:** Ollama
+- **Build tooling:** Node.js LTS `>= 18`, pnpm `>= 8`, Bun `>= 1.1.43`, CMake `>= 3.x`
 
-- **$4.4M average cost per data breach** (IBM 2024)
-- **€5.88 billion in GDPR fines** issued by 2025
-- **400+ unlawful recording cases** filed in California this year
+## Project Architecture
 
-Whether you're a defense consultant, enterprise executive, legal professional, or healthcare provider, your sensitive discussions shouldn't live on servers you don't control. Cloud meeting tools promise convenience but deliver privacy nightmares with unclear data storage practices and potential unauthorized access.
+Meet4Specs is a self-contained desktop application.
 
-**Meetily solves this:** Complete data sovereignty on your infrastructure, zero vendor lock-in, and full control over your sensitive conversations.
+```mermaid
+flowchart TB
+    subgraph app["Meet4Specs desktop app"]
+        ui["Next.js UI"] <-->|Tauri IPC| rust["Rust / Tauri backend"]
+        rust --> audio["Audio capture"]
+        rust --> stt["Whisper / Parakeet transcription"]
+        rust --> summary["Summary service"]
+        rust --> specgen["OpenSpec generator"]
+        rust --> db["Local SQLite storage"]
+    end
 
-</details>
-
-## Features
-
-- **Local First:** All processing is done on your machine. No data ever leaves your computer.
-- **Real-time Transcription:** Get a live transcript of your meeting as it happens.
-- **AI-Powered Summaries:** Generate summaries of your meetings using powerful language models.
-- **Multi-Platform:** Works on macOS, Windows, and Linux.
-- **Open Source:** Meetily is open source and free to use.
-- **Flexible AI Provider Support:** Choose from Ollama (local), Claude, Groq, OpenRouter, or use your own OpenAI-compatible endpoint.
-
-## Installation
-
-> 📖 **New here?** Read the [Getting Started guide](docs/GETTING_STARTED.md) — requirements per OS, first-run checklist, and how to turn interviews into development specifications.
-
-### 🪟 **Windows**
-
-1. Download the latest `x64-setup.exe` from [Releases](https://github.com/Zackriya-Solutions/meeting-minutes/releases/latest)
-2. Run the installer
-
-### 🍎 **macOS**
-
-1. Download `meetily_0.4.0_aarch64.dmg` from [Releases](https://github.com/Zackriya-Solutions/meeting-minutes/releases/latest)
-2. Open the downloaded `.dmg` file
-3. Drag **Meetily** to your Applications folder
-4. Open **Meetily** from Applications folder
-
-### 🐧 **Linux**
-
-Build from source following our detailed guides:
-
-- [Building on Linux](docs/building_in_linux.md)
-- [General Build Instructions](docs/BUILDING.md)
-
-**Quick start:**
-
-```bash
-git clone https://github.com/Zackriya-Solutions/meeting-minutes
-cd meeting-minutes/frontend
-pnpm install
-./build-gpu.sh
+    summary --> ollama["Ollama (local)"]
+    summary --> cloud["Claude / Groq / OpenRouter / custom OpenAI"]
+    specgen --> node["Node.js + npx openspec"]
 ```
 
-## Key Features in Action
+High level:
+- **Next.js frontend** drives interview, transcript, and settings UX.
+- **Rust/Tauri backend** handles native audio capture, transcription, local storage, summaries, and OpenSpec generation.
+- **Node.js + OpenSpec CLI** are used when generating the development-spec bundle.
 
-### 🎯 Local Transcription
+See also [docs/architecture.md](docs/architecture.md) and [docs/DEV_SETUP.md](docs/DEV_SETUP.md).
 
-Transcribe meetings entirely on your device using **Whisper** or **Parakeet** models. No cloud required.
+## Getting Started
 
-<p align="center">
-    <img src="docs/home.png" width="650" style="border-radius: 10px;" alt="Meetily Demo" />
-</p>
+### Prerequisites
 
-### 📥 Import & Enhance `Beta`
+- **End users:** supported desktop OS and microphone
+- **Spec generation:** Node.js LTS installed on PATH
+- **From source:** Node.js, pnpm, Rust, Bun, CMake
 
-Import existing audio files to generate transcripts, or enhance to re-transcribe any recorded meeting with a different model or language, all processed locally.
+### Quick Start from source
 
-> Contributed by [Jeremi Joslin](https://github.com/jeremi), improved by [Vishnu P S](https://github.com/p-s-vishnu) and [Mohammed Safvan](https://github.com/mohammedsafvan)
+```bash
+git clone git@github.com:xmagcx/meet4specs.git
+cd meet4specs/frontend
+pnpm install
+./dev-gpu.sh
+```
 
-<p align="center">
-    <img src="docs/meetily-export.gif" width="650" style="border-radius: 10px;" alt="Import and Enhance" />
-</p>
+CPU-only alternative:
 
-### 🤖 AI-Powered Summaries
+```bash
+cd frontend
+pnpm tauri:dev
+```
 
-Generate meeting summaries with your choice of AI provider. **Ollama** (local) is recommended, with support for Claude, Groq, OpenRouter, and OpenAI.
+### First-run flow
 
-<p align="center">
-    <img src="docs/summary.png" width="650" style="border-radius: 10px;" alt="Summary generation" />
-</p>
+1. Open app and complete onboarding.
+2. Download transcription model.
+3. Configure AI provider in Settings.
+4. Record interview or import audio.
+5. Generate summary.
+6. Click **Generate development specification**.
 
-<p align="center">
-    <img src="docs/editor1.png" width="650" style="border-radius: 10px;" alt="Editor Summary generation" />
-</p>
+For OS-specific install and troubleshooting, see [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md) and [docs/BUILDING.md](docs/BUILDING.md).
 
-### 🔒 Privacy-First Design
+## Usage
 
-All data stays on your machine. Transcription models, recordings, and transcripts are stored locally.
+Typical workflow:
 
-<p align="center">
-    <img src="docs/settings.png" width="650" style="border-radius: 10px;" alt="Local Transcription and storage" />
-</p>
+1. Run an interview in Meet4Specs.
+2. Capture microphone and optional system audio.
+3. Review transcript and summary.
+4. Export generated OpenSpec bundle.
 
-### 🌐 Custom OpenAI Endpoint Support
+Example of inspecting exported output:
 
-Use your own OpenAI-compatible endpoint for AI summaries. Perfect for organizations with custom AI infrastructure or preferred providers.
+```bash
+unzip customer-discovery-spec.zip -d ./customer-discovery-spec
+find ./customer-discovery-spec -maxdepth 3 -type f | sort
+```
 
-<p align="center">
-    <img src="docs/custom.png" width="650" style="border-radius: 10px;" alt="Custom OpenAI Endpoint Configuration" />
-</p>
+Expected bundle shape:
 
-### 🎙️ Professional Audio Mixing
+```text
+customer-discovery-spec/
+├── proposal.md
+├── design.md
+├── tasks.md
+└── specs/
+    └── <capability>/
+        └── spec.md
+```
 
-Capture microphone and system audio simultaneously with intelligent ducking and clipping prevention.
+That output is designed to plug into a spec-driven development workflow instead of forcing teams to manually rewrite interview notes into engineering artifacts.
 
-<p align="center">
-    <img src="docs/audio.png" width="650" style="border-radius: 10px;" alt="Device selection" />
-</p>
+### Product demos
 
-### ⚡ GPU Acceleration
+<div align="center">
+  <img src="assets/meetily_demo.gif" width="520" alt="Meet4Specs interview recording and transcription demo" />
+</div>
 
-Built-in support for hardware acceleration across platforms:
+<div align="center">
+  <img src="assets/meetily-export.gif" width="520" alt="Meet4Specs export and specification bundle demo" />
+</div>
 
-- **macOS**: Apple Silicon (Metal) + CoreML
-- **Windows/Linux**: NVIDIA (CUDA), AMD/Intel (Vulkan)
+## Project Structure
 
-Automatically enabled at build time - no configuration needed.
+| Path | Purpose |
+| --- | --- |
+| `frontend/` | Next.js desktop UI, scripts, and frontend tests |
+| `frontend/src-tauri/` | Rust/Tauri core: audio, transcription, storage, summaries, OpenSpec generation |
+| `llama-helper/` | Rust sidecar binary for local inference support |
+| `docs/` | End-user, build, architecture, and setup documentation |
+| `openspec/` | Local OpenSpec workspace for specs and in-flight changes |
+| `backend/` | Legacy backend archive retained for historical context, not current supported path |
+| `assets/` | Branding and visual assets |
 
-## System Architecture
+## Development Workflow
 
-Meetily is a single, self-contained application built with [Tauri](https://tauri.app/). It uses a Rust-based backend to handle all the core logic, and a Next.js frontend for the user interface.
+Current repo workflow, based on `CONTRIBUTING.md` and GitHub Actions docs:
 
-For more details, see the [Architecture documentation](docs/architecture.md).
+- `main` = production branch
+- `devtest` = integration and testing branch
+- Feature branches should branch from `devtest`
+- Pull requests target `devtest`
+- CI provides multi-platform build/test validation plus release automation
 
-## For Developers
+Useful workflow docs:
+- [Contributing guide](CONTRIBUTING.md)
+- [.github/workflows/WORKFLOWS_OVERVIEW.md](.github/workflows/WORKFLOWS_OVERVIEW.md)
+- [.github/workflows/README_DEVTEST.md](.github/workflows/README_DEVTEST.md)
 
-If you want to contribute to Meetily or build it from source, you'll need to have Rust and Node.js installed. Start with the [Developer Setup guide](docs/DEV_SETUP.md) for validated Windows/Linux prerequisites. For detailed build instructions, please see the [Building from Source guide](docs/BUILDING.md).
+## Coding Standards
 
-## Meetily Pro
+Project conventions documented in `CONTRIBUTING.md`:
 
-<p align="center">
-    <img src="docs/pv2.1.png" width="650" style="border-radius: 10px;" alt="Upcoming version" />
-</p>
+- follow existing code style
+- use meaningful variable and function names
+- keep functions small and focused
+- add comments for complex logic
+- update docs when behavior changes
+- use structured commit messages such as `feat(scope): subject`
 
-**Meetily PRO** is a professional-grade solution with enhanced accuracy and advanced features for serious users and teams. Built on a different codebase with superior transcription models and enterprise-ready capabilities.
+## Testing
 
-### Community Thank-You Offer
+Testing is mixed by layer:
 
-Meetily Community Edition will remain free and open source. PRO exists for users and teams who want a more advanced meeting workflow, including higher transcription accuracy, custom summary templates, advanced exports, auto-meeting detection, and self-hosted deployment options.
+- **Frontend:** tests live under `frontend/tests/`
+- **Rust backend:** extensive unit and async tests live under `frontend/src-tauri/src/`
+- **CI:** GitHub Actions validates cross-platform builds and release flow
 
-For the community that helped Meetily grow, we are making the upgrade easier: use coupon code **LAUNCH20** for **20% off Meetily PRO** until the next Meetily Community Edition release.
+Contributor expectation:
+- add or update tests for new behavior
+- ensure relevant tests pass before PR
+- update docs when feature behavior changes
 
-Speaker diarization is planned for mid-June, bringing automatic speaker separation to PRO meetings.
+## Roadmap
 
-### Key Advantages Over Community Edition:
+Current direction, based on existing docs and repo intent:
 
-- **Enhanced Accuracy**: Superior transcription models for professional-grade accuracy
-- **Custom Summary Templates**: Tailor summaries to your specific workflow and needs
-- **Advanced Export Options**: PDF, DOCX, and Markdown exports with formatting
-- **Auto-detect and Join Meetings**: Automatic meeting detection and joining
-- **Speaker Identification**: Distinguish between speakers automatically *(Coming Soon)*
-- **Chat with Meetings**: AI-powered meeting insights and queries *(Coming Soon)*
-- **Calendar Integration**: Seamless integration with your calendar *(Coming Soon)*
-- **Self-Hosted Deployment**: Deploy on your own infrastructure for teams
-- **GDPR Compliance Built-In**: Privacy by design architecture with complete audit trails
-- **Priority Support**: Dedicated support for PRO users
+- [ ] Improve interview-to-spec prompt quality and artifact fidelity
+- [ ] Expand OpenSpec generation workflows for more business discovery patterns
+- [ ] Refine import and post-processing flows for recorded interviews
+- [ ] Continue hardening cross-platform audio and GPU acceleration support
 
-### Who is PRO for?
+## FAQ
 
-- **Professionals** who need the highest accuracy for critical meetings
-- **Teams and organizations** (2-100 users) requiring self-hosted deployment
-- **Power users** who need advanced export formats and custom workflows
-- **Compliance-focused organizations** requiring GDPR readiness
+### Does audio leave my machine?
+Transcription can run fully locally. Summaries and spec generation stay local if you use Ollama; cloud providers are optional.
 
-> **Note:** Meetily Community Edition remains **free & open source forever** with local transcription, AI summaries, and core features. PRO is a separate professional solution for users who need enhanced accuracy and advanced capabilities.
+### Do I need Node.js?
+Only for the **Generate development specification** feature, which invokes the OpenSpec CLI via `npx`.
 
-For organizations needing 100+ users or managed compliance solutions, explore [Meetily Enterprise](https://meetily.ai/enterprise/).
-
-**Learn more about pricing and features:** [https://meetily.ai/pro/](https://meetily.ai/pro/)
+### Is the old `backend/` folder still supported?
+No. It is retained for historical reference. Current supported architecture is the Tauri desktop app.
 
 ## Contributing
 
-We welcome contributions from the community! If you have any questions or suggestions, please open an issue or submit a pull request. Please follow the established project structure and guidelines. For more details, refer to the [CONTRIBUTING.md](CONTRIBUTING.md) file.
+Contributions welcome. Best path:
 
-Thanks for all the contributions. Our community is what makes this project possible.
+1. Open or confirm issue first.
+2. Branch from `devtest`.
+3. Keep change focused.
+4. Add or update tests.
+5. Open PR against `devtest` and complete template.
+
+For details, read [CONTRIBUTING.md](CONTRIBUTING.md). If the repo starts labeling onboarding issues, `good first issue` is best place to begin.
+
+## Author & Contact
+
+**Mauricio Gallardo**
+
+[![Email](https://img.shields.io/badge/Email-D14836?style=flat-square&logo=gmail&logoColor=white)](mailto:mauricio.gallardo@outlook.com)
+[![LinkedIn](https://img.shields.io/badge/LinkedIn-0077B5?style=flat-square&logo=linkedin&logoColor=white)](https://www.linkedin.com/in/mauricio-gallardo-carvacho/)
 
 ## License
 
-MIT License - Feel free to use this project for your own purposes.
-
-## Acknowledgments
-
-- We borrowed some code from [Whisper.cpp](https://github.com/ggerganov/whisper.cpp).
-- We borrowed some code from [Screenpipe](https://github.com/mediar-ai/screenpipe).
-- We borrowed some code from [transcribe-rs](https://crates.io/crates/transcribe-rs).
-- Thanks to **NVIDIA** for developing the **Parakeet** model.
-- Thanks to [istupakov](https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx) for providing the **ONNX conversion** of the Parakeet model.
+Distributed under the MIT License. See [LICENSE.md](LICENSE.md).
 
 ## Star History
 
-[![Star History Chart](https://api.star-history.com/chart?repos=Zackriya-Solutions/meetily&type=date&legend=top-left)](https://www.star-history.com/?repos=Zackriya-Solutions%2Fmeetily&type=date&legend=bottom-right)
+<a href="https://www.star-history.com/?repos=xmagcx%2Fmeet4specs&type=timeline&legend=top-left">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=xmagcx/meet4specs&type=timeline&theme=dark&legend=top-left&sealed_token=J_owx_Mu6OFOrn_vnQ7iZgZltLvypow-jKsxPrKSRwgwgoAqa4f918ezt-LtAaKCavUdT3R536tR2uHpEaJ7xidxyhO9cKOMBkVH6M7d--wA-SY5O4vVNg" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=xmagcx/meet4specs&type=timeline&legend=top-left&sealed_token=J_owx_Mu6OFOrn_vnQ7iZgZltLvypow-jKsxPrKSRwgwgoAqa4f918ezt-LtAaKCavUdT3R536tR2uHpEaJ7xidxyhO9cKOMBkVH6M7d--wA-SY5O4vVNg" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=xmagcx/meet4specs&type=timeline&legend=top-left&sealed_token=J_owx_Mu6OFOrn_vnQ7iZgZltLvypow-jKsxPrKSRwgwgoAqa4f918ezt-LtAaKCavUdT3R536tR2uHpEaJ7xidxyhO9cKOMBkVH6M7d--wA-SY5O4vVNg" />
+ </picture>
+</a>

@@ -148,9 +148,13 @@ export function useRecordingStart(
       await showRecordingNotification(t);
     } catch (error) {
       console.error('Failed to start recording:', error);
-      setStatus(RecordingStatus.ERROR, error instanceof Error ? error.message : 'Failed to start recording');
+      const errorMessage = error instanceof Error ? error.message : 'Failed to start recording';
+      setStatus(RecordingStatus.ERROR, errorMessage);
       setIsRecording(false); // Reset state on error
       Analytics.trackButtonClick('start_recording_error', 'home_page');
+      void Analytics.trackError('recording_start_failed', errorMessage, {
+        error_context: 'useRecordingStart.handleRecordingStart',
+      });
       // Re-throw so RecordingControls can handle device-specific errors
       throw error;
     }
@@ -216,9 +220,13 @@ export function useRecordingStart(
             await showRecordingNotification(t);
           } catch (error) {
             console.error('Failed to auto-start recording:', error);
-            setStatus(RecordingStatus.ERROR, error instanceof Error ? error.message : 'Failed to auto-start recording');
+            const errorMessage = error instanceof Error ? error.message : 'Failed to auto-start recording';
+            setStatus(RecordingStatus.ERROR, errorMessage);
             alert(t('recording.failedToStart'));
             Analytics.trackButtonClick('start_recording_error', 'sidebar_auto');
+            void Analytics.trackError('recording_autostart_failed', errorMessage, {
+              error_context: 'useRecordingStart.autoStart',
+            });
           } finally {
             setIsAutoStarting(false);
           }

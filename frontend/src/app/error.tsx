@@ -3,6 +3,7 @@
 import { useEffect } from 'react';
 import { AlertTriangle, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import Analytics from '@/lib/analytics';
 
 export default function RouteError({
   error,
@@ -13,6 +14,10 @@ export default function RouteError({
 }) {
   useEffect(() => {
     console.error('[App route] Unhandled route error', error);
+    void Analytics.trackCriticalError('route_error', error.message, {
+      error_context: 'app.error',
+      error_digest: error.digest || 'none',
+    });
   }, [error]);
 
   return (
