@@ -88,6 +88,8 @@ choco install visualstudio2022buildtools -y --package-parameters `
 > After installing Build Tools for the first time, open a **new** terminal (or a *Developer Command Prompt*) so the MSVC environment variables are picked up.
 >
 > Windows build behavior: `frontend/build.bat` now uses the repo's auto-detection path by default. If `VULKAN_SDK` is missing, it falls back to non-Vulkan build modes instead of forcing a failing Vulkan build.
+>
+> Local production builds also skip updater artifact signing when `TAURI_SIGNING_PRIVATE_KEY` is not set by merging `src-tauri/tauri.local.conf.json`. Release builds that need updater artifacts must provide the private key.
 
 ## 🐧 Linux prerequisites (Ubuntu 22.04 — validated)
 
@@ -139,9 +141,16 @@ pnpm tauri:dev        # explicit CPU mode alternative
 ```
 
 ```bat
-:: 3b. Windows development / build
+:: 3b. Windows development / local production build
 build.bat debug       :: auto-detects acceleration; does NOT require Vulkan SDK
-build.bat             :: production build with same fallback behavior
+build.bat             :: local production build; skips updater signing if TAURI_SIGNING_PRIVATE_KEY is missing
+```
+
+```powershell
+# 3c. Signed Windows release build (updater artifacts enabled)
+$env:TAURI_SIGNING_PRIVATE_KEY = Get-Content .tauri\meetily.key -Raw
+$env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = "<password>"
+./build.ps1
 ```
 
 ```bash
