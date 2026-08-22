@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
-import { ArrowLeft, Settings2, Mic, Database as DatabaseIcon, SparkleIcon, FlaskConical } from 'lucide-react';
+import { ArrowLeft, Settings2, Mic, Database as DatabaseIcon, SparkleIcon, FlaskConical, Wrench } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { invoke } from '@tauri-apps/api/core';
 import { motion } from 'framer-motion';
@@ -10,6 +10,7 @@ import { RecordingSettings } from '@/components/RecordingSettings';
 import { PreferenceSettings } from '@/components/PreferenceSettings';
 import { SummaryModelSettings } from '@/components/SummaryModelSettings';
 import { BetaSettings } from '@/components/BetaSettings';
+import { DesktopToolsSettings } from '@/components/DesktopToolsSettings';
 import { useConfig } from '@/contexts/ConfigContext';
 import { useI18n } from '@/hooks/useI18n';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
@@ -20,7 +21,8 @@ const TABS = [
   { value: 'recording', labelKey: 'settings.tabs.recording', icon: Mic },
   { value: 'Transcriptionmodels', labelKey: 'settings.tabs.transcription', icon: DatabaseIcon },
   { value: 'summaryModels', labelKey: 'settings.tabs.summary', icon: SparkleIcon },
-  { value: 'beta', labelKey: 'settings.tabs.beta', icon: FlaskConical }
+  { value: 'beta', labelKey: 'settings.tabs.beta', icon: FlaskConical },
+  { value: 'desktopTools', labelKey: 'settings.tabs.desktopTools', icon: Wrench }
 ] as const;
 
 export default function SettingsPage() {
@@ -128,6 +130,9 @@ export default function SettingsPage() {
             </TabsContent>
             <TabsContent value="beta" className="mt-6">
               <BetaSettings />
+            </TabsContent>
+            <TabsContent value="desktopTools">
+              <DesktopToolsSettings />
             </TabsContent>
           </Tabs>
         </div>

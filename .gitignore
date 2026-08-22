@@ -85,3 +85,4 @@ frontend/src-tauri/binaries/
 .serena/
 .github/
 commit_context.md
+.playwright-cli/

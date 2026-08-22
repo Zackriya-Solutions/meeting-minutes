@@ -338,7 +338,12 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
         console.log('✅ MAIN transcript listener setup complete');
       } catch (error) {
         console.error('❌ Failed to setup MAIN transcript listener:', error);
-        alert('Failed to setup transcript listener. Check console for details.');
+        // A transcript event listener is an enhancement, not a reason to
+        // freeze the whole desktop application. `alert()` is modal in
+        // WebView2 and blocks every control until dismissed; it also turns a
+        // transient IPC startup failure into an apparently unresponsive app.
+        // Keep the detailed error in the console and let the rest of the UI
+        // remain usable; the listener will be recreated on the next mount.
       }
     };
 

@@ -1,5 +1,6 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import { toast } from 'sonner';
 import {
   isOpenSpecDependencyError,
@@ -60,6 +61,11 @@ interface SaveOpenSpecResult {
   saved_path?: string;
 }
 
+interface SummaryProviderConfig {
+  provider: string;
+  model: string;
+}
+
 type OpenSpecInvoke = <T>(command: string, args?: Record<string, unknown>) => Promise<T>;
 
 interface GenerateOpenSpecOptions {
@@ -81,9 +87,11 @@ export async function generateOpenSpecBundle(
   {
     meetingId,
     hasTranscript,
+    resume = false,
   }: {
     meetingId: string;
     hasTranscript: boolean;
+    resume?: boolean;
   },
   options: GenerateOpenSpecOptions,
 ): Promise<{ state: OpenSpecStatus; error: OpenSpecErrorPayload | null }> {
@@ -92,6 +100,29 @@ export async function generateOpenSpecBundle(
   }
 
   const invokeFn = options.invokeFn ?? invoke;
+
+  // A meeting transcript can contain sensitive business information. Local
+  // providers keep it on the device; every remote provider needs a fresh,
+  // explicit decision for this meeting before we send the transcript/summary
+  // to generate OpenSpec artifacts.
+  try {
+    const config = await invokeFn<SummaryProviderConfig | null>('api_get_model_config');
+    const provider = config?.provider?.toLowerCase();
+    const isRemoteProvider = provider && !['builtin-ai', 'ollama'].includes(provider);
+    if (isRemoteProvider) {
+      const approved = window.confirm(
+        `OpenSpec will send this meeting's transcript and summary to ${config?.provider} (${config?.model}) to generate proposal, specification, design, and task artifacts. Continue?`,
+      );
+      if (!approved) {
+        return { state: 'idle', error: null };
+      }
+    }
+  } catch (error) {
+    // Do not block local generation if an older backend cannot expose the
+    // selected model config. The generation command still validates provider
+    // configuration server-side.
+    console.warn('[OpenSpec] Failed to check selected provider before generation:', error);
+  }
 
   const showActionableError = async (payload: OpenSpecErrorPayload) => {
     const fallbackDescription = payload.stderr || payload.message;
@@ -131,6 +162,8 @@ export async function generateOpenSpecBundle(
   try {
     result = await invokeFn<OpenSpecGenerationResult>('api_generate_openspec_bundle', {
       meetingId,
+      generateWithAi: true,
+      resume: resume ?? false,
     });
   } catch (invokeError) {
     const payload = {
@@ -174,6 +207,19 @@ export function useOpenSpecGeneration({ meetingId, hasTranscript }: UseOpenSpecG
   const { t } = useI18n();
   const [status, setStatus] = useState<OpenSpecStatus>('idle');
   const [error, setError] = useState<OpenSpecErrorPayload | null>(null);
+  const [progress, setProgress] = useState<{ stage: string; message: string; percent: number } | null>(null);
+
+  useEffect(() => {
+    const unlisten = listen<{ meetingId: string; stage: string; message: string; percent: number }>(
+      'openspec-generation-progress',
+      (event) => {
+        if (event.payload.meetingId === meetingId) {
+          setProgress({ stage: event.payload.stage, message: event.payload.message, percent: event.payload.percent });
+        }
+      },
+    );
+    return () => { unlisten.then((fn) => fn()); };
+  }, [meetingId]);
 
   const getStatusMessage = useCallback((value: OpenSpecStatus) => {
     switch (value) {
@@ -188,16 +234,17 @@ export function useOpenSpecGeneration({ meetingId, hasTranscript }: UseOpenSpecG
     }
   }, [t]);
 
-  const generate = useCallback(async () => {
+  const generate = useCallback(async (resume = false) => {
     if (!hasTranscript) {
       return;
     }
 
     setStatus(prev => advanceOpenSpecState(prev, 'start'));
     setError(null);
+    setProgress({ stage: 'workspace', message: 'Preparing OpenSpec workspace', percent: 10 });
 
     const result = await generateOpenSpecBundle(
-      { meetingId, hasTranscript },
+      { meetingId, hasTranscript, resume },
       {
         t,
         showToastError: (message, options) => toast.error(message, options),
@@ -215,6 +262,11 @@ export function useOpenSpecGeneration({ meetingId, hasTranscript }: UseOpenSpecG
     setStatus(prev => advanceOpenSpecState(prev, 'success'));
   }, [hasTranscript, meetingId, t]);
 
+  const cancel = useCallback(async () => {
+    await invoke('cancel_openspec_generation', { meetingId });
+    setProgress({ stage: 'cancelled', message: 'Cancelling generation', percent: 0 });
+  }, [meetingId]);
+
   const handleGenerateOrRetry = useCallback(async () => {
     if (status === 'error') {
       setStatus(prev => advanceOpenSpecState(prev, 'reset_error'));
@@ -222,7 +274,7 @@ export function useOpenSpecGeneration({ meetingId, hasTranscript }: UseOpenSpecG
       return;
     }
 
-    await generate();
+    await generate(true);
   }, [generate, status]);
 
   const handleRegenerate = useCallback(async () => {
@@ -235,5 +287,7 @@ export function useOpenSpecGeneration({ meetingId, hasTranscript }: UseOpenSpecG
     getOpenSpecStatusMessage: getStatusMessage,
     handleGenerateOpenSpec: handleGenerateOrRetry,
     handleRegenerateOpenSpec: handleRegenerate,
+    openSpecProgress: progress,
+    cancelOpenSpecGeneration: cancel,
   };
 }

@@ -2,6 +2,7 @@
 
 import React from 'react';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
+import { MainContentErrorBoundary } from './MainContentErrorBoundary';
 
 interface MainContentProps {
   children: React.ReactNode;
@@ -17,7 +18,7 @@ const MainContent: React.FC<MainContentProps> = ({ children }) => {
       }`}
     >
       <div className="pl-8">
-        {children}
+        <MainContentErrorBoundary>{children}</MainContentErrorBoundary>
       </div>
     </main>
   );
