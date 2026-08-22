@@ -16,17 +16,10 @@ case $LOG_LEVEL in
         ;;
 esac
 
-# Check and install CMake if needed
-echo "Checking CMake version..."
+# Check CMake
 if ! command -v cmake &> /dev/null; then
-    echo "CMake not found. Installing via Homebrew..."
-    brew install cmake
-else
-    CMAKE_VERSION=$(cmake --version | head -n1 | cut -d" " -f3)
-    if [[ "$CMAKE_VERSION" < "3.5" ]]; then
-        echo "CMake version $CMAKE_VERSION is too old. Updating via Homebrew..."
-        brew upgrade cmake
-    fi
+    echo "CMake not found. Install it first: sudo apt install cmake (Linux) / brew install cmake (macOS)"
+    exit 1
 fi
 
 # Clean up previous builds
@@ -53,5 +46,4 @@ pnpm run build
 
 echo "Building Tauri app..."
 pnpm run tauri build
-sleep
 
