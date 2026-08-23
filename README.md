@@ -174,9 +174,9 @@ That output is designed to plug into a spec-driven development workflow instead 
 Current repo workflow, based on `CONTRIBUTING.md` and GitHub Actions docs:
 
 - `main` = production branch
-- `devtest` = integration and testing branch
-- Feature branches should branch from `devtest`
-- Pull requests target `devtest`
+- `dev` = integration and testing branch
+- Feature branches should branch from `dev`
+- Pull requests target `dev`
 - CI provides multi-platform build/test validation plus release automation
 
 Useful workflow docs:
@@ -212,10 +212,28 @@ Contributor expectation:
 
 Current direction, based on existing docs and repo intent:
 
-- [ ] Improve interview-to-spec prompt quality and artifact fidelity
-- [ ] Expand OpenSpec generation workflows for more business discovery patterns
-- [ ] Refine import and post-processing flows for recorded interviews
-- [ ] Continue hardening cross-platform audio and GPU acceleration support
+- [ ] **Multi-Modal Image Ingestion Pipeline**
+  - Support uploading meeting screenshots, whiteboard sketches, UI mockups, and architecture diagrams alongside audio/transcripts.
+- [ ] **Vision LLM Integration (`Llama 3.2 Vision` / `LLaVA`)**
+  - Implement vision model integration to analyze and extract contextual software engineering detail from uploaded images.
+- [ ] **Diagrams-as-Code Engine (Mermaid.js / PlantUML)**
+  - Automatically parse visual input (flowcharts, sequence diagrams, ERDs) and convert them into standard **Mermaid.js** or **PlantUML** markup embedded directly into generated specification deliverables.
+- [ ] **Ultra-Fast & Lightweight ASR Engine Support (`SenseVoice` / `Moonshine`)**
+  - Integrate alternative open-source speech-to-text models for local, low-latency, and resource-efficient processing.
+- [ ] **Dynamic Model Router**
+  - Route audio files dynamically based on language, duration, compute resources, or latency targets (e.g., fast local transcription vs. high-accuracy cloud Whisper).
+- [ ] **Loudness Normalization (LUFS)**
+  - Implement dynamic range compression and Integrated Loudness Normalization (target: -16 to -14 LUFS) to balance low-volume whispers and loud speakers, preventing word omission or signal distortion.
+- [ ] **Noise Suppression (Spectral Gating / RNNoise)**
+  - Filter out background HVAC hums, fan noises, desktop vibrations, and ambient static before feeding audio into ASR models.
+- [ ] **High-Pass Filter (HPF @ 80 Hz)**
+  - Remove low-frequency rumbles, microphone thumps, wind noise, and physical table knocks below 80 Hz.
+- [ ] **Voice Activity Detection (VAD - e.g., Silero VAD)**
+  - Strip non-speech audio and extended silences prior to transcription to eliminate hallucinations, repeated loops, and unnecessary API token consumption in Whisper-based models.
+- [ ] **ASR Accuracy Evaluation Plugin (Standalone / Auxiliary Tool)**
+  - Implement Word Error Rate (**WER**), Character Error Rate (**CER**), and Match Error Rate (**MER**) benchmarks to quantitatively measure transcript accuracy against ground-truth references.
+- [ ] **Specification Consistency & Completeness Validator**
+  - Automated LLM-as-a-Judge validation layer to verify whether requirements, acceptance criteria, and technical constraints generated in the specifications strictly match source transcripts and visual diagrams without hallucinations
 
 ## FAQ
 
