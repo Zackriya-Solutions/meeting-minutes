@@ -1,0 +1,34 @@
+{
+  "app": {
+    "name": "Meetily",
+    "tagline": "개인정보 보호 중심 AI 회의 어시스턴트"
+  },
+  "nav": {
+    "home": "홈",
+    "meetings": "회의",
+    "settings": "설정",
+    "notes": "메모"
+  },
+  "actions": {
+    "save": "저장",
+    "cancel": "취소",
+    "delete": "삭제",
+    "edit": "편집",
+    "close": "닫기",
+    "confirm": "확인",
+    "back": "뒤로",
+    "next": "다음"
+  },
+  "status": {
+    "loading": "불러오는 중...",
+    "saving": "저장 중...",
+    "success": "성공",
+    "failed": "실패"
+  },
+  "recovery": {
+    "success_title": "회의 복구 완료!",
+    "transcripts_and_audio": "전사와 오디오가 복구되었습니다",
+    "transcripts_only": "전사 복구 완료 (오디오 없음)",
+    "view_meeting": "회의 보기"
+  }
+}

@@ -1,0 +1,54 @@
+{
+  "title": "Transcription",
+  "view": {
+    "empty": "No transcript yet. Start recording to see transcription here.",
+    "loading": "Loading transcript...",
+    "search_placeholder": "Search transcript...",
+    "copy": "Copy",
+    "copy_title": "Copy Transcript",
+    "language": "Language",
+    "language_title": "Language",
+    "player": {
+      "play": "Play",
+      "pause": "Pause",
+      "play_title": "Play audio",
+      "pause_title": "Pause audio",
+      "no_audio": "No audio available for this meeting",
+      "seek_title": "Seek to position",
+      "timestamp_jump_tooltip": "Click timestamp to jump to that audio position",
+      "loading": "Loading audio...",
+      "error": "Audio playback failed"
+    }
+  },
+  "settings": {
+    "title": "Transcription Settings",
+    "model": "Model",
+    "language": "Language",
+    "auto_detect": "Auto-detect"
+  },
+  "recovery": {
+    "title": "Recover Unsaved Transcript",
+    "description": "We found a previous session that did not finish. Recover it?",
+    "recover": "Recover",
+    "discard": "Discard",
+    "dialog_title": "Recover Interrupted Meetings",
+    "interrupted_label": "Interrupted Meetings",
+    "preview_label": "Preview",
+    "dialog_description_one": "We found 1 meeting that was interrupted. Select a meeting to preview and recover it.",
+    "dialog_description_other": "We found {count} meetings that were interrupted. Select a meeting to preview and recover it.",
+    "started_label": "Started",
+    "preview_segments": "Showing first {shown} transcript segments (of {total} total)",
+    "preview_loading": "Loading preview...",
+    "preview_empty": "No transcripts to preview",
+    "preview_select": "Select a meeting to preview",
+    "audio_available": "Audio available",
+    "audio_unavailable": "No audio",
+    "alert_recover_failed": "Failed to recover meeting. Please try again.",
+    "alert_delete_failed": "Failed to delete meeting. Please try again.",
+    "confirm_delete": "Are you sure you want to delete this meeting? This cannot be undone.",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "deleting": "Deleting...",
+    "recovering": "Recovering..."
+  }
+}

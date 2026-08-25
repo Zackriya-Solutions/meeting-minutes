@@ -1,0 +1,12 @@
+{
+  "permission_microphone_denied": "麦克风权限被拒绝，请在系统设置中授予访问权限。",
+  "permission_screen_denied": "屏幕录制权限被拒绝，无法单独获取系统音频。",
+  "model_load_failed": "模型加载失败，请尝试重新下载。",
+  "recording_failed": "录音启动失败，请检查设备选择。",
+  "transcription_failed": "转写失败，请重试。",
+  "network_offline": "网络不可用，已切换到离线模式。",
+  "update_available": "有可用更新。",
+  "update_failed": "更新失败，请稍后重试。",
+  "recovery_failed": "恢复会议失败，请重试。",
+  "unknown_error": "发生未知错误。"
+}

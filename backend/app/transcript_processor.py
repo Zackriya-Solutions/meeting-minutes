@@ -15,6 +15,7 @@ from db import DatabaseManager
 from ollama import chat
 import asyncio
 from ollama import AsyncClient
+from transcript_postprocess import PostprocessConfig, postprocess_transcript
 
 
 
@@ -285,6 +286,20 @@ class TranscriptProcessor:
             # Remove the client from active clients list
             if client in self.active_clients:
                 self.active_clients.remove(client)
+
+    async def correct_text(
+        self,
+        text: str,
+        config: PostprocessConfig = None,
+    ) -> str:
+        """Apply LLM postprocess to a transcript (Wave 12 PR-42-i).
+
+        Thin wrapper around postprocess_transcript that allows the
+        TranscriptProcessor class to host the correction step. The actual
+        logic lives in transcript_postprocess.py for testability.
+        """
+        cfg = config or PostprocessConfig.from_env()
+        return await postprocess_transcript(text, config=cfg)
 
     def cleanup(self):
         """Clean up resources used by the TranscriptProcessor."""

@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Button } from './ui/button';
 import { AlertTriangle, CheckCircle, X } from 'lucide-react';
+import { useTranslations } from 'next-intl';
 
 interface ComplianceNotificationProps {
   isOpen: boolean;
@@ -18,6 +19,7 @@ export const ComplianceNotification: React.FC<ComplianceNotificationProps> = ({
   recordingButtonRef,
 }) => {
   const [isVisible, setIsVisible] = useState(false);
+  const t = useTranslations('settings');
   const [position, setPosition] = useState({ top: 0, left: 0, width: 192 }); // Default width
 
   useEffect(() => {
@@ -77,7 +79,7 @@ export const ComplianceNotification: React.FC<ComplianceNotificationProps> = ({
           <div className="flex items-center gap-1">
             <AlertTriangle className="h-3 w-3 text-amber-500 flex-shrink-0" />
             <h3 className="text-xs font-semibold text-gray-900">
-              Recording Notice
+              {t('compliance.title')}
             </h3>
           </div>
           <button
@@ -91,11 +93,11 @@ export const ComplianceNotification: React.FC<ComplianceNotificationProps> = ({
         {/* Content */}
         <div className="mb-2">
           <p className="text-xs text-gray-600 mb-1">
-            Inform participants about recording.
+            {t('compliance.body')}
           </p>
           <div className="bg-amber-50 border border-amber-200 rounded p-1">
             <p className="text-xs text-amber-800 font-medium">
-              US compliance required
+              {t('compliance.us_compliance')}
             </p>
           </div>
         </div>
@@ -108,7 +110,7 @@ export const ComplianceNotification: React.FC<ComplianceNotificationProps> = ({
             onClick={handleClose}
             className="text-xs px-2 py-0.5 h-6 flex-1"
           >
-            Later
+            {t('compliance.later')}
           </Button>
           <Button
             size="sm"
@@ -116,7 +118,7 @@ export const ComplianceNotification: React.FC<ComplianceNotificationProps> = ({
             className="text-xs px-2 py-0.5 h-6 bg-green-600 hover:bg-green-700 flex-1"
           >
             <CheckCircle className="h-2 w-2 mr-1" />
-            Done
+            {t('compliance.done')}
           </Button>
         </div>
       </div>

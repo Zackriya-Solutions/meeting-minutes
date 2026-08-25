@@ -1,5 +1,6 @@
 import React from 'react';
 import { Clock, Users, Calendar, Tag } from 'lucide-react';
+import { getTranslations } from 'next-intl/server';
 
 interface PageProps {
   params: {
@@ -26,7 +27,8 @@ export function generateStaticParams() {
   ];
 }
 
-const NotePage = ({ params }: PageProps) => {
+const NotePage = async ({ params }: PageProps) => {
+  const t = await getTranslations('settings');
   // This would normally come from your database
   const sampleData: Record<string, Note> = {
     'team-sync-dec-26': {
@@ -129,7 +131,7 @@ Quarterly product review session with stakeholders.
   const note = sampleData[params.id as keyof typeof sampleData];
 
   if (!note) {
-    return <div className="p-8">Note not found</div>;
+    return <div className="p-8">{t('notes.not_found')}</div>;
   }
 
   return (

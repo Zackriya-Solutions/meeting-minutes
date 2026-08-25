@@ -1,0 +1,14 @@
+allowBuilds:
+  '@parcel/watcher': true
+  '@swc/core': true
+  esbuild: true
+
+onlyBuiltDependencies:
+  - "@parcel/watcher"
+  - "@swc/core"
+  - "esbuild"
+  - "better-sqlite3"
+  - "electron"
+  - "core-js"
+  - "argon2"
+  - "@tailwindcss/oxide"

@@ -34,6 +34,8 @@ export interface VirtualizedTranscriptViewProps {
     totalCount?: number;
     loadedCount?: number;
     onLoadMore?: () => void;
+    /** Called when user clicks the timestamp button to jump audio playback */
+    onTimestampClick?: (sec: number) => void;
 }
 
 // Threshold for enabling virtualization (below this, use simple rendering)
@@ -71,6 +73,7 @@ const TranscriptSegment = memo(function TranscriptSegment({
     confidence,
     isStreaming,
     showConfidence,
+    onTimestampClick,
 }: {
     id: string;
     timestamp: number;
@@ -78,17 +81,35 @@ const TranscriptSegment = memo(function TranscriptSegment({
     confidence?: number;
     isStreaming: boolean;
     showConfidence: boolean;
+    onTimestampClick?: (sec: number) => void;
 }) {
     const displayText = cleanStopWords(text) || (text.trim() === '' ? '[Silence]' : text);
+    const timeButton = (
+        <button
+            type="button"
+            onClick={(e) => {
+                e.stopPropagation();
+                onTimestampClick?.(timestamp);
+            }}
+            disabled={!onTimestampClick}
+            className={
+                "text-xs mt-1 flex-shrink-0 min-w-[50px] text-left " +
+                (onTimestampClick
+                    ? "text-blue-600 hover:text-blue-800 hover:underline cursor-pointer"
+                    : "text-gray-400 cursor-default")
+            }
+            aria-label={`Jump to ${formatRecordingTime(timestamp)}`}
+        >
+            {formatRecordingTime(timestamp)}
+        </button>
+    );
 
     return (
         <div id={`segment-${id}`} className="mb-3">
             <div className="flex items-start gap-2">
                 <Tooltip>
-                    <TooltipTrigger>
-                        <span className="text-xs text-gray-400 mt-1 flex-shrink-0 min-w-[50px]">
-                            {formatRecordingTime(timestamp)}
-                        </span>
+                    <TooltipTrigger asChild>
+                        {timeButton}
                     </TooltipTrigger>
                     <TooltipContent>
                         {confidence !== undefined && showConfidence && (
@@ -112,6 +133,7 @@ const TranscriptSegment = memo(function TranscriptSegment({
 
 export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps> = ({
     segments,
+    onTimestampClick,
     isRecording = false,
     isPaused = false,
     isProcessing = false,
@@ -296,6 +318,8 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                         confidence={segment.confidence}
                                         isStreaming={isStreaming}
                                         showConfidence={showConfidence}
+                                    
+                                        onTimestampClick={onTimestampClick}
                                     />
                                 </div>
                             );
@@ -352,6 +376,8 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                         confidence={segment.confidence}
                                         isStreaming={isStreaming}
                                         showConfidence={showConfidence}
+                                    
+                                        onTimestampClick={onTimestampClick}
                                     />
                                 </motion.div>
                             );

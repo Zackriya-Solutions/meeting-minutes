@@ -112,6 +112,12 @@ pub struct TranscriptSetting {
     pub id: String,
     pub provider: String,
     pub model: String,
+    /// Wave 15 PR-45c-ui: optional hot-word / vocabulary list forwarded to
+    /// whisper.cpp as `initial_prompt`. NULL or empty means no bias.
+    #[sqlx(rename = "hotwords")]
+    #[serde(rename = "hotwords")]
+    pub hotwords: Option<String>,
+
     #[sqlx(rename = "whisperApiKey")]
     #[serde(rename = "whisperApiKey")]
     pub whisper_api_key: Option<String>,

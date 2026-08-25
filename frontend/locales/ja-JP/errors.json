@@ -1,0 +1,12 @@
+{
+  "permission_microphone_denied": "マイクへのアクセスが拒否されました。システム設定でアクセスを許可してください。",
+  "permission_screen_denied": "画面収録のアクセスが拒否されました。システム音声をキャプチャできません。",
+  "model_load_failed": "モデルの読み込みに失敗しました。再度ダウンロードしてください。",
+  "recording_failed": "録音を開始できませんでした。デバイス選択を確認してください。",
+  "transcription_failed": "文字起こしに失敗しました。もう一度お試しください。",
+  "network_offline": "ネットワークに接続できません。オフラインモードで動作しています。",
+  "update_available": "アップデートが利用可能です。",
+  "update_failed": "アップデートに失敗しました。しばらくしてから再度お試しください。",
+  "recovery_failed": "会議の復元に失敗しました。もう一度お試しください。",
+  "unknown_error": "不明なエラーが発生しました"
+}
