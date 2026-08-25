@@ -1,0 +1,24 @@
+{
+  "nav": {
+    "home": "ホーム",
+    "meetings": "会議",
+    "import_audio": "音声をインポート",
+    "notes": "会議メモ",
+    "settings": "設定"
+  },
+  "meeting_list": {
+    "search_placeholder": "会議内容を検索...",
+    "searching": "検索中...",
+    "edit_title_dialog_title": "会議タイトルを編集",
+    "edit_title_input_placeholder": "会議タイトルを入力",
+    "edit_title_label": "会議タイトル",
+    "save": "保存",
+    "cancel": "キャンセル"
+  },
+  "status": {
+    "recording_in_progress": "録音中...",
+    "start_recording": "録音を開始",
+    "import_audio": "音声をインポート"
+  },
+  "brand": "Meetily"
+}

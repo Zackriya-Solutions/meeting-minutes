@@ -21,6 +21,7 @@ import Analytics from '@/lib/analytics';
 import { invoke } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
 import { useState, useEffect, useRef, ReactNode } from 'react';
+import { useTranslations } from 'next-intl';
 import { isOllamaNotInstalledError } from '@/lib/utils';
 import { BuiltInModelInfo } from '@/lib/builtin-ai';
 
@@ -59,6 +60,7 @@ export function SummaryGeneratorButtonGroup({
   onOpenModelSettings,
   languageSlot
 }: SummaryGeneratorButtonGroupProps) {
+  const t = useTranslations('summary');
   const [isCheckingModels, setIsCheckingModels] = useState(false);
   const [settingsDialogOpen, setSettingsDialogOpen] = useState(false);
 
@@ -90,8 +92,8 @@ export function SummaryGeneratorButtonGroup({
 
       // Check if specific model is configured
       if (!selectedModel) {
-        toast.error('No built-in AI model selected', {
-          description: 'Please select a model in settings',
+        toast.error(t('errors.no_model_selected'), {
+          description: t('errors.no_model_selected_description'),
           duration: 5000,
         });
         setSettingsDialogOpen(true);
@@ -116,8 +118,8 @@ export function SummaryGeneratorButtonGroup({
       });
 
       if (!modelInfo) {
-        toast.error('Model not found', {
-          description: `Could not find information for model: ${selectedModel}`,
+        toast.error(t('errors.model_not_found'), {
+          description: t('errors.model_not_found_description', { model: selectedModel }),
           duration: 5000,
         });
         setSettingsDialogOpen(true);
@@ -128,7 +130,7 @@ export function SummaryGeneratorButtonGroup({
       const status = modelInfo.status;
 
       if (status.type === 'downloading') {
-        toast.info('Model download in progress', {
+        toast.info(t('errors.model_download_in_progress'), {
           description: `${selectedModel} is downloading (${status.progress}%). Please wait until download completes.`,
           duration: 5000,
         });
@@ -136,7 +138,7 @@ export function SummaryGeneratorButtonGroup({
       }
 
       if (status.type === 'not_downloaded') {
-        toast.error('Model not downloaded', {
+        toast.error(t('errors.model_not_downloaded'), {
           description: `${selectedModel} needs to be downloaded before use. Opening model settings...`,
           duration: 5000,
         });
@@ -145,8 +147,8 @@ export function SummaryGeneratorButtonGroup({
       }
 
       if (status.type === 'corrupted') {
-        toast.error('Model file corrupted', {
-          description: `${selectedModel} file is corrupted. Please delete and re-download.`,
+        toast.error(t('errors.model_file_corrupted'), {
+          description: t('errors.model_file_corrupted_description', { model: selectedModel }),
           duration: 7000,
         });
         setSettingsDialogOpen(true);
@@ -154,7 +156,7 @@ export function SummaryGeneratorButtonGroup({
       }
 
       if (status.type === 'error') {
-        toast.error('Model error', {
+        toast.error(t('errors.model_error'), {
           description: status.Error || 'An error occurred with the model',
           duration: 5000,
         });
@@ -163,15 +165,15 @@ export function SummaryGeneratorButtonGroup({
       }
 
       // Fallback
-      toast.error('Model not available', {
-        description: 'The selected model is not ready for use',
+      toast.error(t('errors.model_not_available'), {
+        description: t('errors.model_not_available_description'),
         duration: 5000,
       });
       setSettingsDialogOpen(true);
 
     } catch (error) {
       console.error('Error checking built-in AI models:', error);
-      toast.error('Failed to check model status', {
+      toast.error(t('errors.check_model_status_failed'), {
         description: error instanceof Error ? error.message : String(error),
         duration: 5000,
       });
@@ -201,7 +203,7 @@ export function SummaryGeneratorButtonGroup({
       if (!models || models.length === 0) {
         // No models available, show message and open settings
         toast.error(
-          'No Ollama models found. Please download gemma2:2b from Model Settings.',
+          t('errors.ollama_no_models'),
           { duration: 5000 }
         );
         setSettingsDialogOpen(true);
@@ -217,12 +219,12 @@ export function SummaryGeneratorButtonGroup({
       if (isOllamaNotInstalledError(errorMessage)) {
         // Ollama is not installed - show specific message with download link
         toast.error(
-          'Ollama is not installed',
+          t('errors.ollama_not_installed'),
           {
-            description: 'Please download and install Ollama to use local models.',
+            description: t('errors.ollama_not_installed_description'),
             duration: 7000,
             action: {
-              label: 'Download',
+              label: t('errors.ollama_install_action'),
               onClick: () => invoke('open_external_url', { url: 'https://ollama.com/download' })
             }
           }
@@ -230,7 +232,7 @@ export function SummaryGeneratorButtonGroup({
       } else {
         // Other error - generic message
         toast.error(
-          'Failed to check Ollama models. Please check if Ollama is running and download a model.',
+          t('errors.ollama_check_failed'),
           { duration: 5000 }
         );
       }

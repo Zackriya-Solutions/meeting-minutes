@@ -1,0 +1,54 @@
+{
+  "title": "转写",
+  "view": {
+    "empty": "暂无转写内容。开始录音后将在此显示。",
+    "loading": "正在加载...",
+    "search_placeholder": "搜索转写内容...",
+    "copy": "复制",
+    "copy_title": "复制转写",
+    "language": "语言",
+    "language_title": "转写语言",
+    "player": {
+      "play": "播放",
+      "pause": "暂停",
+      "play_title": "播放音频",
+      "pause_title": "暂停音频",
+      "no_audio": "此会议无音频可播放",
+      "seek_title": "跳转到指定时间",
+      "timestamp_jump_tooltip": "点击时间戳跳转到音频位置",
+      "loading": "加载音频中...",
+      "error": "音频播放失败"
+    }
+  },
+  "settings": {
+    "title": "转写设置",
+    "model": "模型",
+    "language": "语言",
+    "auto_detect": "自动检测"
+  },
+  "recovery": {
+    "title": "恢复未保存的转写",
+    "description": "检测到上次未完成的会话，是否恢复？",
+    "recover": "恢复",
+    "discard": "丢弃",
+    "dialog_title": "恢复未完成的会议",
+    "interrupted_label": "未完成会议",
+    "preview_label": "预览",
+    "dialog_description_one": "检测到 1 个被中断的会议。",
+    "dialog_description_other": "检测到 {count} 个被中断的会议。",
+    "started_label": "开始于",
+    "preview_segments": "显示前 {shown} 条，共 {total} 条",
+    "preview_loading": "正在加载预览...",
+    "preview_empty": "暂无转写可预览",
+    "preview_select": "请选择会议以预览",
+    "audio_available": "有音频",
+    "audio_unavailable": "无音频",
+    "alert_recover_failed": "恢复会议失败，请重试。",
+    "alert_delete_failed": "删除会议失败，请重试。",
+    "confirm_delete": "确认删除这个会议？删除后无法撤销。",
+    "cancel": "取消",
+    "delete": "删除",
+    "deleting": "正在删除...",
+    "recovering": "正在恢复..."
+  }
+}

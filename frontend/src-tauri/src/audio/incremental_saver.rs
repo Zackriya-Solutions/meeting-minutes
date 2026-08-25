@@ -132,6 +132,14 @@ impl IncrementalAudioSaver {
         let final_audio_path = self.meeting_folder.join("audio.mp4");
         self.merge_checkpoints(&final_audio_path).await?;
 
+        // Wave 14 PR-44e: also export a parallel WAV copy so the browser
+        // can decode it via Web Audio API for click-to-jump playback.
+        // Non-fatal: if transcode fails, mp4 remains the canonical file.
+        let wav_path = self.meeting_folder.join("audio.wav");
+        if let Err(e) = self.transcode_mp4_to_wav(&final_audio_path, &wav_path).await {
+            warn!("Failed to export parallel WAV for browser playback: {}", e);
+        }
+
         // Clean up checkpoints directory
         info!("Cleaning up {} checkpoint files", self.checkpoint_count);
         if let Err(e) = std::fs::remove_dir_all(&self.checkpoints_dir) {
@@ -213,6 +221,50 @@ impl IncrementalAudioSaver {
 
         Ok(())
     }
+    /// Transcode the merged mp4 to a parallel WAV file for browser playback.
+    /// Uses 16-bit PCM little-endian at the source sample rate so that
+    /// Web Audio API `decodeAudioData` can decode it directly.
+    ///
+    /// Errors are surfaced to the caller (non-fatal at the finalize level).
+    async fn transcode_mp4_to_wav(&self, mp4: &PathBuf, wav: &PathBuf) -> Result<()> {
+        let ffmpeg_path = find_ffmpeg_path()
+            .ok_or_else(|| anyhow!("FFmpeg not found. Please install FFmpeg to export WAV."))?;
+
+        info!("Transcoding {} -> WAV for browser playback", mp4.display());
+
+        let mut command = std::process::Command::new(ffmpeg_path);
+        command.args(&[
+            "-y",                     // Overwrite output file
+            "-i", mp4.to_str().unwrap(),
+            "-c:a", "pcm_s16le",       // 16-bit PCM little-endian (Web Audio compatible)
+            "-vn",                    // No video (defensive: mp4 may carry empty video track)
+            wav.to_str().unwrap(),
+        ]);
+
+        // Hide console window on Windows to prevent CMD popup during finalization
+        #[cfg(target_os = "windows")]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x08000000;
+            command.creation_flags(CREATE_NO_WINDOW);
+        }
+
+        let output = command.output()?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            error!("FFmpeg wav transcode failed: {}", stderr);
+            return Err(anyhow!("FFmpeg wav transcode failed: {}", stderr));
+        }
+
+        if !wav.exists() {
+            return Err(anyhow!("WAV file was not created at: {}", wav.display()));
+        }
+
+        let size = std::fs::metadata(wav).map(|m| m.len()).unwrap_or(0);
+        info!("Exported parallel WAV: {} ({} bytes)", wav.display(), size);
+        Ok(())
+    }
+
 
     /// Get the meeting folder path
     pub fn get_meeting_folder(&self) -> &PathBuf {

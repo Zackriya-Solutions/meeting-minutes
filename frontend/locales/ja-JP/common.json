@@ -1,0 +1,34 @@
+{
+  "app": {
+    "name": "Meetily",
+    "tagline": "プライバシー重視の AI 会議アシスタント"
+  },
+  "nav": {
+    "home": "ホーム",
+    "meetings": "会議",
+    "settings": "設定",
+    "notes": "メモ"
+  },
+  "actions": {
+    "save": "保存",
+    "cancel": "キャンセル",
+    "delete": "削除",
+    "edit": "編集",
+    "close": "閉じる",
+    "confirm": "確認",
+    "back": "戻る",
+    "next": "次へ"
+  },
+  "status": {
+    "loading": "読み込み中...",
+    "saving": "保存中...",
+    "success": "成功",
+    "failed": "失敗"
+  },
+  "recovery": {
+    "success_title": "会議の復元に成功しました!",
+    "transcripts_and_audio": "文字起こしと音声を復元しました",
+    "transcripts_only": "文字起こしを復元しました（音声なし）",
+    "view_meeting": "会議を表示"
+  }
+}

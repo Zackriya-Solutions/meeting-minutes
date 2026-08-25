@@ -1,62 +1,81 @@
+'use client';
+
+import { useTranslations } from 'next-intl';
+import { Loader2 } from 'lucide-react';
+import { RecordingStatus } from '@/contexts/RecordingStateContext';
+
 interface StatusOverlaysProps {
-  // Status flags
-  isProcessing: boolean;      // Processing transcription after recording stops
-  isSaving: boolean;          // Saving transcript to database
-
-  // Layout
-  sidebarCollapsed: boolean;  // For responsive margin calculation
-}
-
-// Internal reusable component for individual status overlays
-interface StatusOverlayProps {
-  show: boolean;
-  message: string;
+  status: RecordingStatus;
+  statusMessage?: string;
   sidebarCollapsed: boolean;
 }
 
-function StatusOverlay({ show, message, sidebarCollapsed }: StatusOverlayProps) {
-  if (!show) return null;
+const PROCESSING_STATUSES = [
+  RecordingStatus.STOPPING,
+  RecordingStatus.PROCESSING_TRANSCRIPTS,
+  RecordingStatus.SAVING,
+];
+
+export function StatusOverlays({
+  status,
+  statusMessage,
+  sidebarCollapsed,
+}: StatusOverlaysProps) {
+  const t = useTranslations('summary');
+  const currentIndex = PROCESSING_STATUSES.indexOf(status);
+
+  if (currentIndex === -1) return null;
+
+  const labels = [
+    t('status.stopping'),
+    t('status.finalizing'),
+    t('status.saving'),
+  ];
+  const message = status === RecordingStatus.STOPPING
+    ? labels[currentIndex]
+    : statusMessage || labels[currentIndex];
 
   return (
     <div className="fixed bottom-4 left-0 right-0 z-10">
       <div
         className="flex justify-center pl-8 transition-[margin] duration-300"
-        style={{
-          marginLeft: sidebarCollapsed ? '4rem' : '16rem'
-        }}
+        style={{ marginLeft: sidebarCollapsed ? '4rem' : '16rem' }}
       >
-        <div className="w-2/3 max-w-[750px] flex justify-center">
-          <div className="bg-white rounded-lg shadow-lg px-4 py-2 flex items-center space-x-2">
-            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-gray-900"></div>
-            <span className="text-sm text-gray-700">{message}</span>
+        <div className="w-2/3 max-w-[750px]">
+          <div
+            className="bg-white rounded-lg shadow-lg border border-gray-200 px-4 py-3"
+            role="status"
+            aria-live="polite"
+          >
+            <div className="flex items-center gap-2 mb-3">
+              <Loader2 className="h-4 w-4 animate-spin text-blue-600" />
+              <span className="text-sm font-medium text-gray-800">{message}</span>
+            </div>
+            <div className="flex items-center gap-2" aria-label={message}>
+              {labels.map((label, index) => (
+                <div key={label} className="flex items-center gap-2 flex-1 last:flex-none">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <span
+                      className={`h-2.5 w-2.5 rounded-full flex-shrink-0 ${
+                        index <= currentIndex ? 'bg-blue-600' : 'bg-gray-300'
+                      }`}
+                      aria-current={index === currentIndex ? 'step' : undefined}
+                    />
+                    <span className={`text-xs truncate ${
+                      index === currentIndex ? 'text-blue-700 font-medium' : 'text-gray-500'
+                    }`}>
+                      {label}
+                    </span>
+                  </div>
+                  {index < labels.length - 1 && (
+                    <div className={`h-px flex-1 ${index < currentIndex ? 'bg-blue-400' : 'bg-gray-200'}`} />
+                  )}
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       </div>
     </div>
-  );
-}
-
-// Main exported component - renders multiple status overlays
-export function StatusOverlays({
-  isProcessing,
-  isSaving,
-  sidebarCollapsed
-}: StatusOverlaysProps) {
-  return (
-    <>
-      {/* Processing status overlay - shown after recording stops while finalizing transcription */}
-      <StatusOverlay
-        show={isProcessing}
-        message="Finalizing transcription..."
-        sidebarCollapsed={sidebarCollapsed}
-      />
-
-      {/* Saving status overlay - shown while saving transcript to database */}
-      <StatusOverlay
-        show={isSaving}
-        message="Saving transcript..."
-        sidebarCollapsed={sidebarCollapsed}
-      />
-    </>
   );
 }

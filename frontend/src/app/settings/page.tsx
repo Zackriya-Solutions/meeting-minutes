@@ -12,19 +12,21 @@ import { SummaryModelSettings } from '@/components/SummaryModelSettings';
 import { BetaSettings } from '@/components/BetaSettings';
 import { useConfig } from '@/contexts/ConfigContext';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import { useTranslations } from 'next-intl';
 
-// Tabs configuration (constant)
-const TABS = [
-  { value: 'general', label: 'General', icon: Settings2 },
-  { value: 'recording', label: 'Recordings', icon: Mic },
-  { value: 'Transcriptionmodels', label: 'Transcription', icon: DatabaseIcon },
-  { value: 'summaryModels', label: 'Summary', icon: SparkleIcon },
-  { value: 'beta', label: 'Beta', icon: FlaskConical }
+// Tabs configuration (static metadata; labels resolved from locale at render)
+const TAB_DEFS = [
+  { value: 'general', icon: Settings2 },
+  { value: 'recording', icon: Mic },
+  { value: 'Transcriptionmodels', icon: DatabaseIcon },
+  { value: 'summaryModels', icon: SparkleIcon },
+  { value: 'beta', icon: FlaskConical }
 ] as const;
 
 export default function SettingsPage() {
   const router = useRouter();
   const { transcriptModelConfig, setTranscriptModelConfig } = useConfig();
+  const tSettings = useTranslations('settings');
 
   // Animation state for tabs
   const [activeTab, setActiveTab] = useState('general');
@@ -53,7 +55,7 @@ export default function SettingsPage() {
 
   // Update underline position when active tab changes
   useLayoutEffect(() => {
-    const activeIndex = TABS.findIndex(tab => tab.value === activeTab);
+    const activeIndex = TAB_DEFS.findIndex(tab => tab.value === activeTab);
     const activeTabElement = tabRefs.current[activeIndex];
 
     if (activeTabElement) {
@@ -73,9 +75,9 @@ export default function SettingsPage() {
               className="flex items-center gap-2 text-gray-600 hover:text-gray-900 transition-colors"
             >
               <ArrowLeft className="w-5 h-5" />
-              <span>Back</span>
+              <span>{tSettings('shell.back')}</span>
             </button>
-            <h1 className="text-3xl font-bold">Settings</h1>
+            <h1 className="text-3xl font-bold">{tSettings('title')}</h1>
           </div>
         </div>
       </div>
@@ -86,7 +88,7 @@ export default function SettingsPage() {
           {/* Tabs */}
           <Tabs value={activeTab} onValueChange={setActiveTab}>
             <TabsList className="bg-transparent relative rounded-none border-b border-gray-200 p-0 h-auto">
-              {TABS.map((tab, index) => {
+              {TAB_DEFS.map((tab, index) => {
                 const Icon = tab.icon;
                 return (
                   <TabsTrigger
@@ -96,7 +98,7 @@ export default function SettingsPage() {
                     className="flex items-center gap-2 px-6 py-4 bg-transparent rounded-none border-0 data-[state=active]:bg-transparent data-[state=active]:text-blue-600 data-[state=active]:shadow-none text-gray-600 hover:text-gray-900 relative z-10"
                   >
                     <Icon className="w-4 h-4" />
-                    {tab.label}
+                    {tSettings(`tabs.${tab.value === 'Transcriptionmodels' ? 'transcript' : tab.value === 'summaryModels' ? 'summary' : tab.value}`)}
                   </TabsTrigger>
                 );
               })}

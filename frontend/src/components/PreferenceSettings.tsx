@@ -6,9 +6,12 @@ import { FolderOpen } from "lucide-react"
 import { invoke } from "@tauri-apps/api/core"
 import Analytics from "@/lib/analytics"
 import AnalyticsConsentSwitch from "./AnalyticsConsentSwitch"
-import { useConfig, NotificationSettings } from "@/contexts/ConfigContext"
+import { useConfig, NotificationSettings } from "@/contexts/ConfigContext";
+import { UiLanguagePicker } from "./UiLanguagePicker";
+import { useTranslations } from "next-intl";
 
 export function PreferenceSettings() {
+  const t = useTranslations("settings");
   const {
     notificationSettings,
     storageLocations,
@@ -135,7 +138,7 @@ export function PreferenceSettings() {
 
   // Show loading only if we're actually loading and don't have cached data
   if (isLoadingPreferences && !notificationSettings && !storageLocations) {
-    return <div className="max-w-2xl mx-auto p-6">Loading Preferences...</div>
+    return <div className="max-w-2xl mx-auto p-6">{t("preference.loading")}</div>
   }
 
   // Show loading if notificationsEnabled hasn't been determined yet
@@ -148,12 +151,23 @@ export function PreferenceSettings() {
 
   return (
     <div className="space-y-6">
+      {/* Interface Language */}
+      <div className="bg-white rounded-lg border border-gray-200 p-6 shadow-sm">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">{t("preference.title")}</h3>
+            <p className="text-sm text-gray-600">{t("preference.language")}</p>
+          </div>
+          <UiLanguagePicker />
+        </div>
+      </div>
+
       {/* Notifications Section */}
       <div className="bg-white rounded-lg border border-gray-200 p-6 shadow-sm">
         <div className="flex items-center justify-between">
           <div>
-            <h3 className="text-lg font-semibold text-gray-900 mb-2">Notifications</h3>
-            <p className="text-sm text-gray-600">Enable or disable notifications of start and end of meeting</p>
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">{t("preference.notifications.title")}</h3>
+            <p className="text-sm text-gray-600">{t("preference.notifications.description")}</p>
           </div>
           <Switch checked={notificationsEnabledValue} onCheckedChange={setNotificationsEnabled} />
         </div>
@@ -161,17 +175,17 @@ export function PreferenceSettings() {
 
       {/* Data Storage Locations Section */}
       <div className="bg-white rounded-lg border border-gray-200 p-6 shadow-sm">
-        <h3 className="text-lg font-semibold text-gray-900 mb-4">Data Storage Locations</h3>
+        <h3 className="text-lg font-semibold text-gray-900 mb-4">{t("preference.storage.title")}</h3>
         <p className="text-sm text-gray-600 mb-6">
-          View and access where Meetily stores your data
+          {t("preference.storage.description")}
         </p>
 
         <div className="space-y-4">
           {/* Database Location */}
           {/* <div className="p-4 border rounded-lg bg-gray-50">
-            <div className="font-medium mb-2">Database</div>
+            <div className="font-medium mb-2">{t("preference.storage.database")}</div>
             <div className="text-sm text-gray-600 mb-3 break-all font-mono text-xs">
-              {storageLocations?.database || 'Loading...'}
+              {storageLocations?.database || t('preference.storage.loading')}
             </div>
             <button
               onClick={() => handleOpenFolder('database')}
@@ -184,9 +198,9 @@ export function PreferenceSettings() {
 
           {/* Models Location */}
           {/* <div className="p-4 border rounded-lg bg-gray-50">
-            <div className="font-medium mb-2">Whisper Models</div>
+            <div className="font-medium mb-2">{t("preference.storage.models")}</div>
             <div className="text-sm text-gray-600 mb-3 break-all font-mono text-xs">
-              {storageLocations?.models || 'Loading...'}
+              {storageLocations?.models || t('preference.storage.loading')}
             </div>
             <button
               onClick={() => handleOpenFolder('models')}
@@ -199,9 +213,9 @@ export function PreferenceSettings() {
 
           {/* Recordings Location */}
           <div className="p-4 border rounded-lg bg-gray-50">
-            <div className="font-medium mb-2">Meeting Recordings</div>
+            <div className="font-medium mb-2">{t("preference.storage.recordings")}</div>
             <div className="text-sm text-gray-600 mb-3 break-all font-mono text-xs">
-              {storageLocations?.recordings || 'Loading...'}
+              {storageLocations?.recordings || t('preference.storage.loading')}
             </div>
             <button
               onClick={() => handleOpenFolder('recordings')}
@@ -215,7 +229,7 @@ export function PreferenceSettings() {
 
         <div className="mt-4 p-3 bg-blue-50 rounded-md">
           <p className="text-xs text-blue-800">
-            <strong>Note:</strong> Database and models are stored together in your application data directory for unified management.
+            {t("preference.storage.note")}
           </p>
         </div>
       </div>

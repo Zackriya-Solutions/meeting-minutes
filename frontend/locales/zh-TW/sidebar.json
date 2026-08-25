@@ -1,0 +1,24 @@
+{
+  "nav": {
+    "home": "首頁",
+    "meetings": "會議",
+    "import_audio": "匯入音訊",
+    "notes": "筆記",
+    "settings": "設定"
+  },
+  "meeting_list": {
+    "search_placeholder": "搜尋會議內容...",
+    "searching": "搜尋中...",
+    "edit_title_dialog_title": "編輯會議標題",
+    "edit_title_input_placeholder": "請輸入新的會議標題",
+    "edit_title_label": "會議標題",
+    "save": "儲存",
+    "cancel": "取消"
+  },
+  "status": {
+    "recording_in_progress": "正在錄音",
+    "start_recording": "開始錄音",
+    "import_audio": "匯入音訊"
+  },
+  "brand": "Meetily"
+}

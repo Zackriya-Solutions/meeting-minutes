@@ -1,0 +1,34 @@
+{
+  "app": {
+    "name": "Meetily",
+    "tagline": "Privacy-first AI meeting assistant"
+  },
+  "nav": {
+    "home": "Home",
+    "meetings": "Meetings",
+    "settings": "Settings",
+    "notes": "Notes"
+  },
+  "actions": {
+    "save": "Save",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "edit": "Edit",
+    "close": "Close",
+    "confirm": "Confirm",
+    "back": "Back",
+    "next": "Next"
+  },
+  "status": {
+    "loading": "Loading...",
+    "saving": "Saving...",
+    "success": "Success",
+    "failed": "Failed"
+  },
+  "recovery": {
+    "success_title": "Meeting recovered successfully!",
+    "transcripts_and_audio": "Transcripts and audio recovered",
+    "transcripts_only": "Transcripts recovered (no audio available)",
+    "view_meeting": "View Meeting"
+  }
+}

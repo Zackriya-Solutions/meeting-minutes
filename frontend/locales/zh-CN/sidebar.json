@@ -1,0 +1,24 @@
+{
+  "nav": {
+    "home": "首页",
+    "meetings": "会议",
+    "import_audio": "导入音频",
+    "notes": "笔记",
+    "settings": "设置"
+  },
+  "meeting_list": {
+    "search_placeholder": "搜索会议内容...",
+    "searching": "搜索中...",
+    "edit_title_dialog_title": "编辑会议标题",
+    "edit_title_input_placeholder": "请输入新的会议标题",
+    "edit_title_label": "会议标题",
+    "save": "保存",
+    "cancel": "取消"
+  },
+  "status": {
+    "recording_in_progress": "正在录音",
+    "start_recording": "开始录音",
+    "import_audio": "导入音频"
+  },
+  "brand": "Meetily"
+}

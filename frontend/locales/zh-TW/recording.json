@@ -1,0 +1,60 @@
+{
+  "title": "錄音",
+  "controls": {
+    "start": "開始錄音",
+    "stop": "停止錄音",
+    "pause": "暫停",
+    "resume": "繼續",
+    "processing": "正在處理錄音...",
+    "start_tooltip": "開始錄音",
+    "stop_tooltip": "停止錄音"
+  },
+  "status": {
+    "idle": "準備錄音",
+    "recording": "正在錄音",
+    "paused": "已暫停",
+    "saving": "正在儲存...",
+    "saved": "已儲存",
+    "pausing": "正在暫停...",
+    "resuming": "正在繼續...",
+    "stopping": "正在停止...",
+    "validating": "正在驗證轉寫...",
+    "pause_tooltip": "暫停錄音",
+    "resume_tooltip": "繼續錄音"
+  },
+  "device": {
+    "microphone": "麥克風",
+    "system_audio": "系統音訊",
+    "select_device": "選擇裝置",
+    "no_device": "未偵測到裝置"
+  },
+  "duration": {
+    "minutes": "{minutes} 分鐘",
+    "seconds": "{seconds} 秒"
+  },
+  "errors": {
+    "init_failed": "錄音初始化失敗，請查看主控台詳細資訊。",
+    "pause_failed": "暫停失敗，請查看主控台詳細資訊。",
+    "resume_failed": "繼續失敗，請查看主控台詳細資訊。",
+    "close_alert": "確認關閉",
+    "device_mic_title": "麥克風無法使用",
+    "device_mic_message": "無法存取麥克風，請檢查：\n• 麥克風已連接\n• 已授予麥克風權限\n• 沒有其他應用程式正在佔用麥克風",
+    "device_speaker_title": "系統音訊無法使用",
+    "device_speaker_message": "無法錄製系統音訊，請檢查：\n• 已安裝虛擬音訊裝置（如 BlackHole）\n• 已授予螢幕錄製權限（macOS）\n• 系統音訊已正確設定",
+    "device_permission_title": "需要授權",
+    "device_permission_message": "需要錄音權限，請：\n• 在系統設定中授予麥克風權限\n• 授予螢幕錄製權限（macOS）\n• 授予權限後重新啟動應用程式",
+    "device_generic_title": "錄音失敗",
+    "device_generic_message": "無法開始錄音，請檢查音訊裝置設定後重試。"
+  },
+  "orphan_checkpoints_title": "偵測到未完成錄音",
+  "orphan_checkpoints_description": "偵測到上次未完成儲存的錄音片段。選擇恢復以保留錄音,或選擇捨棄以釋放磁碟空間。",
+  "orphan_checkpoints_dismiss": "全部關閉",
+  "orphan_checkpoint_chunks": "{count} 個片段",
+  "orphan_checkpoint_duration": "約 {duration}",
+  "orphan_checkpoint_recover": "恢復",
+  "orphan_checkpoint_discard": "捨棄",
+  "orphan_checkpoint_recovered": "錄音已恢復",
+  "orphan_checkpoint_recovered_failed": "恢復失敗",
+  "orphan_checkpoint_discarded": "錄音已捨棄",
+  "orphan_checkpoint_discarded_failed": "捨棄失敗"
+}

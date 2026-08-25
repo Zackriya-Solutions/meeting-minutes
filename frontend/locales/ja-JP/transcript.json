@@ -1,0 +1,54 @@
+{
+  "title": "文字起こし",
+  "view": {
+    "empty": "まだ文字起こしはありません。録音を開始すると、ここに表示されます。",
+    "loading": "文字起こしを読み込み中...",
+    "search_placeholder": "文字起こしを検索...",
+    "copy": "コピー",
+    "copy_title": "文字起こしをコピー",
+    "language": "言語",
+    "language_title": "言語",
+    "player": {
+      "play": "再生",
+      "pause": "一時停止",
+      "play_title": "音声を再生",
+      "pause_title": "音声を一時停止",
+      "no_audio": "この会議には再生可能な音声がありません",
+      "seek_title": "指定位置にシーク",
+      "timestamp_jump_tooltip": "タイムスタンプをクリックして音声位置にジャンプ",
+      "loading": "音声を読み込み中...",
+      "error": "音声の再生に失敗しました"
+    }
+  },
+  "settings": {
+    "title": "文字起こし設定",
+    "model": "モデル",
+    "language": "言語",
+    "auto_detect": "自動検出"
+  },
+  "recovery": {
+    "title": "未保存の文字起こしを復元",
+    "description": "前回完了していないセッションが見つかりました。復元しますか？",
+    "recover": "復元",
+    "discard": "破棄",
+    "dialog_title": "中断された会議を復元",
+    "interrupted_label": "中断された会議",
+    "preview_label": "プレビュー",
+    "dialog_description_one": "中断された会議が 1 件見つかりました。プレビューして復元する会議を選択してください。",
+    "dialog_description_other": "中断された会議が {count} 件見つかりました。プレビューして復元する会議を選択してください。",
+    "started_label": "開始",
+    "preview_segments": "最初の {shown} セグメントを表示中（全 {total} 件）",
+    "preview_loading": "プレビューを読み込み中...",
+    "preview_empty": "プレビューできる文字起こしがありません",
+    "preview_select": "プレビューする会議を選択",
+    "audio_available": "音声あり",
+    "audio_unavailable": "音声なし",
+    "alert_recover_failed": "会議の復元に失敗しました。もう一度お試しください。",
+    "alert_delete_failed": "会議の削除に失敗しました。もう一度お試しください。",
+    "confirm_delete": "この会議を削除してもよろしいですか？この操作は元に戻せません。",
+    "cancel": "キャンセル",
+    "delete": "削除",
+    "deleting": "削除中...",
+    "recovering": "復元中..."
+  }
+}

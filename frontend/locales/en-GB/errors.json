@@ -1,0 +1,12 @@
+{
+  "permission_microphone_denied": "Microphone permission denied. Please grant access in System Settings.",
+  "permission_screen_denied": "Screen recording permission denied. System audio cannot be captured.",
+  "model_load_failed": "Failed to load model. Please try downloading again.",
+  "recording_failed": "Recording failed to start. Check device selection.",
+  "transcription_failed": "Transcription failed. Please try again.",
+  "network_offline": "Network unavailable. Working in offline mode.",
+  "update_available": "An update is available.",
+  "update_failed": "Update failed. Please try again later.",
+  "recovery_failed": "Failed to recover meeting. Please try again.",
+  "unknown_error": "Unknown error occurred"
+}

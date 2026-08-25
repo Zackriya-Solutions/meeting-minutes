@@ -1,3 +1,4 @@
+'use client';
 import React, { useState, useEffect } from 'react';
 import { Download, X, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
 import {
@@ -13,6 +14,7 @@ import { updateService, UpdateInfo, UpdateProgress } from '@/services/updateServ
 import { check, Update } from '@tauri-apps/plugin-updater';
 import { relaunch } from '@tauri-apps/plugin-process';
 import { toast } from 'sonner';
+import { useTranslations } from 'next-intl';
 
 interface UpdateDialogProps {
   open: boolean;
@@ -24,6 +26,7 @@ export function UpdateDialog({ open, onOpenChange, updateInfo }: UpdateDialogPro
   const [isDownloading, setIsDownloading] = useState(false);
   const [progress, setProgress] = useState<UpdateProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const t = useTranslations('settings');
   const [update, setUpdate] = useState<Update | null>(null);
 
   useEffect(() => {
@@ -38,11 +41,11 @@ export function UpdateDialog({ open, onOpenChange, updateInfo }: UpdateDialogPro
         if (updateResult?.available) {
           setUpdate(updateResult);
         } else {
-          setError('Update no longer available');
+          setError(t('update.no_longer'));
         }
       }).catch((err) => {
         console.error('Failed to get update object:', err);
-        setError('Failed to prepare update: ' + (err.message || 'Unknown error'));
+        setError(t('update.prepare_failed', { message: err.message || 'Unknown error' }));
       });
     } else {
       // Reset state when dialog closes
@@ -63,11 +66,11 @@ export function UpdateDialog({ open, onOpenChange, updateInfo }: UpdateDialogPro
           updateToUse = updateResult;
           setUpdate(updateResult);
         } else {
-          setError('Update not available');
+          setError(t('update.not_available'));
           return;
         }
       } catch (err: any) {
-        setError('Failed to get update: ' + (err.message || 'Unknown error'));
+        setError(t('update.get_failed', { message: err.message || 'Unknown error' }));
         return;
       }
     }
@@ -123,7 +126,7 @@ export function UpdateDialog({ open, onOpenChange, updateInfo }: UpdateDialogPro
       });
 
       console.log('[UpdateDialog] Update installed successfully');
-      toast.success('Update installed successfully. The app will restart...');
+      toast.success(t('update.installed_toast'));
 
       // Mark download as complete before closing
       setIsDownloading(false);
@@ -137,7 +140,7 @@ export function UpdateDialog({ open, onOpenChange, updateInfo }: UpdateDialogPro
       console.error('Update failed:', err);
       setError(err.message || 'Failed to download or install update');
       setIsDownloading(false);
-      toast.error('Update failed: ' + (err.message || 'Unknown error'));
+      toast.error(t('update.failed_toast', { message: err.message || 'Unknown error' }));
     }
   };
 
@@ -190,26 +193,26 @@ export function UpdateDialog({ open, onOpenChange, updateInfo }: UpdateDialogPro
             {isDownloading ? (
               <>
                 <Loader2 className="h-5 w-5 animate-spin text-blue-600" />
-                Downloading Update
+                {t('update.downloading_title')}
               </>
             ) : error ? (
               <>
                 <AlertCircle className="h-5 w-5 text-red-600" />
-                Update Error
+                {t('update.error_title')}
               </>
             ) : (
               <>
                 <Download className="h-5 w-5 text-blue-600" />
-                Update Available
+                {t('update.available_title')}
               </>
             )}
           </DialogTitle>
           <DialogDescription>
             {isDownloading
-              ? 'Downloading the latest version...'
+              ? t('update.downloading_desc')
               : error
-              ? 'An error occurred while updating'
-              : `A new version (${updateInfo.version}) is available`}
+              ? t('update.error_desc')
+              : t('update.available_desc', { version: updateInfo.version ?? '' })}
           </DialogDescription>
         </DialogHeader>
 
@@ -218,16 +221,16 @@ export function UpdateDialog({ open, onOpenChange, updateInfo }: UpdateDialogPro
             <>
               <div className="space-y-2">
                 <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">Current Version:</span>
+                  <span className="text-muted-foreground">{t('update.current_version')}</span>
                   <span className="font-medium">{updateInfo.currentVersion}</span>
                 </div>
                 <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">New Version:</span>
+                  <span className="text-muted-foreground">{t('update.new_version')}</span>
                   <span className="font-medium text-blue-600">{updateInfo.version}</span>
                 </div>
                 {updateInfo.date && (
                   <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Release Date:</span>
+                    <span className="text-muted-foreground">{t('update.release_date')}</span>
                     <span className="font-medium">{formatDate(updateInfo.date)}</span>
                   </div>
                 )}
@@ -253,7 +256,7 @@ export function UpdateDialog({ open, onOpenChange, updateInfo }: UpdateDialogPro
                   />
                 </div>
                 <div className="flex justify-between text-xs text-gray-600 mt-1">
-                  <span>{Math.round(progress.percentage)}% complete</span>
+                  <span>{t('update.percent_complete', { percent: Math.round(progress.percentage) })}</span>
                   {progress.total > 0 && (
                     <span>
                       {formatBytes(progress.downloaded)} / {formatBytes(progress.total)}
@@ -262,7 +265,7 @@ export function UpdateDialog({ open, onOpenChange, updateInfo }: UpdateDialogPro
                 </div>
               </div>
               <p className="text-sm text-muted-foreground text-center">
-                The app will restart automatically after installation
+                {t('update.will_restart')}
               </p>
             </div>
           )}
@@ -278,17 +281,17 @@ export function UpdateDialog({ open, onOpenChange, updateInfo }: UpdateDialogPro
           {!isDownloading && !error && (
             <>
               <Button variant="outline" onClick={() => handleOpenChange(false)}>
-                Later
+                {t('update.later')}
               </Button>
               <Button onClick={handleDownloadAndInstall} className="bg-blue-600 hover:bg-blue-700">
                 <Download className="h-4 w-4 mr-2" />
-                Download & Install
+                {t('update.download_install')}
               </Button>
             </>
           )}
           {error && (
             <Button variant="outline" onClick={() => handleOpenChange(false)}>
-              Close
+              {t('update.close')}
             </Button>
           )}
         </DialogFooter>

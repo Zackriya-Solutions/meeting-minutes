@@ -1,0 +1,12 @@
+{
+  "permission_microphone_denied": "麥克風權限被拒絕，請在系統設定中授予存取權限。",
+  "permission_screen_denied": "螢幕錄製權限被拒絕，無法單獨取得系統音訊。",
+  "model_load_failed": "模型載入失敗，請嘗試重新下載。",
+  "recording_failed": "錄音啟動失敗，請檢查裝置選擇。",
+  "transcription_failed": "轉寫失敗，請重試。",
+  "network_offline": "網路無法使用，已切換到離線模式。",
+  "update_available": "有可用更新。",
+  "update_failed": "更新失敗，請稍後重試。",
+  "recovery_failed": "復原會議失敗，請重試。",
+  "unknown_error": "發生未知錯誤。"
+}
