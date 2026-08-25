@@ -65,6 +65,9 @@
                         "notification:allow-is-permission-granted",
                         "updater:default",
                         "process:default",
+                        "global-shortcut:default",
+                        "global-shortcut:allow-register",
+                        "global-shortcut:allow-unregister",
                         {
                             "identifier": "fs:scope",
                             "allow": [
