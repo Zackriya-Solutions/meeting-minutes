@@ -52,6 +52,7 @@ pub mod parakeet_engine;
 pub mod state;
 pub mod summary;
 pub mod tray;
+pub mod meeting_detector;
 pub mod utils;
 pub mod whisper_engine;
 
@@ -465,6 +466,11 @@ pub fn run() {
             if let Err(e) = tray::create_tray(_app.handle()) {
                 log::error!("Failed to create system tray: {}", e);
             }
+
+            // Auto-detect meetings (Zoom/Teams/Slack/Discord/Webex processes +
+            // Meet/Zoom-web/Teams-web/Whereby browser tabs) and toggle recording
+            // without user input. Poll interval 10s.
+            meeting_detector::spawn(_app.handle().clone());
 
             // Initialize notification system with proper defaults
             log::info!("Initializing notification system...");
