@@ -78,19 +78,6 @@ export function MeetingOrganizationPanel({ meetingId, folderId, tags: initialTag
     setIsSuggesting(false);
   }, [meetingId]);
 
-  useEffect(() => {
-    if (!hasContent || readStoredSuggestions(meetingId) !== null) return;
-    writeStoredSuggestions(meetingId, { status: 'generated', suggestions: [] });
-    const token = suggestionTokenRef.current;
-    void invoke('api_suggest_meeting_tags', { meetingId }).then((result) => {
-      if (suggestionTokenRef.current !== token) return;
-      const generated = result as string[];
-      writeStoredSuggestions(meetingId, { status: 'generated', suggestions: generated });
-      setSuggestions(generated);
-    }).catch(() => { /* Optional enhancement: manual tags still work. */ });
-    return () => { suggestionTokenRef.current += 1; };
-  }, [meetingId, hasContent]);
-
   const updateSuggestions = (next: string[], dismissed: boolean) => {
     if (dismissed) suggestionTokenRef.current += 1;
     setSuggestions(next);
