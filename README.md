@@ -137,6 +137,8 @@ pnpm install
 
 Transcribe meetings entirely on your device using **Whisper** or **Parakeet** models. No cloud required.
 
+You can also point Meetily at your own **self-hosted Whisper server** (any OpenAI-compatible `/v1/audio/transcriptions` endpoint) to run transcription on a machine with a stronger GPU. Audio still never leaves infrastructure you control.
+
 <p align="center">
     <img src="docs/home.png" width="650" style="border-radius: 10px;" alt="Meetily Demo" />
 </p>
