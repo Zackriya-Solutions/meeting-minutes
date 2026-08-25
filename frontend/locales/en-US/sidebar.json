@@ -1,0 +1,24 @@
+{
+  "nav": {
+    "home": "Home",
+    "meetings": "Meetings",
+    "import_audio": "Import Audio",
+    "notes": "Meeting Notes",
+    "settings": "Settings"
+  },
+  "meeting_list": {
+    "search_placeholder": "Search meeting content...",
+    "searching": "Searching...",
+    "edit_title_dialog_title": "Edit Meeting Title",
+    "edit_title_input_placeholder": "Enter meeting title",
+    "edit_title_label": "Meeting Title",
+    "save": "Save",
+    "cancel": "Cancel"
+  },
+  "status": {
+    "recording_in_progress": "Recording in progress...",
+    "start_recording": "Start Recording",
+    "import_audio": "Import Audio"
+  },
+  "brand": "Meetily"
+}

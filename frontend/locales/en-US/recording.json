@@ -1,0 +1,60 @@
+{
+  "title": "Recording",
+  "controls": {
+    "start": "Start Recording",
+    "stop": "Stop Recording",
+    "pause": "Pause",
+    "resume": "Resume",
+    "processing": "Processing recording...",
+    "start_tooltip": "Start recording",
+    "stop_tooltip": "Stop recording"
+  },
+  "status": {
+    "idle": "Ready to record",
+    "recording": "Recording in progress",
+    "paused": "Recording paused",
+    "saving": "Saving recording...",
+    "saved": "Recording saved",
+    "pausing": "Pausing...",
+    "resuming": "Resuming...",
+    "stopping": "Stopping...",
+    "validating": "Validating speech recognition...",
+    "pause_tooltip": "Pause recording",
+    "resume_tooltip": "Resume recording"
+  },
+  "device": {
+    "microphone": "Microphone",
+    "system_audio": "System Audio",
+    "select_device": "Select a device",
+    "no_device": "No device detected"
+  },
+  "duration": {
+    "minutes": "{minutes} min",
+    "seconds": "{seconds} sec"
+  },
+  "errors": {
+    "init_failed": "Failed to initialize recording. Please check the console for details.",
+    "pause_failed": "Failed to pause recording. Please check the console for details.",
+    "resume_failed": "Failed to resume recording. Please check the console for details.",
+    "close_alert": "Close alert",
+    "device_mic_title": "Microphone Not Available",
+    "device_mic_message": "Unable to access your microphone. Please check that:\n\u2022 Your microphone is connected\n\u2022 The app has microphone permissions\n\u2022 No other app is using the microphone",
+    "device_speaker_title": "System Audio Not Available",
+    "device_speaker_message": "Unable to capture system audio. Please check that:\n\u2022 A virtual audio device (like BlackHole) is installed\n\u2022 The app has screen recording permissions (macOS)\n\u2022 System audio is properly configured",
+    "device_permission_title": "Permission Required",
+    "device_permission_message": "Recording permissions are required. Please:\n\u2022 Grant microphone access in System Settings\n\u2022 Grant screen recording access for system audio (macOS)\n\u2022 Restart the app after granting permissions",
+    "device_generic_title": "Recording Failed",
+    "device_generic_message": "Unable to start recording. Please check your audio device settings and try again."
+  },
+  "orphan_checkpoints_title": "Unfinished Recording Detected",
+  "orphan_checkpoints_description": "Meetily found audio left over from a previous session that did not finish saving. Recover it to keep the recording, or discard it to free disk space.",
+  "orphan_checkpoints_dismiss": "Dismiss all",
+  "orphan_checkpoint_chunks": "{count, plural, one {# chunk} other {# chunks}}",
+  "orphan_checkpoint_duration": "~{duration}",
+  "orphan_checkpoint_recover": "Recover",
+  "orphan_checkpoint_discard": "Discard",
+  "orphan_checkpoint_recovered": "Recording recovered",
+  "orphan_checkpoint_recovered_failed": "Recovery failed",
+  "orphan_checkpoint_discarded": "Recording discarded",
+  "orphan_checkpoint_discarded_failed": "Discard failed"
+}

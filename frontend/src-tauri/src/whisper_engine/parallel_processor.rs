@@ -81,6 +81,8 @@ pub struct ParallelProcessor {
     is_paused: Arc<RwLock<bool>>,
     is_stopped: Arc<RwLock<bool>>,
     semaphore: Arc<Semaphore>, // Limit concurrent workers
+    /// PR-34: Engine-kind fallback state (CUDA → Metal → CPU → Parakeet).
+    fallback_engine: Arc<FallbackEngine>,
 }
 
 struct Worker {
@@ -124,6 +126,13 @@ impl ParallelProcessor {
             is_paused: Arc::new(RwLock::new(false)),
             is_stopped: Arc::new(RwLock::new(false)),
             semaphore: Arc::new(Semaphore::new(safe_max_workers)),
+            // PR-34: default engine preference chain. Caller can override after construction.
+            fallback_engine: Arc::new(FallbackEngine::new(vec![
+                EngineKind::Cuda,
+                EngineKind::Metal,
+                EngineKind::Cpu,
+                EngineKind::Parakeet,
+            ])),
         };
 
         info!("Parallel processor initialized with {} workers", safe_max_workers);
@@ -210,6 +219,8 @@ impl ParallelProcessor {
         let semaphore = self.semaphore.clone();
         let config = self.config.clone();
         let engine_ref = whisper_engine.clone();
+        // PR-34: capture fallback engine for the worker task.
+        let fallback_engine = self.fallback_engine.clone();
 
         // Spawn worker task
         let handle = tokio::spawn(async move {
@@ -271,11 +282,19 @@ impl ParallelProcessor {
                         queue.processing.remove(&chunk.id);
 
                         match result {
+                            // PR-34: Track engine health on each chunk result.
                             Ok(transcription) => {
+                                fallback_engine.record_success();
                                 queue.completed.insert(chunk.id, transcription.clone());
                                 let _ = event_sender.send(ProcessingEvent::ChunkCompleted(transcription));
                             }
                             Err(e) => {
+                                // PR-34: trigger engine-kind switch on consecutive failures.
+                                if let Some(switched_to) = fallback_engine.record_failure() {
+                                    let _ = event_sender.send(ProcessingEvent::ResourceConstraint(
+                                        format!("Whisper engine switched to {} after consecutive failures", switched_to.name())
+                                    ));
+                                }
                                 let error = ProcessingError {
                                     chunk_id: chunk.id,
                                     error_message: e.to_string(),

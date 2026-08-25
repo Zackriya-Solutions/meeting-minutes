@@ -1,4 +1,5 @@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { useTranslations } from 'next-intl';
 import { ModelConfig, ModelSettingsModal } from "./ModelSettingsModal"
 import { TranscriptModelProps, TranscriptSettings } from "./TranscriptSettings"
 import { RecordingSettings, RecordingPreferences } from "./RecordingSettings"
@@ -15,7 +16,8 @@ interface SettingTabsProps {
     defaultTab?: string;
 }
 
-export function SettingTabs({ 
+export function SettingTabs({
+
     modelConfig, 
     setModelConfig, 
     onSave, 
@@ -25,6 +27,7 @@ export function SettingTabs({
     setTranscriptModelConfig,
     onSaveTranscript,
 }: SettingTabsProps) {
+    const t = useTranslations('settings');
 
     const handleTabChange = () => {
         setSaveSuccess(null); // Reset save success when tab changes
@@ -33,10 +36,10 @@ export function SettingTabs({
     return (
         <Tabs defaultValue={defaultTab} className="w-full max-h-[calc(100vh-10rem)] overflow-y-auto" onValueChange={handleTabChange}>
   <TabsList>
-    <TabsTrigger value="transcriptSettings">Transcript</TabsTrigger>
-    <TabsTrigger value="modelSettings">Ai Summary</TabsTrigger>
-    <TabsTrigger value="recordingSettings">Preferences</TabsTrigger>
-    <TabsTrigger value="about">About</TabsTrigger>
+    <TabsTrigger value="transcriptSettings">{t('tabs.transcript')}</TabsTrigger>
+    <TabsTrigger value="modelSettings">{t('tabs.summary')}</TabsTrigger>
+    <TabsTrigger value="recordingSettings">{t('preference.title')}</TabsTrigger>
+    <TabsTrigger value="about">{t('tabs.about')}</TabsTrigger>
   </TabsList>
   <TabsContent value="modelSettings">
     <ModelSettingsModal

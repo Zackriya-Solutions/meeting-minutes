@@ -1,4 +1,7 @@
+'use client';
+
 import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { useTranslations } from 'next-intl';
 import { RefreshCw, Globe, Loader2, AlertCircle, CheckCircle2, X, Cpu } from 'lucide-react';
 import {
   Dialog,
@@ -58,6 +61,7 @@ export function RetranscribeDialog({
   meetingFolderPath,
   onComplete,
 }: RetranscribeDialogProps) {
+  const t = useTranslations('summary');
   const { selectedLanguage, transcriptModelConfig } = useConfig();
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState<RetranscriptionProgress | null>(null);
@@ -154,7 +158,7 @@ export function RetranscribeDialog({
 
             setIsProcessing(false);
             toast.success(
-              `Retranscription complete! ${event.payload.segments_count} segments created.`
+              t('actions.retranscription_complete', { count: event.payload.segments_count })
             );
             onCompleteRef.current?.();
             onOpenChangeRef.current(false);
@@ -236,7 +240,7 @@ export function RetranscribeDialog({
         await invoke('cancel_retranscription_command');
         setIsProcessing(false);
         setProgress(null);
-        toast.info('Retranscription cancelled');
+        toast.info(t('actions.retranscription_cancelled'));
       } catch (err) {
         console.error('Failed to cancel retranscription:', err);
       }

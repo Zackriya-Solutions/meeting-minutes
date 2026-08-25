@@ -1,0 +1,60 @@
+{
+  "title": "録音",
+  "controls": {
+    "start": "録音を開始",
+    "stop": "録音を停止",
+    "pause": "一時停止",
+    "resume": "再開",
+    "processing": "録音を処理中...",
+    "start_tooltip": "録音を開始",
+    "stop_tooltip": "録音を停止"
+  },
+  "status": {
+    "idle": "録音準備完了",
+    "recording": "録音中",
+    "paused": "録音を一時停止しました",
+    "saving": "録音を保存中...",
+    "saved": "録音を保存しました",
+    "pausing": "一時停止中...",
+    "resuming": "再開中...",
+    "stopping": "停止中...",
+    "validating": "音声認識を検証中...",
+    "pause_tooltip": "録音を一時停止",
+    "resume_tooltip": "録音を再開"
+  },
+  "device": {
+    "microphone": "マイク",
+    "system_audio": "システム音声",
+    "select_device": "デバイスを選択",
+    "no_device": "デバイスが検出されません"
+  },
+  "duration": {
+    "minutes": "{minutes} 分",
+    "seconds": "{seconds} 秒"
+  },
+  "errors": {
+    "init_failed": "録音を初期化できませんでした。コンソールで詳細を確認してください。",
+    "pause_failed": "録音を一時停止できませんでした。コンソールで詳細を確認してください。",
+    "resume_failed": "録音を再開できませんでした。コンソールで詳細を確認してください。",
+    "close_alert": "アラートを閉じる",
+    "device_mic_title": "マイクが利用できません",
+    "device_mic_message": "マイクにアクセスできません。以下を確認してください:\n• マイクが接続されているか\n• アプリにマイク権限があるか\n• 他のアプリがマイクを使用していないか",
+    "device_speaker_title": "システム音声が利用できません",
+    "device_speaker_message": "システム音声をキャプチャできません。以下を確認してください:\n• 仮想オーディオデバイス（BlackHole など）がインストールされているか\n• アプリに画面収録権限があるか（macOS）\n• システム音声が正しく設定されているか",
+    "device_permission_title": "権限が必要です",
+    "device_permission_message": "録音には権限が必要です。以下を行ってください:\n• システム設定でマイクへのアクセスを許可\n• システム音声のため画面収録権限を許可（macOS）\n• 権限を許可したらアプリを再起動",
+    "device_generic_title": "録音に失敗しました",
+    "device_generic_message": "録音を開始できません。オーディオデバイスの設定を確認してもう一度お試しください。"
+  },
+  "orphan_checkpoints_title": "未完了の録音を検出しました",
+  "orphan_checkpoints_description": "前回のセッションで保存されなかった音声が見つかりました。復元すると録音を維持し、破棄するとディスク容量を解放できます。",
+  "orphan_checkpoints_dismiss": "すべて閉じる",
+  "orphan_checkpoint_chunks": "{count, plural, one {# チャンク} other {# チャンク}}",
+  "orphan_checkpoint_duration": "~{duration}",
+  "orphan_checkpoint_recover": "復元",
+  "orphan_checkpoint_discard": "破棄",
+  "orphan_checkpoint_recovered": "録音を復元しました",
+  "orphan_checkpoint_recovered_failed": "復元に失敗しました",
+  "orphan_checkpoint_discarded": "録音を破棄しました",
+  "orphan_checkpoint_discarded_failed": "破棄に失敗しました"
+}

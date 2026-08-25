@@ -17,6 +17,8 @@ import { useTemplates } from '@/hooks/meeting-details/useTemplates';
 import { useCopyOperations } from '@/hooks/meeting-details/useCopyOperations';
 import { useMeetingOperations } from '@/hooks/meeting-details/useMeetingOperations';
 import { useConfig } from '@/contexts/ConfigContext';
+import { useTranslations } from 'next-intl';
+import { useMeetingAudioPath } from '@/hooks/useMeetingAudioPath';
 
 export default function PageContent({
   meeting,
@@ -65,6 +67,7 @@ export default function PageContent({
   const { serverAddress } = useSidebar();
 
   // Get model config from ConfigContext
+  const t = useTranslations('settings');
   const { modelConfig, setModelConfig } = useConfig();
 
   // Custom hooks
@@ -103,12 +106,15 @@ export default function PageContent({
       const { emit } = await import('@tauri-apps/api/event');
       await emit('model-config-updated', config);
 
-      toast.success('Model settings saved successfully');
+      toast.success(t('summary.save_success'));
     } catch (error) {
       console.error('Failed to save model config:', error);
-      toast.error('Failed to save model settings');
+      toast.error(t('summary.save_failed'));
     }
   };
+
+  // Resolve browser-decodable audio path for click-to-jump (Wave 14 PR-44d)
+  const { audioPath } = useMeetingAudioPath(meeting?.id);
 
   const summaryGeneration = useSummaryGeneration({
     meeting,
@@ -191,6 +197,8 @@ export default function PageContent({
           meetingId={meeting.id}
           meetingFolderPath={meeting.folder_path}
           onRefetchTranscripts={onRefetchTranscripts}
+          // Audio jump props (Wave 14 PR-44d): null disables the player gracefully
+          audioPath={audioPath}
         />
         <SummaryPanel
           meeting={meeting}

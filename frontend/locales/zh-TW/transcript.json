@@ -1,0 +1,54 @@
+{
+  "title": "轉寫",
+  "view": {
+    "empty": "尚無轉寫內容。開始錄音後將在此顯示。",
+    "loading": "正在載入...",
+    "search_placeholder": "搜尋轉寫內容...",
+    "copy": "複製",
+    "copy_title": "複製轉寫",
+    "language": "語言",
+    "language_title": "轉寫語言",
+    "player": {
+      "play": "播放",
+      "pause": "暫停",
+      "play_title": "播放音訊",
+      "pause_title": "暫停音訊",
+      "no_audio": "此會議無音訊可播放",
+      "seek_title": "跳轉到指定時間",
+      "timestamp_jump_tooltip": "點擊時間戳跳轉到音訊位置",
+      "loading": "載入音訊中...",
+      "error": "音訊播放失敗"
+    }
+  },
+  "settings": {
+    "title": "轉寫設定",
+    "model": "模型",
+    "language": "語言",
+    "auto_detect": "自動偵測"
+  },
+  "recovery": {
+    "title": "復原未儲存的轉寫",
+    "description": "偵測到上次未完成的會話，是否復原？",
+    "recover": "復原",
+    "discard": "捨棄",
+    "dialog_title": "復原未完成的會議",
+    "interrupted_label": "未完成會議",
+    "preview_label": "預覽",
+    "dialog_description_one": "偵測到 1 個被中斷的會議。",
+    "dialog_description_other": "偵測到 {count} 個被中斷的會議。",
+    "started_label": "開始於",
+    "preview_segments": "顯示前 {shown} 條，共 {total} 條",
+    "preview_loading": "正在載入預覽...",
+    "preview_empty": "尚無轉寫可預覽",
+    "preview_select": "請選擇會議以預覽",
+    "audio_available": "有音訊",
+    "audio_unavailable": "無音訊",
+    "alert_recover_failed": "復原會議失敗，請重試。",
+    "alert_delete_failed": "刪除會議失敗，請重試。",
+    "confirm_delete": "確認刪除這個會議？刪除後無法復原。",
+    "cancel": "取消",
+    "delete": "刪除",
+    "deleting": "正在刪除...",
+    "recovering": "正在復原..."
+  }
+}

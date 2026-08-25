@@ -3,6 +3,7 @@ pub mod acceleration;
 pub mod commands;
 pub mod system_monitor;
 pub mod parallel_processor;
+pub mod fallback;
 pub mod parallel_commands;
 // pub mod stderr_suppressor;
 
@@ -12,4 +13,5 @@ pub use commands::*;
 pub use system_monitor::*;
 pub use parallel_processor::*;
 pub use parallel_commands::*;
+pub use fallback::*;
 // pub use stderr_suppressor::*;

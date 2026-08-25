@@ -1,0 +1,12 @@
+{
+  "permission_microphone_denied": "마이크 접근이 거부되었습니다. 시스템 설정에서 접근을 허용하세요.",
+  "permission_screen_denied": "화면 녹화 접근이 거부되었습니다. 시스템 오디오를 캡처할 수 없습니다.",
+  "model_load_failed": "모델 로드에 실패했습니다. 다시 다운로드해 주세요.",
+  "recording_failed": "녹음을 시작하지 못했습니다. 장치 선택을 확인하세요.",
+  "transcription_failed": "전사 처리에 실패했습니다. 다시 시도해 주세요.",
+  "network_offline": "네트워크에 연결할 수 없습니다. 오프라인 모드로 작동 중입니다.",
+  "update_available": "업데이트를 사용할 수 있습니다.",
+  "update_failed": "업데이트에 실패했습니다. 잠시 후 다시 시도해 주세요.",
+  "recovery_failed": "회의 복구에 실패했습니다. 다시 시도해 주세요.",
+  "unknown_error": "알 수 없는 오류가 발생했습니다"
+}

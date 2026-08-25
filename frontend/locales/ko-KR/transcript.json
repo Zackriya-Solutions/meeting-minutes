@@ -1,0 +1,54 @@
+{
+  "title": "전사",
+  "view": {
+    "empty": "아직 전사가 없습니다. 녹음을 시작하면 여기에 표시됩니다.",
+    "loading": "전사를 불러오는 중...",
+    "search_placeholder": "전사 검색...",
+    "copy": "복사",
+    "copy_title": "전사 복사",
+    "language": "언어",
+    "language_title": "언어",
+    "player": {
+      "play": "재생",
+      "pause": "일시정지",
+      "play_title": "오디오 재생",
+      "pause_title": "오디오 일시정지",
+      "no_audio": "이 회의에 재생 가능한 오디오가 없습니다",
+      "seek_title": "지정된 위치로 이동",
+      "timestamp_jump_tooltip": "타임스탬프를 클릭하여 오디오 위치로 이동",
+      "loading": "오디오 불러오는 중...",
+      "error": "오디오 재생 실패"
+    }
+  },
+  "settings": {
+    "title": "전사 설정",
+    "model": "모델",
+    "language": "언어",
+    "auto_detect": "자동 감지"
+  },
+  "recovery": {
+    "title": "저장되지 않은 전사 복구",
+    "description": "이전 세션이 완료되지 않았습니다. 복구하시겠습니까?",
+    "recover": "복구",
+    "discard": "삭제",
+    "dialog_title": "중단된 회의 복구",
+    "interrupted_label": "중단된 회의",
+    "preview_label": "미리보기",
+    "dialog_description_one": "중단된 회의를 1개 발견했습니다. 미리보고 복구할 회의를 선택하세요.",
+    "dialog_description_other": "중단된 회의를 {count}개 발견했습니다. 미리보고 복구할 회의를 선택하세요.",
+    "started_label": "시작",
+    "preview_segments": "처음 {shown}개 세그먼트 표시 (총 {total}개)",
+    "preview_loading": "미리보기 불러오는 중...",
+    "preview_empty": "미리볼 전사가 없습니다",
+    "preview_select": "미리볼 회의를 선택하세요",
+    "audio_available": "오디오 사용 가능",
+    "audio_unavailable": "오디오 없음",
+    "alert_recover_failed": "회의 복구에 실패했습니다. 다시 시도해 주세요.",
+    "alert_delete_failed": "회의 삭제에 실패했습니다. 다시 시도해 주세요.",
+    "confirm_delete": "이 회의를 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.",
+    "cancel": "취소",
+    "delete": "삭제",
+    "deleting": "삭제 중...",
+    "recovering": "복구 중..."
+  }
+}

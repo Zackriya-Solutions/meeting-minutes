@@ -8,7 +8,9 @@ import { ConfidenceIndicator } from "./ConfidenceIndicator";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 import { RecordingStatusBar } from "./RecordingStatusBar";
 import { motion, AnimatePresence } from "framer-motion";
+import { Check, X } from "lucide-react";
 import { TranscriptSegmentData } from "@/types";
+import { useTranslations } from "next-intl";
 
 export interface VirtualizedTranscriptViewProps {
     /** Transcript segments to display */
@@ -34,6 +36,10 @@ export interface VirtualizedTranscriptViewProps {
     totalCount?: number;
     loadedCount?: number;
     onLoadMore?: () => void;
+    /** Called when user clicks the timestamp button to jump audio playback */
+    onTimestampClick?: (sec: number) => void;
+    customSpeakerNames?: Record<string, string>;
+    onSpeakerRename?: (speakerId: string, friendlyName: string) => void;
 }
 
 // Threshold for enabling virtualization (below this, use simple rendering)
@@ -71,6 +77,10 @@ const TranscriptSegment = memo(function TranscriptSegment({
     confidence,
     isStreaming,
     showConfidence,
+    onTimestampClick,
+    speaker,
+    customSpeakerNames,
+    onSpeakerRename,
 }: {
     id: string;
     timestamp: number;
@@ -78,17 +88,53 @@ const TranscriptSegment = memo(function TranscriptSegment({
     confidence?: number;
     isStreaming: boolean;
     showConfidence: boolean;
+    onTimestampClick?: (sec: number) => void;
+    speaker?: string | null;
+    customSpeakerNames?: Record<string, string>;
+    onSpeakerRename?: (speakerId: string, friendlyName: string) => void;
 }) {
+    const t = useTranslations('settings.transcript');
     const displayText = cleanStopWords(text) || (text.trim() === '' ? '[Silence]' : text);
+    const customName = speaker ? customSpeakerNames?.[speaker] : undefined;
+    const [isRenaming, setIsRenaming] = useState(false);
+    const [draftName, setDraftName] = useState('');
+    const openRename = (e: React.MouseEvent) => {
+        e.stopPropagation();
+        if (!onSpeakerRename) return;
+        setDraftName(customName ?? '');
+        setIsRenaming(true);
+    };
+    const commitRename = () => {
+        if (speaker) onSpeakerRename?.(speaker, draftName);
+        setIsRenaming(false);
+    };
+    const cancelRename = () => setIsRenaming(false);
+    const timeButton = (
+        <button
+            type="button"
+            onClick={(e) => {
+                e.stopPropagation();
+                onTimestampClick?.(timestamp);
+            }}
+            disabled={!onTimestampClick}
+            className={
+                "text-xs mt-1 flex-shrink-0 min-w-[50px] text-left " +
+                (onTimestampClick
+                    ? "text-blue-600 hover:text-blue-800 hover:underline cursor-pointer"
+                    : "text-gray-400 cursor-default")
+            }
+            aria-label={`Jump to ${formatRecordingTime(timestamp)}`}
+        >
+            {formatRecordingTime(timestamp)}
+        </button>
+    );
 
     return (
         <div id={`segment-${id}`} className="mb-3">
             <div className="flex items-start gap-2">
                 <Tooltip>
-                    <TooltipTrigger>
-                        <span className="text-xs text-gray-400 mt-1 flex-shrink-0 min-w-[50px]">
-                            {formatRecordingTime(timestamp)}
-                        </span>
+                    <TooltipTrigger asChild>
+                        {timeButton}
                     </TooltipTrigger>
                     <TooltipContent>
                         {confidence !== undefined && showConfidence && (
@@ -96,6 +142,35 @@ const TranscriptSegment = memo(function TranscriptSegment({
                         )}
                     </TooltipContent>
                 </Tooltip>
+                {speaker && !isRenaming && (
+                    <button
+                        type="button"
+                        onClick={openRename}
+                        disabled={!onSpeakerRename}
+                        className="text-xs font-medium text-blue-700 bg-blue-50 hover:bg-blue-100 disabled:cursor-default px-2 py-0.5 rounded mt-1 flex-shrink-0"
+                        title={onSpeakerRename ? t('speaker_rename_placeholder') : undefined}
+                    >
+                        {customName ?? speaker}
+                    </button>
+                )}
+                {speaker && isRenaming && (
+                    <span className="flex items-center gap-1 mt-1 flex-shrink-0">
+                        <input
+                            autoFocus
+                            type="text"
+                            value={draftName}
+                            onChange={(e) => setDraftName(e.target.value)}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter') commitRename();
+                                else if (e.key === 'Escape') cancelRename();
+                            }}
+                            placeholder={t('speaker_rename_placeholder')}
+                            className="text-xs px-1.5 py-0.5 border border-blue-300 rounded w-28 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        />
+                        <button type="button" onClick={commitRename} className="p-0.5 text-green-600 hover:text-green-800" title={t('speaker_rename_save')} aria-label={t('speaker_rename_save')}><Check size={14} /></button>
+                        <button type="button" onClick={cancelRename} className="p-0.5 text-gray-500 hover:text-gray-700" title={t('speaker_rename_cancel')} aria-label={t('speaker_rename_cancel')}><X size={14} /></button>
+                    </span>
+                )}
                 <div className="flex-1">
                     {isStreaming ? (
                         <div className="bg-gray-100 border border-gray-200 rounded-lg px-3 py-2">
@@ -112,6 +187,7 @@ const TranscriptSegment = memo(function TranscriptSegment({
 
 export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps> = ({
     segments,
+    onTimestampClick,
     isRecording = false,
     isPaused = false,
     isProcessing = false,
@@ -124,6 +200,8 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
     totalCount = 0,
     loadedCount = 0,
     onLoadMore,
+    customSpeakerNames,
+    onSpeakerRename,
 }) => {
     // Create scroll ref first - shared between virtualizer and auto-scroll hook
     const scrollRef = useRef<HTMLDivElement>(null);
@@ -296,6 +374,10 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                         confidence={segment.confidence}
                                         isStreaming={isStreaming}
                                         showConfidence={showConfidence}
+                                        speaker={segment.speaker}
+                                        customSpeakerNames={customSpeakerNames}
+                                        onSpeakerRename={onSpeakerRename}
+                                        onTimestampClick={onTimestampClick}
                                     />
                                 </div>
                             );
@@ -352,6 +434,10 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                         confidence={segment.confidence}
                                         isStreaming={isStreaming}
                                         showConfidence={showConfidence}
+                                        speaker={segment.speaker}
+                                        customSpeakerNames={customSpeakerNames}
+                                        onSpeakerRename={onSpeakerRename}
+                                        onTimestampClick={onTimestampClick}
                                     />
                                 </motion.div>
                             );

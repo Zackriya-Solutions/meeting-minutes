@@ -1,0 +1,68 @@
+{
+  "title": "Summary",
+  "panel": {
+    "title": "Meeting Summary",
+    "generating": "Generating AI Summary...",
+    "sections": {
+      "key_points": "Key Points",
+      "action_items": "Action Items",
+      "decisions": "Decisions",
+      "main_topics": "Main Topics",
+      "full_summary": "Full Summary"
+    },
+    "auto_language_subtitle": "Uses dominant transcript language",
+    "saved_locally_subtitle": "Saved on this device for folderless meetings",
+    "summary_language_tooltip": "Summary language: {label}",
+    "summary_language_tooltip_fallback": "Summary language: {label} (saved on this device)",
+    "set_summary_language": "Set summary language"
+  },
+  "actions": {
+    "generate": "Generate Summary",
+    "regenerate": "Regenerate",
+    "edit": "Edit Summary",
+    "copy": "Copy Summary",
+    "retranscription_complete": "Retranscription complete! {count} segments created.",
+    "retranscription_cancelled": "Retranscription cancelled"
+  },
+  "status": {
+    "idle": "No summary yet",
+    "generating": "Generating summary...",
+    "ready": "Summary ready",
+    "failed": "Failed to generate summary",
+    "finalizing": "Finalizing transcription...",
+    "saving": "Saving transcript...",
+    "saved_locally": "Summary language saved on this device",
+    "failed_to_save_lang": "Failed to save summary language",
+    "failed_to_load_lang": "Could not load saved summary language",
+    "load_failed_description": "Using Auto until meeting metadata can be read.",
+    "saved_locally_description": "This meeting has no recording folder, so the preference cannot be written to meeting metadata."
+  },
+  "empty": "Generate a summary to see key points and action items here.",
+  "language": {
+    "label": "Summary Language",
+    "auto_translate": "Auto-translate to English",
+    "auto_label": "Auto"
+  },
+  "meeting": {
+    "custom_prompt_placeholder": "Add context for AI summary. For example people involved, meeting overview, objective etc..."
+  },
+  "errors": {
+    "no_model_selected": "No built-in AI model selected",
+    "no_model_selected_description": "Please select a model in settings",
+    "model_not_found": "Model not found",
+    "model_not_found_description": "Could not find information for model: {model}",
+    "model_download_in_progress": "Model download in progress",
+    "model_not_downloaded": "Model not downloaded",
+    "model_file_corrupted": "Model file corrupted",
+    "model_file_corrupted_description": "{model} file is corrupted. Please delete and re-download.",
+    "model_error": "Model error",
+    "model_not_available": "Model not available",
+    "model_not_available_description": "The selected model is not ready for use",
+    "check_model_status_failed": "Failed to check model status",
+    "ollama_no_models": "No Ollama models found. Please download gemma2:2b from Model Settings.",
+    "ollama_not_installed": "Ollama is not installed",
+    "ollama_not_installed_description": "Please download and install Ollama to use local models.",
+    "ollama_install_action": "Download",
+    "ollama_check_failed": "Failed to check Ollama models. Please check if Ollama is running and download a model."
+  }
+}
