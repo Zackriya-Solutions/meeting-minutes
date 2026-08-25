@@ -405,12 +405,53 @@ pub fn run() {
         }));
     }
 
+    // Global hotkeys to toggle recording without focusing the app.
+    // Uses the same toggle_recording_handler the tray menu already fires.
+    //
+    // Two shortcuts registered:
+    //   - F13            → for external keyboards (Wispr-Flow style single key)
+    //   - Cmd+Shift+M    → laptop-friendly fallback (M for Meeting, right-hand only)
+    //
+    // Requires macOS Accessibility permission (System Settings > Privacy > Accessibility)
+    // for global hotkeys to actually fire. Plugin register() succeeds silently
+    // without it, but events won't be delivered.
+    #[cfg(desktop)]
+    let global_shortcut_plugin = {
+        use tauri_plugin_global_shortcut::{Code, Modifiers, Shortcut, ShortcutState};
+
+        let f13_shortcut = Shortcut::new(None, Code::F13);
+        let combo_shortcut = Shortcut::new(
+            Some(Modifiers::META | Modifiers::SHIFT),
+            Code::KeyM,
+        );
+
+        log::info!("Global hotkeys: registering F13 and Cmd+Shift+M → toggle recording");
+
+        tauri_plugin_global_shortcut::Builder::new()
+            .with_shortcuts([f13_shortcut, combo_shortcut])
+            .expect("failed to register global toggle-recording shortcuts")
+            .with_handler(move |app, shortcut, event| {
+                log::debug!(
+                    "Global shortcut event: shortcut={:?} state={:?}",
+                    shortcut,
+                    event.state()
+                );
+                let matched = shortcut == &f13_shortcut || shortcut == &combo_shortcut;
+                if matched && event.state() == ShortcutState::Pressed {
+                    log::info!("Global hotkey pressed ({:?}): toggling recording", shortcut);
+                    tray::toggle_recording_handler(app);
+                }
+            })
+            .build()
+    };
+
     builder
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        .plugin(global_shortcut_plugin)
         .manage(whisper_engine::parallel_commands::ParallelProcessorState::new())
         .manage(Arc::new(RwLock::new(
             None::<notifications::manager::NotificationManager<tauri::Wry>>,
