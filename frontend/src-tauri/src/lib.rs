@@ -731,6 +731,7 @@ pub fn run() {
             onboarding::save_onboarding_status_cmd,
             onboarding::reset_onboarding_status_cmd,
             onboarding::complete_onboarding,
+            audio::transcription::remote_whisper_provider::remote_whisper_check_health,
             // System settings commands
             #[cfg(target_os = "macos")]
             utils::open_system_settings,

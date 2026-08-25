@@ -10,7 +10,7 @@ import { ParakeetModelManager } from './ParakeetModelManager';
 
 
 export interface TranscriptModelProps {
-    provider: 'localWhisper' | 'parakeet' | 'deepgram' | 'elevenLabs' | 'groq' | 'openai';
+    provider: 'localWhisper' | 'parakeet' | 'remoteWhisper' | 'deepgram' | 'elevenLabs' | 'groq' | 'openai';
     model: string;
     apiKey?: string | null;
 }
@@ -34,7 +34,7 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
     }, [transcriptModelConfig.provider]);
 
     useEffect(() => {
-        if (transcriptModelConfig.provider === 'localWhisper' || transcriptModelConfig.provider === 'parakeet') {
+        if (transcriptModelConfig.provider === 'localWhisper' || transcriptModelConfig.provider === 'parakeet' || transcriptModelConfig.provider === 'remoteWhisper') {
             setApiKey(null);
         }
     }, [transcriptModelConfig.provider]);
@@ -53,6 +53,7 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
     const modelOptions = {
         localWhisper: [], // Model selection handled by ModelManager component
         parakeet: [], // Model selection handled by ParakeetModelManager component
+        remoteWhisper: [], // URL entered directly, no fixed model list
         deepgram: ['nova-2-phonecall'],
         elevenLabs: ['eleven_multilingual_v2'],
         groq: ['llama-3.3-70b-versatile'],
@@ -112,7 +113,7 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                 onValueChange={(value) => {
                                     const provider = value as TranscriptModelProps['provider'];
                                     setUiProvider(provider);
-                                    if (provider !== 'localWhisper' && provider !== 'parakeet') {
+                                    if (provider !== 'localWhisper' && provider !== 'parakeet' && provider !== 'remoteWhisper') {
                                         fetchApiKey(provider);
                                     }
                                 }}
@@ -123,6 +124,7 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                 <SelectContent>
                                     <SelectItem value="parakeet">⚡ Parakeet (Recommended - Real-time / Accurate)</SelectItem>
                                     <SelectItem value="localWhisper">🏠 Local Whisper (High Accuracy)</SelectItem>
+                                    <SelectItem value="remoteWhisper">🖥️ Remote Whisper (self-hosted server)</SelectItem>
                                     {/* <SelectItem value="deepgram">☁️ Deepgram (Backup)</SelectItem>
                                     <SelectItem value="elevenLabs">☁️ ElevenLabs</SelectItem>
                                     <SelectItem value="groq">☁️ Groq</SelectItem>
@@ -130,7 +132,7 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                 </SelectContent>
                             </Select>
 
-                            {uiProvider !== 'localWhisper' && uiProvider !== 'parakeet' && (
+                            {uiProvider !== 'localWhisper' && uiProvider !== 'parakeet' && uiProvider !== 'remoteWhisper' && (
                                 <Select
                                     value={transcriptModelConfig.model}
                                     onValueChange={(value) => {
@@ -169,6 +171,31 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                 onModelSelect={handleParakeetModelSelect}
                                 autoSave={true}
                             />
+                        </div>
+                    )}
+
+                    {uiProvider === 'remoteWhisper' && (
+                        <div>
+                            <Label className="block text-sm font-medium text-gray-700 mb-1">
+                                Server URL
+                            </Label>
+                            <Input
+                                type="text"
+                                className="mx-1 focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                                value={transcriptModelConfig.provider === 'remoteWhisper' ? transcriptModelConfig.model : ''}
+                                onChange={(e) => {
+                                    setTranscriptModelConfig({
+                                        ...transcriptModelConfig,
+                                        provider: 'remoteWhisper',
+                                        model: e.target.value,
+                                    });
+                                }}
+                                placeholder="http://192.168.1.100:8093"
+                            />
+                            <p className="mt-1 mx-1 text-xs text-gray-500">
+                                Base URL of an OpenAI-compatible <code>/v1/audio/transcriptions</code> server
+                                (e.g. a self-hosted faster-whisper instance). No API key required.
+                            </p>
                         </div>
                     )}
 
