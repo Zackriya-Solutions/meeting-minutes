@@ -1,20 +1,21 @@
 use log::{debug as log_debug, error as log_error, info as log_info, warn as log_warn};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use tauri::{AppHandle, Runtime};
+use tauri::{AppHandle, Manager, Runtime};
 use tauri_plugin_store::StoreExt;
 
 use crate::{
     database::{
         models::MeetingModel,
         repositories::{
-            meeting::MeetingsRepository, setting::SettingsRepository,
+            meeting::MeetingsRepository, organization::OrganizationRepository, setting::SettingsRepository,
             transcript::TranscriptsRepository,
         },
     },
     state::AppState,
     summary::CustomOpenAIConfig,
 };
+use crate::summary::llm_client::{generate_summary, LLMProvider};
 
 // Hardcoded server URL
 const APP_SERVER_URL: &str = "http://localhost:5167";
@@ -30,6 +31,10 @@ pub struct ApiResponse<T> {
 pub struct Meeting {
     pub id: String,
     pub title: String,
+    #[serde(default)]
+    pub project_folder_id: Option<String>,
+    #[serde(default)]
+    pub tags: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -123,6 +128,10 @@ pub struct MeetingDetails {
     pub created_at: String,
     pub updated_at: String,
     pub transcripts: Vec<MeetingTranscript>,
+    #[serde(default)]
+    pub project_folder_id: Option<String>,
+    #[serde(default)]
+    pub tags: Vec<OrganizationTag>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -150,6 +159,22 @@ pub struct MeetingMetadata {
     pub updated_at: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub folder_path: Option<String>,
+    #[serde(default)]
+    pub project_folder_id: Option<String>,
+    #[serde(default)]
+    pub tags: Vec<OrganizationTag>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct OrganizationFolder {
+    pub id: String,
+    pub name: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct OrganizationTag {
+    pub id: String,
+    pub name: String,
 }
 
 /// Paginated transcripts response with total count
@@ -340,11 +365,24 @@ pub async fn api_get_meetings<R: Runtime>(
         Ok(meeting_models) => {
             log_info!("Successfully got {} meetings", meeting_models.len());
 
+            let mut tags_by_meeting = OrganizationRepository::get_tags_for_all_meetings(pool)
+                .await
+                .map_err(|e| e.to_string())?;
             let result: Vec<Meeting> = meeting_models
                 .into_iter()
-                .map(|m| Meeting {
-                    id: m.id,
-                    title: m.title,
+                .map(|m| {
+                    let tags = tags_by_meeting
+                        .remove(&m.id)
+                        .unwrap_or_default()
+                        .into_iter()
+                        .map(|tag| tag.name)
+                        .collect();
+                    Meeting {
+                        id: m.id,
+                        title: m.title,
+                        project_folder_id: m.project_folder_id,
+                        tags,
+                    }
                 })
                 .collect();
             Ok(result)
@@ -354,6 +392,194 @@ pub async fn api_get_meetings<R: Runtime>(
             Err(e.to_string())
         }
     }
+}
+
+#[tauri::command]
+pub async fn api_get_project_folders<R: Runtime>(
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<OrganizationFolder>, String> {
+    OrganizationRepository::get_folders(state.db_manager.pool())
+        .await
+        .map(|folders| folders.into_iter().map(|folder| OrganizationFolder { id: folder.id, name: folder.name }).collect())
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn api_create_project_folder<R: Runtime>(
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    name: String,
+) -> Result<OrganizationFolder, String> {
+    OrganizationRepository::create_folder(state.db_manager.pool(), &name)
+        .await
+        .map(|folder| OrganizationFolder { id: folder.id, name: folder.name })
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn api_rename_project_folder<R: Runtime>(
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    folder_id: String,
+    name: String,
+) -> Result<(), String> {
+    if OrganizationRepository::rename_folder(state.db_manager.pool(), &folder_id, &name)
+        .await.map_err(|e| e.to_string())? { Ok(()) } else { Err("Project folder not found".into()) }
+}
+
+#[tauri::command]
+pub async fn api_delete_project_folder<R: Runtime>(
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    folder_id: String,
+) -> Result<(), String> {
+    if OrganizationRepository::delete_folder(state.db_manager.pool(), &folder_id)
+        .await.map_err(|e| e.to_string())? { Ok(()) } else { Err("Project folder not found".into()) }
+}
+
+#[tauri::command]
+pub async fn api_move_meeting_to_project_folder<R: Runtime>(
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    meeting_id: String,
+    folder_id: Option<String>,
+) -> Result<(), String> {
+    if let Some(folder_id) = folder_id.as_deref() {
+        let exists = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM project_folders WHERE id = ?")
+            .bind(folder_id).fetch_one(state.db_manager.pool()).await.map_err(|e| e.to_string())?;
+        if exists == 0 { return Err("Project folder not found".into()); }
+    }
+    if OrganizationRepository::assign_folder(state.db_manager.pool(), &meeting_id, folder_id.as_deref())
+        .await.map_err(|e| e.to_string())? { Ok(()) } else { Err("Meeting not found".into()) }
+}
+
+#[tauri::command]
+pub async fn api_add_meeting_tag<R: Runtime>(
+    _app: AppHandle<R>, state: tauri::State<'_, AppState>, meeting_id: String, name: String,
+) -> Result<OrganizationTag, String> {
+    OrganizationRepository::add_tag(state.db_manager.pool(), &meeting_id, &name).await
+        .map(|tag| OrganizationTag { id: tag.id, name: tag.name })
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn api_remove_meeting_tag<R: Runtime>(
+    _app: AppHandle<R>, state: tauri::State<'_, AppState>, meeting_id: String, tag_id: String,
+) -> Result<(), String> {
+    OrganizationRepository::remove_tag(state.db_manager.pool(), &meeting_id, &tag_id).await
+        .map(|_| ()).map_err(|e| e.to_string())
+}
+
+fn strip_list_marker(candidate: &str) -> &str {
+    let trimmed = candidate.trim_start();
+    if let Some(rest) = trimmed.strip_prefix(['-', '*', '•']) {
+        if rest.starts_with(char::is_whitespace) {
+            return rest.trim_start();
+        }
+    }
+    let digit_count = trimmed.chars().take_while(|c| c.is_ascii_digit()).count();
+    if digit_count > 0 {
+        if let Some(rest) = trimmed[digit_count..].strip_prefix(['.', ')']) {
+            if rest.starts_with(char::is_whitespace) {
+                return rest.trim_start();
+            }
+        }
+    }
+    trimmed
+}
+
+fn is_plausible_tag(tag: &str) -> bool {
+    !tag.is_empty()
+        && tag.chars().count() <= 40
+        && !tag.ends_with(':')
+        && tag.split_whitespace().count() <= 3
+        && tag.chars().any(char::is_alphanumeric)
+}
+
+fn parse_suggested_tags(raw: &str) -> Vec<String> {
+    let cleaned = raw.trim().trim_start_matches("```json").trim_start_matches("```").trim_end_matches("```").trim();
+    let candidates: Vec<String> = match serde_json::from_str::<serde_json::Value>(cleaned) {
+        Ok(value) => match value.get("tags").cloned().unwrap_or(value).as_array() {
+            Some(items) => items.iter().filter_map(|item| item.as_str().map(str::to_string)).collect(),
+            None => Vec::new(),
+        },
+        Err(_) => cleaned.split([',', '\n']).map(str::trim).map(str::to_string).collect(),
+    };
+    let mut result: Vec<String> = Vec::new();
+    for candidate in candidates {
+        let tag = strip_list_marker(candidate.trim()).trim_start_matches('#').trim().to_string();
+        if !is_plausible_tag(&tag) || result.iter().any(|existing| existing.eq_ignore_ascii_case(&tag)) {
+            continue;
+        }
+        result.push(tag);
+        if result.len() == 8 { break; }
+    }
+    result
+}
+
+const SUGGESTION_CONTENT_LIMIT: usize = 24_000;
+
+fn build_suggestion_content(transcript: &str, summary: &str, limit: usize) -> String {
+    let transcript = transcript.trim();
+    let summary = summary.trim();
+    if summary.is_empty() {
+        return format!("Transcript:\n{}", transcript.chars().take(limit).collect::<String>());
+    }
+    let summary_slice: String = summary.chars().take(limit).collect();
+    let remaining = limit - summary_slice.chars().count();
+    if transcript.is_empty() || remaining == 0 {
+        return format!("Summary:\n{}", summary_slice);
+    }
+    format!(
+        "Summary:\n{}\n\nTranscript:\n{}",
+        summary_slice,
+        transcript.chars().take(remaining).collect::<String>()
+    )
+}
+
+#[tauri::command]
+pub async fn api_suggest_meeting_tags<R: Runtime>(
+    app: AppHandle<R>, state: tauri::State<'_, AppState>, meeting_id: String,
+) -> Result<Vec<String>, String> {
+    let pool = state.db_manager.pool();
+    let transcript_rows: Vec<(String,)> = sqlx::query_as(
+        "SELECT transcript FROM transcripts WHERE meeting_id = ? ORDER BY audio_start_time, timestamp",
+    ).bind(&meeting_id).fetch_all(pool).await.map_err(|e| e.to_string())?;
+    let summary_row: Option<(Option<String>,)> = sqlx::query_as(
+        "SELECT result FROM summary_processes WHERE meeting_id = ? AND result IS NOT NULL",
+    ).bind(&meeting_id).fetch_optional(pool).await.map_err(|e| e.to_string())?;
+    let transcript = transcript_rows.into_iter().map(|row| row.0).collect::<Vec<_>>().join("\n");
+    let summary = summary_row.and_then(|row| row.0).unwrap_or_default();
+    if transcript.trim().len() + summary.trim().len() < 20 { return Ok(Vec::new()); }
+    let content = build_suggestion_content(&transcript, &summary, SUGGESTION_CONTENT_LIMIT);
+
+    let config = SettingsRepository::get_model_config(pool).await.map_err(|e| e.to_string())?
+        .ok_or_else(|| "No summary model configured".to_string())?;
+    if config.provider.trim().is_empty() || config.model.trim().is_empty() {
+        return Err("No summary model configured".into());
+    }
+    let provider = LLMProvider::from_str(&config.provider)?;
+    let api_key = match provider {
+        LLMProvider::Ollama | LLMProvider::BuiltInAI | LLMProvider::CustomOpenAI => String::new(),
+        _ => SettingsRepository::get_api_key(pool, &config.provider).await.map_err(|e| e.to_string())?.unwrap_or_default(),
+    };
+    let custom_config: Option<CustomOpenAIConfig> = if provider == LLMProvider::CustomOpenAI {
+        Some(SettingsRepository::get_custom_openai_config(pool).await.map_err(|e| e.to_string())?
+            .ok_or_else(|| "Custom OpenAI provider is not configured".to_string())?)
+    } else { None };
+    let final_api_key = custom_config.as_ref().and_then(|value| value.api_key.clone()).unwrap_or(api_key);
+    let generated = generate_summary(
+        &reqwest::Client::new(), &provider, &config.model, &final_api_key,
+        "You suggest concise organization tags for a meeting. Return only JSON in the form {\"tags\":[\"tag\"]}. Suggest 3 to 8 specific, reusable tags. Do not include people names, dates, or generic words like meeting.",
+        &content,
+        config.ollama_endpoint.as_deref(), custom_config.as_ref().map(|value| value.endpoint.as_str()),
+        custom_config.as_ref().and_then(|value| value.max_tokens.map(|tokens| tokens as u32)),
+        custom_config.as_ref().and_then(|value| value.temperature),
+        custom_config.as_ref().and_then(|value| value.top_p),
+        Some(&app.path().app_data_dir().map_err(|e| e.to_string())?), None,
+    ).await?;
+    Ok(parse_suggested_tags(&generated))
 }
 
 #[tauri::command]
@@ -826,12 +1052,17 @@ pub async fn api_get_meeting_metadata<R: Runtime>(
     match MeetingsRepository::get_meeting_metadata(pool, &meeting_id).await {
         Ok(Some(meeting)) => {
             log_info!("Successfully retrieved meeting metadata {}", meeting_id);
+            let tags = OrganizationRepository::get_tags_for_meeting(pool, &meeting.id)
+                .await.map_err(|e| e.to_string())?.into_iter()
+                .map(|tag| OrganizationTag { id: tag.id, name: tag.name }).collect();
             Ok(MeetingMetadata {
                 id: meeting.id,
                 title: meeting.title,
                 created_at: meeting.created_at.0.to_rfc3339(),
                 updated_at: meeting.updated_at.0.to_rfc3339(),
                 folder_path: meeting.folder_path,
+                project_folder_id: meeting.project_folder_id,
+                tags,
             })
         }
         Ok(None) => {
@@ -1021,7 +1252,7 @@ pub async fn open_meeting_folder<R: Runtime>(
 
     // Get meeting with folder_path
     let meeting: Option<MeetingModel> = sqlx::query_as(
-        "SELECT id, title, created_at, updated_at, folder_path FROM meetings WHERE id = ?",
+        "SELECT id, title, created_at, updated_at, folder_path, project_folder_id FROM meetings WHERE id = ?",
     )
     .bind(&meeting_id)
     .fetch_optional(pool)
@@ -1384,5 +1615,122 @@ pub async fn api_test_custom_openai_connection<R: Runtime>(
                 Err(format!("Connection failed: {}", e))
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{build_suggestion_content, parse_suggested_tags};
+
+    #[test]
+    fn keeps_the_whole_summary_when_the_transcript_overflows_the_limit() {
+        let transcript = "t".repeat(40_000);
+        let summary = "Decided to ship the mobile alpha.";
+
+        let content = build_suggestion_content(&transcript, summary, 24_000);
+
+        let (summary_part, transcript_part) = content.split_once("\n\nTranscript:\n").unwrap();
+        assert_eq!(summary_part, format!("Summary:\n{}", summary));
+        assert_eq!(transcript_part, "t".repeat(24_000 - summary.chars().count()));
+    }
+
+    #[test]
+    fn falls_back_to_the_transcript_when_no_summary_exists() {
+        let content = build_suggestion_content("we shipped the alpha", "", 24_000);
+
+        assert_eq!(content, "Transcript:\nwe shipped the alpha");
+    }
+
+    #[test]
+    fn drops_the_transcript_entirely_when_the_summary_fills_the_budget() {
+        let summary = "s".repeat(30_000);
+
+        let content = build_suggestion_content("a transcript", &summary, 100);
+
+        assert_eq!(content, format!("Summary:\n{}", "s".repeat(100)));
+    }
+
+    #[test]
+    fn counts_multibyte_characters_without_splitting_them() {
+        let content = build_suggestion_content("ação", "café", 3);
+
+        assert_eq!(content, "Summary:\ncaf");
+    }
+
+    #[test]
+    fn parses_json_tag_objects_and_arrays() {
+        assert_eq!(
+            parse_suggested_tags("{\"tags\":[\"roadmap\",\"alpha-release\"]}"),
+            vec!["roadmap".to_string(), "alpha-release".to_string()]
+        );
+        assert_eq!(
+            parse_suggested_tags("```json\n[\"roadmap\", \"#mobile\"]\n```"),
+            vec!["roadmap".to_string(), "mobile".to_string()]
+        );
+    }
+
+    #[test]
+    fn drops_conversational_prose_from_the_plain_text_fallback() {
+        assert_eq!(
+            parse_suggested_tags("Here are 5 tags for this meeting:\n\nroadmap, alpha-release, mobile"),
+            vec![
+                "roadmap".to_string(),
+                "alpha-release".to_string(),
+                "mobile".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn strips_numbered_and_bulleted_list_markers_from_fallback_candidates() {
+        assert_eq!(
+            parse_suggested_tags("1. roadmap\n2. alpha-release\n3. mobile"),
+            vec![
+                "roadmap".to_string(),
+                "alpha-release".to_string(),
+                "mobile".to_string()
+            ]
+        );
+        assert_eq!(
+            parse_suggested_tags("- roadmap\n* alpha-release\n• mobile"),
+            vec![
+                "roadmap".to_string(),
+                "alpha-release".to_string(),
+                "mobile".to_string()
+            ]
+        );
+        assert_eq!(
+            parse_suggested_tags("1) roadmap\n2) #mobile"),
+            vec!["roadmap".to_string(), "mobile".to_string()]
+        );
+    }
+
+    #[test]
+    fn keeps_tags_whose_own_text_starts_with_digits_or_punctuation() {
+        assert_eq!(
+            parse_suggested_tags("2024-planning, 2.0-release, 3d-printing"),
+            vec![
+                "2024-planning".to_string(),
+                "2.0-release".to_string(),
+                "3d-printing".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn returns_nothing_for_json_without_a_tag_array() {
+        assert!(parse_suggested_tags("{\"suggestions\":[\"roadmap\"]}").is_empty());
+    }
+
+    #[test]
+    fn deduplicates_case_insensitively_and_caps_at_eight() {
+        assert_eq!(
+            parse_suggested_tags("roadmap, Roadmap"),
+            vec!["roadmap".to_string()]
+        );
+        assert_eq!(
+            parse_suggested_tags("a1, b2, c3, d4, e5, f6, g7, h8, i9").len(),
+            8
+        );
     }
 }

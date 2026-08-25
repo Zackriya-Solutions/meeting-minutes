@@ -1,10 +1,11 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useMemo } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import Analytics from '@/lib/analytics';
 import { invoke } from '@tauri-apps/api/core';
 import { useRecordingState } from '@/contexts/RecordingStateContext';
+import { buildMeetingTree } from '@/lib/sidebar-tree';
 
 
 interface SidebarItem {
@@ -12,11 +13,22 @@ interface SidebarItem {
   title: string;
   type: 'folder' | 'file';
   children?: SidebarItem[];
+  tags?: string[];
+  project_folder_id?: string | null;
 }
+
+export interface ProjectFolder {
+  id: string;
+  name: string;
+}
+
+export const UNFILED_FOLDER_VALUE = 'unfiled';
 
 export interface CurrentMeeting {
   id: string;
   title: string;
+  project_folder_id?: string | null;
+  tags?: string[];
 }
 
 // Search result type for transcript search
@@ -51,6 +63,8 @@ interface SidebarContextType {
   stopSummaryPolling: (meetingId: string) => void;
   // Refetch meetings from backend
   refetchMeetings: () => Promise<void>;
+  projectFolders: ProjectFolder[];
+  refetchOrganization: () => Promise<void>;
 
 }
 
@@ -68,6 +82,7 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
   const [currentMeeting, setCurrentMeeting] = useState<CurrentMeeting | null>({ id: 'intro-call', title: '+ New Call' });
   const [isCollapsed, setIsCollapsed] = useState(true);
   const [meetings, setMeetings] = useState<CurrentMeeting[]>([]);
+  const [projectFolders, setProjectFolders] = useState<ProjectFolder[]>([]);
   const [sidebarItems, setSidebarItems] = useState<SidebarItem[]>([]);
   const [isMeetingActive, setIsMeetingActive] = useState(false);
   const [searchResults, setSearchResults] = useState<any[]>([]);
@@ -85,18 +100,31 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
   // Extract fetchMeetings as a reusable function
   const fetchMeetings = React.useCallback(async () => {
     if (serverAddress) {
-      try {
-        const meetings = await invoke('api_get_meetings') as Array<{ id: string, title: string }>;
-        const transformedMeetings = meetings.map((meeting: any) => ({
+      const [meetingsResult, foldersResult] = await Promise.allSettled([
+        invoke('api_get_meetings') as Promise<CurrentMeeting[]>,
+        invoke('api_get_project_folders') as Promise<ProjectFolder[]>,
+      ]);
+
+      if (meetingsResult.status === 'fulfilled') {
+        const transformedMeetings = meetingsResult.value.map((meeting) => ({
           id: meeting.id,
-          title: meeting.title
+          title: meeting.title,
+          project_folder_id: meeting.project_folder_id ?? null,
+          tags: meeting.tags ?? [],
         }));
         setMeetings(transformedMeetings);
         Analytics.trackBackendConnection(true);
-      } catch (error) {
+      } else {
+        const error = meetingsResult.reason;
         console.error('Error fetching meetings:', error);
         setMeetings([]);
         Analytics.trackBackendConnection(false, error instanceof Error ? error.message : 'Unknown error');
+      }
+
+      if (foldersResult.status === 'fulfilled') {
+        setProjectFolders(foldersResult.value);
+      } else {
+        console.error('Error fetching project folders:', foldersResult.reason);
       }
     }
   }, [serverAddress]);
@@ -113,16 +141,10 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
     fetchSettings();
   }, []);
 
-  const baseItems: SidebarItem[] = [
-    {
-      id: 'meetings',
-      title: 'Meeting Notes',
-      type: 'folder' as const,
-      children: [
-        ...meetings.map(meeting => ({ id: meeting.id, title: meeting.title, type: 'file' as const }))
-      ]
-    },
-  ];
+  const baseItems = useMemo<SidebarItem[]>(
+    () => buildMeetingTree(meetings, projectFolders, UNFILED_FOLDER_VALUE),
+    [meetings, projectFolders]
+  );
 
 
   const toggleCollapse = () => {
@@ -140,7 +162,7 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
   // Update sidebar items when meetings change
   useEffect(() => {
     setSidebarItems(baseItems);
-  }, [meetings]);
+  }, [baseItems]);
 
   // Function to handle recording toggle from sidebar
   const handleRecordingToggle = () => {
@@ -312,6 +334,8 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
       startSummaryPolling,
       stopSummaryPolling,
       refetchMeetings: fetchMeetings,
+      projectFolders,
+      refetchOrganization: fetchMeetings,
 
     }}>
       {children}
