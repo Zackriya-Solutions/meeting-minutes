@@ -52,7 +52,7 @@ fn handle_menu_event<R: Runtime>(app: &AppHandle<R>, item_id: &str) {
         _ => {}
     }
 }
-fn toggle_recording_handler<R: Runtime>(app: &AppHandle<R>) {
+pub fn toggle_recording_handler<R: Runtime>(app: &AppHandle<R>) {
     focus_main_window(app);
     let app_clone = app.clone();
     tauri::async_runtime::spawn(async move {
