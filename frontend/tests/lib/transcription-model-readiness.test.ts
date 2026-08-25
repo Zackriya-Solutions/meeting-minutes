@@ -29,6 +29,7 @@ describe('transcription model readiness', () => {
   test('recognizes only active downloads', () => {
     expect(hasDownloadingModel([{ status: 'Available' }])).toBeFalse();
     expect(hasDownloadingModel([{ status: 'Downloading' }])).toBeTrue();
+    expect(hasDownloadingModel([{ status: { Downloading: 0 } }])).toBeTrue();
     expect(hasDownloadingModel([{ status: { Downloading: 42 } }])).toBeTrue();
   });
 });
