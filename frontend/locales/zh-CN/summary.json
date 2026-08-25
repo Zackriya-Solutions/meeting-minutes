@@ -1,0 +1,68 @@
+{
+  "title": "摘要",
+  "panel": {
+    "title": "会议摘要",
+    "generating": "正在生成摘要...",
+    "sections": {
+      "key_points": "关键要点",
+      "action_items": "行动项",
+      "decisions": "决议",
+      "main_topics": "主要议题",
+      "full_summary": "完整摘要"
+    },
+    "auto_language_subtitle": "使用转写中最常见的语言",
+    "saved_locally_subtitle": "已保存至本设备（无录制目录）",
+    "summary_language_tooltip": "摘要语言：{label}",
+    "summary_language_tooltip_fallback": "摘要语言：{label}（已保存至本设备）",
+    "set_summary_language": "设置摘要语言"
+  },
+  "actions": {
+    "generate": "生成摘要",
+    "regenerate": "重新生成",
+    "edit": "编辑摘要",
+    "copy": "复制摘要",
+    "retranscription_complete": "重新转写完成，共生成 {count} 个片段。",
+    "retranscription_cancelled": "已取消重新转写"
+  },
+  "status": {
+    "idle": "暂无摘要",
+    "generating": "正在生成摘要...",
+    "ready": "摘要已生成",
+    "failed": "生成摘要失败",
+    "finalizing": "正在完成转写...",
+    "saving": "正在保存转写...",
+    "saved_locally": "摘要语言已保存到本机",
+    "failed_to_save_lang": "保存摘要语言失败",
+    "failed_to_load_lang": "无法加载已保存的摘要语言",
+    "load_failed_description": "读取会议信息前，先使用自动检测。",
+    "saved_locally_description": "该会议无录制目录，摘要语言偏好无法写入元数据。"
+  },
+  "empty": "生成摘要后，要点和行动项将在此显示。",
+  "language": {
+    "label": "摘要语言",
+    "auto_translate": "自动翻译为英文",
+    "auto_label": "自动"
+  },
+  "meeting": {
+    "custom_prompt_placeholder": "补充会议背景，例如参会人、概览、目标等。"
+  },
+  "errors": {
+    "no_model_selected": "未选择内置 AI 模型",
+    "no_model_selected_description": "请在设置中选择模型",
+    "model_not_found": "未找到模型",
+    "model_not_found_description": "找不到模型信息：{model}",
+    "model_download_in_progress": "正在下载模型",
+    "model_not_downloaded": "模型尚未下载",
+    "model_file_corrupted": "模型文件已损坏",
+    "model_file_corrupted_description": "{model} 文件已损坏，请删除后重新下载。",
+    "model_error": "模型错误",
+    "model_not_available": "模型不可用",
+    "model_not_available_description": "所选模型尚未就绪",
+    "check_model_status_failed": "检查模型状态失败",
+    "ollama_no_models": "未找到 Ollama 模型，请在模型设置中下载 gemma2:2b。",
+    "ollama_not_installed": "未安装 Ollama",
+    "ollama_not_installed_description": "请下载安装 Ollama 以使用本地模型。",
+    "ollama_install_action": "下载",
+    "ollama_check_failed": "检查 Ollama 模型失败。请确认 Ollama 正在运行，且已下载模型。"
+  }
+}

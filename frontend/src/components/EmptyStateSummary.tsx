@@ -9,6 +9,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
+import { useTranslations } from 'next-intl';
 
 interface EmptyStateSummaryProps {
   onGenerate: () => void;
@@ -17,6 +18,7 @@ interface EmptyStateSummaryProps {
 }
 
 export function EmptyStateSummary({ onGenerate, hasModel, isGenerating = false }: EmptyStateSummaryProps) {
+  const t = useTranslations('settings');
   return (
     <motion.div
       initial={{ opacity: 0, scale: 0.95 }}
@@ -26,10 +28,10 @@ export function EmptyStateSummary({ onGenerate, hasModel, isGenerating = false }
     >
       <FileQuestion className="w-16 h-16 text-gray-300 mb-4" />
       <h3 className="text-lg font-semibold text-gray-900 mb-2">
-        No Summary Generated Yet
+        {t('empty_state.title')}
       </h3>
       <p className="text-sm text-gray-500 mb-6 max-w-md">
-        Generate an AI-powered summary of your meeting transcript to get key points, action items, and decisions.
+        {t('empty_state.description')}
       </p>
 
       <TooltipProvider>
@@ -42,13 +44,13 @@ export function EmptyStateSummary({ onGenerate, hasModel, isGenerating = false }
                 className="gap-2"
               >
                 <Sparkles className="w-4 h-4" />
-                {isGenerating ? 'Generating...' : 'Generate Summary'}
+                {isGenerating ? t('empty_state.generating') : t('empty_state.generate')}
               </Button>
             </div>
           </TooltipTrigger>
           {!hasModel && (
             <TooltipContent>
-              <p>Please select a model in Settings first</p>
+              <p>{t('empty_state.select_model_first')}</p>
             </TooltipContent>
           )}
         </Tooltip>
@@ -56,7 +58,7 @@ export function EmptyStateSummary({ onGenerate, hasModel, isGenerating = false }
 
       {!hasModel && (
         <p className="text-xs text-amber-600 mt-3">
-          Please select a model in Settings first
+          {t('empty_state.select_model_first')}
         </p>
       )}
     </motion.div>

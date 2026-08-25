@@ -43,6 +43,7 @@ pub mod console_utils;
 pub mod database;
 pub mod notifications;
 pub mod ollama;
+pub mod i18n;
 pub mod onboarding;
 pub mod openai;
 pub mod anthropic;
@@ -87,9 +88,9 @@ async fn start_recording<R: Runtime>(
     system_device_name: Option<String>,
     meeting_name: Option<String>,
 ) -> Result<(), String> {
-    log_info!("🔥 CALLED start_recording with meeting: {:?}", meeting_name);
+    log_info!("馃敟 CALLED start_recording with meeting: {:?}", meeting_name);
     log_info!(
-        "📋 Backend received parameters - mic: {:?}, system: {:?}, meeting: {:?}",
+        "馃搵 Backend received parameters - mic: {:?}, system: {:?}, meeting: {:?}",
         mic_device_name,
         system_device_name,
         meeting_name
@@ -310,7 +311,7 @@ async fn start_recording_with_devices_and_meeting<R: Runtime>(
     system_device_name: Option<String>,
     meeting_name: Option<String>,
 ) -> Result<(), String> {
-    log_info!("🚀 CALLED start_recording_with_devices_and_meeting - Mic: {:?}, System: {:?}, Meeting: {:?}",
+    log_info!("馃殌 CALLED start_recording_with_devices_and_meeting - Mic: {:?}, System: {:?}, Meeting: {:?}",
              mic_device_name, system_device_name, meeting_name);
 
     // Clone meeting_name for notification use later
@@ -493,6 +494,25 @@ pub fn run() {
             //     });
             // }
 
+            // PR-33: Scan for orphan checkpoints after a short delay (avoid blocking UI startup).
+            let app_handle_for_orphans = _app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                let app_data_dir = match app_handle_for_orphans.path().app_data_dir() {
+                    Ok(p) => p,
+                    Err(e) => {
+                        log::warn!("Failed to resolve app_data_dir for orphan scan: {}", e);
+                        return;
+                    }
+                };
+                let orphans = database::orphan_checkpoints::scan_orphan_checkpoints(&app_data_dir);
+                if !orphans.is_empty() {
+                    log::info!("Detected {} orphan checkpoint(s) on startup", orphans.len());
+                    if let Err(e) = app_handle_for_orphans.emit("orphan-checkpoints-detected", &orphans) {
+                        log::warn!("Failed to emit orphan-checkpoints-detected: {}", e);
+                    }
+                }
+            });
             // Initialize database (handles first launch detection and conditional setup)
             tauri::async_runtime::block_on(async {
                 database::setup::initialize_database_on_startup(&_app.handle()).await
@@ -556,6 +576,7 @@ pub fn run() {
             analytics::commands::track_analytics_disabled,
             analytics::commands::track_analytics_transparency_viewed,
             whisper_engine::commands::whisper_init,
+            whisper_engine::commands::get_whisper_recommended_model,
             whisper_engine::commands::whisper_get_available_models,
             whisper_engine::commands::whisper_load_model,
             whisper_engine::commands::whisper_get_current_model,
@@ -725,13 +746,18 @@ pub fn run() {
             database::commands::check_default_legacy_database,
             database::commands::check_homebrew_database,
             database::commands::import_and_initialize_database,
+            database::commands::get_meeting_audio_path,
             database::commands::initialize_fresh_database,
+            database::commands::scan_orphan_checkpoints_cmd,
+            database::commands::discard_orphan_checkpoint_cmd,
             // Database and Models path commands
             database::commands::get_database_directory,
             database::commands::open_database_folder,
             whisper_engine::commands::open_models_folder,
             // Onboarding commands
-            onboarding::get_onboarding_status,
+            i18n::get_ui_language,
+            i18n::set_ui_language,
+            i18n::reset_ui_language_cmd,
             onboarding::save_onboarding_status_cmd,
             onboarding::reset_onboarding_status_cmd,
             onboarding::complete_onboarding,

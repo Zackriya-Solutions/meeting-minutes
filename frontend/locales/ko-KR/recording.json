@@ -1,0 +1,60 @@
+{
+  "title": "녹음",
+  "controls": {
+    "start": "녹음 시작",
+    "stop": "녹음 중지",
+    "pause": "일시 정지",
+    "resume": "재개",
+    "processing": "녹음 처리 중...",
+    "start_tooltip": "녹음 시작",
+    "stop_tooltip": "녹음 중지"
+  },
+  "status": {
+    "idle": "녹음 준비됨",
+    "recording": "녹음 중",
+    "paused": "녹음이 일시 정지되었습니다",
+    "saving": "녹음 저장 중...",
+    "saved": "녹음이 저장되었습니다",
+    "pausing": "일시 정지 중...",
+    "resuming": "재개 중...",
+    "stopping": "중지 중...",
+    "validating": "음성 인식 검증 중...",
+    "pause_tooltip": "녹음 일시 정지",
+    "resume_tooltip": "녹음 재개"
+  },
+  "device": {
+    "microphone": "마이크",
+    "system_audio": "시스템 오디오",
+    "select_device": "장치 선택",
+    "no_device": "장치가 감지되지 않았습니다"
+  },
+  "duration": {
+    "minutes": "{minutes}분",
+    "seconds": "{seconds}초"
+  },
+  "errors": {
+    "init_failed": "녹음을 초기화하지 못했습니다. 콘솔에서 자세한 내용을 확인하세요.",
+    "pause_failed": "녹음을 일시 정지하지 못했습니다. 콘솔에서 자세한 내용을 확인하세요.",
+    "resume_failed": "녹음을 재개하지 못했습니다. 콘솔에서 자세한 내용을 확인하세요.",
+    "close_alert": "알림 닫기",
+    "device_mic_title": "마이크를 사용할 수 없습니다",
+    "device_mic_message": "마이크에 접근할 수 없습니다. 다음을 확인하세요:\n• 마이크가 연결되어 있는지\n• 앱에 마이크 권한이 부여되어 있는지\n• 다른 앱이 마이크를 사용 중이지 않은지",
+    "device_speaker_title": "시스템 오디오를 사용할 수 없습니다",
+    "device_speaker_message": "시스템 오디오를 캡처할 수 없습니다. 다음을 확인하세요:\n• 가상 오디오 장치(BlackHole 등)가 설치되어 있는지\n• 앱에 화면 녹화 권한이 있는지 (macOS)\n• 시스템 오디오가 올바르게 설정되어 있는지",
+    "device_permission_title": "권한 필요",
+    "device_permission_message": "녹음 권한이 필요합니다. 다음을 수행하세요:\n• 시스템 설정에서 마이크 접근 허용\n• 시스템 오디오를 위해 화면 녹화 권한 허용 (macOS)\n• 권한을 부여한 후 앱 재시작",
+    "device_generic_title": "녹음 실패",
+    "device_generic_message": "녹음을 시작할 수 없습니다. 오디오 장치 설정을 확인하고 다시 시도하세요."
+  },
+  "orphan_checkpoints_title": "미완료 녹음 감지됨",
+  "orphan_checkpoints_description": "이전 세션에서 저장되지 못한 오디오가 발견되었습니다. 복구하면 녹음을 유지하고, 삭제하면 디스크 공간을 확보할 수 있습니다.",
+  "orphan_checkpoints_dismiss": "모두 닫기",
+  "orphan_checkpoint_chunks": "{count, plural, one {#개 청크} other {#개 청크}}",
+  "orphan_checkpoint_duration": "~{duration}",
+  "orphan_checkpoint_recover": "복구",
+  "orphan_checkpoint_discard": "삭제",
+  "orphan_checkpoint_recovered": "녹음 복구 완료",
+  "orphan_checkpoint_recovered_failed": "복구 실패",
+  "orphan_checkpoint_discarded": "녹음 삭제 완료",
+  "orphan_checkpoint_discarded_failed": "삭제 실패"
+}

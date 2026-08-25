@@ -513,7 +513,16 @@ impl WhisperEngine {
     }
     
     /// Transcribe audio with streaming support for partial results and adaptive quality
-    pub async fn transcribe_audio_with_confidence(&self, audio_data: Vec<f32>, language: Option<String>) -> Result<(String, f32, bool)> {
+    pub async fn transcribe_audio_with_confidence(
+        &self,
+        audio_data: Vec<f32>,
+        language: Option<String>,
+        /// Optional initial_prompt used to bias the decoder toward known
+        /// vocabulary (project names, technical terms, etc.). Forwarded to
+        /// whisper.cpp `params.set_initial_prompt`. Pass None for the legacy
+        /// behavior (no prompt bias).
+        initial_prompt: Option<String>,
+    ) -> Result<(String, f32, bool)> {
         let ctx_lock = self.current_context.read().await;
         let ctx = ctx_lock.as_ref()
             .ok_or_else(|| anyhow!("No model loaded. Please load a model first."))?;
@@ -564,6 +573,14 @@ impl WhisperEngine {
         // Previous value was too aggressive and rejected valid quiet speech
         // 0.55 is balanced - prevents hallucinations while preserving quiet speech
         params.set_no_speech_thold(0.55);
+
+        // Wave 15 PR-45c: optional hot-word / vocabulary bias.
+        // whisper.cpp prepends the prompt to the decoder context window.
+        if let Some(prompt) = initial_prompt.as_deref() {
+            if !prompt.trim().is_empty() {
+                params.set_initial_prompt(prompt);
+            }
+        }
         params.set_max_len(200);
         params.set_single_segment(false);
 

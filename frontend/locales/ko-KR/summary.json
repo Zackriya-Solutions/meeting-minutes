@@ -1,0 +1,68 @@
+{
+  "title": "요약",
+  "panel": {
+    "title": "회의 요약",
+    "generating": "AI 요약 생성 중...",
+    "sections": {
+      "key_points": "핵심 포인트",
+      "action_items": "실행 항목",
+      "decisions": "결정 사항",
+      "main_topics": "주요 주제",
+      "full_summary": "전체 요약"
+    },
+    "auto_language_subtitle": "전사의 주요 언어를 사용합니다",
+    "saved_locally_subtitle": "폴더가 없는 회의는 이 기기에 저장됩니다",
+    "summary_language_tooltip": "요약 언어: {label}",
+    "summary_language_tooltip_fallback": "요약 언어: {label} (이 기기에 저장됨)",
+    "set_summary_language": "요약 언어 설정"
+  },
+  "actions": {
+    "generate": "요약 생성",
+    "regenerate": "재생성",
+    "edit": "요약 편집",
+    "copy": "요약 복사",
+    "retranscription_complete": "재전사 완료! {count}개 세그먼트가 생성되었습니다.",
+    "retranscription_cancelled": "재전사가 취소되었습니다"
+  },
+  "status": {
+    "idle": "아직 요약이 없습니다",
+    "generating": "요약 생성 중...",
+    "ready": "요약 준비 완료",
+    "failed": "요약 생성 실패",
+    "finalizing": "전사 완료 처리 중...",
+    "saving": "전사 저장 중...",
+    "saved_locally": "요약 언어가 이 기기에 저장되었습니다",
+    "failed_to_save_lang": "요약 언어 저장 실패",
+    "failed_to_load_lang": "저장된 요약 언어를 불러올 수 없습니다",
+    "load_failed_description": "회의 메타데이터를 읽을 수 있을 때까지 자동을 사용합니다.",
+    "saved_locally_description": "이 회의에는 녹음 폴더가 없으므로 설정을 회의 메타데이터에 쓸 수 없습니다."
+  },
+  "empty": "여기에 핵심 포인트와 실행 항목을 표시하려면 요약을 생성하세요.",
+  "language": {
+    "label": "요약 언어",
+    "auto_translate": "영어로 자동 번역",
+    "auto_label": "자동"
+  },
+  "meeting": {
+    "custom_prompt_placeholder": "AI 요약에 컨텍스트를 추가하세요. 예: 참석자, 회의 개요, 목적 등..."
+  },
+  "errors": {
+    "no_model_selected": "내장 AI 모델이 선택되지 않았습니다",
+    "no_model_selected_description": "설정에서 모델을 선택하세요",
+    "model_not_found": "모델을 찾을 수 없습니다",
+    "model_not_found_description": "모델 정보를 가져올 수 없습니다: {model}",
+    "model_download_in_progress": "모델 다운로드 중",
+    "model_not_downloaded": "모델이 다운로드되지 않았습니다",
+    "model_file_corrupted": "모델 파일이 손상되었습니다",
+    "model_file_corrupted_description": "{model} 파일이 손상되었습니다. 삭제하고 다시 다운로드하세요.",
+    "model_error": "모델 오류",
+    "model_not_available": "모델을 사용할 수 없습니다",
+    "model_not_available_description": "선택한 모델은 사용할 준비가 되지 않았습니다",
+    "check_model_status_failed": "모델 상태 확인 실패",
+    "ollama_no_models": "Ollama 모델을 찾을 수 없습니다. 모델 설정에서 gemma2:2b를 다운로드하세요.",
+    "ollama_not_installed": "Ollama가 설치되어 있지 않습니다",
+    "ollama_not_installed_description": "로컬 모델을 사용하려면 Ollama를 다운로드하고 설치하세요.",
+    "ollama_install_action": "다운로드",
+    "ollama_check_failed": "Ollama 모델 확인 실패. Ollama가 실행 중인지 확인하고 모델을 다운로드하세요."
+  }
+}

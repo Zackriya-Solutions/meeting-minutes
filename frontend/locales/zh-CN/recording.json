@@ -1,0 +1,60 @@
+{
+  "title": "录音",
+  "controls": {
+    "start": "开始录音",
+    "stop": "停止录音",
+    "pause": "暂停",
+    "resume": "继续",
+    "processing": "正在处理录音...",
+    "start_tooltip": "开始录音",
+    "stop_tooltip": "停止录音"
+  },
+  "status": {
+    "idle": "准备录音",
+    "recording": "正在录音",
+    "paused": "已暂停",
+    "saving": "正在保存...",
+    "saved": "已保存",
+    "pausing": "正在暂停...",
+    "resuming": "正在恢复...",
+    "stopping": "正在停止...",
+    "validating": "正在校验转写...",
+    "pause_tooltip": "暂停录音",
+    "resume_tooltip": "继续录音"
+  },
+  "device": {
+    "microphone": "麦克风",
+    "system_audio": "系统音频",
+    "select_device": "选择设备",
+    "no_device": "未检测到设备"
+  },
+  "duration": {
+    "minutes": "{minutes} 分钟",
+    "seconds": "{seconds} 秒"
+  },
+  "errors": {
+    "init_failed": "录音初始化失败，请查看控制台详情。",
+    "pause_failed": "暂停失败，请查看控制台详情。",
+    "resume_failed": "恢复失败，请查看控制台详情。",
+    "close_alert": "确认关闭",
+    "device_mic_title": "麦克风不可用",
+    "device_mic_message": "无法访问麦克风，请检查：\n• 麦克风已连接\n• 已授予麦克风权限\n• 没有其他应用正在占用麦克风",
+    "device_speaker_title": "系统音频不可用",
+    "device_speaker_message": "无法录制系统音频，请检查：\n• 已安装虚拟音频设备（如 BlackHole）\n• 已授予屏幕录制权限（macOS）\n• 系统音频已正确配置",
+    "device_permission_title": "需要授权",
+    "device_permission_message": "需要录音权限，请：\n• 在系统设置中授予麦克风权限\n• 授予屏幕录制权限（macOS）\n• 授予权限后重启应用",
+    "device_generic_title": "录音失败",
+    "device_generic_message": "无法开始录音，请检查音频设备设置后重试。"
+  },
+  "orphan_checkpoints_title": "检测到未完成录音",
+  "orphan_checkpoints_description": "检测到上次未完成保存的录音片段。选择恢复以保留录音,或选择丢弃以释放磁盘空间。",
+  "orphan_checkpoints_dismiss": "全部关闭",
+  "orphan_checkpoint_chunks": "{count} 个片段",
+  "orphan_checkpoint_duration": "约 {duration}",
+  "orphan_checkpoint_recover": "恢复",
+  "orphan_checkpoint_discard": "丢弃",
+  "orphan_checkpoint_recovered": "录音已恢复",
+  "orphan_checkpoint_recovered_failed": "恢复失败",
+  "orphan_checkpoint_discarded": "录音已丢弃",
+  "orphan_checkpoint_discarded_failed": "丢弃失败"
+}

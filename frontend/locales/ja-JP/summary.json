@@ -1,0 +1,68 @@
+{
+  "title": "要約",
+  "panel": {
+    "title": "会議の要約",
+    "generating": "AI 要約を生成中...",
+    "sections": {
+      "key_points": "要点",
+      "action_items": "アクションアイテム",
+      "decisions": "決定事項",
+      "main_topics": "メイントピック",
+      "full_summary": "完全な要約"
+    },
+    "auto_language_subtitle": "文字起こしの主要言語を使用します",
+    "saved_locally_subtitle": "フォルダのない会議はこのデバイスに保存されます",
+    "summary_language_tooltip": "要約言語: {label}",
+    "summary_language_tooltip_fallback": "要約言語: {label}（このデバイスに保存済み）",
+    "set_summary_language": "要約言語を設定"
+  },
+  "actions": {
+    "generate": "要約を生成",
+    "regenerate": "再生成",
+    "edit": "要約を編集",
+    "copy": "要約をコピー",
+    "retranscription_complete": "再文字起こし完了! {count} セグメントが作成されました。",
+    "retranscription_cancelled": "再文字起こしをキャンセルしました"
+  },
+  "status": {
+    "idle": "要約はまだありません",
+    "generating": "要約を生成中...",
+    "ready": "要約の準備が完了しました",
+    "failed": "要約の生成に失敗しました",
+    "finalizing": "文字起こしを完了処理中...",
+    "saving": "文字起こしを保存中...",
+    "saved_locally": "要約言語をこのデバイスに保存しました",
+    "failed_to_save_lang": "要約言語の保存に失敗しました",
+    "failed_to_load_lang": "保存された要約言語を読み込めませんでした",
+    "load_failed_description": "会議メタデータを読み取れるまで自動を使用します。",
+    "saved_locally_description": "この会議には録音フォルダがないため、設定を会議メタデータに書き込めません。"
+  },
+  "empty": "要約を生成すると、要点とアクションアイテムがここに表示されます。",
+  "language": {
+    "label": "要約言語",
+    "auto_translate": "英語に自動翻訳",
+    "auto_label": "自動"
+  },
+  "meeting": {
+    "custom_prompt_placeholder": "AI 要約にコンテキストを追加してください。例: 参加者、会議の概要、目的など..."
+  },
+  "errors": {
+    "no_model_selected": "内蔵 AI モデルが選択されていません",
+    "no_model_selected_description": "設定でモデルを選択してください",
+    "model_not_found": "モデルが見つかりません",
+    "model_not_found_description": "モデルの情報を取得できませんでした: {model}",
+    "model_download_in_progress": "モデルをダウンロード中です",
+    "model_not_downloaded": "モデルがダウンロードされていません",
+    "model_file_corrupted": "モデルファイルが破損しています",
+    "model_file_corrupted_description": "{model} ファイルが破損しています。削除して再ダウンロードしてください。",
+    "model_error": "モデルエラー",
+    "model_not_available": "モデルが利用できません",
+    "model_not_available_description": "選択したモデルは使用できる状態ではありません",
+    "check_model_status_failed": "モデル状態の確認に失敗しました",
+    "ollama_no_models": "Ollama モデルが見つかりません。モデル設定から gemma2:2b をダウンロードしてください。",
+    "ollama_not_installed": "Ollama がインストールされていません",
+    "ollama_not_installed_description": "ローカルモデルを使用するには Ollama をダウンロードしてインストールしてください。",
+    "ollama_install_action": "ダウンロード",
+    "ollama_check_failed": "Ollama モデルの確認に失敗しました。Ollama が動作しているか確認し、モデルをダウンロードしてください。"
+  }
+}

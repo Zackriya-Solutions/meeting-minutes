@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useTranslations } from 'next-intl';
 import { motion } from 'framer-motion';
 import { RecordingControls } from '@/components/RecordingControls';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
@@ -59,6 +60,8 @@ export default function Home() {
     loadMeetingTranscripts,
     deleteRecoverableMeeting
   } = useTranscriptRecovery();
+  const t = useTranslations('common');
+  const tErrors = useTranslations('errors');
 
   const router = useRouter();
 
@@ -85,14 +88,14 @@ export default function Home() {
         try {
           await indexedDBService.deleteOldMeetings(7);
         } catch (error) {
-          console.warn('⚠️ Failed to clean up old meetings:', error);
+          console.warn('闂傚倸鍊搁崐椋庣矆娓氣偓閹潡宕惰閺嬫牠鏌￠崶鈺佹瀻闁搞劍妫冮幃妤呮濞戞瑦鍠愮紓?Failed to clean up old meetings:', error);
         }
 
         // 2. Clean up saved meetings (24+ hours after save)
         try {
           await indexedDBService.deleteSavedMeetings(24);
         } catch (error) {
-          console.warn('⚠️ Failed to clean up saved meetings:', error);
+          console.warn('闂傚倸鍊搁崐椋庣矆娓氣偓閹潡宕惰閺嬫牠鏌￠崶鈺佹瀻闁搞劍妫冮幃妤呮濞戞瑦鍠愮紓?Failed to clean up saved meetings:', error);
         }
 
         // 3. Always check for recoverable meetings on startup
@@ -124,12 +127,12 @@ export default function Home() {
       const result = await recoverMeeting(meetingId);
 
       if (result.success) {
-        toast.success('Meeting recovered successfully!', {
+        toast.success(t('recovery.success_title'), {
           description: result.audioRecoveryStatus?.status === 'success'
             ? 'Transcripts and audio recovered'
-            : 'Transcripts recovered (no audio available)',
+            : t('recovery.transcripts_only'),
           action: result.meetingId ? {
-            label: 'View Meeting',
+            label: t('recovery.view_meeting'),
             onClick: () => {
               router.push(`/meeting-details?id=${result.meetingId}`);
             }
@@ -153,8 +156,8 @@ export default function Home() {
         }
       }
     } catch (error) {
-      toast.error('Failed to recover meeting', {
-        description: error instanceof Error ? error.message : 'Unknown error occurred',
+      toast.error(tErrors('recovery_failed'), {
+        description: error instanceof Error ? error.message : tErrors('unknown_error'),
       });
       throw error;
     }

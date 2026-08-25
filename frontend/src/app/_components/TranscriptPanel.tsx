@@ -10,6 +10,7 @@ import { usePermissionCheck } from '@/hooks/usePermissionCheck';
 import { ModalType } from '@/hooks/useModalState';
 import { useIsLinux } from '@/hooks/usePlatform';
 import { useMemo } from 'react';
+import { useTranslations } from 'next-intl';
 
 /**
  * TranscriptPanel Component
@@ -37,6 +38,8 @@ export function TranscriptPanel({
   const { checkPermissions, isChecking, hasSystemAudio, hasMicrophone } = usePermissionCheck();
   const isLinux = useIsLinux();
 
+  const t = useTranslations("transcript");
+
   // Convert transcripts to segments for virtualized view
   const segments = useMemo(() =>
     transcripts.map(t => ({
@@ -62,11 +65,11 @@ export function TranscriptPanel({
                     variant="outline"
                     size="sm"
                     onClick={copyTranscript}
-                    title="Copy Transcript"
+                    title={t("view.copy_title")}
                   >
                     <Copy />
                     <span className='hidden md:inline'>
-                      Copy
+                      {t("view.copy")}
                     </span>
                   </Button>
                 )}
@@ -75,11 +78,11 @@ export function TranscriptPanel({
                     variant="outline"
                     size="sm"
                     onClick={() => showModal('languageSettings')}
-                    title="Language"
+                    title={t("view.language_title")}
                   >
                     <GlobeIcon />
                     <span className='hidden md:inline'>
-                      Language
+                      {t("view.language")}
                     </span>
                   </Button>
                 }

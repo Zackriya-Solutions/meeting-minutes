@@ -1,5 +1,6 @@
 use crate::whisper_engine::{ModelInfo, WhisperEngine};
 use std::sync::{Arc, Mutex};
+use log::info;
 use std::path::PathBuf;
 use tauri::{command, Emitter, Manager, AppHandle, Runtime};
 use crate::config::WHISPER_MODEL_CATALOG;
@@ -558,4 +559,39 @@ pub async fn open_models_folder() -> Result<(), String> {
 
     log::info!("Opened models folder: {}", folder_path);
     Ok(())
+}
+
+/// PR-45b: hardware-aware Whisper model recommendation.
+///
+/// Returns the recommended local-Whisper model variant for the current host.
+/// Tuning leans toward Chinese-meeting accuracy (PR-45a findings: large-v3-turbo
+/// is within 0.4% CER of large-v3 at half the size and 2x the speed, so it is
+/// the default for mid/high-spec hosts).
+///
+/// Tiers:
+/// * >=8 GB RAM + >=8 cores  -> large-v3         (highest accuracy)
+/// * >=8 GB RAM + >=4 cores  -> large-v3-turbo   (best accuracy/speed for ZH)
+/// * >=4 GB RAM + >=4 cores  -> medium           (balanced)
+/// * otherwise               -> small-q5_1       (quantized, low-spec)
+#[command]
+pub async fn get_whisper_recommended_model() -> Result<String, String> {
+    let profile = crate::audio::hardware_detector::HardwareProfile::detect();
+    let cores = profile.cpu_cores as u32;
+    let ram = profile.memory_gb as u32;
+
+    let recommended = if ram >= 8 && cores >= 8 {
+        "large-v3"
+    } else if ram >= 8 && cores >= 4 {
+        "large-v3-turbo"
+    } else if ram >= 4 && cores >= 4 {
+        "medium"
+    } else {
+        "small-q5_1"
+    };
+
+    info!(
+        "PR-45b: recommending Whisper model \"{}\" for {} cores / {} GB RAM",
+        recommended, cores, ram
+    );
+    Ok(recommended.to_string())
 }

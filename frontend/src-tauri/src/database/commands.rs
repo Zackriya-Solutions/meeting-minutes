@@ -4,6 +4,8 @@ use std::path::PathBuf;
 use tauri::{AppHandle, Emitter, Manager};
 
 use super::manager::DatabaseManager;
+use super::orphan_checkpoints::{discard_orphan_checkpoint, scan_orphan_checkpoints, OrphanCheckpoint};
+use super::repositories::meeting::MeetingsRepository;
 use crate::state::AppState;
 
 #[derive(Serialize)]
@@ -275,4 +277,81 @@ pub async fn open_database_folder(app: AppHandle) -> Result<(), String> {
 
     info!("Opened database folder: {}", folder_path);
     Ok(())
+}
+
+// ===== PR-33: Orphan checkpoint commands =====
+
+#[tauri::command]
+pub async fn scan_orphan_checkpoints_cmd(app: AppHandle) -> Result<Vec<OrphanCheckpoint>, String> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to get app data dir: {}", e))?;
+    Ok(scan_orphan_checkpoints(&app_data_dir))
+}
+
+#[tauri::command]
+pub async fn discard_orphan_checkpoint_cmd(meeting_folder: String) -> Result<(), String> {
+    discard_orphan_checkpoint(std::path::Path::new(&meeting_folder))
+}
+
+
+/// Resolve the local audio file path for a meeting so the frontend can
+/// offer click-to-jump audio playback (Wave 14 PR-44d).
+///
+/// Looks up the meeting's `folder_path`, then probes the folder for a
+/// browser-decodable audio file. Current supported filename: `audio.wav`.
+///
+/// Returns `Ok(Some(absolute_path))` when a decodable file exists,
+/// `Ok(None)` when the meeting has no `folder_path` or no decodable audio,
+/// and `Err` only on unexpected filesystem / database failures.
+///
+/// NOTE: meetily records in AAC-in-MP4 (`encode.rs`), which the browser
+/// cannot decode via Web Audio API. Until PR-44e adds a parallel WAV
+/// export, only legacy WAV recordings will resolve. mp4-only meetings
+/// return `None` so the frontend stays silent instead of erroring.
+#[tauri::command]
+pub async fn get_meeting_audio_path(
+    app: AppHandle,
+    meeting_id: String,
+) -> Result<Option<String>, String> {
+    if meeting_id.trim().is_empty() {
+        return Err("meeting_id cannot be empty".to_string());
+    }
+
+    let app_state = app
+        .state::<AppState>()
+        .inner()
+        .db_manager
+        .clone();
+    let pool = app_state.pool();
+
+    let meeting = MeetingsRepository::get_meeting_metadata(&pool, &meeting_id)
+        .await
+        .map_err(|e| format!("Failed to load meeting: {}", e))?;
+
+    let Some(meeting) = meeting else {
+        info!("No meeting found for id {}", meeting_id);
+        return Ok(None);
+    };
+
+    let Some(folder) = meeting.folder_path else {
+        info!("Meeting {} has no folder_path", meeting_id);
+        return Ok(None);
+    };
+
+    let folder_path = PathBuf::from(&folder);
+    let candidate = folder_path.join("audio.wav");
+    if candidate.is_file() {
+        let abs = candidate
+            .canonicalize()
+            .unwrap_or(candidate)
+            .to_string_lossy()
+            .to_string();
+        info!("Resolved audio path for {}: {}", meeting_id, abs);
+        return Ok(Some(abs));
+    }
+
+    info!("No browser-decodable audio for meeting {}", meeting_id);
+    Ok(None)
 }
