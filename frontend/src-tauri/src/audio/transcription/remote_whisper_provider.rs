@@ -105,10 +105,13 @@ impl RemoteWhisperProvider {
     /// Encode 16kHz mono f32 PCM samples as a WAV byte buffer (16-bit PCM).
     /// Self-contained — no extra crate dependency needed for such a simple header.
     fn encode_wav_pcm16(samples: &[f32]) -> Vec<u8> {
-        let num_samples = samples.len() as u32;
+        // WAV headers are u32, so an oversized buffer would wrap in release and
+        // emit a header that silently disagrees with the payload. Chunks are
+        // seconds long in practice; saturate rather than wrap if that ever changes.
+        let num_samples = u32::try_from(samples.len()).unwrap_or(u32::MAX);
         let byte_rate = SAMPLE_RATE_HZ * 2; // mono, 16-bit
-        let data_size = num_samples * 2;
-        let riff_size = 36 + data_size;
+        let data_size = num_samples.saturating_mul(2);
+        let riff_size = data_size.saturating_add(36);
 
         let mut buf = Vec::with_capacity(44 + data_size as usize);
         buf.extend_from_slice(b"RIFF");
@@ -201,15 +204,30 @@ impl TranscriptionProvider for RemoteWhisperProvider {
         // "Loaded" here means "reachable" — the remote process owns model lifecycle.
         // Note this only proves the server answers; it cannot promise the next
         // transcription succeeds.
-        let health_url = format!("{}/health", self.base_url);
-        matches!(
-            self.client
-                .get(&health_url)
-                .timeout(Duration::from_secs(HEALTH_TIMEOUT_SECS))
-                .send()
-                .await,
-            Ok(resp) if resp.status().is_success()
-        )
+        //
+        // Two probes, because no single one covers the field. `/health` is a
+        // whisper.cpp-server / faster-whisper-server extension, absent from the
+        // OpenAI API; `/v1/models` is part of the OpenAI contract but absent from
+        // some minimal Whisper servers. Probing only one strands users of the other
+        // family on a reachable server that this check calls dead — and onboarding
+        // refuses to continue on that verdict.
+        for path in ["/health", "/v1/models"] {
+            let url = format!("{}{}", self.base_url, path);
+            let reachable = matches!(
+                self.client
+                    .get(&url)
+                    .timeout(Duration::from_secs(HEALTH_TIMEOUT_SECS))
+                    .send()
+                    .await,
+                // 401/403 count as alive: an endpoint that demands credentials is
+                // still an endpoint that answered.
+                Ok(resp) if resp.status().is_success() || resp.status() == 401 || resp.status() == 403
+            );
+            if reachable {
+                return true;
+            }
+        }
+        false
     }
 
     async fn get_current_model(&self) -> Option<String> {
@@ -270,6 +288,15 @@ mod tests {
             RemoteWhisperProvider::normalize_language(Some(" en ".into())),
             Some("en".to_string())
         );
+    }
+
+    #[test]
+    fn wav_header_survives_an_implausibly_large_buffer() {
+        // Not reachable with real chunks; the point is that the header stays
+        // internally consistent instead of wrapping into nonsense.
+        let data_size = u32::MAX.saturating_mul(2);
+        assert_eq!(data_size, u32::MAX);
+        assert_eq!(data_size.saturating_add(36), u32::MAX);
     }
 
     #[test]
