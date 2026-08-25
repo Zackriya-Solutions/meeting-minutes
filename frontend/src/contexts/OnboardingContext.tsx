@@ -17,9 +17,25 @@ interface OnboardingStatus {
     parakeet: string;
     summary: string;
     selected_summary_model?: string;
+    transcription_provider?: string;
+    remote_transcription_url?: string;
   };
   last_updated: string;
 }
+
+/**
+ * Where transcription runs. 'local' downloads the bundled Parakeet engine;
+ * 'remote' points at a self-hosted OpenAI-compatible Whisper server and
+ * downloads nothing.
+ */
+export type TranscriptionMode = 'local' | 'remote';
+
+/**
+ * Where summarization runs. 'local' downloads the built-in AI model;
+ * 'external' leaves it to be configured in Settings (OpenAI, Claude, Ollama, ...)
+ * and downloads nothing.
+ */
+export type SummaryMode = 'local' | 'external';
 
 interface SummaryModelProgressInfo {
   percent: number;
@@ -45,6 +61,9 @@ interface OnboardingContextType {
   summaryModelProgressInfo: SummaryModelProgressInfo;
   selectedSummaryModel: string;
   recommendedSummaryModel: string;
+  transcriptionMode: TranscriptionMode;
+  remoteTranscriptionUrl: string;
+  summaryMode: SummaryMode;
   databaseExists: boolean;
   isBackgroundDownloading: boolean;
   // Permissions
@@ -58,6 +77,9 @@ interface OnboardingContextType {
   setParakeetDownloaded: (value: boolean) => void;
   setSummaryModelDownloaded: (value: boolean) => void;
   setSelectedSummaryModel: (value: string) => void;
+  setTranscriptionMode: (value: TranscriptionMode) => void;
+  setRemoteTranscriptionUrl: (value: string) => void;
+  setSummaryMode: (value: SummaryMode) => void;
   setDatabaseExists: (value: boolean) => void;
   setPermissionStatus: (permission: keyof OnboardingPermissions, status: PermissionStatus) => void;
   setPermissionsSkipped: (skipped: boolean) => void;
@@ -95,6 +117,9 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
   });
   const [selectedSummaryModel, setSelectedSummaryModel] = useState<string>('');
   const [recommendedSummaryModel, setRecommendedSummaryModel] = useState<string>('');
+  const [transcriptionMode, setTranscriptionMode] = useState<TranscriptionMode>('local');
+  const [remoteTranscriptionUrl, setRemoteTranscriptionUrl] = useState<string>('');
+  const [summaryMode, setSummaryMode] = useState<SummaryMode>('local');
   const [databaseExists, setDatabaseExists] = useState(false);
   const [isBackgroundDownloading, setIsBackgroundDownloading] = useState(false);
 
@@ -107,6 +132,10 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
   const [permissionsSkipped, setPermissionsSkipped] = useState(false);
 
   const saveTimeoutRef = useRef<NodeJS.Timeout>();
+  // Guards the debounced auto-save: until the persisted status has been read,
+  // component state is still at its defaults, and saving it would overwrite a
+  // stored configuration (e.g. a remote transcription URL) with 'parakeet'.
+  const hasLoadedStatusRef = useRef(false);
 
   const initializeSummaryModelSelection = async (preferredModel = selectedSummaryModel) => {
     try {
@@ -223,6 +252,7 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
     // Don't auto-save if completed (to avoid overwriting completion status)
     // Also don't auto-save if we are currently in the process of completing
     if (completed || isCompletingRef.current) return;
+    if (!hasLoadedStatusRef.current) return;
 
     saveTimeoutRef.current = setTimeout(() => {
       saveOnboardingStatus();
@@ -231,7 +261,7 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
     return () => {
       if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
     };
-  }, [currentStep, parakeetDownloaded, summaryModelDownloaded, completed]);
+  }, [currentStep, parakeetDownloaded, summaryModelDownloaded, completed, transcriptionMode, remoteTranscriptionUrl, summaryMode]);
 
   // Listen to Parakeet download progress
   useEffect(() => {
@@ -339,11 +369,25 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
     }
   };
 
+  // Restore the user's backend choices so a re-entered wizard does not silently
+  // fall back to "download everything" after they opted into remote backends.
+  const restoreBackendModes = (status: OnboardingStatus) => {
+    if (status.model_status.transcription_provider === 'remoteWhisper') {
+      setTranscriptionMode('remote');
+      setRemoteTranscriptionUrl(status.model_status.remote_transcription_url || '');
+    }
+    if (status.model_status.summary === 'skipped') {
+      setSummaryMode('external');
+    }
+  };
+
   const loadOnboardingStatus = async () => {
     try {
       const status = await invoke<OnboardingStatus | null>('get_onboarding_status');
       if (status) {
         console.log('[OnboardingContext] Loaded saved status:', status);
+
+        restoreBackendModes(status);
 
         if (status.completed) {
           setCurrentStep(status.current_step);
@@ -377,6 +421,9 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
       }
     } catch (error) {
       console.error('[OnboardingContext] Failed to load onboarding status:', error);
+    } finally {
+      // Released on every path — a failed read must not wedge auto-save off.
+      hasLoadedStatusRef.current = true;
     }
   };
 
@@ -386,14 +433,25 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
     let summaryModelDownloaded = false;
     let selectedSummaryModel = '';
 
-    // Verify Parakeet model exists on disk
-    try {
-      await invoke('parakeet_init');
-      parakeetDownloaded = await invoke<boolean>('parakeet_has_available_models');
-      console.log('[OnboardingContext] Parakeet verified on disk:', parakeetDownloaded);
-    } catch (error) {
-      console.warn('[OnboardingContext] Failed to verify Parakeet:', error);
-      parakeetDownloaded = false;
+    // Verify Parakeet model exists on disk. Read the choice from the saved
+    // status rather than component state: `restoreBackendModes` schedules its
+    // setState calls, so they are not visible yet on this pass.
+    const savedRemoteTranscription =
+      savedStatus.model_status.transcription_provider === 'remoteWhisper';
+
+    if (savedRemoteTranscription) {
+      // No local model to verify, and `parakeet_init` would spin up an engine
+      // the user explicitly opted out of.
+      console.log('[OnboardingContext] Remote transcription configured, skipping Parakeet check');
+    } else {
+      try {
+        await invoke('parakeet_init');
+        parakeetDownloaded = await invoke<boolean>('parakeet_has_available_models');
+        console.log('[OnboardingContext] Parakeet verified on disk:', parakeetDownloaded);
+      } catch (error) {
+        console.warn('[OnboardingContext] Failed to verify Parakeet:', error);
+        parakeetDownloaded = false;
+      }
     }
 
     // Verify the selected/recommended Summary model exists on disk.
@@ -456,9 +514,19 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
           completed: completed,
           current_step: currentStep,
           model_status: {
-            parakeet: parakeetDownloaded ? 'downloaded' : 'not_downloaded',
-            summary: summaryModelDownloaded ? 'downloaded' : 'not_downloaded',
-            selected_summary_model: selectedSummaryModel || undefined,
+            parakeet: transcriptionMode === 'remote'
+              ? 'skipped'
+              : parakeetDownloaded ? 'downloaded' : 'not_downloaded',
+            summary: summaryMode === 'external'
+              ? 'skipped'
+              : summaryModelDownloaded ? 'downloaded' : 'not_downloaded',
+            selected_summary_model: summaryMode === 'external'
+              ? undefined
+              : (selectedSummaryModel || undefined),
+            transcription_provider:
+              transcriptionMode === 'remote' ? 'remoteWhisper' : 'parakeet',
+            remote_transcription_url:
+              transcriptionMode === 'remote' ? remoteTranscriptionUrl.trim() || undefined : undefined,
           },
           last_updated: new Date().toISOString(),
         },
@@ -479,27 +547,39 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
         saveTimeoutRef.current = undefined;
       }
 
-      let modelToSave = selectedSummaryModel;
-      if (!modelToSave) {
-        modelToSave = await invoke<string>('builtin_ai_get_recommended_model');
-        setSelectedSummaryModel(modelToSave);
+      // `null` tells the backend the user brings their own summary provider, so
+      // onboarding must not write a builtin-ai config nor kick off a download.
+      let modelToSave: string | null = null;
+
+      if (summaryMode === 'local') {
+        modelToSave = selectedSummaryModel;
+        if (!modelToSave) {
+          modelToSave = await invoke<string>('builtin_ai_get_recommended_model');
+          setSelectedSummaryModel(modelToSave);
+        }
+
+        const selectedModelReady = await invoke<boolean>('builtin_ai_is_model_ready', {
+          modelName: modelToSave,
+          refresh: true,
+        });
+        setSummaryModelDownloaded(selectedModelReady);
+        if (!selectedModelReady) {
+          requestSummaryModelDownload(modelToSave);
+        }
       }
 
-      const selectedModelReady = await invoke<boolean>('builtin_ai_is_model_ready', {
-        modelName: modelToSave,
-        refresh: true,
-      });
-      setSummaryModelDownloaded(selectedModelReady);
-      if (!selectedModelReady) {
-        requestSummaryModelDownload(modelToSave);
-      }
+      const usesRemoteTranscription = transcriptionMode === 'remote';
 
-      // Onboarding always uses builtin-ai with selected model
       await invoke('complete_onboarding', {
         model: modelToSave,
+        transcriptionProvider: usesRemoteTranscription ? 'remoteWhisper' : 'parakeet',
+        remoteTranscriptionUrl: usesRemoteTranscription ? remoteTranscriptionUrl.trim() : null,
       });
       setCompleted(true);
-      console.log('[OnboardingContext] Onboarding completed with model:', modelToSave);
+      console.log('[OnboardingContext] Onboarding completed', {
+        summaryModel: modelToSave ?? '(external provider)',
+        transcription: usesRemoteTranscription ? remoteTranscriptionUrl : 'parakeet',
+      });
 
       // Reset the flag so subsequent state updates can be saved
       isCompletingRef.current = false;
@@ -523,8 +603,11 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
     });
 
     try {
-      const shouldStartParakeet = includeParakeet && !parakeetDownloaded;
-      const shouldStartSummary = includeSummary && !summaryModelDownloaded && !!summaryModel;
+      // Remote/external backends own their model lifecycle: never download for them.
+      const shouldStartParakeet =
+        includeParakeet && !parakeetDownloaded && transcriptionMode === 'local';
+      const shouldStartSummary =
+        includeSummary && !summaryModelDownloaded && !!summaryModel && summaryMode === 'local';
 
       if (!shouldStartParakeet && !shouldStartSummary) {
         if (includeSummary && !summaryModelDownloaded && !summaryModel) {
@@ -620,6 +703,9 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
         summaryModelProgressInfo,
         selectedSummaryModel,
         recommendedSummaryModel,
+        transcriptionMode,
+        remoteTranscriptionUrl,
+        summaryMode,
         databaseExists,
         isBackgroundDownloading,
         permissions,
@@ -630,6 +716,9 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
         setParakeetDownloaded,
         setSummaryModelDownloaded,
         setSelectedSummaryModel,
+        setTranscriptionMode,
+        setRemoteTranscriptionUrl,
+        setSummaryMode,
         setDatabaseExists,
         setPermissionStatus,
         setPermissionsSkipped,
