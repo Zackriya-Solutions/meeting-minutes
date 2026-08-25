@@ -345,4 +345,32 @@ impl SettingsRepository {
 
         Ok(())
     }
+
+    pub async fn get_teams_detection_enabled(
+        pool: &SqlitePool,
+    ) -> std::result::Result<bool, sqlx::Error> {
+        let row: Option<(i64,)> =
+            sqlx::query_as("SELECT autoDetectTeamsEnabled FROM settings WHERE id = '1'")
+                .fetch_optional(pool)
+                .await?;
+        Ok(row.map(|(v,)| v != 0).unwrap_or(true))
+    }
+
+    pub async fn set_teams_detection_enabled(
+        pool: &SqlitePool,
+        enabled: bool,
+    ) -> std::result::Result<(), sqlx::Error> {
+        let value: i64 = if enabled { 1 } else { 0 };
+        sqlx::query(
+            r#"
+            INSERT INTO settings (id, provider, model, whisperModel, autoDetectTeamsEnabled)
+            VALUES ('1', 'openai', 'gpt-4o-2024-11-20', 'large-v3', $1)
+            ON CONFLICT(id) DO UPDATE SET autoDetectTeamsEnabled = excluded.autoDetectTeamsEnabled
+            "#,
+        )
+        .bind(value)
+        .execute(pool)
+        .await?;
+        Ok(())
+    }
 }

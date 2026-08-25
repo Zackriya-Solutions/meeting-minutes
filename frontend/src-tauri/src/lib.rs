@@ -543,6 +543,31 @@ pub fn run() {
             })
             .expect("Failed to initialize database");
 
+            // Spawn Teams meeting detection background task
+            audio::teams_detection_commands::spawn_teams_detection_task(_app.handle().clone());
+
+            // Auto-start system audio monitoring so Teams detection can receive audio events (macOS).
+            // On macOS Teams detection is event-driven: it listens for system-audio-started/stopped,
+            // which are only emitted when the SystemAudioDetector is running.
+            #[cfg(target_os = "macos")]
+            {
+                let app_for_audio = _app.handle().clone();
+                let detector_arc = (*_app.handle()
+                    .state::<audio::system_audio_commands::SystemAudioDetectorState>())
+                    .clone();
+                tauri::async_runtime::spawn(async move {
+                    match audio::system_audio_commands::start_system_audio_monitoring_internal(
+                        app_for_audio,
+                        detector_arc,
+                    )
+                    .await
+                    {
+                        Ok(_) => log::info!("teams_detection: system audio monitoring auto-started"),
+                        Err(e) => log::warn!("teams_detection: failed to auto-start system audio monitoring: {}", e),
+                    }
+                });
+            }
+
             // Initialize bundled templates directory for dynamic template discovery
             log::info!("Initializing bundled templates directory...");
             if let Ok(resource_path) = _app.handle().path().resource_dir() {
@@ -764,6 +789,9 @@ pub fn run() {
             audio::system_audio_commands::start_system_audio_monitoring,
             audio::system_audio_commands::stop_system_audio_monitoring,
             audio::system_audio_commands::get_system_audio_monitoring_status,
+            // Teams meeting detection commands
+            audio::teams_detection_commands::get_teams_detection_enabled,
+            audio::teams_detection_commands::set_teams_detection_enabled,
             // Screen Recording permission commands
             audio::permissions::check_screen_recording_permission_command,
             audio::permissions::request_screen_recording_permission_command,

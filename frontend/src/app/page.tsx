@@ -17,7 +17,9 @@ import { useRecordingStateSync } from '@/hooks/useRecordingStateSync';
 import { useRecordingStart } from '@/hooks/useRecordingStart';
 import { useRecordingStop } from '@/hooks/useRecordingStop';
 import { useTranscriptRecovery } from '@/hooks/useTranscriptRecovery';
+import { useTeamsDetection } from '@/hooks/useTeamsDetection';
 import { TranscriptRecovery } from '@/components/TranscriptRecovery';
+import { TeamsDetectionPopup } from '@/components/TeamsDetectionPopup';
 import { indexedDBService } from '@/services/indexedDBService';
 import { toast } from 'sonner';
 import { useRouter } from 'next/navigation';
@@ -47,6 +49,13 @@ export default function Home() {
   const { handleRecordingStop, setIsStopping } = useRecordingStop(
     setIsRecordingState,
     setIsRecordingDisabled
+  );
+
+  // Teams meeting detection
+  const teamsDetection = useTeamsDetection(
+    recordingState.isRecording,
+    handleRecordingStart,
+    () => handleRecordingStop(true)
   );
 
   // Recovery hook
@@ -259,6 +268,25 @@ export default function Home() {
           isSaving={status === RecordingStatus.SAVING}
           sidebarCollapsed={sidebarCollapsed}
         />
+
+        {/* Teams Meeting Detection Popups */}
+        {teamsDetection.showStartPopup && (
+          <TeamsDetectionPopup
+            variant="started"
+            onStart={teamsDetection.handleStart}
+            onDismiss={teamsDetection.dismissStartPopup}
+            sidebarCollapsed={sidebarCollapsed}
+          />
+        )}
+        {teamsDetection.showEndPopup && (
+          <TeamsDetectionPopup
+            variant="ended"
+            countdown={teamsDetection.countdown}
+            onStop={teamsDetection.handleStop}
+            onContinue={teamsDetection.handleContinue}
+            sidebarCollapsed={sidebarCollapsed}
+          />
+        )}
       </div>
     </motion.div>
   );

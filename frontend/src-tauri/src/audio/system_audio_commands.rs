@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use anyhow::Result;
 
 // Global state for system audio detector
-type SystemAudioDetectorState = Arc<Mutex<Option<SystemAudioDetector>>>;
+pub type SystemAudioDetectorState = Arc<Mutex<Option<SystemAudioDetector>>>;
 
 /// Start system audio capture (for capturing system output audio)
 #[command]
@@ -34,13 +34,12 @@ pub async fn check_system_audio_permissions_command() -> bool {
     check_system_audio_permissions()
 }
 
-/// Start monitoring system audio usage by other applications
-#[command]
-pub async fn start_system_audio_monitoring(
+/// Internal helper — starts the detector given a raw `Arc`. Used at startup and from the Tauri command.
+pub async fn start_system_audio_monitoring_internal(
     app_handle: AppHandle,
-    detector_state: State<'_, SystemAudioDetectorState>
+    detector_arc: SystemAudioDetectorState,
 ) -> Result<(), String> {
-    let mut detector_guard = detector_state.lock()
+    let mut detector_guard = detector_arc.lock()
         .map_err(|e| format!("Failed to acquire detector lock: {}", e))?;
 
     if detector_guard.is_some() {
@@ -49,16 +48,15 @@ pub async fn start_system_audio_monitoring(
 
     let mut detector = SystemAudioDetector::new();
 
-    // Create callback that emits events to the frontend
     let callback = new_system_audio_callback(move |event| {
         match event {
             SystemAudioEvent::SystemAudioStarted(apps) => {
-                tracing::info!("System audio started by apps: {:?}", apps);
+                log::info!("system_audio: audio started by apps: {:?}", apps);
                 let _ = app_handle.emit("system-audio-started", apps);
             }
             SystemAudioEvent::SystemAudioStopped => {
+                log::info!("system_audio: audio stopped");
                 let _ = app_handle.emit("system-audio-stopped", ());
-                tracing::info!("System audio stopped");
             }
         }
     });
@@ -67,6 +65,15 @@ pub async fn start_system_audio_monitoring(
     *detector_guard = Some(detector);
 
     Ok(())
+}
+
+/// Start monitoring system audio usage by other applications
+#[command]
+pub async fn start_system_audio_monitoring(
+    app_handle: AppHandle,
+    detector_state: State<'_, SystemAudioDetectorState>
+) -> Result<(), String> {
+    start_system_audio_monitoring_internal(app_handle, (*detector_state).clone()).await
 }
 
 /// Stop monitoring system audio usage

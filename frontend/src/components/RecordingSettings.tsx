@@ -31,6 +31,7 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [showRecordingNotification, setShowRecordingNotification] = useState(true);
+  const [autoDetectCalls, setAutoDetectCalls] = useState(true);
 
   // Load recording preferences on component mount
   useEffect(() => {
@@ -54,6 +55,22 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
 
     loadPreferences();
   }, []);
+
+  // Load auto detect calls preference
+  useEffect(() => {
+    invoke<boolean>('get_teams_detection_enabled')
+      .then(setAutoDetectCalls)
+      .catch(() => {});
+  }, []);
+
+  const handleAutoDetectChange = async (enabled: boolean) => {
+    setAutoDetectCalls(enabled);
+    try {
+      await invoke('set_teams_detection_enabled', { enabled });
+    } catch {
+      setAutoDetectCalls(!enabled);
+    }
+  };
 
   // Load recording notification preference
   useEffect(() => {
@@ -226,6 +243,20 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
         <Switch
           checked={showRecordingNotification}
           onCheckedChange={handleNotificationToggle}
+        />
+      </div>
+
+      {/* Auto detect calls */}
+      <div className="flex items-center justify-between p-4 border rounded-lg">
+        <div className="flex-1">
+          <div className="font-medium">Auto detect calls</div>
+          <div className="text-sm text-gray-600">
+            Automatically start recording when a call is detected and prompt to stop when it ends
+          </div>
+        </div>
+        <Switch
+          checked={autoDetectCalls}
+          onCheckedChange={handleAutoDetectChange}
         />
       </div>
 

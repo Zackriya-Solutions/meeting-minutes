@@ -34,6 +34,8 @@ pub mod batch_processor;
 pub mod system_detector;
 pub mod system_audio_commands;
 pub mod device_monitor;  // NEW: Device disconnect/reconnect monitoring
+pub mod teams_detector;
+pub mod teams_detection_commands;
 pub mod playback_monitor; // NEW: Playback device detection for BT warnings
 
 // Speaker label abstraction for channel-based diarization
