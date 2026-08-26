@@ -1,4 +1,4 @@
-use crate::whisper_engine::{ModelInfo, WhisperEngine};
+use crate::whisper_engine::{is_download_cancelled, ModelInfo, WhisperEngine};
 use std::sync::{Arc, Mutex};
 use std::path::PathBuf;
 use tauri::{command, Emitter, Manager, AppHandle, Runtime};
@@ -463,6 +463,13 @@ pub async fn whisper_download_model(
                 ) {
                     log::error!("Failed to emit download complete event: {}", e);
                 }
+                Ok(())
+            }
+            Err(e) if is_download_cancelled(&e) => {
+                // Cancellation is handled by the existing cancel command/UI path. Do not
+                // emit a terminal event or reject the original request, which would
+                // otherwise overwrite that path's Missing state with an error.
+                log::info!("Download cancelled for {}", model_name);
                 Ok(())
             }
             Err(e) => {
