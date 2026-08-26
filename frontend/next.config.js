@@ -2,6 +2,12 @@ const path = require('path');
 const tiptapPmResolveBase = path.dirname(require.resolve('@tiptap/pm/model'));
 const resolveFromTiptapPm = (pkg) =>
   require.resolve(pkg, { paths: [tiptapPmResolveBase] });
+const e2eBootstrapPath = path.resolve(
+  __dirname,
+  process.env.NEXT_PUBLIC_E2E_TESTING === '1'
+    ? 'src/testing/E2EBootstrap.tsx'
+    : 'src/testing/E2ENoop.tsx',
+);
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
@@ -15,7 +21,16 @@ const nextConfig = {
   assetPrefix: '/',
 
   // Add webpack configuration for Tauri
-  webpack: (config, { isServer }) => {
+  webpack: (config, { isServer, webpack }) => {
+    if (process.env.NEXT_PUBLIC_E2E_TESTING !== '1') {
+      config.plugins.push(
+        new webpack.NormalModuleReplacementPlugin(
+          /^@\/testing\/E2EBootstrap$/,
+          e2eBootstrapPath,
+        ),
+      );
+    }
+
     if (!isServer) {
       config.resolve.fallback = {
         ...config.resolve.fallback,

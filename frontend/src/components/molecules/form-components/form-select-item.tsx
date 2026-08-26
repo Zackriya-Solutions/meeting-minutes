@@ -71,7 +71,7 @@ export const FormSelectItem = ({
                         <SelectItem
                           key={`${item}+${i}`}
                           value={item.value}
-                          className="hover:bg-slate-100 cursor-pointer"
+                          className="hover:bg-muted cursor-pointer"
                         >
                           {item.label}
                         </SelectItem>

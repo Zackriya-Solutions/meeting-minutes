@@ -7,6 +7,15 @@ import { configService, ModelConfig } from '@/services/configService';
 import { invoke } from '@tauri-apps/api/core';
 import Analytics from '@/lib/analytics';
 import { BetaFeatures, BetaFeatureKey, loadBetaFeatures, saveBetaFeatures } from '@/types/betaFeatures';
+import {
+  applyEffectiveTheme,
+  parseThemeMode,
+  resolveEffectiveTheme,
+  THEME_STORAGE_KEY,
+  type ThemeMode,
+} from '@/lib/theme';
+
+export type { ThemeMode } from '@/lib/theme';
 
 export interface OllamaModel {
   name: string;
@@ -62,6 +71,9 @@ interface ConfigContextType {
   // UI preferences
   showConfidenceIndicator: boolean;
   toggleConfidenceIndicator: (checked: boolean) => void;
+  themeMode: ThemeMode;
+  setThemeMode: (mode: ThemeMode) => void;
+  isDarkTheme: boolean;
 
   // Beta features
   betaFeatures: BetaFeatures;
@@ -95,6 +107,20 @@ interface ConfigContextType {
 
 const ConfigContext = createContext<ConfigContextType | undefined>(undefined);
 
+function getStoredSummarySystemPrompt() {
+  if (typeof window === 'undefined') return '';
+  return localStorage.getItem('summarySystemPrompt') || '';
+}
+
+function getStoredThemeMode(): ThemeMode {
+  if (typeof window === 'undefined') return 'system';
+
+  try {
+    return parseThemeMode(window.localStorage.getItem(THEME_STORAGE_KEY));
+  } catch {
+    return 'system';
+  }
+}
 
 export function ConfigProvider({ children }: { children: ReactNode }) {
   // Model configuration state
@@ -102,7 +128,8 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     provider: 'ollama',
     model: 'llama3.2:latest',
     whisperModel: 'large-v3',
-    ollamaEndpoint: null
+    ollamaEndpoint: null,
+    summarySystemPrompt: getStoredSummarySystemPrompt(),
   });
 
   // Transcript model configuration state
@@ -153,6 +180,13 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     }
     return true;
   });
+
+  const [themeMode, setThemeModeState] = useState<ThemeMode>(() => getStoredThemeMode());
+  const [isDarkTheme, setIsDarkTheme] = useState(
+    () =>
+      typeof document !== 'undefined' &&
+      document.documentElement.classList.contains('dark'),
+  );
 
   // Summary configs
   const [isAutoSummary, setisAutoSummary] = useState<boolean>(() => {
@@ -252,6 +286,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
                   maxTokens: customConfig.maxTokens,
                   temperature: customConfig.temperature,
                   topP: customConfig.topP,
+                  summarySystemPrompt: prev.summarySystemPrompt ?? getStoredSummarySystemPrompt(),
                 }));
 
                 // Seed per-provider model cache from DB
@@ -275,6 +310,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
             model: data.model || prev.model,
             whisperModel: data.whisperModel || prev.whisperModel,
             ollamaEndpoint: data.ollamaEndpoint,
+            summarySystemPrompt: prev.summarySystemPrompt ?? getStoredSummarySystemPrompt(),
           }));
 
           // Seed per-provider model cache from DB
@@ -324,7 +360,10 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
       const { listen } = await import('@tauri-apps/api/event');
       const unlisten = await listen<ModelConfig>('model-config-updated', (event) => {
         console.log('[ConfigContext] Received model-config-updated event:', event.payload);
-        setModelConfig(event.payload);
+        setModelConfig(prev => ({
+          ...event.payload,
+          summarySystemPrompt: event.payload.summarySystemPrompt ?? prev.summarySystemPrompt ?? getStoredSummarySystemPrompt(),
+        }));
 
         // Update provider-specific key when config changes
         if (event.payload.apiKey && event.payload.provider !== 'custom-openai') {
@@ -381,6 +420,33 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     // Trigger a custom event to notify other components
     window.dispatchEvent(new CustomEvent('confidenceIndicatorChanged', { detail: checked }));
   }, []);
+
+  const setThemeMode = useCallback((mode: ThemeMode) => {
+    setThemeModeState(mode);
+    if (typeof window !== 'undefined') {
+      try {
+        window.localStorage.setItem(THEME_STORAGE_KEY, mode);
+      } catch {}
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const media = window.matchMedia('(prefers-color-scheme: dark)');
+    const applyTheme = () => {
+      const effectiveTheme = resolveEffectiveTheme(themeMode, media.matches);
+      applyEffectiveTheme(effectiveTheme);
+      setIsDarkTheme(effectiveTheme === 'dark');
+    };
+
+    applyTheme();
+
+    if (themeMode !== 'system') return;
+
+    media.addEventListener('change', applyTheme);
+    return () => media.removeEventListener('change', applyTheme);
+  }, [themeMode]);
 
   const toggleIsAutoSummary = useCallback((checked: boolean) => {
     setisAutoSummary(checked);
@@ -497,6 +563,9 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     setSelectedLanguage: handleSetSelectedLanguage,
     showConfidenceIndicator,
     toggleConfidenceIndicator,
+    themeMode,
+    setThemeMode,
+    isDarkTheme,
     betaFeatures,
     toggleBetaFeature,
     models,
@@ -519,6 +588,9 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     handleSetSelectedLanguage,
     showConfidenceIndicator,
     toggleConfidenceIndicator,
+    themeMode,
+    setThemeMode,
+    isDarkTheme,
     betaFeatures,
     toggleBetaFeature,
     models,

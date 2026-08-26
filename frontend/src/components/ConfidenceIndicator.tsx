@@ -16,10 +16,10 @@ export const ConfidenceIndicator: React.FC<ConfidenceIndicatorProps> = ({
 
   // Get color class based on confidence threshold
   const getColorClass = (conf: number): string => {
-    if (conf >= 0.8) return 'bg-green-500'; // 80-100%: High confidence
-    if (conf >= 0.7) return 'bg-yellow-500'; // 70-79%: Good confidence
-    if (conf >= 0.4) return 'bg-orange-500'; // 40-79%: Medium confidence
-    return 'bg-red-500'; // Below 50%: Low confidence
+    if (conf >= 0.8) return 'bg-success'; // 80-100%: High confidence
+    if (conf >= 0.7) return 'bg-warning'; // 70-79%: Good confidence
+    if (conf >= 0.4) return 'bg-warning'; // 40-79%: Medium confidence
+    return 'bg-destructive'; // Below 50%: Low confidence
   };
 
   // Get descriptive label for accessibility

@@ -137,7 +137,7 @@ Quarterly product review session with stakeholders.
       <div className="mb-8">
         <h1 className="text-3xl font-bold mb-4">{note.title}</h1>
         
-        <div className="flex flex-wrap gap-4 text-gray-600">
+        <div className="flex flex-wrap gap-4 text-muted-foreground">
           {note.date && (
             <div className="flex items-center gap-1">
               <Calendar className="w-4 h-4" />
@@ -162,7 +162,7 @@ Quarterly product review session with stakeholders.
 
         <div className="flex gap-2 mt-4">
           {note.tags.map((tag) => (
-            <div key={tag} className="flex items-center gap-1 bg-blue-100 text-blue-800 px-2 py-1 rounded-full text-sm">
+            <div key={tag} className="flex items-center gap-1 bg-info/15 text-info px-2 py-1 rounded-full text-sm">
               <Tag className="w-3 h-3" />
               {tag}
             </div>

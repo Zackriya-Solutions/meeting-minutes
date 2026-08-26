@@ -17,24 +17,24 @@ export function ModelDownloadProgress({ status, modelName, onCancel }: ModelDown
   const isCompleted = progress >= 100;
 
   return (
-    <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+    <div className="bg-info/10 border border-info/30 rounded-lg p-4">
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center space-x-2">
-          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
-          <span className="text-sm font-medium text-blue-900">
+          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-info"></div>
+          <span className="text-sm font-medium text-info">
             {isCompleted ? 'Finalizing...' : `Downloading ${modelName}`}
           </span>
         </div>
       </div>
       
       <div className="relative">
-        <div className="w-full bg-blue-200 rounded-full h-2">
+        <div className="w-full bg-info/20 rounded-full h-2">
           <div 
-            className="bg-blue-600 h-2 rounded-full transition-all duration-300 ease-out"
+            className="bg-info h-2 rounded-full transition-all duration-300 ease-out"
             style={{ width: `${Math.min(progress, 100)}%` }}
           />
         </div>
-        <div className="flex justify-between text-xs text-blue-700 mt-1">
+        <div className="flex justify-between text-xs text-info mt-1">
           <span>{Math.round(progress)}% complete</span>
           {!isCompleted && (
             <span className="animate-pulse">Downloading...</span>
@@ -43,7 +43,7 @@ export function ModelDownloadProgress({ status, modelName, onCancel }: ModelDown
       </div>
       
       {isCompleted && (
-        <div className="mt-2 text-xs text-green-700">
+        <div className="mt-2 text-xs text-success">
           ✓ Download completed, loading model...
         </div>
       )}
@@ -74,7 +74,7 @@ export function ProgressRing({ progress, size = 40, strokeWidth = 3 }: ProgressR
           cx={size / 2}
           cy={size / 2}
           r={radius}
-          stroke="#e5e7eb"
+          stroke="hsl(var(--border))"
           strokeWidth={strokeWidth}
           fill="transparent"
         />
@@ -82,7 +82,7 @@ export function ProgressRing({ progress, size = 40, strokeWidth = 3 }: ProgressR
           cx={size / 2}
           cy={size / 2}
           r={radius}
-          stroke="#3b82f6"
+          stroke="hsl(var(--info))"
           strokeWidth={strokeWidth}
           strokeDasharray={strokeDasharray}
           strokeDashoffset={strokeDashoffset}
@@ -91,7 +91,7 @@ export function ProgressRing({ progress, size = 40, strokeWidth = 3 }: ProgressR
           className="transition-all duration-300 ease-in-out"
         />
       </svg>
-      <span className="absolute text-xs font-medium text-blue-600">
+      <span className="absolute text-xs font-medium text-info">
         {Math.round(progress)}%
       </span>
     </div>
@@ -111,17 +111,17 @@ export function DownloadSummary({ totalModels, downloadedModels, totalSizeMb }: 
   };
 
   return (
-    <div className="bg-gray-50 rounded-lg p-3 text-sm">
+    <div className="bg-muted/40 rounded-lg p-3 text-sm">
       <div className="flex items-center justify-between">
-        <span className="text-gray-700">
+        <span className="text-foreground">
           📦 {downloadedModels} of {totalModels} models available
         </span>
-        <span className="text-gray-600">
+        <span className="text-muted-foreground">
           💾 {formatSize(totalSizeMb)} total
         </span>
       </div>
       {downloadedModels > 0 && (
-        <div className="mt-1 text-xs text-green-600">
+        <div className="mt-1 text-xs text-success">
           ✓ Models run locally - no internet required for transcription
         </div>
       )}

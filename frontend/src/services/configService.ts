@@ -25,6 +25,7 @@ export interface ModelConfig {
   maxTokens?: number | null;
   temperature?: number | null;
   topP?: number | null;
+  summarySystemPrompt?: string | null;
 }
 
 export interface CustomOpenAIConfig {
