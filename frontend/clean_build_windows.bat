@@ -23,4 +23,4 @@ if %ERRORLEVEL% neq 0 (
 )
 
 echo Building the project...
-pnpm run tauri build
+pnpm run tauri:build

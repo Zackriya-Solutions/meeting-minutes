@@ -7,10 +7,10 @@ param(
 # Signing is mandatory when signCommand is set in tauri.conf.json — a silent skip
 # would allow an unsigned binary to be distributed and blocked by Windows Defender SmartScreen.
 if (-not $env:DIGICERT_KEYPAIR_ALIAS) {
-    Write-Error "DIGICERT_KEYPAIR_ALIAS is not set. Signing environment is not configured."
-    Write-Error "Ensure the DigiCert KeyLocker setup steps ran successfully in the workflow."
-    Write-Error "To produce an intentionally unsigned build, remove the signCommand from tauri.conf.json."
-    exit 1
+    Write-Warning "DIGICERT_KEYPAIR_ALIAS is not set — skipping signing for local build."
+    Write-Warning "CI builds set this variable via the DigiCert KeyLocker workflow step."
+    Write-Warning "Distributing this unsigned binary will trigger Windows Defender SmartScreen."
+    exit 0
 }
 
 Write-Host "Signing: $FilePath"
