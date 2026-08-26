@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 
 interface AudioLevelMeterProps {
   rmsLevel: number;    // 0.0 to 1.0
@@ -17,6 +18,7 @@ export function AudioLevelMeter({
   className = '',
   size = 'medium'
 }: AudioLevelMeterProps) {
+  const { t } = useTranslation();
   // Normalize levels to 0-1 range and apply log scaling for better visual representation
   const normalizedRms = Math.max(0, Math.min(1, rmsLevel));
   const normalizedPeak = Math.max(0, Math.min(1, peakLevel));
@@ -65,7 +67,7 @@ export function AudioLevelMeter({
       {/* Device activity indicator */}
       <div className={`w-2 h-2 rounded-full ${
         isActive ? 'bg-green-400 animate-pulse' : 'bg-gray-300'
-      }`} title={`${deviceName} - ${isActive ? 'Active' : 'Inactive'}`} />
+      }`} title={`\${deviceName} - \${isActive ? t('common.active') : t('common.disabled')}`} />
 
       {/* Level meter container */}
       <div className={`flex-1 ${sizes.container} relative`}>

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Summary, Block } from '@/types';
 import { Section } from './Section';
 import { EditableTitle } from '../EditableTitle';
@@ -20,6 +21,7 @@ interface Props {
 }
 
 export const AISummary = ({ summary, status, error, onSummaryChange, onRegenerateSummary, meeting }: Props) => {
+  const { t } = useTranslation();
   const generateUniqueId = (sectionKey: string) => {
     return `${sectionKey}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
   };
@@ -609,10 +611,10 @@ export const AISummary = ({ summary, status, error, onSummaryChange, onRegenerat
     <div className="w-full p-4 bg-red-50 border border-red-200 rounded-lg">
       <div className="flex items-center mb-2">
         <ExclamationTriangleIcon className="h-5 w-5 text-red-500 mr-2" />
-        <h3 className="text-red-700 font-medium">Error Generating Summary</h3>
+        <h3 className="text-red-700 font-medium">{t('summarySettings.errorGenerating')}</h3>
       </div>
       <p className="text-red-600 text-sm">{error}</p>
-      <p className="text-red-500 text-xs mt-2">Please check your model configuration and API keys, or try again.</p>
+      <p className="text-red-500 text-xs mt-2">{t('summarySettings.checkModelConfig')}</p>
     </div>
   );
 
@@ -649,8 +651,8 @@ export const AISummary = ({ summary, status, error, onSummaryChange, onRegenerat
   if (!hasContent && status === 'completed') {
     return (
       <div className="w-full p-4 bg-gray-50 border border-gray-200 rounded-lg text-center">
-        <p className="text-gray-600">No summary content available.</p>
-        <p className="text-gray-500 text-sm mt-1">Try generating a new summary.</p>
+        <p className="text-gray-600">{t('summarySettings.noContent')}</p>
+        <p className="text-gray-500 text-sm mt-1">{t('summarySettings.tryGenerating')}</p>
       </div>
     );
   }
@@ -685,14 +687,14 @@ export const AISummary = ({ summary, status, error, onSummaryChange, onRegenerat
             onClick={handleCopyBlocks}
           >
             <span className="text-gray-600">📋</span>
-            <span>Copy {selectedBlocks.length > 1 ? `${selectedBlocks.length} blocks` : 'block'}</span>
+            <span>{selectedBlocks.length > 1 ? t('summarySettings.copyBlocks', { count: selectedBlocks.length }) : t('summarySettings.copyBlock')}</span>
           </button>
           <button
             className="w-full px-4 py-2 text-left hover:bg-gray-100 text-red-600 flex items-center space-x-2"
             onClick={handleDeleteBlocks}
           >
             <span>🗑️</span>
-            <span>Delete {selectedBlocks.length > 1 ? `${selectedBlocks.length} blocks` : 'block'}</span>
+            <span>{selectedBlocks.length > 1 ? t('summarySettings.deleteBlocks', { count: selectedBlocks.length }) : t('summarySettings.deleteBlock')}</span>
           </button>
         </div>
       )}
@@ -709,7 +711,7 @@ export const AISummary = ({ summary, status, error, onSummaryChange, onRegenerat
             onClick={handleUndo}
             disabled={currentHistoryIndex === 0}
             className="p-2 hover:bg-gray-100 rounded disabled:opacity-50"
-            title="Undo"
+            title={t('common.undo')}
           >
             <svg
               xmlns="http://www.w3.org/2000/svg"
@@ -730,7 +732,7 @@ export const AISummary = ({ summary, status, error, onSummaryChange, onRegenerat
             onClick={handleRedo}
             disabled={currentHistoryIndex === history.length - 1}
             className="p-2 hover:bg-gray-100 rounded disabled:opacity-50"
-            title="Redo"
+            title={t('common.redo')}
           >
             <svg
               xmlns="http://www.w3.org/2000/svg"
@@ -750,7 +752,7 @@ export const AISummary = ({ summary, status, error, onSummaryChange, onRegenerat
           <button
             onClick={handleAddSection}
             className="p-2 hover:bg-gray-100 rounded"
-            title="Add new section"
+            title={t('summarySettings.addSection')}
           >
             <svg
               xmlns="http://www.w3.org/2000/svg"
@@ -775,12 +777,12 @@ export const AISummary = ({ summary, status, error, onSummaryChange, onRegenerat
             className="px-2 py-1 text-sm bg-gray-100 hover:bg-gray-200 rounded-md flex items-center space-x-1"
           >
             <span>📋</span>
-            <span>Copy</span>
+            <span>{t('common.copy')}</span>
           </button>
           <button
             onClick={onRegenerateSummary}
             className="px-2 py-1 text-sm bg-gray-100 hover:bg-gray-200 rounded-md flex items-center space-x-1"
-            title="Regenerate Summary"
+            title={t('summarySettings.regenerateSummary')}
           >
             <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />

@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Button } from './ui/button';
 import { AlertTriangle, CheckCircle, X } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 
 interface ComplianceNotificationProps {
   isOpen: boolean;
@@ -19,6 +20,7 @@ export const ComplianceNotification: React.FC<ComplianceNotificationProps> = ({
 }) => {
   const [isVisible, setIsVisible] = useState(false);
   const [position, setPosition] = useState({ top: 0, left: 0, width: 192 }); // Default width
+  const { t } = useTranslation();
 
   useEffect(() => {
     if (isOpen) {
@@ -116,7 +118,7 @@ export const ComplianceNotification: React.FC<ComplianceNotificationProps> = ({
             className="text-xs px-2 py-0.5 h-6 bg-green-600 hover:bg-green-700 flex-1"
           >
             <CheckCircle className="h-2 w-2 mr-1" />
-            Done
+            {t('common.done')}
           </Button>
         </div>
       </div>

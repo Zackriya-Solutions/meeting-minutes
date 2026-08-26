@@ -25,6 +25,11 @@ import { RecordingPostProcessingProvider } from '@/contexts/RecordingPostProcess
 import { ImportAudioDialog, ImportDropOverlay } from '@/components/ImportAudio'
 import { ImportDialogProvider } from '@/contexts/ImportDialogContext'
 import { isAudioExtension, getAudioFormatsDisplayList } from '@/constants/audioFormats'
+import '@/i18n/config' // Initialize i18next
+import { I18nextProvider } from 'react-i18next'
+import i18n from 'i18next'
+import { useTranslation } from 'react-i18next';
+import { LanguageSwitcher } from '@/components/LanguageSwitcher'
 
 
 const sourceSans3 = Source_Sans_3({
@@ -63,11 +68,12 @@ function ConditionalImportDialog({
 
 // export { metadata } from './metadata'
 
-export default function RootLayout({
+function LayoutInner({
   children,
 }: {
   children: React.ReactNode
 }) {
+  const { t } = useTranslation();
   const [showOnboarding, setShowOnboarding] = useState(false)
   const [onboardingCompleted, setOnboardingCompleted] = useState(false)
 
@@ -112,8 +118,8 @@ export default function RootLayout({
       console.log('[Layout] Received request-recording-toggle from tray');
 
       if (showOnboarding) {
-        toast.error("Please complete setup first", {
-          description: "You need to finish onboarding before you can start recording."
+        toast.error(t('permissionWarning.completeSetupFirst'), {
+          description: t('permissionWarning.needToFinishOnboarding')
         });
       } else {
         // If in main app, forward to useRecordingStart via window event
@@ -133,8 +139,8 @@ export default function RootLayout({
     const betaFeatures = loadBetaFeatures();
 
     if (!betaFeatures.importAndRetranscribe) {
-      toast.error('Beta feature disabled', {
-        description: 'Enable "Import Audio & Retranscribe" in Settings > Beta to use this feature.'
+      toast.error(t('importAudio.betaFeatureDisabled'), {
+        description: t('importAudio.betaFeatureDisabledDesc')
       });
       return;
     }
@@ -150,7 +156,7 @@ export default function RootLayout({
       setImportFilePath(audioFile);
       setShowImportDialog(true);
     } else if (paths.length > 0) {
-      toast.error('Please drop an audio file', {
+      toast.error(t('importAudio.dropAudioFileOnly'), {
         description: `Supported formats: ${getAudioFormatsDisplayList()}`
       });
     }
@@ -231,7 +237,7 @@ export default function RootLayout({
   }
 
   return (
-    <html lang="en">
+    <html lang={i18n.language}>
       <body className={`${sourceSans3.variable} font-sans antialiased`}>
         <AnalyticsProvider>
           <RecordingStateProvider>
@@ -280,4 +286,12 @@ export default function RootLayout({
       </body>
     </html>
   )
+}
+
+export default function RootLayout(props: { children: React.ReactNode }) {
+  return (
+    <I18nextProvider i18n={i18n}>
+      <LayoutInner {...props} />
+    </I18nextProvider>
+  );
 }

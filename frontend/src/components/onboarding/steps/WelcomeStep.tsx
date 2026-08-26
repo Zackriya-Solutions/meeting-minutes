@@ -1,31 +1,33 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import { Lock, Sparkles, Cpu } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { OnboardingContainer } from '../OnboardingContainer';
 import { useOnboarding } from '@/contexts/OnboardingContext';
 
 export function WelcomeStep() {
+  const { t } = useTranslation();
   const { goNext } = useOnboarding();
 
   const features = [
     {
       icon: Lock,
-      title: 'Your data never leaves your device',
+      title: t('compliance.dataNeverLeaves'),
     },
     {
       icon: Sparkles,
-      title: 'Intelligent summaries & insights',
+      title: t('onboarding.welcomeSubtitle'),
     },
     {
       icon: Cpu,
-      title: 'Works offline, no cloud required',
+      title: t('languagePicker.worksOffline'),
     },
   ];
 
   return (
     <OnboardingContainer
-      title="Welcome to Meetily"
-      description="Record. Transcribe. Summarize. All on your device."
+      title={t('onboarding.welcome')}
+      description={t('onboarding.welcomeSubtitle')}
       step={1}
       hideProgress={true}
     >
@@ -56,9 +58,9 @@ export function WelcomeStep() {
             onClick={goNext}
             className="w-full h-11 bg-gray-900 hover:bg-gray-800 text-white"
           >
-            Get Started
+            {t('onboarding.getStarted')}
           </Button>
-          <p className="text-xs text-center text-gray-500">Takes less than 3 minutes</p>
+          <p className="text-xs text-center text-gray-500">{t('onboarding.thisMayTakeAFewMinutes')}</p>
         </div>
       </div>
     </OnboardingContainer>
