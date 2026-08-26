@@ -935,6 +935,32 @@ impl WhisperEngine {
 
         if result.is_ok() && !active_download.cancellation.is_cancelled() {
             result = self.validate_model_file(file_path).await;
+
+            if result.is_ok() {
+                let expected_min_size = WHISPER_MODEL_CATALOG
+                    .iter()
+                    .find(|model| model.0 == model_name)
+                    .map(|model| ((model.2 as f64 * 0.9) as u64) * 1024 * 1024);
+
+                result = match expected_min_size {
+                    Some(expected_min_size) => match fs::metadata(file_path).await {
+                        Ok(metadata) if metadata.len() >= expected_min_size => Ok(()),
+                        Ok(metadata) => Err(anyhow!(
+                            "Downloaded model file is too small: {} bytes (expected at least {} bytes)",
+                            metadata.len(),
+                            expected_min_size
+                        )),
+                        Err(e) => Err(anyhow!(
+                            "Failed to read downloaded model file metadata: {}",
+                            e
+                        )),
+                    },
+                    None => Err(anyhow!(
+                        "Unsupported model for download validation: {}",
+                        model_name
+                    )),
+                };
+            }
         }
 
         if result.is_err() && !active_download.cancellation.is_cancelled() && file_path.exists() {
@@ -1472,21 +1498,23 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn downloaded_model_sends_user_agent_and_validates_header() {
+    async fn downloaded_model_sends_user_agent_and_rejects_undersized_valid_header() {
         let dir = tempfile::tempdir().unwrap();
         let engine = WhisperEngine::new_with_models_dir(Some(dir.path().to_path_buf())).unwrap();
         engine.discover_models().await.unwrap();
         let (url, request, server) = response_http_server(8, b"ggml\0\0\0\0").await;
 
-        engine.download_model_from_url("tiny", &url, None).await.unwrap();
+        let error = engine.download_model_from_url("tiny", &url, None).await.unwrap_err();
         let request = String::from_utf8(request.await.unwrap()).unwrap();
         server.await.unwrap();
 
+        assert!(error.to_string().contains("too small"));
         assert!(request.to_ascii_lowercase().contains(&format!(
             "user-agent: meetily/{}",
             env!("CARGO_PKG_VERSION")
         )));
         assert!(!engine.active_downloads.lock().await.contains_key("tiny"));
+        assert!(!dir.path().join("ggml-tiny.bin").exists());
         assert!(matches!(
             engine
                 .available_models
@@ -1495,7 +1523,7 @@ mod tests {
                 .get("tiny")
                 .expect("tiny should remain cached")
                 .status,
-            ModelStatus::Available
+            ModelStatus::Missing
         ));
     }
 
