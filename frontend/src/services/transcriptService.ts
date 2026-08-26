@@ -59,6 +59,13 @@ export class TranscriptService {
     });
   }
 
+  /** Listen for an ephemeral live preview. Preview events are never persisted. */
+  async onTranscriptPreview(callback: (update: TranscriptUpdate) => void): Promise<UnlistenFn> {
+    return listen<TranscriptUpdate>('transcript-preview', (event) => {
+      callback(event.payload);
+    });
+  }
+
   /**
    * Listen for transcription-complete event
    * @param callback - Function to call when transcription processing is complete

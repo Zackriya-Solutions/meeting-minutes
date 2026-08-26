@@ -11,6 +11,12 @@ pub const DEFAULT_WHISPER_MODEL: &str = "large-v3-turbo";
 /// This is the quantized version optimized for speed.
 pub const DEFAULT_PARAKEET_MODEL: &str = "parakeet-tdt-0.6b-v3-int8";
 
+/// Default Deepgram model for realtime cloud transcription.
+pub const DEFAULT_DEEPGRAM_REALTIME_MODEL: &str = "nova-3";
+
+/// Default Deepgram model for async cloud transcription of existing files.
+pub const DEFAULT_DEEPGRAM_ASYNC_MODEL: &str = "nova-3";
+
 /// Whisper model catalog with metadata for all supported models.
 /// Used by both WhisperEngine::discover_models() and discover_models_standalone().
 ///

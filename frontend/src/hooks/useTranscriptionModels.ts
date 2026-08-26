@@ -8,7 +8,7 @@ export interface RawModelInfo {
 }
 
 export interface ModelOption {
-  provider: 'whisper' | 'parakeet';
+  provider: 'whisper' | 'parakeet' | 'deepgram';
   name: string;
   displayName: string;
   size_mb: number;
@@ -77,6 +77,39 @@ export function useTranscriptionModels(transcriptModelConfig: TranscriptModelCon
       console.error('Failed to fetch Parakeet models:', err);
     }
 
+    allModels.push(
+      {
+        provider: 'deepgram',
+        name: 'nova-3',
+        displayName: '☁️ Deepgram: nova-3',
+        size_mb: 0,
+      },
+      {
+        provider: 'deepgram',
+        name: 'flux-general-multi',
+        displayName: '☁️ Deepgram: flux-general-multi',
+        size_mb: 0,
+      },
+      {
+        provider: 'deepgram',
+        name: 'nova-2',
+        displayName: '☁️ Deepgram: nova-2',
+        size_mb: 0,
+      },
+      {
+        provider: 'deepgram',
+        name: 'nova-2-meeting',
+        displayName: '☁️ Deepgram: nova-2-meeting',
+        size_mb: 0,
+      },
+      {
+        provider: 'deepgram',
+        name: 'nova-2-general',
+        displayName: '☁️ Deepgram: nova-2-general',
+        size_mb: 0,
+      },
+    );
+
     setAvailableModels(allModels);
 
     // Set default model based on user's saved configuration
@@ -85,11 +118,16 @@ export function useTranscriptionModels(transcriptModelConfig: TranscriptModelCon
 
     // Try to match the configured model
     // Note: 'localWhisper' in config maps to 'whisper' provider in model list
-    const configuredMatch = allModels.find(
-      (m) =>
-        (configuredProvider === 'localWhisper' && m.provider === 'whisper' && m.name === configuredModel) ||
-        (configuredProvider === 'parakeet' && m.provider === 'parakeet' && m.name === configuredModel)
-    );
+    const configuredMatch =
+      allModels.find(
+        (m) =>
+          (configuredProvider === 'localWhisper' && m.provider === 'whisper' && m.name === configuredModel) ||
+          (configuredProvider === 'parakeet' && m.provider === 'parakeet' && m.name === configuredModel) ||
+          (configuredProvider === 'deepgram' && m.provider === 'deepgram' && m.name === configuredModel),
+      ) ||
+      allModels.find(
+        (m) => configuredProvider === 'deepgram' && m.provider === 'deepgram',
+      );
 
     // Only set default model if user hasn't manually selected one
     if (!userSelectedRef.current) {

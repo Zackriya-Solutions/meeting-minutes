@@ -60,11 +60,13 @@ impl RecordingManager {
     /// * `microphone_device` - Optional microphone device to use
     /// * `system_device` - Optional system audio device to use
     /// * `auto_save` - Whether to save audio checkpoints (true) or just transcripts/metadata (false)
+    /// * `send_continuous_transcription` - Stream mixed audio without local VAD segmentation
     pub async fn start_recording(
         &mut self,
         microphone_device: Option<Arc<AudioDevice>>,
         system_device: Option<Arc<AudioDevice>>,
         auto_save: bool,
+        send_continuous_transcription: bool,
     ) -> Result<mpsc::UnboundedReceiver<AudioChunk>> {
         info!("Starting recording manager (auto_save: {})", auto_save);
 
@@ -116,6 +118,7 @@ impl RecordingManager {
             mic_kind,
             sys_name,
             sys_kind,
+            send_continuous_transcription,
         )?;
 
         // Give the pipeline a moment to fully initialize before starting streams
@@ -186,7 +189,7 @@ impl RecordingManager {
             }
 
             // Start recording with selected devices and auto_save setting
-            self.start_recording(microphone_device, system_device, auto_save).await
+            self.start_recording(microphone_device, system_device, auto_save, false).await
         }
 
         #[cfg(not(target_os = "macos"))]
@@ -221,7 +224,7 @@ impl RecordingManager {
                 return Err(anyhow::anyhow!("No microphone device available"));
             }
 
-            self.start_recording(microphone_device, system_device, auto_save).await
+            self.start_recording(microphone_device, system_device, auto_save, false).await
         }
     }
 

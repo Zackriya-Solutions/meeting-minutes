@@ -70,6 +70,7 @@ const TranscriptSegment = memo(function TranscriptSegment({
     text,
     confidence,
     isStreaming,
+    isPreview,
     showConfidence,
 }: {
     id: string;
@@ -77,12 +78,13 @@ const TranscriptSegment = memo(function TranscriptSegment({
     text: string;
     confidence?: number;
     isStreaming: boolean;
+    isPreview: boolean;
     showConfidence: boolean;
 }) {
     const displayText = cleanStopWords(text) || (text.trim() === '' ? '[Silence]' : text);
 
     return (
-        <div id={`segment-${id}`} className="mb-3">
+        <div id={`segment-${id}`} className="mb-3" aria-live={isPreview ? "polite" : undefined}>
             <div className="flex items-start gap-2">
                 <Tooltip>
                     <TooltipTrigger>
@@ -97,9 +99,9 @@ const TranscriptSegment = memo(function TranscriptSegment({
                     </TooltipContent>
                 </Tooltip>
                 <div className="flex-1">
-                    {isStreaming ? (
+                    {isStreaming || isPreview ? (
                         <div className="bg-gray-100 border border-gray-200 rounded-lg px-3 py-2">
-                            <p className="text-base text-gray-800 leading-relaxed">{displayText}</p>
+                            <p className={`text-base leading-relaxed ${isPreview ? 'text-gray-500 italic' : 'text-gray-800'}`}>{displayText}</p>
                         </div>
                     ) : (
                         <p className="text-base text-gray-800 leading-relaxed">{displayText}</p>
@@ -274,7 +276,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                     >
                         {virtualizer.getVirtualItems().map((virtualRow) => {
                             const segment = segments[virtualRow.index];
-                            const isStreaming = streamingSegmentId === segment.id;
+                            const isStreaming = !segment.isPreview && streamingSegmentId === segment.id;
 
                             return (
                                 <div
@@ -292,9 +294,10 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                     <TranscriptSegment
                                         id={segment.id}
                                         timestamp={segment.timestamp}
-                                        text={getDisplayText(segment)}
+                                        text={segment.isPreview ? segment.text : getDisplayText(segment)}
                                         confidence={segment.confidence}
                                         isStreaming={isStreaming}
+                                        isPreview={segment.isPreview ?? false}
                                         showConfidence={showConfidence}
                                     />
                                 </div>
@@ -336,7 +339,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                 <>
                     <div className="space-y-1">
                         {segments.map((segment) => {
-                            const isStreaming = streamingSegmentId === segment.id;
+                            const isStreaming = !segment.isPreview && streamingSegmentId === segment.id;
 
                             return (
                                 <motion.div
@@ -348,9 +351,10 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                     <TranscriptSegment
                                         id={segment.id}
                                         timestamp={segment.timestamp}
-                                        text={getDisplayText(segment)}
+                                        text={segment.isPreview ? segment.text : getDisplayText(segment)}
                                         confidence={segment.confidence}
                                         isStreaming={isStreaming}
+                                        isPreview={segment.isPreview ?? false}
                                         showConfidence={showConfidence}
                                     />
                                 </motion.div>
