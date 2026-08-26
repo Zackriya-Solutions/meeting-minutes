@@ -1,4 +1,4 @@
-# Meetily - Frontend
+# Meet4Specs - Frontend
 
 A modern desktop application for recording, transcribing, and analyzing meetings with AI assistance. Built with Next.js and Tauri for a native desktop experience.
 
@@ -129,7 +129,7 @@ pnpm run tauri:build
 
 ## Local Transcription
 
-Current Meetily does not require a separate FastAPI service, Docker backend, or manually started whisper-server process. Local transcription is handled by the Rust/Tauri desktop app.
+Current Meet4Specs does not require a separate FastAPI service, Docker backend, or manually started whisper-server process. Local transcription is handled by the Rust/Tauri desktop app.
 
 For build and acceleration details, see:
 

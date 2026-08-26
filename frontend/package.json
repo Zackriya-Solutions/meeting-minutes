@@ -1,11 +1,11 @@
 {
-    "name": "meetily",
-    "version": "0.4.0",
+    "name": "meet4specs",
+    "version": "1.0.0",
     "private": true,
     "main": "electron/main.js",
     "scripts": {
         "dev": "next dev -H 127.0.0.1 -p 3118",
-        "build": "next build",
+        "build": "pnpm run version:check && next build",
         "export": "next export",
         "start": "next start -p 3118",
         "tauri": "tauri",
@@ -25,7 +25,13 @@
         "tauri:build:coreml": "tauri build -- --features coreml",
         "tauri:build:openblas": "tauri build -- --features openblas",
         "tauri:build:hipblas": "tauri build -- --features hipblas",
-        "lint": "next lint"
+        "lint": "next lint",
+        "version:get": "node ../scripts/version.mjs get",
+        "version:check": "node ../scripts/version.mjs check",
+        "version:sync": "node ../scripts/version.mjs sync",
+        "version:set": "node ../scripts/version.mjs set",
+        "changeset": "changeset",
+        "changeset:version": "changeset version && pnpm run version:sync"
     },
     "dependencies": {
         "@blocknote/core": "0.36.0",
@@ -87,6 +93,7 @@
         "zod": "^3.25.71"
     },
     "devDependencies": {
+        "@changesets/cli": "2.27.12",
         "@tailwindcss/typography": "^0.5.15",
         "@tauri-apps/cli": "^2.1.0",
         "@tauri-apps/plugin-fs": "~2.4.0",

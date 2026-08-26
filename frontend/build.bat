@@ -166,7 +166,7 @@ echo   /?        Show this help message
 echo   ^(none^)  Build the application for production
 echo.
 echo DESCRIPTION:
-echo   This script builds the Meetily Tauri application for Windows.
+echo   This script builds the Meet4Specs Tauri application for Windows.
 echo   It automatically sets up the Visual Studio build environment,
 echo   configures necessary paths, and handles port cleanup.
 echo.

@@ -1,124 +1,121 @@
 {
-    "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-    "productName": "Meet4Specs",
-    "version": "0.4.0",
-    "identifier": "com.meetily.ai",
-    "build": {
-        "frontendDist": "../out",
-        "beforeDevCommand": {
-            "script": "pnpm run build",
-            "wait": true
-        },
-        "beforeBuildCommand": "pnpm build"
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "productName": "Meet4Specs",
+  "version": "../package.json",
+  "identifier": "com.meet4specs.ai",
+  "build": {
+    "frontendDist": "../out",
+    "beforeDevCommand": {
+      "script": "pnpm run build",
+      "wait": true
     },
-    "app": {
-        "windows": [
+    "beforeBuildCommand": "pnpm build"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Meet4Specs",
+        "width": 1100,
+        "height": 700,
+        "resizable": true,
+        "fullscreen": false,
+        "theme": "Light",
+        "decorations": true
+      }
+    ],
+    "macOSPrivateApi": true,
+    "security": {
+      "csp": {
+        "default-src": "'self'",
+        "script-src": "'self' 'unsafe-inline'",
+        "style-src": "'self' 'unsafe-inline'",
+        "img-src": "'self' asset: https://asset.localhost data:",
+        "connect-src": "'self' http://localhost:11434 http://localhost:5167 http://localhost:8178 https://api.ollama.ai"
+      },
+      "assetProtocol": {
+        "enable": true,
+        "scope": [
+          "$APPDATA/**"
+        ]
+      },
+      "capabilities": [
+        {
+          "identifier": "main",
+          "description": "Main window capability with file system and media access",
+          "windows": [
+            "main"
+          ],
+          "permissions": [
+            "fs:default",
+            "fs:allow-read-file",
+            "fs:read-all",
+            "fs:write-all",
+            "fs:allow-app-read",
+            "fs:allow-app-write",
+            "fs:allow-download-write",
+            "fs:allow-download-read",
+            "fs:scope-download",
+            "core:path:default",
+            "core:event:default",
+            "core:window:default",
+            "core:app:default",
+            "core:resources:default",
+            "core:menu:default",
+            "core:tray:default",
+            "core:window:allow-set-title",
+            "store:default",
+            "notification:default",
+            "notification:allow-is-permission-granted",
+            "updater:default",
+            "process:default",
             {
-                "title": "Meet4Specs",
-                "width": 1100,
-                "height": 700,
-                "resizable": true,
-                "fullscreen": false,
-                "theme": "Light",
-                "decorations": true
-            }
-        ],
-        "macOSPrivateApi": true,
-        "security": {
-            "csp": {
-                "default-src": "'self'",
-                "script-src": "'self' 'unsafe-inline'",
-                "style-src": "'self' 'unsafe-inline'",
-                "img-src": "'self' asset: https://asset.localhost data:",
-                "connect-src": "'self' http://localhost:11434 http://localhost:5167 http://localhost:8178 https://api.ollama.ai"
-            },
-            "assetProtocol": {
-                "enable": true,
-                "scope": [
-                    "$APPDATA/**"
-                ]
-            },
-            "capabilities": [
+              "identifier": "fs:scope",
+              "allow": [
                 {
-                    "identifier": "main",
-                    "description": "Main window capability with file system and media access",
-                    "windows": [
-                        "main"
-                    ],
-                    "permissions": [
-                        "fs:default",
-                        "fs:allow-read-file",
-                        "fs:read-all",
-                        "fs:write-all",
-                        "fs:allow-app-read",
-                        "fs:allow-app-write",
-                        "fs:allow-download-write",
-                        "fs:allow-download-read",
-                        "fs:scope-download",
-                        "core:path:default",
-                        "core:event:default",
-                        "core:window:default",
-                        "core:app:default",
-                        "core:resources:default",
-                        "core:menu:default",
-                        "core:tray:default",
-                        "core:window:allow-set-title",
-                        "store:default",
-                        "notification:default",
-                        "notification:allow-is-permission-granted",
-                        "updater:default",
-                        "process:default",
-                        {
-                            "identifier": "fs:scope",
-                            "allow": [
-                                {
-                                    "path": "$APPDATA/*"
-                                }
-                            ]
-                        }
-                    ]
+                  "path": "$APPDATA/*"
                 }
-            ]
+              ]
+            }
+          ]
         }
-    },
-    "bundle": {
-        "active": true,
-        "targets": [
-            "deb",
-            "appimage",
-            "msi",
-            "nsis",
-            "app",
-            "dmg"
-        ],
-        "createUpdaterArtifacts": true,
-        "icon": [
-            "icons/icon.png",
-            "icons/app_icon.icns",
-            "icons/app_icon.ico"
-        ],
-        "resources": [
-            "templates/*.json"
-        ],
-        "externalBin": [
-            "binaries/llama-helper",
-            "binaries/ffmpeg"
-        ],
-        "macOS": {
-            "entitlements": "entitlements.plist",
-            "signingIdentity": "-",
-            "hardenedRuntime": true
-        },
-        "windows": {
-            "signCommand": "powershell -ExecutionPolicy Bypass -File scripts/sign-windows.ps1 -FilePath %1"
-        }
-    },
-    "plugins": {
-        "updater": {
-            "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEVDQTYzMUQ3ODc5N0M4MkEKUldRcXlKZUgxekdtN09DRkVWSHNpZlJseEVOUmpNd1dDSTNaLzZ3MXJGTnY3WW1pdnlOYjBpbkIK",
-            "endpoints": [
-                "https://github.com/Zackriya-Solutions/meeting-minutes/releases/latest/download/latest.json"
-            ]
-        }
+      ]
     }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "deb",
+      "appimage",
+      "msi",
+      "nsis",
+      "app",
+      "dmg"
+    ],
+    "createUpdaterArtifacts": true,
+    "icon": [
+      "icons/icon.png",
+      "icons/app_icon.icns",
+      "icons/app_icon.ico"
+    ],
+    "resources": [
+      "templates/*.json"
+    ],
+    "externalBin": [
+      "binaries/llama-helper",
+      "binaries/ffmpeg"
+    ],
+    "macOS": {
+      "entitlements": "entitlements.plist",
+      "signingIdentity": "-",
+      "hardenedRuntime": true
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEVDQTYzMUQ3ODc5N0M4MkEKUldRcXlKZUgxekdtN09DRkVWSHNpZlJseEVOUmpNd1dDSTNaLzZ3MXJGTnY3WW1pdnlOYjBpbkIK",
+      "endpoints": [
+        "https://github.com/Zackriya-Solutions/meeting-minutes/releases/latest/download/latest.json"
+      ]
+    }
+  }
 }

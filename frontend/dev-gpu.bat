@@ -212,7 +212,7 @@ exit /b 0
 :_print_help
 echo.
 echo ========================================
-echo   Meetily GPU Development Script - Help
+echo   Meet4Specs GPU Development Script - Help
 echo ========================================
 echo.
 echo USAGE:
@@ -226,7 +226,7 @@ echo   /?        Show this help message
 echo.
 echo DESCRIPTION:
 echo   This script automatically detects your GPU and runs
-echo   Meetily in development mode with optimal hardware acceleration:
+echo   Meet4Specs in development mode with optimal hardware acceleration:
 echo.
 echo   - NVIDIA GPU    : Builds with CUDA acceleration
 echo   - AMD/Intel GPU : Builds with Vulkan acceleration

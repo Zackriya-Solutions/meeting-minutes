@@ -688,6 +688,51 @@ jobs:
           echo "## Build Artifacts"
           find target/x86_64-pc-windows-msvc/${{ steps.build-profile.outputs.profile }}/bundle -type f \( -name "*.msi" -o -name "*.exe" \) -exec ls -lh {} \;
 
+      - name: Verify Windows artifact signatures
+        if: ${{ github.event.inputs.sign-build == 'true' }}
+        shell: pwsh
+        run: |
+          Write-Host "=== Post-Build Authenticode Signature Verification ==="
+
+          $profile = "${{ steps.build-profile.outputs.profile }}"
+          $bundleDir = "target/x86_64-pc-windows-msvc/$profile/bundle"
+
+          Write-Host "Scanning: $bundleDir"
+
+          $artifacts = Get-ChildItem -Path $bundleDir -Recurse -Include "*.exe","*.msi" -ErrorAction SilentlyContinue
+
+          if ($artifacts.Count -eq 0) {
+            Write-Error "No .exe or .msi artifacts found in $bundleDir"
+            exit 1
+          }
+
+          $failed = $false
+          foreach ($file in $artifacts) {
+            $sig = Get-AuthenticodeSignature -FilePath $file.FullName
+            $publisher = if ($sig.SignerCertificate) { $sig.SignerCertificate.Subject } else { "UNSIGNED" }
+            $hasTimestamp = $null -ne $sig.TimeStamperCertificate
+
+            if ($sig.Status -eq 'Valid' -and $hasTimestamp) {
+              Write-Host "  [OK]  $($file.Name) — $publisher"
+            } elseif ($sig.Status -eq 'Valid' -and -not $hasTimestamp) {
+              Write-Error "  [FAIL]  $($file.Name) — Signed but missing RFC3161 timestamp"
+              $failed = $true
+            } else {
+              Write-Error "  [FAIL]  $($file.Name) — Status: $($sig.Status) (publisher: $publisher)"
+              $failed = $true
+            }
+          }
+
+          if ($failed) {
+            Write-Error ""
+            Write-Error "Signature verification FAILED. Unsigned or timestamp-less artifacts detected."
+            Write-Error "Distributing these binaries will trigger Windows Defender SmartScreen."
+            exit 1
+          }
+
+          Write-Host ""
+          Write-Host "All $($artifacts.Count) artifact(s) verified: valid Authenticode signature + RFC3161 timestamp."
+
       - name: Upload artifacts
         if: ${{ github.event.inputs.upload-artifacts == 'true' }}
         uses: actions/upload-artifact@v4

@@ -62,8 +62,8 @@ echo "Building Tauri app..."
 # previous run before starting a new one, so a stale process never leaves the
 # window stuck loading against a dead dev server.
 echo "Stopping any previous Meet4Specs/dev-server instance..."
-pkill -9 -f 'target/debug/meetily' 2>/dev/null || true
-pkill -9 -f 'target/release/meetily' 2>/dev/null || true
+pkill -9 -f 'target/debug/meet4specs' 2>/dev/null || true
+pkill -9 -f 'target/release/meet4specs' 2>/dev/null || true
 pkill -9 -f 'next dev -p 3118' 2>/dev/null || true
 pkill -9 -f 'WebKitNetworkProcess' 2>/dev/null || true
 pkill -9 -f 'WebKitWebProcess' 2>/dev/null || true

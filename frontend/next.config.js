@@ -1,4 +1,5 @@
 const path = require('path');
+const { version: appVersion } = require('./package.json');
 const tiptapPmResolveBase = path.dirname(require.resolve('@tiptap/pm/model'));
 const resolveFromTiptapPm = (pkg) =>
   require.resolve(pkg, { paths: [tiptapPmResolveBase] });
@@ -7,6 +8,9 @@ const resolveFromTiptapPm = (pkg) =>
 const nextConfig = {
   reactStrictMode: false, // Disabled for BlockNote compatibility
   output: 'export',
+  env: {
+    NEXT_PUBLIC_APP_VERSION: appVersion,
+  },
   images: {
     unoptimized: true,
   },
