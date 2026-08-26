@@ -1,5 +1,8 @@
 {
   "bundle": {
-    "createUpdaterArtifacts": false
+    "createUpdaterArtifacts": false,
+    "windows": {
+      "signCommand": null
+    }
   }
 }
