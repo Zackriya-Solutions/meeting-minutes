@@ -3,17 +3,21 @@ param(
     [string]$FilePath
 )
 
-# Check if signing is enabled
+# Fail hard if signing environment is not configured.
+# Signing is mandatory when signCommand is set in tauri.conf.json — a silent skip
+# would allow an unsigned binary to be distributed and blocked by Windows Defender SmartScreen.
 if (-not $env:DIGICERT_KEYPAIR_ALIAS) {
-    Write-Host "Skipping signing - DIGICERT_KEYPAIR_ALIAS not set"
-    exit 0
+    Write-Error "DIGICERT_KEYPAIR_ALIAS is not set. Signing environment is not configured."
+    Write-Error "Ensure the DigiCert KeyLocker setup steps ran successfully in the workflow."
+    Write-Error "To produce an intentionally unsigned build, remove the signCommand from tauri.conf.json."
+    exit 1
 }
 
 Write-Host "Signing: $FilePath"
 Write-Host "Using keypair alias: $env:DIGICERT_KEYPAIR_ALIAS"
 
-# Sign the file with verbose output
-$signOutput = smctl sign --keypair-alias $env:DIGICERT_KEYPAIR_ALIAS --input $FilePath --verbose 2>&1
+# Sign with an RFC3161 timestamp so the signature remains valid after the certificate expires.
+$signOutput = smctl sign --keypair-alias $env:DIGICERT_KEYPAIR_ALIAS --input $FilePath --timestamp http://timestamp.digicert.com --verbose 2>&1
 $signExitCode = $LASTEXITCODE
 
 Write-Host "Sign output: $signOutput"
@@ -25,7 +29,7 @@ if ($signExitCode -ne 0) {
     exit $signExitCode
 }
 
-# Verify the signature was applied
+# Verify the Authenticode signature was applied correctly.
 $sig = Get-AuthenticodeSignature -FilePath $FilePath
 if ($sig.Status -ne 'Valid') {
     Write-Error "Signature verification failed after signing"
@@ -34,5 +38,13 @@ if ($sig.Status -ne 'Valid') {
     exit 1
 }
 
+# Verify the timestamp is present — without it the signature expires with the cert.
+if (-not $sig.TimeStamperCertificate) {
+    Write-Error "Timestamp certificate is missing after signing."
+    Write-Error "Signatures without timestamps become invalid when the signing certificate expires."
+    exit 1
+}
+
 Write-Host "Successfully signed: $FilePath"
 Write-Host "Signature status: $($sig.Status)"
+Write-Host "Timestamp issuer: $($sig.TimeStamperCertificate.Subject)"
