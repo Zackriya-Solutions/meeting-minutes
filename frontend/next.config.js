@@ -15,7 +15,18 @@ const nextConfig = {
   assetPrefix: '/',
 
   // Add webpack configuration for Tauri
-  webpack: (config, { isServer }) => {
+  webpack: (config, { isServer, webpack }) => {
+    // Outside E2E builds, swap the E2E bootstrap for a noop component so the
+    // Tauri browser mocks never reach the production bundle.
+    if (process.env.NEXT_PUBLIC_E2E_TESTING !== '1') {
+      config.plugins.push(
+        new webpack.NormalModuleReplacementPlugin(
+          /^@\/testing\/E2EBootstrap$/,
+          path.resolve(__dirname, 'src/testing/E2ENoop.tsx'),
+        ),
+      );
+    }
+
     if (!isServer) {
       config.resolve.fallback = {
         ...config.resolve.fallback,

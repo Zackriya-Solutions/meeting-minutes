@@ -10,10 +10,10 @@ export function StatusIndicator({ status, size = 'md' }: StatusIndicatorProps) {
   };
 
   const statusColors = {
-    idle: 'bg-neutral-300',
-    checking: 'bg-yellow-400 animate-pulse',
-    success: 'bg-green-500',
-    error: 'bg-red-500',
+    idle: 'bg-muted-foreground/30',
+    checking: 'bg-warning animate-pulse',
+    success: 'bg-success',
+    error: 'bg-destructive',
   };
 
   return <span className={cn('rounded-full inline-block', sizeClasses[size], statusColors[status])} />;

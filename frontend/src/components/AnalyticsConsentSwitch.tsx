@@ -157,22 +157,22 @@ export default function AnalyticsConsentSwitch() {
     <>
       <div className="space-y-4">
         <div>
-          <h3 className="text-base font-semibold text-gray-800 mb-2">Usage Analytics</h3>
-          <p className="text-sm text-gray-600 mb-4">
+          <h3 className="text-base font-semibold text-foreground mb-2">Usage Analytics</h3>
+          <p className="text-sm text-muted-foreground mb-4">
             Usage analytics is off by default. You can turn it on to share anonymous product and performance data; no personal content is collected.
           </p>
         </div>
 
-        <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-200">
+        <div className="flex items-center justify-between p-3 bg-muted/40 rounded-lg border border-border">
           <div>
-            <h4 className="font-semibold text-gray-800">Enable Analytics</h4>
-            <p className="text-sm text-gray-600">
+            <h4 className="font-semibold text-foreground">Enable Analytics</h4>
+            <p className="text-sm text-muted-foreground">
               {isProcessing ? 'Updating...' : 'Off unless you choose to enable it'}
             </p>
           </div>
           <div className="flex items-center gap-2 ml-4">
             {isProcessing && (
-              <Loader2 className="w-4 h-4 animate-spin text-gray-500" />
+              <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
             )}
             <Switch
               checked={isAnalyticsOptedIn}
@@ -184,15 +184,15 @@ export default function AnalyticsConsentSwitch() {
 
         {/* User ID Display */}
         {isAnalyticsOptedIn && userId && (
-          <div className="p-4 border rounded-lg bg-gray-50">
+          <div className="p-4 border rounded-lg bg-muted/40">
             <div className="flex items-start justify-between gap-4">
               <div className="flex-1 min-w-0">
-                <div className="font-medium text-gray-800 mb-1">Your User ID</div>
-                <p className="text-xs text-gray-600 mb-2">
+                <div className="font-medium text-foreground mb-1">Your User ID</div>
+                <p className="text-xs text-muted-foreground mb-2">
                   Share this ID when reporting issues to help us investigate your issue logs
                 </p>
                 <div className="flex items-center gap-2">
-                  <code className="text-xs text-gray-700 bg-white px-2 py-1 rounded border border-gray-300 font-mono flex-1 truncate">
+                  <code className="text-xs text-foreground bg-card px-2 py-1 rounded border border-border font-mono flex-1 truncate">
                     {userId}
                   </code>
                   <Button
@@ -204,8 +204,8 @@ export default function AnalyticsConsentSwitch() {
                   >
                     {isCopied ? (
                       <>
-                        <Check className="w-3.5 h-3.5 text-green-600" />
-                        <span className="text-green-600">Copied!</span>
+                        <Check className="w-3.5 h-3.5 text-success-text" />
+                        <span className="text-success-text">Copied!</span>
                       </>
                     ) : (
                       <>
@@ -220,15 +220,15 @@ export default function AnalyticsConsentSwitch() {
           </div>
         )}
 
-        <div className="flex items-start gap-2 p-2 bg-blue-50 rounded border border-blue-200">
-          <Info className="w-4 h-4 text-blue-600 mt-0.5 flex-shrink-0" />
-          <div className="text-xs text-blue-700">
+        <div className="flex items-start gap-2 p-2 bg-info/10 rounded border border-info/30">
+          <Info className="w-4 h-4 text-info-text mt-0.5 flex-shrink-0" />
+          <div className="text-xs text-info-text">
             <p className="mb-1">
               Your meetings, transcripts, and recordings remain completely private and local.
             </p>
             <button
               onClick={handlePrivacyPolicyClick}
-              className="text-blue-600 hover:text-blue-800 underline hover:no-underline"
+              className="text-info-text hover:text-info-text underline hover:no-underline"
             >
               View Privacy Policy
             </button>

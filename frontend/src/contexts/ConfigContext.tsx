@@ -7,6 +7,15 @@ import { configService, ModelConfig } from '@/services/configService';
 import { invoke } from '@tauri-apps/api/core';
 import Analytics from '@/lib/analytics';
 import { BetaFeatures, BetaFeatureKey, loadBetaFeatures, saveBetaFeatures } from '@/types/betaFeatures';
+import {
+  applyEffectiveTheme,
+  readStoredThemeMode,
+  resolveEffectiveTheme,
+  THEME_STORAGE_KEY,
+  type ThemeMode,
+} from '@/lib/theme';
+
+export type { ThemeMode } from '@/lib/theme';
 
 export interface OllamaModel {
   name: string;
@@ -62,6 +71,8 @@ interface ConfigContextType {
   // UI preferences
   showConfidenceIndicator: boolean;
   toggleConfidenceIndicator: (checked: boolean) => void;
+  themeMode: ThemeMode;
+  setThemeMode: (mode: ThemeMode) => void;
 
   // Beta features
   betaFeatures: BetaFeatures;
@@ -95,14 +106,13 @@ interface ConfigContextType {
 
 const ConfigContext = createContext<ConfigContextType | undefined>(undefined);
 
-
 export function ConfigProvider({ children }: { children: ReactNode }) {
   // Model configuration state
   const [modelConfig, setModelConfig] = useState<ModelConfig>({
     provider: 'ollama',
     model: 'llama3.2:latest',
     whisperModel: 'large-v3',
-    ollamaEndpoint: null
+    ollamaEndpoint: null,
   });
 
   // Transcript model configuration state
@@ -153,6 +163,8 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     }
     return true;
   });
+
+  const [themeMode, setThemeModeState] = useState<ThemeMode>(() => readStoredThemeMode());
 
   // Summary configs
   const [isAutoSummary, setisAutoSummary] = useState<boolean>(() => {
@@ -382,6 +394,62 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     window.dispatchEvent(new CustomEvent('confidenceIndicatorChanged', { detail: checked }));
   }, []);
 
+  const setThemeMode = useCallback((mode: ThemeMode) => {
+    setThemeModeState(mode);
+    if (typeof window !== 'undefined') {
+      try {
+        window.localStorage.setItem(THEME_STORAGE_KEY, mode);
+      } catch {}
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const media = window.matchMedia('(prefers-color-scheme: dark)');
+    const applyTheme = () => {
+      applyEffectiveTheme(resolveEffectiveTheme(themeMode, media.matches));
+    };
+
+    applyTheme();
+
+    if (themeMode !== 'system') return;
+
+    media.addEventListener('change', applyTheme);
+    return () => media.removeEventListener('change', applyTheme);
+  }, [themeMode]);
+
+  const ownsNativeThemeRef = useRef(false);
+  const nativeThemeSeqRef = useRef(0);
+
+  useEffect(() => {
+    // 'system' is Tauri's default; skip the initial no-op IPC call until we've
+    // taken ownership by applying an explicit theme at least once. Ownership is
+    // claimed synchronously here (not after the async setTheme resolves) so a
+    // switch back to System while a previous explicit call is still in flight
+    // is never skipped — otherwise the stale call would strand native chrome
+    // on the old theme while the webview follows System.
+    if (!ownsNativeThemeRef.current && themeMode === 'system') return;
+    ownsNativeThemeRef.current = true;
+
+    const seq = ++nativeThemeSeqRef.current;
+
+    const applyNativeTheme = async () => {
+      try {
+        const { setTheme } = await import('@tauri-apps/api/app');
+        // A newer theme change has superseded this one; don't issue a stale IPC.
+        if (seq !== nativeThemeSeqRef.current) return;
+        await setTheme(themeMode === 'system' ? null : themeMode);
+      } catch (error) {
+        // Surface in production too: a silent failure here leaves native
+        // window chrome permanently mismatched with the webview theme.
+        console.warn('[ConfigContext] Failed to sync native window theme:', error);
+      }
+    };
+
+    applyNativeTheme();
+  }, [themeMode]);
+
   const toggleIsAutoSummary = useCallback((checked: boolean) => {
     setisAutoSummary(checked);
     if (typeof window !== 'undefined') {
@@ -497,6 +565,8 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     setSelectedLanguage: handleSetSelectedLanguage,
     showConfidenceIndicator,
     toggleConfidenceIndicator,
+    themeMode,
+    setThemeMode,
     betaFeatures,
     toggleBetaFeature,
     models,
@@ -519,6 +589,8 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     handleSetSelectedLanguage,
     showConfidenceIndicator,
     toggleConfidenceIndicator,
+    themeMode,
+    setThemeMode,
     betaFeatures,
     toggleBetaFeature,
     models,

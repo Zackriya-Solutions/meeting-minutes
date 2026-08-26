@@ -92,8 +92,27 @@
     --muted-foreground: 0 0% 45.1%;
     --accent: 0 0% 96.1%;
     --accent-foreground: 0 0% 9%;
-    --destructive: 0 84.2% 60.2%;
+    --destructive: 0 72% 51%;
     --destructive-foreground: 0 0% 98%;
+    --info: 217 91% 60%;
+    --info-foreground: 222 47% 11%;
+    --success: 142 71% 45%;
+    --success-foreground: 144 61% 8%;
+    --warning: 45 93% 47%;
+    --warning-foreground: 26 83% 14%;
+    --warning-strong: 25 95% 53%;
+    --warning-strong-foreground: 15 75% 15%;
+    /* Accessible ink for status text/icons on light app surfaces.
+       The fill tokens above are mid-tones for backgrounds and fail AA as
+       text on white (info 3.6:1, success 2.3:1, warning 2.0:1); these
+       darker tones clear 4.5:1. Use text-{info,success,warning}-text. */
+    --info-text: 217 91% 45%;
+    --success-text: 142 71% 27%;
+    --warning-text: 35 95% 32%;
+    --recording: 0 84% 60%;
+    --recording-foreground: 0 63% 12%;
+    --overlay: 0 0% 0%;
+    --overlay-foreground: 0 0% 98%;
     --border: 0 0% 89.8%;
     --input: 0 0% 89.8%;
     --ring: 0 0% 3.9%;
@@ -108,9 +127,9 @@
   .dark {
     --background: 0 0% 3.9%;
     --foreground: 0 0% 98%;
-    --card: 0 0% 3.9%;
+    --card: 0 0% 7%;
     --card-foreground: 0 0% 98%;
-    --popover: 0 0% 3.9%;
+    --popover: 0 0% 9%;
     --popover-foreground: 0 0% 98%;
     --primary: 0 0% 98%;
     --primary-foreground: 0 0% 9%;
@@ -120,8 +139,24 @@
     --muted-foreground: 0 0% 63.9%;
     --accent: 0 0% 14.9%;
     --accent-foreground: 0 0% 98%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 0 0% 98%;
+    --destructive: 0 91% 71%;
+    --destructive-foreground: 0 63% 12%;
+    --info: 217 91% 65%;
+    --info-foreground: 222 47% 11%;
+    --success: 142 69% 58%;
+    --success-foreground: 144 61% 8%;
+    --warning: 48 96% 65%;
+    --warning-foreground: 26 83% 14%;
+    --warning-strong: 27 96% 61%;
+    --warning-strong-foreground: 15 75% 15%;
+    /* Accessible ink for status text/icons on dark app surfaces. */
+    --info-text: 217 91% 70%;
+    --success-text: 142 65% 62%;
+    --warning-text: 45 95% 62%;
+    --recording: 0 91% 71%;
+    --recording-foreground: 0 63% 12%;
+    --overlay: 0 0% 0%;
+    --overlay-foreground: 0 0% 98%;
     --border: 0 0% 14.9%;
     --input: 0 0% 14.9%;
     --ring: 0 0% 83.1%;
@@ -166,18 +201,18 @@
   }
 
   .custom-scrollbar::-webkit-scrollbar-thumb {
-    background: #d1d5db;
+    background: hsl(var(--muted-foreground) / 0.35);
     border-radius: 3px;
   }
 
   .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-    background: #9ca3af;
+    background: hsl(var(--muted-foreground) / 0.5);
   }
 
   /* Firefox scrollbar */
   .custom-scrollbar {
     scrollbar-width: thin;
-    scrollbar-color: #d1d5db transparent;
+    scrollbar-color: hsl(var(--muted-foreground) / 0.35) transparent;
   }
 
   /* BlockNote Editor - Override fixed dimensions for responsive layout */
@@ -211,4 +246,15 @@
   [data-node-type] {
     overflow: visible !important;
   }
+}
+.dark *::-webkit-scrollbar-thumb {
+  background-color: hsl(var(--muted-foreground) / 0.35);
+}
+
+.dark *::-webkit-scrollbar-thumb:hover {
+  background-color: hsl(var(--muted-foreground) / 0.5);
+}
+
+.dark * {
+  scrollbar-color: hsl(var(--muted-foreground) / 0.35) transparent;
 }
