@@ -100,6 +100,10 @@ pub struct DeepgramLiveResponse {
     #[serde(default)]
     pub words: Vec<DeepgramWord>,
     #[serde(default)]
+    pub code: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
     pub error: Option<String>,
     #[serde(default)]
     pub err_code: Option<String>,
@@ -479,6 +483,7 @@ pub async fn run_realtime_transcription<R: Runtime>(
             _ => crate::config::DEFAULT_DEEPGRAM_REALTIME_MODEL.to_string(),
         };
 
+    let is_flux = model.to_lowercase().contains("flux");
     let ws_url = build_realtime_ws_url(&model, language.as_deref());
     info!(
         "Connecting to Deepgram realtime transcription at {}",
@@ -505,6 +510,7 @@ pub async fn run_realtime_transcription<R: Runtime>(
     let writer_time_map = time_map.clone();
     let writer_cursor = stream_cursor_ms.clone();
     let writer_shutdown = shutdown.clone();
+    let writer_is_flux = is_flux;
     let writer_handle = tokio::spawn(async move {
         let mut receiver = transcription_receiver;
         let mut ping_interval = tokio::time::interval(Duration::from_secs(10));
@@ -518,9 +524,15 @@ pub async fn run_realtime_transcription<R: Runtime>(
                     }
                 }
                 _ = ping_interval.tick() => {
-                    let keepalive = serde_json::json!({ "type": "KeepAlive" });
-                    if let Err(e) = write.send(Message::Text(keepalive.to_string())).await {
-                        return Err(anyhow!("Failed to send KeepAlive to Deepgram realtime API: {}", e));
+                    if writer_is_flux {
+                        if let Err(e) = write.send(Message::Ping(Vec::new())).await {
+                            return Err(anyhow!("Failed to send WebSocket ping to Deepgram realtime API: {}", e));
+                        }
+                    } else {
+                        let keepalive = serde_json::json!({ "type": "KeepAlive" });
+                        if let Err(e) = write.send(Message::Text(keepalive.to_string())).await {
+                            return Err(anyhow!("Failed to send KeepAlive to Deepgram realtime API: {}", e));
+                        }
                     }
                 }
                 maybe_chunk = receiver.recv() => {
@@ -570,9 +582,14 @@ pub async fn run_realtime_transcription<R: Runtime>(
             }
         }
 
-        let close_stream = serde_json::json!({ "type": "CloseStream" });
-        let _ = write.send(Message::Text(close_stream.to_string())).await;
-        let _ = write.send(Message::Binary(Vec::new())).await;
+        if writer_is_flux {
+            let close_stream = serde_json::json!({ "type": "CloseStream" });
+            let _ = write.send(Message::Text(close_stream.to_string())).await;
+        } else {
+            let close_stream = serde_json::json!({ "type": "CloseStream" });
+            let _ = write.send(Message::Text(close_stream.to_string())).await;
+            let _ = write.send(Message::Binary(Vec::new())).await;
+        }
         Ok::<(), anyhow::Error>(())
     });
 
@@ -606,8 +623,18 @@ pub async fn run_realtime_transcription<R: Runtime>(
                         }
                     };
 
-                    if let Some(message) = response.err_msg.or(response.error).or(response.err_code)
-                    {
+                    let is_error = response.r#type.as_deref() == Some("Error")
+                        || response.err_msg.is_some()
+                        || response.error.is_some()
+                        || response.err_code.is_some();
+                    if is_error {
+                        let message = response
+                            .description
+                            .or(response.err_msg)
+                            .or(response.error)
+                            .or(response.code)
+                            .or(response.err_code)
+                            .unwrap_or_else(|| "Unknown Deepgram realtime error".to_string());
                         emit_transcript_preview(&reader_app, String::new(), 0.0, 0.0, 0.0);
                         reader_shutdown.store(true, Ordering::SeqCst);
                         return Err(anyhow!("Deepgram realtime error: {}", message));
@@ -882,6 +909,7 @@ fn flush_flux_turn<R: Runtime>(
             emit_transcript_update(app, trimmed.to_string(), start_ms, end_ms, 0.85, false);
         }
     }
+    emit_transcript_preview(app, String::new(), 0.0, 0.0, 0.0);
 }
 
 impl<R: Runtime> RealtimeSegmentBuffer<R> {
