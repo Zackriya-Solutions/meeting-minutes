@@ -45,6 +45,14 @@ export function TranscriptPanel({
       endTime: t.audio_end_time,
       text: t.text,
       confidence: t.confidence,
+      speaker: t.speaker,
+      attribution_source: t.attribution_source,
+      overlap_region_id: t.overlap_region_id,
+      overlap_speaker_ids: t.overlap_speaker_ids,
+      overlap_start_time: t.overlap_start_time,
+      overlap_end_time: t.overlap_end_time,
+      overlap_confidence: t.overlap_confidence,
+      overlap_status: t.overlap_status,
     })),
     [transcripts]
   );

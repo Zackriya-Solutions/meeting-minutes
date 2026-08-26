@@ -1,7 +1,6 @@
 'use client'
 
 import './globals.css'
-import { Source_Sans_3 } from 'next/font/google'
 import Sidebar from '@/components/Sidebar'
 import { SidebarProvider } from '@/components/Sidebar/SidebarProvider'
 import MainContent from '@/components/MainContent'
@@ -27,11 +26,30 @@ import { ImportDialogProvider } from '@/contexts/ImportDialogContext'
 import { isAudioExtension, getAudioFormatsDisplayList } from '@/constants/audioFormats'
 
 
-const sourceSans3 = Source_Sans_3({
-  subsets: ['latin'],
-  weight: ['400', '500', '600', '700'],
-  variable: '--font-source-sans-3',
-})
+const devChunkLoadRecoveryScript = `
+(() => {
+  if (window.__meetilyChunkLoadRecoveryInstalled) return;
+  window.__meetilyChunkLoadRecoveryInstalled = true;
+  const reloadKey = 'meetily:last-chunk-reload';
+  const isChunkLoadFailure = (value) => {
+    const message = String(value?.message || value?.reason?.message || value || '');
+    return message.includes('ChunkLoadError') || message.includes('Loading chunk');
+  };
+  const reloadOnce = () => {
+    const lastReload = Number(sessionStorage.getItem(reloadKey) || 0);
+    const now = Date.now();
+    if (now - lastReload < 5000) return;
+    sessionStorage.setItem(reloadKey, String(now));
+    window.location.reload();
+  };
+  window.addEventListener('error', (event) => {
+    if (isChunkLoadFailure(event.error || event.message)) reloadOnce();
+  });
+  window.addEventListener('unhandledrejection', (event) => {
+    if (isChunkLoadFailure(event.reason)) reloadOnce();
+  });
+})();
+`;
 
 // Module-level component — stable reference across RootLayout re-renders.
 // Defined here (not inside RootLayout) so React never sees a new function type
@@ -232,7 +250,10 @@ export default function RootLayout({
 
   return (
     <html lang="en">
-      <body className={`${sourceSans3.variable} font-sans antialiased`}>
+      <body className="font-sans antialiased">
+        {process.env.NODE_ENV !== 'production' && (
+          <script dangerouslySetInnerHTML={{ __html: devChunkLoadRecoveryScript }} />
+        )}
         <AnalyticsProvider>
           <RecordingStateProvider>
             <TranscriptProvider>

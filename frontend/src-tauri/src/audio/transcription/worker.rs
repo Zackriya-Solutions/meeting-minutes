@@ -5,11 +5,15 @@
 use super::engine::TranscriptionEngine;
 use super::provider::TranscriptionError;
 use crate::audio::AudioChunk;
+use crate::diarization::overlap_detector::{
+    detect_overlap_regions_from_timeline, find_overlap_region_for_range, AttributionSource,
+    OverlapDetector, OverlapStatus,
+};
 use log::{error, info, warn};
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
-use tauri::{AppHandle, Emitter, Runtime};
+use tauri::{AppHandle, Emitter, Manager, Runtime};
 
 // Sequence counter for transcript updates
 static SEQUENCE_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -20,7 +24,10 @@ static SPEECH_DETECTED_EMITTED: AtomicBool = AtomicBool::new(false);
 /// Reset the speech detected flag for a new recording session
 pub fn reset_speech_detected_flag() {
     SPEECH_DETECTED_EMITTED.store(false, Ordering::SeqCst);
-    info!("🔍 SPEECH_DETECTED_EMITTED reset to: {}", SPEECH_DETECTED_EMITTED.load(Ordering::SeqCst));
+    info!(
+        "🔍 SPEECH_DETECTED_EMITTED reset to: {}",
+        SPEECH_DETECTED_EMITTED.load(Ordering::SeqCst)
+    );
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -35,11 +42,135 @@ pub struct TranscriptUpdate {
     // NEW: Recording-relative timestamps for playback sync
     pub audio_start_time: f64, // Seconds from recording start (e.g., 125.3)
     pub audio_end_time: f64,   // Seconds from recording start (e.g., 128.6)
-    pub duration: f64,          // Segment duration in seconds (e.g., 3.3)
+    pub duration: f64,         // Segment duration in seconds (e.g., 3.3)
+    // Speaker identification label ("Speaker 1" or a saved profile name);
+    // None when the feature is disabled or no label could be computed
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub speaker: Option<String>,
+    #[serde(default)]
+    pub attribution_source: AttributionSource,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub overlap_region_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub overlap_speaker_ids: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub overlap_start_time: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub overlap_end_time: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub overlap_confidence: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub overlap_status: Option<OverlapStatus>,
 }
 
 // NOTE: get_transcript_history and get_recording_meeting_name functions
 // have been moved to recording_commands.rs where they have access to RECORDING_MANAGER
+
+/// Create the per-recording diarization session when the feature is enabled
+/// and the embedding model has been downloaded. Any failure returns None so
+/// speaker labels are simply absent — transcription is never affected.
+async fn init_diarization_session<R: Runtime>(
+    app: &AppHandle<R>,
+) -> Option<crate::diarization::DiarizationSession> {
+    let enabled = match app.try_state::<crate::state::AppState>() {
+        Some(state) => crate::diarization::commands::is_enabled(state.db_manager.pool()).await,
+        None => false,
+    };
+    if !enabled {
+        info!("🎙️ Speaker identification disabled for this recording");
+        return None;
+    }
+    if !crate::diarization::models::is_embedding_model_present(app) {
+        warn!("🎙️ Speaker identification enabled but embedding model not downloaded - labels disabled");
+        return None;
+    }
+    let model_path = match crate::diarization::models::embedding_model_path(app) {
+        Ok(path) => path,
+        Err(e) => {
+            warn!("🎙️ Could not resolve diarization model path: {}", e);
+            return None;
+        }
+    };
+
+    // Seed saved voice profiles so returning speakers are labeled by name
+    let profiles = match app.try_state::<crate::state::AppState>() {
+        Some(state) => {
+            match crate::database::repositories::speaker_profile::SpeakerProfilesRepository::list(
+                state.db_manager.pool(),
+            )
+            .await
+            {
+                Ok(profiles) => profiles
+                    .into_iter()
+                    .map(|p| (p.name, p.embedding))
+                    .collect(),
+                Err(e) => {
+                    warn!(
+                        "🎙️ Failed to load voice profiles, continuing without: {}",
+                        e
+                    );
+                    Vec::new()
+                }
+            }
+        }
+        None => Vec::new(),
+    };
+    let profile_count = profiles.len();
+
+    match crate::diarization::DiarizationSession::with_profiles(&model_path, profiles) {
+        Ok(session) => {
+            info!(
+                "🎙️ ✅ Speaker identification active for this recording ({} saved profile{})",
+                profile_count,
+                if profile_count == 1 { "" } else { "s" }
+            );
+            Some(session)
+        }
+        Err(e) => {
+            warn!("🎙️ Failed to initialize speaker identification: {}", e);
+            None
+        }
+    }
+}
+
+/// Persist this recording's speaker centroids to speakers.json in the meeting
+/// folder (next to transcripts.json) so a later rename can save the voice as
+/// a profile. The folder must be captured while the recording manager is
+/// still alive — stop_recording tears it down before this task finishes.
+async fn persist_speaker_centroids(
+    session: &crate::diarization::DiarizationSession,
+    folder: Option<std::path::PathBuf>,
+) {
+    let snapshot = session.centroid_snapshot();
+    let timeline = session.timeline_snapshot();
+    if snapshot.is_empty() && timeline.is_empty() {
+        return;
+    }
+    let folder = match folder {
+        Some(folder) => folder,
+        None => {
+            warn!("🎙️ No meeting folder available - speaker centroids not persisted");
+            return;
+        }
+    };
+    let json = serde_json::json!({
+        "version": "1.0",
+        "speakers": snapshot.iter().map(|(label, centroid, count)| {
+            serde_json::json!({ "label": label, "centroid": centroid, "segments": count })
+        }).collect::<Vec<_>>(),
+        "timeline": timeline,
+    });
+    let path = folder.join("speakers.json");
+    match serde_json::to_string(&json).map(|s| std::fs::write(&path, s)) {
+        Ok(Ok(())) => info!(
+            "🎙️ Saved {} speaker centroid(s) to {}",
+            snapshot.len(),
+            path.display()
+        ),
+        Ok(Err(e)) => warn!("🎙️ Failed to write speakers.json: {}", e),
+        Err(e) => warn!("🎙️ Failed to serialize speaker centroids: {}", e),
+    }
+}
 
 /// Optimized parallel transcription task ensuring ZERO chunk loss
 pub fn start_transcription_task<R: Runtime>(
@@ -50,7 +181,8 @@ pub fn start_transcription_task<R: Runtime>(
         info!("🚀 Starting optimized parallel transcription task - guaranteeing zero chunk loss");
 
         // Initialize transcription engine (Whisper or Parakeet based on config)
-        let transcription_engine = match super::engine::get_or_init_transcription_engine(&app).await {
+        let transcription_engine = match super::engine::get_or_init_transcription_engine(&app).await
+        {
             Ok(engine) => engine,
             Err(e) => {
                 error!("Failed to initialize transcription engine: {}", e);
@@ -63,6 +195,16 @@ pub fn start_transcription_task<R: Runtime>(
             }
         };
 
+        // Initialize speaker identification if enabled and its model is present.
+        // Failure only disables speaker labels; transcription proceeds normally.
+        let diarization_session = Arc::new(tokio::sync::Mutex::new(
+            init_diarization_session(&app).await,
+        ));
+        // Meeting folder for speakers.json, captured lazily while the
+        // recording manager still exists (it is torn down during stop)
+        let diarization_folder: Arc<tokio::sync::Mutex<Option<std::path::PathBuf>>> =
+            Arc::new(tokio::sync::Mutex::new(None));
+
         // Create parallel workers for faster processing while preserving ALL chunks
         const NUM_WORKERS: usize = 1; // Serial processing ensures transcripts emit in chronological order
         let (work_sender, work_receiver) = tokio::sync::mpsc::unbounded_channel::<AudioChunk>();
@@ -73,7 +215,11 @@ pub fn start_transcription_task<R: Runtime>(
         let chunks_completed = Arc::new(AtomicU64::new(0));
         let input_finished = Arc::new(AtomicBool::new(false));
 
-        info!("📊 Starting {} transcription worker{} (serial mode for ordered emission)", NUM_WORKERS, if NUM_WORKERS == 1 { "" } else { "s" });
+        info!(
+            "📊 Starting {} transcription worker{} (serial mode for ordered emission)",
+            NUM_WORKERS,
+            if NUM_WORKERS == 1 { "" } else { "s" }
+        );
 
         // Spawn worker tasks
         let mut worker_handles = Vec::new();
@@ -88,6 +234,8 @@ pub fn start_transcription_task<R: Runtime>(
             let chunks_completed_clone = chunks_completed.clone();
             let input_finished_clone = input_finished.clone();
             let chunks_queued_clone = chunks_queued.clone();
+            let diarization_clone = diarization_session.clone();
+            let diarization_folder_clone = diarization_folder.clone();
 
             let worker_handle = tokio::spawn(async move {
                 info!("👷 Worker {} started", worker_id);
@@ -107,7 +255,10 @@ pub fn start_transcription_task<R: Runtime>(
                         worker_id, engine_name, current_model
                     );
                 } else {
-                    warn!("⚠️ Worker {} pre-validation: {} model not loaded - chunks may be skipped", worker_id, engine_name);
+                    warn!(
+                        "⚠️ Worker {} pre-validation: {} model not loaded - chunks may be skipped",
+                        worker_id, engine_name
+                    );
                 }
 
                 loop {
@@ -142,19 +293,41 @@ pub fn start_transcription_task<R: Runtime>(
 
                             let chunk_timestamp = chunk.timestamp;
                             let chunk_duration = chunk.data.len() as f64 / chunk.sample_rate as f64;
+                            let chunk_id_for_logging = chunk.chunk_id;
+
+                            // Keep segment samples for speaker embedding (STT consumes the chunk).
+                            // Diarization (fbank + WeSpeaker) requires 16kHz mono. Chunks arrive
+                            // at the device rate (e.g. 48kHz, see pipeline.rs), and transcription
+                            // resamples to 16kHz internally; we must do the same here. Feeding raw
+                            // 48kHz samples to label_segment_at would corrupt the fbank frontend
+                            // (wrong frequency mapping) and the rolling-window timestamps
+                            // (samples.len()/16000), producing garbage embeddings.
+                            let diarization_samples: Option<Vec<f32>> = {
+                                let guard = diarization_clone.lock().await;
+                                if guard.is_some() {
+                                    if chunk.sample_rate != 16000 {
+                                        Some(crate::audio::audio_processing::resample_audio(
+                                            &chunk.data,
+                                            chunk.sample_rate,
+                                            16000,
+                                        ))
+                                    } else {
+                                        Some(chunk.data.clone())
+                                    }
+                                } else {
+                                    None
+                                }
+                            };
 
                             // Transcribe with provider-agnostic approach
-                            match transcribe_chunk_with_provider(
-                                &engine_clone,
-                                chunk,
-                                &app_clone,
-                            )
-                            .await
+                            match transcribe_chunk_with_provider(&engine_clone, chunk, &app_clone)
+                                .await
                             {
                                 Ok((transcript, confidence_opt, is_partial)) => {
                                     // Provider-aware confidence threshold
                                     let confidence_threshold = match &engine_clone {
-                                        TranscriptionEngine::Whisper(_) | TranscriptionEngine::Provider(_) => 0.3,
+                                        TranscriptionEngine::Whisper(_)
+                                        | TranscriptionEngine::Provider(_) => 0.3,
                                         TranscriptionEngine::Parakeet(_) => 0.0, // Parakeet has no confidence, accept all
                                     };
 
@@ -167,7 +340,8 @@ pub fn start_transcription_task<R: Runtime>(
                                           worker_id, transcript, confidence_str, is_partial, confidence_threshold);
 
                                     // Check confidence threshold (or accept if no confidence provided)
-                                    let meets_threshold = confidence_opt.map_or(true, |c| c >= confidence_threshold);
+                                    let meets_threshold =
+                                        confidence_opt.map_or(true, |c| c >= confidence_threshold);
 
                                     if !transcript.trim().is_empty() && meets_threshold {
                                         // PERFORMANCE: Only log transcription results, not every processing step
@@ -176,7 +350,8 @@ pub fn start_transcription_task<R: Runtime>(
 
                                         // Emit speech-detected event for frontend UX (only on first detection per session)
                                         // This is lightweight and provides better user feedback
-                                        let current_flag = SPEECH_DETECTED_EMITTED.load(Ordering::SeqCst);
+                                        let current_flag =
+                                            SPEECH_DETECTED_EMITTED.load(Ordering::SeqCst);
                                         info!("🔍 Checking speech-detected flag: current={}, will_emit={}", current_flag, !current_flag);
 
                                         if !current_flag {
@@ -192,7 +367,8 @@ pub fn start_transcription_task<R: Runtime>(
                                         }
 
                                         // Generate sequence ID and calculate timestamps FIRST
-                                        let sequence_id = SEQUENCE_COUNTER.fetch_add(1, Ordering::SeqCst);
+                                        let sequence_id =
+                                            SEQUENCE_COUNTER.fetch_add(1, Ordering::SeqCst);
                                         let audio_start_time = chunk_timestamp; // Already in seconds from recording start
                                         let audio_end_time = chunk_timestamp + chunk_duration;
 
@@ -202,6 +378,60 @@ pub fn start_transcription_task<R: Runtime>(
                                         // NOTE: This is now handled via the transcript-update event emission below
                                         // The recording_commands module listens to these events and saves them
                                         // This decouples the transcription worker from direct RECORDING_MANAGER access
+
+                                        // Assign a speaker label from the segment's voice embedding
+                                        // and mark the chunk ambiguous if it intersects a detected overlap region.
+                                        let (speaker, overlap_region) = if let Some(samples) =
+                                            &diarization_samples
+                                        {
+                                            // Capture the meeting folder once, while recording is live
+                                            {
+                                                let mut folder_guard =
+                                                    diarization_folder_clone.lock().await;
+                                                if folder_guard.is_none() {
+                                                    if let Ok(Some(folder)) = crate::audio::recording_commands::get_meeting_folder_path().await {
+                                                        *folder_guard = Some(std::path::PathBuf::from(folder));
+                                                    }
+                                                }
+                                            }
+                                            let mut guard = diarization_clone.lock().await;
+                                            if let Some(session) = guard.as_mut() {
+                                                let speaker = session
+                                                    .label_segment_at(audio_start_time, samples);
+                                                let regions = detect_overlap_regions_from_timeline(
+                                                    &session.timeline_snapshot(),
+                                                    &OverlapDetector::default(),
+                                                );
+                                                let overlap_region = find_overlap_region_for_range(
+                                                    &regions,
+                                                    seconds_to_ms(audio_start_time),
+                                                    seconds_to_ms(audio_end_time),
+                                                )
+                                                .cloned();
+                                                (speaker, overlap_region)
+                                            } else {
+                                                (None, None)
+                                            }
+                                        } else {
+                                            (None, None)
+                                        };
+                                        let (speaker, attribution_source) =
+                                            if overlap_region.is_some() {
+                                                (None, AttributionSource::OverlapDetectedAmbiguous)
+                                            } else {
+                                                (speaker, AttributionSource::NormalDiarization)
+                                            };
+                                        if should_log_this_chunk || speaker.is_none() {
+                                            info!(
+                                                "🎙️ Worker {} diarization for chunk {}: speaker={:?}, overlap_region={:?}, samples={}, sample_rate={}",
+                                                worker_id,
+                                                chunk_id_for_logging,
+                                                speaker,
+                                                overlap_region.as_ref().map(|region| &region.id),
+                                                diarization_samples.as_ref().map_or(0, |s| s.len()),
+                                                16000
+                                            );
+                                        }
 
                                         // Emit transcript update with NEW recording-relative timestamps
 
@@ -217,6 +447,26 @@ pub fn start_transcription_task<R: Runtime>(
                                             audio_start_time,
                                             audio_end_time,
                                             duration: chunk_duration,
+                                            speaker,
+                                            attribution_source,
+                                            overlap_region_id: overlap_region
+                                                .as_ref()
+                                                .map(|region| region.id.clone()),
+                                            overlap_speaker_ids: overlap_region
+                                                .as_ref()
+                                                .map(|region| region.speaker_ids.clone()),
+                                            overlap_start_time: overlap_region
+                                                .as_ref()
+                                                .map(|region| region.start_ms as f64 / 1000.0),
+                                            overlap_end_time: overlap_region
+                                                .as_ref()
+                                                .map(|region| region.end_ms as f64 / 1000.0),
+                                            overlap_confidence: overlap_region
+                                                .as_ref()
+                                                .map(|region| region.confidence),
+                                            overlap_status: overlap_region
+                                                .as_ref()
+                                                .map(|_| OverlapStatus::MarkedAmbiguous),
                                         };
 
                                         if let Err(e) = app_clone.emit("transcript-update", &update)
@@ -245,13 +495,20 @@ pub fn start_transcription_task<R: Runtime>(
                                             continue;
                                         }
                                         TranscriptionError::ModelNotLoaded => {
-                                            warn!("Worker {}: Model unloaded during transcription", worker_id);
+                                            warn!(
+                                                "Worker {}: Model unloaded during transcription",
+                                                worker_id
+                                            );
                                             chunks_completed_clone.fetch_add(1, Ordering::SeqCst);
                                             continue;
                                         }
                                         _ => {
-                                            warn!("Worker {}: Transcription failed: {}", worker_id, e);
-                                            let _ = app_clone.emit("transcription-warning", e.to_string());
+                                            warn!(
+                                                "Worker {}: Transcription failed: {}",
+                                                worker_id, e
+                                            );
+                                            let _ = app_clone
+                                                .emit("transcription-warning", e.to_string());
                                         }
                                     }
                                 }
@@ -356,6 +613,14 @@ pub fn start_transcription_task<R: Runtime>(
             } else {
                 info!("✅ Worker {} completed successfully", worker_id);
             }
+        }
+
+        // Persist speaker centroids so renaming a speaker later can save
+        // the voice as a profile (must run before the recording manager
+        // is torn down, while the meeting folder is still known)
+        if let Some(session) = diarization_session.lock().await.as_ref() {
+            let folder = diarization_folder.lock().await.clone();
+            persist_speaker_centroids(session, folder).await;
         }
 
         // Final verification with retry logic to catch any stragglers
@@ -583,6 +848,10 @@ fn format_current_timestamp() -> String {
     let seconds = now.as_secs() % 60;
 
     format!("{:02}:{:02}:{:02}", hours, minutes, seconds)
+}
+
+fn seconds_to_ms(seconds: f64) -> u64 {
+    (seconds.max(0.0) * 1000.0).round() as u64
 }
 
 /// Format recording-relative time as [MM:SS]

@@ -4,7 +4,8 @@ import { Transcript, TranscriptSegmentData } from '@/types';
 import { TranscriptView } from '@/components/TranscriptView';
 import { VirtualizedTranscriptView } from '@/components/VirtualizedTranscriptView';
 import { TranscriptButtonGroup } from './TranscriptButtonGroup';
-import { useMemo } from 'react';
+import { SpeakerRenameDialog } from '@/components/SpeakerRenameDialog';
+import { useMemo, useState } from 'react';
 
 interface TranscriptPanelProps {
   transcripts: Transcript[];
@@ -61,8 +62,19 @@ export function TranscriptPanel({
       endTime: t.audio_end_time,
       text: t.text,
       confidence: t.confidence,
+      speaker: t.speaker,
+      attribution_source: t.attribution_source,
+      overlap_region_id: t.overlap_region_id,
+      overlap_speaker_ids: t.overlap_speaker_ids,
+      overlap_start_time: t.overlap_start_time,
+      overlap_end_time: t.overlap_end_time,
+      overlap_confidence: t.overlap_confidence,
+      overlap_status: t.overlap_status,
     }));
   }, [transcripts, usePagination, segments]);
+
+  // Speaker rename dialog state (opened by clicking a speaker chip)
+  const [renameSpeaker, setRenameSpeaker] = useState<string | null>(null);
 
   return (
     <div className="hidden md:flex md:w-1/4 lg:w-1/3 min-w-0 border-r border-gray-200 bg-white flex-col relative shrink-0">
@@ -94,8 +106,24 @@ export function TranscriptPanel({
           totalCount={totalCount}
           loadedCount={loadedCount}
           onLoadMore={onLoadMore}
+          onSpeakerClick={meetingId && !isRecording ? setRenameSpeaker : undefined}
         />
       </div>
+
+      {/* Speaker rename dialog */}
+      {meetingId && renameSpeaker && (
+        <SpeakerRenameDialog
+          meetingId={meetingId}
+          speakerLabel={renameSpeaker}
+          onClose={() => setRenameSpeaker(null)}
+          onRenamed={async () => {
+            setRenameSpeaker(null);
+            if (onRefetchTranscripts) {
+              await onRefetchTranscripts();
+            }
+          }}
+        />
+      )}
 
       {/* Custom prompt input at bottom of transcript section */}
       {!isRecording && convertedSegments.length > 0 && (

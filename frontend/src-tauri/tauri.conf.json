@@ -23,6 +23,13 @@
         ],
         "macOSPrivateApi": true,
         "security": {
+            "devCsp": {
+                "default-src": "'self'",
+                "script-src": "'self' 'unsafe-inline' 'unsafe-eval'",
+                "style-src": "'self' 'unsafe-inline'",
+                "img-src": "'self' asset: https://asset.localhost data:",
+                "connect-src": "'self' ipc: http://ipc.localhost http://localhost:3118 ws://localhost:3118 http://localhost:11434 http://localhost:5167 http://localhost:8178 https://api.ollama.ai"
+            },
             "csp": {
                 "default-src": "'self'",
                 "style-src": "'self' 'unsafe-inline'",

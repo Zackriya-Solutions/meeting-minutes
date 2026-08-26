@@ -48,7 +48,9 @@ pub(crate) async fn unload_engine_after_batch(use_parakeet: bool) {
 
 /// Create transcript segments from transcription results.
 /// Each tuple is (text, start_ms, end_ms) from VAD timestamps.
-pub(crate) fn create_transcript_segments(transcripts: &[(String, f64, f64)]) -> Vec<TranscriptSegment> {
+pub(crate) fn create_transcript_segments(
+    transcripts: &[(String, f64, f64)],
+) -> Vec<TranscriptSegment> {
     transcripts
         .iter()
         .map(|(text, start_ms, end_ms)| {
@@ -63,6 +65,17 @@ pub(crate) fn create_transcript_segments(transcripts: &[(String, f64, f64)]) -> 
                 audio_start_time: Some(start_seconds),
                 audio_end_time: Some(end_seconds),
                 duration: Some(duration),
+                // Batch import/retranscription has no live diarization session
+                speaker: None,
+                attribution_source: Some(
+                    crate::diarization::overlap_detector::AttributionSource::NormalDiarization,
+                ),
+                overlap_region_id: None,
+                overlap_speaker_ids: None,
+                overlap_start_time: None,
+                overlap_end_time: None,
+                overlap_confidence: None,
+                overlap_status: None,
             }
         })
         .collect()
@@ -85,6 +98,14 @@ pub(crate) fn write_transcripts_json(folder: &Path, segments: &[TranscriptSegmen
                 "audio_start_time": s.audio_start_time,
                 "audio_end_time": s.audio_end_time,
                 "duration": s.duration,
+                "speaker": s.speaker,
+                "attribution_source": s.attribution_source.as_ref().map(|source| source.as_str()),
+                "overlap_region_id": s.overlap_region_id,
+                "overlap_speaker_ids": s.overlap_speaker_ids,
+                "overlap_start_time": s.overlap_start_time,
+                "overlap_end_time": s.overlap_end_time,
+                "overlap_confidence": s.overlap_confidence,
+                "overlap_status": s.overlap_status.as_ref().map(|status| status.as_str()),
                 "sequence_id": i
             })
         }).collect::<Vec<_>>()
@@ -126,8 +147,8 @@ pub(crate) fn split_segment_at_silence(
         return vec![segment.clone()];
     }
 
-    let ms_per_sample = (segment.end_timestamp_ms - segment.start_timestamp_ms)
-        / segment.samples.len() as f64;
+    let ms_per_sample =
+        (segment.end_timestamp_ms - segment.start_timestamp_ms) / segment.samples.len() as f64;
     let mut result = Vec::new();
     let mut pos = 0usize;
 
@@ -214,6 +235,37 @@ pub(crate) fn split_segment_at_silence(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn write_transcripts_json_preserves_speaker_labels() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let segments = vec![TranscriptSegment {
+            id: "transcript-1".to_string(),
+            text: "hello".to_string(),
+            timestamp: "12:00:00".to_string(),
+            audio_start_time: Some(1.0),
+            audio_end_time: Some(2.0),
+            duration: Some(1.0),
+            speaker: Some("Speaker 1".to_string()),
+            attribution_source: Some(
+                crate::diarization::overlap_detector::AttributionSource::NormalDiarization,
+            ),
+            overlap_region_id: None,
+            overlap_speaker_ids: None,
+            overlap_start_time: None,
+            overlap_end_time: None,
+            overlap_confidence: None,
+            overlap_status: None,
+        }];
+
+        write_transcripts_json(dir.path(), &segments).expect("write transcripts");
+
+        let content =
+            std::fs::read_to_string(dir.path().join("transcripts.json")).expect("read json");
+        let json: serde_json::Value = serde_json::from_str(&content).expect("parse json");
+
+        assert_eq!(json["segments"][0]["speaker"].as_str(), Some("Speaker 1"));
+    }
 
     #[tokio::test]
     async fn test_engine_lifecycle_lock_serializes_acquirers() {
