@@ -901,7 +901,7 @@ impl<R: Runtime> RealtimeSegmentBuffer<R> {
             let gap = self
                 .tokens
                 .last()
-                .map(|last| token.start_ms - last.end_ms > 1200.0)
+                .map(|last| token.start_ms - last.end_ms > 1500.0)
                 .unwrap_or(false);
             let speaker_changed = self
                 .tokens
@@ -915,11 +915,16 @@ impl<R: Runtime> RealtimeSegmentBuffer<R> {
 
             self.tokens.push(token);
 
-            if self
-                .tokens
-                .last()
-                .map(|last| ends_sentence(&last.text))
-                .unwrap_or(false)
+            // Avoid micro-chunking: only flush on sentence boundary if we have at least 4 tokens
+            // or if the accumulated segment duration is >= 4.0 seconds.
+            let duration_ms = self.tokens.last().map(|l| l.end_ms).unwrap_or(0.0)
+                - self.tokens.first().map(|f| f.start_ms).unwrap_or(0.0);
+            if (self.tokens.len() >= 4 || duration_ms >= 4000.0)
+                && self
+                    .tokens
+                    .last()
+                    .map(|last| ends_sentence(&last.text))
+                    .unwrap_or(false)
             {
                 self.flush();
             }
