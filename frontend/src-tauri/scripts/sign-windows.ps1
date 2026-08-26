@@ -4,10 +4,10 @@ param(
 )
 
 # Fail hard if signing environment is not configured.
-# Signing is mandatory when signCommand is set in tauri.conf.json — a silent skip
+# Signing is mandatory when signCommand is set in tauri.conf.json; a silent skip
 # would allow an unsigned binary to be distributed and blocked by Windows Defender SmartScreen.
 if (-not $env:DIGICERT_KEYPAIR_ALIAS) {
-    Write-Warning "DIGICERT_KEYPAIR_ALIAS is not set — skipping signing for local build."
+    Write-Warning "DIGICERT_KEYPAIR_ALIAS is not set; skipping signing for local build."
     Write-Warning "CI builds set this variable via the DigiCert KeyLocker workflow step."
     Write-Warning "Distributing this unsigned binary will trigger Windows Defender SmartScreen."
     exit 0
@@ -38,7 +38,7 @@ if ($sig.Status -ne 'Valid') {
     exit 1
 }
 
-# Verify the timestamp is present — without it the signature expires with the cert.
+# Verify the timestamp is present; without it the signature expires with the cert.
 if (-not $sig.TimeStamperCertificate) {
     Write-Error "Timestamp certificate is missing after signing."
     Write-Error "Signatures without timestamps become invalid when the signing certificate expires."
