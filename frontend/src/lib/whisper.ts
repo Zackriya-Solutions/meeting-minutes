@@ -15,7 +15,7 @@ export type ProcessingSpeed = 'Slow' | 'Medium' | 'Fast' | 'Very Fast';
 export type ModelStatus =
   | 'Available'
   | 'Missing'
-  | { Downloading: number }
+  | { Downloading: { progress: number } }
   | { Error: string }
   | { Corrupted: { file_size: number; expected_min_size: number } };
 

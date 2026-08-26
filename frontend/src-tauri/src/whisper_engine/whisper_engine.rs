@@ -182,31 +182,10 @@ impl WhisperEngine {
         let mut models = Vec::new();
         // Use centralized model catalog from config.rs
         let model_configs = WHISPER_MODEL_CATALOG;
-        let active_downloads: HashSet<String> = self
-            .active_downloads
-            .lock()
-            .await
-            .keys()
-            .cloned()
-            .collect();
-        let cached_download_progress: HashMap<String, u8> = self
-            .available_models
-            .read()
-            .await
-            .iter()
-            .filter_map(|(name, model)| match model.status {
-                ModelStatus::Downloading { progress } => Some((name.clone(), progress)),
-                _ => None,
-            })
-            .collect();
 
         for &(name, filename, size_mb, accuracy, speed, description) in model_configs {
             let model_path = models_dir.join(filename);
-            let status = if active_downloads.contains(name) {
-                ModelStatus::Downloading {
-                    progress: cached_download_progress.get(name).copied().unwrap_or(0),
-                }
-            } else if model_path.exists() {
+            let status = if model_path.exists() {
                 // Check if file size is reasonable (at least 1MB for a valid model)
                 match std::fs::metadata(&model_path) {
                     Ok(metadata) => {
@@ -257,8 +236,20 @@ impl WhisperEngine {
             models.push(model_info);
         }
         
-        // Update internal cache
+        let active_downloads = self.active_downloads.lock().await;
         let mut available_models = self.available_models.write().await;
+        for model in &mut models {
+            if active_downloads.contains_key(&model.name) {
+                let progress = available_models
+                    .get(&model.name)
+                    .and_then(|cached| match cached.status {
+                        ModelStatus::Downloading { progress } => Some(progress),
+                        _ => None,
+                    })
+                    .unwrap_or(0);
+                model.status = ModelStatus::Downloading { progress };
+            }
+        }
         available_models.clear();
         for model in &models {
             available_models.insert(model.name.clone(), model.clone());
@@ -926,20 +917,20 @@ impl WhisperEngine {
         file_path: &PathBuf,
         mut result: Result<()>,
     ) -> Result<()> {
-        let cancellation_won = {
+        let (released_active_owner, cancellation_won) = {
             let mut active_downloads = self.active_downloads.lock().await;
             match active_downloads.get(model_name) {
                 Some(current) if Arc::ptr_eq(current, active_download) => {
                     if active_download.cancellation.is_cancelled() {
-                        true
+                        (false, true)
                     } else {
                         active_downloads.remove(model_name);
-                        false
+                        (true, false)
                     }
                 }
                 _ => {
                     log::warn!("Download owner for {} was no longer active during cleanup", model_name);
-                    active_download.cancellation.is_cancelled()
+                    (false, active_download.cancellation.is_cancelled())
                 }
             }
         };
@@ -971,6 +962,14 @@ impl WhisperEngine {
             };
             if !removed {
                 log::warn!("Download owner for {} was no longer active during cancellation cleanup", model_name);
+            }
+        }
+
+        if released_active_owner && result.is_ok() && !cancellation_won {
+            let mut models = self.available_models.write().await;
+            if let Some(model_info) = models.get_mut(model_name) {
+                model_info.status = ModelStatus::Available;
+                model_info.path = file_path.clone();
             }
         }
 
@@ -1137,11 +1136,6 @@ impl WhisperEngine {
             return Err(DownloadCancelled.into());
         }
 
-        let mut models = self.available_models.write().await;
-        if let Some(model_info) = models.get_mut(model_name) {
-            model_info.status = ModelStatus::Available;
-            model_info.path = file_path.clone();
-        }
 
         Ok(())
     }
@@ -1238,6 +1232,52 @@ mod tests {
         assert!(matches!(
             tiny_model(&corrupted_models).status,
             ModelStatus::Corrupted { .. }
+        ));
+    }
+
+    #[tokio::test]
+    async fn finish_download_publishes_available_after_releasing_active_owner() {
+        let dir = tempfile::tempdir().unwrap();
+        let engine = WhisperEngine::new_with_models_dir(Some(dir.path().to_path_buf())).unwrap();
+        let model_path = dir.path().join("ggml-tiny.bin");
+
+        std::fs::write(&model_path, b"ggml\0\0\0\0").unwrap();
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&model_path)
+            .unwrap()
+            .set_len(68 * 1024 * 1024)
+            .unwrap();
+
+        engine.discover_models().await.unwrap();
+        let active_download = engine.reserve_active_download("tiny").await.unwrap();
+        let active_models = engine.discover_models().await.unwrap();
+        assert!(matches!(
+            tiny_model(&active_models).status,
+            ModelStatus::Downloading { progress: 0 }
+        ));
+
+        engine
+            .finish_download("tiny", &active_download, &model_path, Ok(()))
+            .await
+            .unwrap();
+
+        assert!(!engine.active_downloads.lock().await.contains_key("tiny"));
+        assert!(matches!(
+            engine
+                .available_models
+                .read()
+                .await
+                .get("tiny")
+                .expect("tiny should remain cached")
+                .status,
+            ModelStatus::Available
+        ));
+
+        let rediscovered_models = engine.discover_models().await.unwrap();
+        assert!(matches!(
+            tiny_model(&rediscovered_models).status,
+            ModelStatus::Available
         ));
     }
 
