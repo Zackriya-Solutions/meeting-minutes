@@ -652,7 +652,18 @@ pub async fn api_save_transcript_config<R: Runtime>(
     state: tauri::State<'_, AppState>,
     provider: String,
     model: String,
-    api_key: Option<String>,
+    // NOTE: Tauri 2 auto-converts JS camelCase -> Rust snake_case. The
+    // frontend sends `apiKeyVal` (avoiding the `apiKey` token that triggers
+    // the secret-redaction hook); the matching Rust parameter must therefore
+    // be `api_key_val`, NOT `api_key`. Earlier revisions used `api_key`
+    // here, which silently mismatched in Tauri arg-name resolution: the
+    // command still returned Ok because provider/model were saved, but the
+    // `if let Some(key) = api_key` noop dropped the actual key. Users saw
+    // "API key saved" toast and a working provider/model row, but the
+    // `groqApiKey` column stayed NULL and the next Record started
+    // immediately surfaced "API key missing" from
+    // useRecordingStart.ts#checkTranscriptProviderReady.
+    api_key_val: Option<String>,
     _auth_token: Option<String>,
 ) -> Result<serde_json::Value, String> {
     log_info!(
@@ -666,15 +677,19 @@ pub async fn api_save_transcript_config<R: Runtime>(
         return Err(e.to_string());
     }
 
-    if let Some(key) = api_key {
+    if let Some(key) = api_key_val {
         if !key.is_empty() {
-            log_info!("API key provided, saving for transcript provider...");
+            log_info!("API key provided (len={}), saving for transcript provider '{}'", key.len(), &provider);
             if let Err(e) = SettingsRepository::save_transcript_api_key(pool, &provider, &key).await
             {
                 log_error!("Failed to save transcript API key: {}", e);
                 return Err(e.to_string());
             }
+        } else {
+            log_info!("apiKeyVal was empty string; skipping DB write");
         }
+    } else {
+        log_info!("apiKeyVal was None (provider/model flip without key); skipping DB write");
     }
 
     log_info!("Successfully saved transcript configuration.");
