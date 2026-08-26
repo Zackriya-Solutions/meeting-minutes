@@ -10,6 +10,7 @@ import { indexedDBService } from '@/services/indexedDBService';
 
 interface TranscriptContextType {
   transcripts: Transcript[];
+  livePreview: Transcript | null;
   transcriptsRef: MutableRefObject<Transcript[]>
   addTranscript: (update: TranscriptUpdate) => void;
   copyTranscript: () => void;
@@ -26,6 +27,7 @@ const TranscriptContext = createContext<TranscriptContextType | undefined>(undef
 
 export function TranscriptProvider({ children }: { children: ReactNode }) {
   const [transcripts, setTranscripts] = useState<Transcript[]>([]);
+  const [livePreview, setLivePreview] = useState<Transcript | null>(null);
   const [meetingTitle, setMeetingTitle] = useState('+ New Call');
   const [currentMeetingId, setCurrentMeetingId] = useState<string | null>(null);
 
@@ -93,6 +95,7 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
 
         // Listen for recording-started event
         unlistenRecordingStarted = await recordingService.onRecordingStarted(async () => {
+          setLivePreview(null);
           try {
             // Generate unique meeting ID
             const meetingId = `meeting-${Date.now()}`;
@@ -144,6 +147,7 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
 
         // Listen for recording-stopped event
         unlistenRecordingStopped = await recordingService.onRecordingStopped(async (payload) => {
+          setLivePreview(null);
           try {
             if (currentMeetingId) {
               // Update folder path in IndexedDB
@@ -180,6 +184,7 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
   // Main transcript buffering logic with sequence_id ordering
   useEffect(() => {
     let unlistenFn: (() => void) | undefined;
+    let unlistenPreviewFn: (() => void) | undefined;
     let transcriptCounter = 0;
     let transcriptBuffer = new Map<number, Transcript>();
     let lastProcessedSequence = 0;
@@ -285,7 +290,24 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
     const setupListener = async () => {
       try {
         console.log('🔥 Setting up MAIN transcript listener during component initialization...');
+        unlistenPreviewFn = await transcriptService.onTranscriptPreview((update) => {
+          const text = update.text.trim();
+          setLivePreview(text ? {
+            id: 'live-transcript-preview',
+            text,
+            timestamp: update.timestamp,
+            sequence_id: update.sequence_id,
+            chunk_start_time: update.chunk_start_time,
+            is_partial: true,
+            confidence: update.confidence,
+            audio_start_time: update.audio_start_time,
+            audio_end_time: update.audio_end_time,
+            duration: update.duration,
+          } : null);
+        });
+
         unlistenFn = await transcriptService.onTranscriptUpdate((update) => {
+          setLivePreview(null);
           const now = Date.now();
           console.log('🎯 MAIN LISTENER: Received transcript update:', {
             sequence_id: update.sequence_id,
@@ -355,6 +377,10 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
         unlistenFn();
         console.log('🧹 CLEANUP: MAIN transcript listener cleaned up');
       }
+      if (unlistenPreviewFn) {
+        unlistenPreviewFn();
+      }
+      setLivePreview(null);
     };
   }, [currentMeetingId]); // Add currentMeetingId dependency
 
@@ -406,6 +432,7 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
 
   // Manual transcript update handler (for RecordingControls component)
   const addTranscript = useCallback((update: TranscriptUpdate) => {
+    setLivePreview(null);
     console.log('🎯 addTranscript called with:', {
       sequence_id: update.sequence_id,
       text: update.text.substring(0, 50) + '...',
@@ -483,6 +510,7 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
   // Clear transcripts (used when starting new recording)
   const clearTranscripts = useCallback(() => {
     setTranscripts([]);
+    setLivePreview(null);
     // Don't clear currentMeetingId here - it will be set by recording-started event
   }, []);
 
@@ -511,6 +539,7 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
 
   const value: TranscriptContextType = {
     transcripts,
+    livePreview,
     transcriptsRef,
     addTranscript,
     copyTranscript,

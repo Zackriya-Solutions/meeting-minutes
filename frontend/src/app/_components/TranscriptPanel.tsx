@@ -31,23 +31,31 @@ export function TranscriptPanel({
   showModal
 }: TranscriptPanelProps) {
   // Contexts
-  const { transcripts, transcriptContainerRef, copyTranscript } = useTranscripts();
+  const { transcripts, livePreview, transcriptContainerRef, copyTranscript } = useTranscripts();
   const { transcriptModelConfig } = useConfig();
   const { isRecording, isPaused } = useRecordingState();
   const { checkPermissions, isChecking, hasSystemAudio, hasMicrophone } = usePermissionCheck();
   const isLinux = useIsLinux();
 
   // Convert transcripts to segments for virtualized view
-  const segments = useMemo(() =>
-    transcripts.map(t => ({
+  const segments = useMemo(() => {
+    const committed = transcripts.map(t => ({
       id: t.id,
       timestamp: t.audio_start_time ?? 0,
       endTime: t.audio_end_time,
       text: t.text,
       confidence: t.confidence,
-    })),
-    [transcripts]
-  );
+    }));
+
+    return livePreview ? [...committed, {
+      id: livePreview.id,
+      timestamp: livePreview.audio_start_time ?? 0,
+      endTime: livePreview.audio_end_time,
+      text: livePreview.text,
+      confidence: livePreview.confidence,
+      isPreview: true,
+    }] : committed;
+  }, [transcripts, livePreview]);
 
   return (
     <div ref={transcriptContainerRef} className="w-full border-r border-gray-200 bg-white flex flex-col overflow-y-auto">

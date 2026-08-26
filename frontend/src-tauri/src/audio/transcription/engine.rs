@@ -135,10 +135,23 @@ pub async fn validate_transcription_model_ready<R: Runtime>(app: &AppHandle<R>) 
                 }
             }
         }
+        "deepgram" => {
+            info!("🔍 Validating Deepgram API key...");
+            match crate::audio::deepgram::validate_configured_api_key(app).await {
+                Ok(()) => {
+                    info!("✅ Deepgram API key is configured");
+                    Ok(())
+                }
+                Err(e) => {
+                    warn!("❌ Deepgram validation failed: {}", e);
+                    Err(e)
+                }
+            }
+        }
         other => {
             warn!("❌ Unsupported transcription provider for local recording: {}", other);
             Err(format!(
-                "Provider '{}' is not supported for local transcription. Please select 'localWhisper' or 'parakeet'.",
+                "Provider '{}' is not supported for recording. Please select 'localWhisper', 'parakeet', or 'deepgram'.",
                 other
             ))
         }
@@ -212,10 +225,24 @@ pub async fn get_or_init_transcription_engine<R: Runtime>(
                 }
             }
         }
+        "deepgram" => {
+            Err("Deepgram realtime transcription is handled by the Deepgram streaming worker".to_string())
+        }
         "localWhisper" | _ => {
             info!("🎤 Initializing Whisper transcription engine");
             let whisper_engine = get_or_init_whisper(app).await?;
             Ok(TranscriptionEngine::Whisper(whisper_engine))
+        }
+    }
+}
+
+pub async fn is_deepgram_transcription_provider<R: Runtime>(app: &AppHandle<R>) -> bool {
+    match crate::api::api::api_get_transcript_config(app.clone(), app.clone().state(), None).await {
+        Ok(Some(config)) => config.provider == crate::audio::deepgram::PROVIDER,
+        Ok(None) => false,
+        Err(e) => {
+            warn!("⚠️ Failed to read transcript config while checking Deepgram provider: {}", e);
+            false
         }
     }
 }
