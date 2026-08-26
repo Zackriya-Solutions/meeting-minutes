@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { LANGUAGE_OPTIONS } from "@/lib/summary-languages";
 import { useRecentLanguages } from "@/hooks/useRecentLanguages";
+import { useTranslation } from "react-i18next";
 
 interface LanguagePickerPopoverProps {
   value: string | null;
@@ -20,6 +21,7 @@ export function LanguagePickerPopover({
   autoSubtitle,
 }: LanguagePickerPopoverProps) {
   const { recents } = useRecentLanguages();
+  const { t } = useTranslation();
   const [query, setQuery] = useState("");
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -83,7 +85,7 @@ export function LanguagePickerPopover({
       ref={containerRef}
       className="w-72 rounded-lg bg-white border border-gray-200 shadow-lg overflow-hidden"
       role="dialog"
-      aria-label="Pick summary language"
+      aria-label={t("languagePicker.selectLanguage")}
     >
       <div className="flex items-center gap-2 px-3 py-2.5 border-b border-gray-100">
         <span className="text-gray-400 text-sm">🔍</span>
@@ -92,7 +94,7 @@ export function LanguagePickerPopover({
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search language..."
+          placeholder={t("sidebar.searchPlaceholder")}
           className="flex-1 text-sm text-gray-900 bg-transparent border-none outline-none placeholder-gray-400"
         />
       </div>
@@ -134,7 +136,7 @@ export function LanguagePickerPopover({
             }`}
           >
             <span className="flex flex-col">
-              <span>Auto</span>
+              <span>{t("common.auto")}</span>
               {autoSubtitle && (
                 <span className="text-xs font-normal text-gray-400">{autoSubtitle}</span>
               )}
@@ -145,7 +147,7 @@ export function LanguagePickerPopover({
 
         {filteredAll.length > 0 && (
           <div className="px-3 pt-1 pb-1 text-[10px] font-semibold uppercase tracking-wider text-gray-400">
-            {mode === "meeting" ? "Other Languages" : "All Languages"}
+            {mode === "meeting" ? t("tabs.transcript") : t("languagePicker.selectLanguage")}
           </div>
         )}
 
@@ -168,7 +170,7 @@ export function LanguagePickerPopover({
         ))}
 
         {hasNoResults && (
-          <div className="px-3 py-2 text-sm text-gray-400">No matches</div>
+          <div className="px-3 py-2 text-sm text-gray-400">{t("sidebar.noMatches")}</div>
         )}
       </div>
     </div>
