@@ -3,6 +3,7 @@
 use std::path::{PathBuf};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::{watch, Mutex, RwLock};
 use tokio_util::sync::CancellationToken;
 use whisper_rs::{WhisperContext, WhisperContextParameters, FullParams, SamplingStrategy};
@@ -46,6 +47,8 @@ pub(crate) struct DownloadCancelled;
 pub(crate) fn is_download_cancelled(error: &anyhow::Error) -> bool {
     error.downcast_ref::<DownloadCancelled>().is_some()
 }
+
+const CANCEL_DOWNLOAD_CLEANUP_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub struct WhisperEngine {
     models_dir: PathBuf,
@@ -917,6 +920,31 @@ impl WhisperEngine {
         file_path: &PathBuf,
         mut result: Result<()>,
     ) -> Result<()> {
+        let active_owner_matches = {
+            let active_downloads = self.active_downloads.lock().await;
+            matches!(
+                active_downloads.get(model_name),
+                Some(current) if Arc::ptr_eq(current, active_download)
+            )
+        };
+        if !active_owner_matches {
+            log::warn!("Download owner for {} was no longer active during finalization", model_name);
+            active_download.completion.send_replace(true);
+            return result;
+        }
+
+        if result.is_ok() && !active_download.cancellation.is_cancelled() {
+            result = self.validate_model_file(file_path).await;
+        }
+
+        if result.is_err() && !active_download.cancellation.is_cancelled() && file_path.exists() {
+            if let Err(e) = fs::remove_file(file_path).await {
+                log::warn!("Failed to clean up failed download file: {}", e);
+            } else {
+                log::info!("Cleaned up failed download file: {}", file_path.display());
+            }
+        }
+
         let (released_active_owner, cancellation_won) = {
             let mut active_downloads = self.active_downloads.lock().await;
             match active_downloads.get(model_name) {
@@ -929,7 +957,7 @@ impl WhisperEngine {
                     }
                 }
                 _ => {
-                    log::warn!("Download owner for {} was no longer active during cleanup", model_name);
+                    log::warn!("Download owner for {} was no longer active during finalization", model_name);
                     (false, active_download.cancellation.is_cancelled())
                 }
             }
@@ -963,13 +991,15 @@ impl WhisperEngine {
             if !removed {
                 log::warn!("Download owner for {} was no longer active during cancellation cleanup", model_name);
             }
-        }
-
-        if released_active_owner && result.is_ok() && !cancellation_won {
+        } else if released_active_owner {
             let mut models = self.available_models.write().await;
             if let Some(model_info) = models.get_mut(model_name) {
-                model_info.status = ModelStatus::Available;
-                model_info.path = file_path.clone();
+                if result.is_ok() {
+                    model_info.status = ModelStatus::Available;
+                    model_info.path = file_path.clone();
+                } else {
+                    model_info.status = ModelStatus::Missing;
+                }
             }
         }
 
@@ -1047,7 +1077,10 @@ impl WhisperEngine {
             }
         }
 
-        let client = Client::new();
+        let client = Client::builder()
+            .user_agent(concat!("Meetily/", env!("CARGO_PKG_VERSION")))
+            .build()
+            .map_err(|e| anyhow!("Failed to create download client: {}", e))?;
         let response = tokio::select! {
             biased;
             _ = active_download.cancellation.cancelled() => return Err(DownloadCancelled.into()),
@@ -1141,6 +1174,15 @@ impl WhisperEngine {
     }
 
     pub async fn cancel_download(&self, model_name: &str) -> Result<()> {
+        self.cancel_download_with_timeout(model_name, CANCEL_DOWNLOAD_CLEANUP_TIMEOUT)
+            .await
+    }
+
+    async fn cancel_download_with_timeout(
+        &self,
+        model_name: &str,
+        cleanup_timeout: Duration,
+    ) -> Result<()> {
         log::info!("Cancelling download for model: {}", model_name);
 
         let Some(active_download) = self.active_downloads.lock().await.get(model_name).cloned() else {
@@ -1151,10 +1193,15 @@ impl WhisperEngine {
 
         let mut completion = active_download.completion.subscribe();
         if !*completion.borrow() {
-            completion
-                .changed()
-                .await
-                .map_err(|_| anyhow!("Download worker ended before completing cancellation cleanup"))?;
+            match tokio::time::timeout(cleanup_timeout, completion.changed()).await {
+                Ok(Ok(())) => {}
+                Ok(Err(_)) => {
+                    return Err(anyhow!("Download worker ended before completing cancellation cleanup"));
+                }
+                Err(_) => {
+                    return Err(anyhow!("Timed out waiting for download cancellation cleanup"));
+                }
+            }
         }
 
         Ok(())
@@ -1282,6 +1329,37 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn finish_download_rejects_invalid_header_and_cleans_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let engine = WhisperEngine::new_with_models_dir(Some(dir.path().to_path_buf())).unwrap();
+        let model_path = dir.path().join("ggml-tiny.bin");
+        std::fs::write(&model_path, b"not-a-model").unwrap();
+
+        engine.discover_models().await.unwrap();
+        let active_download = engine.reserve_active_download("tiny").await.unwrap();
+        let error = engine
+            .finish_download("tiny", &active_download, &model_path, Ok(()))
+            .await
+            .unwrap_err();
+
+        assert!(error
+            .to_string()
+            .contains("Invalid model file: missing GGML/GGUF magic number"));
+        assert!(!engine.active_downloads.lock().await.contains_key("tiny"));
+        assert!(!model_path.exists());
+        assert!(matches!(
+            engine
+                .available_models
+                .read()
+                .await
+                .get("tiny")
+                .expect("tiny should remain cached")
+                .status,
+            ModelStatus::Missing
+        ));
+    }
+
+    #[tokio::test]
     async fn unsupported_download_does_not_leave_an_active_transfer() {
         let dir = tempfile::tempdir().unwrap();
         let engine = WhisperEngine::new_with_models_dir(Some(dir.path().to_path_buf())).unwrap();
@@ -1296,6 +1374,29 @@ mod tests {
         let engine = WhisperEngine::new_with_models_dir(Some(dir.path().to_path_buf())).unwrap();
 
         let _first_owner = engine.reserve_active_download("tiny").await.unwrap();
+        assert!(engine.reserve_active_download("tiny").await.is_err());
+    }
+
+    #[tokio::test]
+    async fn cancelling_an_unresponsive_download_keeps_ownership_reserved() {
+        let dir = tempfile::tempdir().unwrap();
+        let engine = WhisperEngine::new_with_models_dir(Some(dir.path().to_path_buf())).unwrap();
+        let active_download = engine.reserve_active_download("tiny").await.unwrap();
+
+        let error = engine
+            .cancel_download_with_timeout("tiny", Duration::from_millis(1))
+            .await
+            .unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "Timed out waiting for download cancellation cleanup"
+        );
+        assert!(active_download.cancellation.is_cancelled());
+        assert!(matches!(
+            engine.active_downloads.lock().await.get("tiny"),
+            Some(current) if Arc::ptr_eq(current, &active_download)
+        ));
         assert!(engine.reserve_active_download("tiny").await.is_err());
     }
 
@@ -1329,6 +1430,75 @@ mod tests {
 
         (format!("http://{address}/model.bin"), headers_ready, release_body, server)
     }
+
+    async fn response_http_server(
+        content_length: usize,
+        body: &'static [u8],
+    ) -> (
+        String,
+        oneshot::Receiver<Vec<u8>>,
+        tokio::task::JoinHandle<()>,
+    ) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let (request_sent, request_received) = oneshot::channel();
+
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            let mut buffer = [0_u8; 1024];
+            loop {
+                let bytes_read = socket.read(&mut buffer).await.unwrap();
+                if bytes_read == 0 {
+                    break;
+                }
+
+                request.extend_from_slice(&buffer[..bytes_read]);
+                if request.ends_with(b"\r\n\r\n") {
+                    break;
+                }
+            }
+            request_sent.send(request).unwrap();
+
+            let headers = format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {content_length}\r\nConnection: close\r\n\r\n"
+            );
+            socket.write_all(headers.as_bytes()).await.unwrap();
+            socket.write_all(body).await.unwrap();
+            socket.flush().await.unwrap();
+        });
+
+        (format!("http://{address}/model.bin"), request_received, server)
+    }
+
+    #[tokio::test]
+    async fn downloaded_model_sends_user_agent_and_validates_header() {
+        let dir = tempfile::tempdir().unwrap();
+        let engine = WhisperEngine::new_with_models_dir(Some(dir.path().to_path_buf())).unwrap();
+        engine.discover_models().await.unwrap();
+        let (url, request, server) = response_http_server(8, b"ggml\0\0\0\0").await;
+
+        engine.download_model_from_url("tiny", &url, None).await.unwrap();
+        let request = String::from_utf8(request.await.unwrap()).unwrap();
+        server.await.unwrap();
+
+        assert!(request.to_ascii_lowercase().contains(&format!(
+            "user-agent: meetily/{}",
+            env!("CARGO_PKG_VERSION")
+        )));
+        assert!(!engine.active_downloads.lock().await.contains_key("tiny"));
+        assert!(matches!(
+            engine
+                .available_models
+                .read()
+                .await
+                .get("tiny")
+                .expect("tiny should remain cached")
+                .status,
+            ModelStatus::Available
+        ));
+    }
+
 
     #[tokio::test]
     async fn cancelling_a_stalled_download_waits_for_cleanup_before_retry_can_start() {
@@ -1400,10 +1570,43 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn incomplete_response_cleans_partial_file_and_cache() {
+        let dir = tempfile::tempdir().unwrap();
+        let engine = WhisperEngine::new_with_models_dir(Some(dir.path().to_path_buf())).unwrap();
+        let model_path = dir.path().join("ggml-tiny.bin");
+        engine.discover_models().await.unwrap();
+        let (url, _request, server) = response_http_server(8, b"ggml").await;
+
+        let error = engine
+            .download_model_from_url("tiny", &url, None)
+            .await
+            .unwrap_err();
+        server.await.unwrap();
+
+        assert!(error.to_string().contains("Failed to read chunk"));
+        assert!(!engine.active_downloads.lock().await.contains_key("tiny"));
+        assert!(!model_path.exists());
+        assert!(matches!(
+            engine
+                .available_models
+                .read()
+                .await
+                .get("tiny")
+                .expect("tiny should remain cached")
+                .status,
+            ModelStatus::Missing
+        ));
+
+        let models = engine.discover_models().await.unwrap();
+        assert!(matches!(tiny_model(&models).status, ModelStatus::Missing));
+    }
+
+    #[tokio::test]
     async fn terminal_download_error_releases_the_active_transfer() {
         let dir = tempfile::tempdir().unwrap();
         let engine = WhisperEngine::new_with_models_dir(Some(dir.path().to_path_buf())).unwrap();
-        std::fs::write(dir.path().join("ggml-tiny.bin"), vec![0_u8; 2 * 1024 * 1024]).unwrap();
+        let model_path = dir.path().join("ggml-tiny.bin");
+        std::fs::write(&model_path, vec![0_u8; 2 * 1024 * 1024]).unwrap();
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
 
@@ -1424,10 +1627,8 @@ mod tests {
         server.await.unwrap();
 
         assert!(!engine.active_downloads.lock().await.contains_key("tiny"));
+        assert!(!model_path.exists());
         let models = engine.discover_models().await.unwrap();
-        assert!(matches!(
-            tiny_model(&models).status,
-            ModelStatus::Corrupted { .. }
-        ));
+        assert!(matches!(tiny_model(&models).status, ModelStatus::Missing));
     }
 }
