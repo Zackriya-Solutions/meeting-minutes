@@ -20,6 +20,8 @@ echo Installing npm dependencies...
 rem pnpm is pnpm.cmd on Windows. CALL is required or this batch file ends here.
 call pnpm install
 if errorlevel 1 goto :install_failed
+call pnpm run version:check
+if errorlevel 1 goto :version_check_failed
 
 echo Building llama-helper sidecar...
 call cargo build --release -p llama-helper
@@ -34,10 +36,15 @@ echo Building the project...
 call pnpm run tauri:build
 if errorlevel 1 goto :tauri_build_failed
 
-rem Cargo names the binary after the Rust package (meetily), while productName is
-rem Meet4Specs. Keep the Cargo binary and expose the documented product-name path.
-copy /Y "%RELEASE_DIR%\meetily.exe" "%RELEASE_DIR%\Meet4Specs.exe" >nul
-if errorlevel 1 goto :artifact_validation_failed
+rem Cargo names the binary after the Rust package (meet4specs), while productName is
+rem Meet4Specs. On Windows this is only a casing difference, so rename through
+rem a temporary filename to expose the documented product-name path.
+if exist "%RELEASE_DIR%\meet4specs.exe" (
+    ren "%RELEASE_DIR%\meet4specs.exe" "Meet4Specs.tmp.exe"
+    if errorlevel 1 goto :artifact_validation_failed
+    ren "%RELEASE_DIR%\Meet4Specs.tmp.exe" "Meet4Specs.exe"
+    if errorlevel 1 goto :artifact_validation_failed
+)
 
 rem Do not report success unless every documented artifact was really produced.
 if not exist "out\index.html" goto :artifact_validation_failed
@@ -61,6 +68,9 @@ echo ERROR: Failed to clean npm dependencies.
 goto :failed
 :install_failed
 echo ERROR: Failed to install npm dependencies.
+goto :failed
+:version_check_failed
+echo ERROR: Application versions are not synchronized.
 goto :failed
 :helper_build_failed
 echo ERROR: Failed to build llama-helper.

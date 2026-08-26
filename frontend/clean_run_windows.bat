@@ -1,8 +1,8 @@
 @echo off
 setlocal enabledelayedexpansion
 
-REM ponytail: kill any stale Meetily instance BEFORE doing anything else.
-REM Meetily uses tauri-plugin-single-instance and hides to the system tray on
+REM ponytail: kill any stale Meet4Specs instance BEFORE doing anything else.
+REM Meet4Specs uses tauri-plugin-single-instance and hides to the system tray on
 REM window close instead of exiting, so a previous run's process can survive
 REM indefinitely in the background. If left running, a fresh `tauri dev`
 REM launch here just re-focuses that stale, tray-hidden window instead of
@@ -11,8 +11,8 @@ REM listening on port 3118 (the Next.js dev server) below, that stale
 REM window's webview loses its live connection and renders blank/white.
 REM Killing it up front guarantees every run starts a genuinely fresh
 REM instance connected to the dev server we are about to start.
-echo Stopping any previous Meetily instance...
-taskkill /F /IM meetily.exe >nul 2>&1
+echo Stopping any previous Meet4Specs instance...
+taskkill /F /IM meet4specs.exe >nul 2>&1
 
 REM Stop legacy Next.js servers before touching node_modules/.next. Current
 REM Tauri dev uses its built-in static frontend server for ../out (see

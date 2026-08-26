@@ -115,7 +115,7 @@ impl<R: Runtime> ConsentManager<R> {
         let mut path = dirs::config_dir()
             .ok_or_else(|| anyhow!("Could not find config directory"))?;
 
-        path.push("meetily");
+        path.push("meet4specs");
         path.push("notifications.json");
 
         // Ensure parent directory exists

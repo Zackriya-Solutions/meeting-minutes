@@ -12,8 +12,8 @@ interface HomebrewDatabaseDetectorProps {
 
 // Homebrew paths differ between Intel and Apple Silicon Macs
 const HOMEBREW_PATHS = [
-  '/opt/homebrew/var/meetily/meeting_minutes.db',  // Apple Silicon (M1/M2/M3)
-  '/usr/local/var/meetily/meeting_minutes.db',      // Intel Macs
+  '/opt/homebrew/var/meet4specs/meeting_minutes.db',  // Apple Silicon (M1/M2/M3)
+  '/usr/local/var/meet4specs/meeting_minutes.db',      // Intel Macs
 ];
 
 export function HomebrewDatabaseDetector({ onImportSuccess, onDecline }: HomebrewDatabaseDetectorProps) {
@@ -97,11 +97,11 @@ export function HomebrewDatabaseDetector({ onImportSuccess, onDecline }: Homebre
           <div className="flex items-center gap-2 mb-1">
             <AlertCircle className="h-4 w-4 text-blue-600" />
             <h3 className="text-sm font-semibold text-blue-900">
-              Previous Meetily Installation Detected!
+              Previous Meet4Specs Installation Detected!
             </h3>
           </div>
           <p className="text-sm text-blue-800 mb-2">
-            We found an existing database from your previous Meetily installation (Python backend version).
+            We found an existing database from your previous Meet4Specs installation (Python backend version).
           </p>
           <div className="bg-white/50 rounded p-2 mb-3">
             <p className="text-xs text-blue-700 font-mono break-all">

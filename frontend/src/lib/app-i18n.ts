@@ -382,7 +382,7 @@ const messages = {
       tryAgain: 'Intentar de nuevo',
       setup: {
         title: 'Habilitar generación de OpenSpec',
-        description: 'Meetily puede generar propuestas de cambio en formato OpenSpec a partir de tus transcripciones. Para eso necesita el CLI de OpenSpec (y Node.js si no lo tenés instalado).',
+        description: 'Meet4Specs puede generar propuestas de cambio en formato OpenSpec a partir de tus transcripciones. Para eso necesita el CLI de OpenSpec (y Node.js si no lo tenés instalado).',
         install: 'Instalar ahora',
         skip: 'Ahora no',
         installing: 'Instalando dependencias de OpenSpec...',
@@ -974,7 +974,7 @@ const messages = {
       tryAgain: 'Try again',
       setup: {
         title: 'Enable OpenSpec generation',
-        description: 'Meetily can generate OpenSpec-format change proposals from your meeting transcripts. This requires the OpenSpec CLI (and Node.js, if not already installed).',
+        description: 'Meet4Specs can generate OpenSpec-format change proposals from your meeting transcripts. This requires the OpenSpec CLI (and Node.js, if not already installed).',
         install: 'Install now',
         skip: 'Not now',
         installing: 'Installing OpenSpec dependencies...',

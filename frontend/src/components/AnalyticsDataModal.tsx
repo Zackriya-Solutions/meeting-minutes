@@ -3,6 +3,7 @@
 import React from 'react';
 import { X, Info, Shield } from 'lucide-react';
 import { useI18n } from '@/hooks/useI18n';
+import { APP_VERSION } from '@/constants/appVersion';
 
 interface AnalyticsDataModalProps {
   isOpen: boolean;
@@ -126,7 +127,7 @@ export default function AnalyticsDataModal({ isOpen, onClose, onConfirmDisable }
             <pre className="text-xs text-gray-700 overflow-x-auto">
               {`{
   "event": "meeting_ended",
-  "app_version": "0.4.0",
+  "app_version": "${APP_VERSION}",
   "transcription_provider": "parakeet",
   "transcription_model": "parakeet-tdt-0.6b-v3-int8",
   "summary_provider": "ollama",
