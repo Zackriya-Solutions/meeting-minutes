@@ -31,6 +31,8 @@ pub struct ModelInfo {
     pub speed: String,
     pub status: ModelStatus,
     pub description: String,
+    /// True for user-imported custom models; false for official catalog models.
+    pub is_custom: bool,
 }
 
 pub struct WhisperEngine {
@@ -243,11 +245,83 @@ impl WhisperEngine {
                 speed: speed.to_string(),
                 status,
                 description: description.to_string(),
+                is_custom: false,
             };
             
             models.push(model_info);
         }
-        
+
+        // --- Custom Model Discovery ---
+        // Scan models_dir for any .bin / .gguf files NOT already covered by the
+        // official catalog.  These are treated as user-imported custom models.
+        let catalog_filenames: HashSet<String> = model_configs
+            .iter()
+            .map(|(_, filename, _, _, _, _)| filename.to_string())
+            .collect();
+
+        match fs::read_dir(models_dir).await {
+            Ok(mut entries) => {
+                while let Ok(Some(entry)) = entries.next_entry().await {
+                    let path = entry.path();
+
+                    // Only process regular files
+                    if !path.is_file() {
+                        continue;
+                    }
+
+                    let filename = match path.file_name().and_then(|f| f.to_str()) {
+                        Some(f) => f.to_string(),
+                        None => continue,
+                    };
+
+                    // Skip files already in the official catalog
+                    if catalog_filenames.contains(&filename) {
+                        continue;
+                    }
+
+                    // Only accept Whisper-compatible model formats
+                    if !filename.ends_with(".bin") && !filename.ends_with(".gguf") {
+                        continue;
+                    }
+
+                    // Validate GGML/GGUF magic number — skip silently if invalid
+                    if self.validate_model_file(&path).await.is_err() {
+                        log::warn!(
+                            "Custom model candidate '{}' failed header validation, skipping",
+                            filename
+                        );
+                        continue;
+                    }
+
+                    let file_size_mb = std::fs::metadata(&path)
+                        .map(|m| (m.len() / (1024 * 1024)) as u32)
+                        .unwrap_or(0);
+
+                    // Derive a readable model name from the filename
+                    let model_name = filename
+                        .trim_end_matches(".bin")
+                        .trim_end_matches(".gguf")
+                        .to_string();
+
+                    log::info!("Discovered custom model: '{}' ({} MB)", model_name, file_size_mb);
+
+                    models.push(ModelInfo {
+                        name: model_name,
+                        path: path.clone(),
+                        size_mb: file_size_mb,
+                        accuracy: "Custom".to_string(),
+                        speed: "Unknown".to_string(),
+                        status: ModelStatus::Available,
+                        description: format!("Custom model: {}", filename),
+                        is_custom: true,
+                    });
+                }
+            }
+            Err(e) => {
+                log::warn!("Could not scan models directory for custom models: {}", e);
+            }
+        }
+
         // Update internal cache
         let mut available_models = self.available_models.write().await;
         available_models.clear();

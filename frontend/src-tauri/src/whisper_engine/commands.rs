@@ -13,10 +13,13 @@ static MODELS_DIR: Mutex<Option<PathBuf>> = Mutex::new(None);
 /// Initialize the models directory path using app_data_dir
 /// This should be called during app setup before whisper_init
 pub fn set_models_directory<R: Runtime>(app: &AppHandle<R>) {
-    let app_data_dir = app.path().app_data_dir()
-        .expect("Failed to get app data dir");
-
-    let models_dir = app_data_dir.join("models");
+    let models_dir = if let Ok(custom_dir) = std::env::var("MEETILY_MODELS_DIR") {
+        PathBuf::from(custom_dir)
+    } else {
+        let app_data_dir = app.path().app_data_dir()
+            .expect("Failed to get app data dir");
+        app_data_dir.join("models")
+    };
 
     // Create directory if it doesn't exist
     if !models_dir.exists() {
@@ -114,6 +117,7 @@ fn discover_models_standalone() -> Result<Vec<ModelInfo>, String> {
             accuracy: accuracy.to_string(),
             speed: speed.to_string(),
             description: description.to_string(),
+            is_custom: false,
         });
     }
 
@@ -558,4 +562,101 @@ pub async fn open_models_folder() -> Result<(), String> {
 
     log::info!("Opened models folder: {}", folder_path);
     Ok(())
+}
+
+/// Import a custom Whisper model by copying a user-selected file into the models directory.
+/// Returns the derived model name (filename without extension) on success.
+#[command]
+pub async fn whisper_import_custom_model(source_path: String) -> Result<String, String> {
+    use tokio::fs as tfs;
+
+    let models_dir = get_models_directory()
+        .ok_or_else(|| "Models directory not initialized".to_string())?;
+
+    let source = std::path::PathBuf::from(&source_path);
+
+    if !source.exists() {
+        return Err(format!("File not found: {}", source_path));
+    }
+
+    let ext = source
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("");
+    if ext != "bin" && ext != "gguf" {
+        return Err("Only .bin and .gguf model files are supported".to_string());
+    }
+
+    let filename = source
+        .file_name()
+        .ok_or_else(|| "Invalid source file path".to_string())?
+        .to_string_lossy()
+        .to_string();
+
+    // Prevent overwriting official catalog models
+    let catalog_filenames: std::collections::HashSet<String> = crate::config::WHISPER_MODEL_CATALOG
+        .iter()
+        .map(|(_, f, _, _, _, _)| f.to_string())
+        .collect();
+    if catalog_filenames.contains(&filename) {
+        return Err(format!(
+            "'{}' conflicts with an official Whisper model name. Please rename your file.",
+            filename
+        ));
+    }
+
+    let dest = models_dir.join(&filename);
+
+    // Copy (not move) so the user's original file is preserved
+    tfs::copy(&source, &dest)
+        .await
+        .map_err(|e| format!("Failed to copy model file: {}", e))?;
+
+    let model_name = filename
+        .trim_end_matches(".bin")
+        .trim_end_matches(".gguf")
+        .to_string();
+
+    log::info!(
+        "Imported custom model '{}' from '{}' to '{}'",
+        model_name,
+        source_path,
+        dest.display()
+    );
+
+    Ok(model_name)
+}
+
+/// Delete a custom model file from the models directory.
+/// Only custom (non-catalog) models may be deleted through this command.
+#[command]
+pub async fn whisper_delete_custom_model(model_name: String) -> Result<String, String> {
+    let models_dir = get_models_directory()
+        .ok_or_else(|| "Models directory not initialized".to_string())?;
+
+    // Guard: refuse to delete official catalog models via this path
+    let catalog_names: std::collections::HashSet<String> = crate::config::WHISPER_MODEL_CATALOG
+        .iter()
+        .map(|(name, _, _, _, _, _)| name.to_string())
+        .collect();
+    if catalog_names.contains(&model_name) {
+        return Err(format!(
+            "'{}' is an official Whisper model and cannot be deleted via this command",
+            model_name
+        ));
+    }
+
+    // Try both supported extensions
+    for ext in &[".bin", ".gguf"] {
+        let candidate = models_dir.join(format!("{}{}", model_name, ext));
+        if candidate.exists() {
+            tokio::fs::remove_file(&candidate)
+                .await
+                .map_err(|e| format!("Failed to delete model file: {}", e))?;
+            log::info!("Deleted custom model file: {}", candidate.display());
+            return Ok(format!("Deleted custom model '{}'", model_name));
+        }
+    }
+
+    Err(format!("Custom model '{}' not found in models directory", model_name))
 }

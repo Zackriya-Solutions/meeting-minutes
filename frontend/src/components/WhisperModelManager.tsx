@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
+import { open as openFilePicker } from '@tauri-apps/plugin-dialog';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
 import {
@@ -373,6 +374,75 @@ export function ModelManager({
     }
   };
 
+  /** Import a custom .bin/.gguf model via native file picker. */
+  const handleImportCustomModel = async () => {
+    try {
+      const selected = await openFilePicker({
+        multiple: false,
+        filters: [{ name: 'Whisper Model', extensions: ['bin', 'gguf'] }]
+      });
+
+      if (!selected) return; // User cancelled
+
+      const filePath = typeof selected === 'string' ? selected : (selected as { path: string }).path;
+
+      toast.info('Importing custom model…', {
+        description: 'Copying file into models directory',
+        duration: 3000
+      });
+
+      const modelName = await WhisperAPI.importCustomModel(filePath);
+
+      // Refresh the full model list so the new entry appears
+      const modelList = await WhisperAPI.getAvailableModels();
+      setModels(modelList);
+
+      toast.success(`Imported "${modelName}" successfully!`, {
+        description: 'Your custom model is ready to select.',
+        duration: 4000
+      });
+
+      // Auto-select the newly imported model
+      if (onModelSelect) {
+        onModelSelect(modelName);
+        if (autoSave) {
+          await saveModelSelection(modelName);
+        }
+      }
+    } catch (err) {
+      console.error('Custom model import failed:', err);
+      toast.error('Failed to import model', {
+        description: err instanceof Error ? err.message : 'Unknown error',
+        duration: 5000
+      });
+    }
+  };
+
+  /** Delete a user-imported custom model from disk and refresh the list. */
+  const deleteCustomModel = async (modelName: string) => {
+    try {
+      await WhisperAPI.deleteCustomModel(modelName);
+
+      const modelList = await WhisperAPI.getAvailableModels();
+      setModels(modelList);
+
+      toast.success(`Custom model "${modelName}" deleted`, {
+        description: 'Model removed from your models folder',
+        duration: 3000
+      });
+
+      if (selectedModel === modelName && onModelSelect) {
+        onModelSelect('');
+      }
+    } catch (err) {
+      console.error('Failed to delete custom model:', err);
+      toast.error(`Failed to delete "${modelName}"`, {
+        description: err instanceof Error ? err.message : 'Unknown error',
+        duration: 4000
+      });
+    }
+  };
+
   const getDisplayName = (modelName: string): string => {
     const modelNameMapping: { [key: string]: string } = {
       "small": "Small",
@@ -411,9 +481,11 @@ export function ModelManager({
   }
 
   const basicModelNames = ["small", "medium-q5_0", "large-v3-q5_0", "large-v3-turbo", "large-v3"];
-  const basicModels = models.filter(m => basicModelNames.includes(m.name))
+  const officialModels = models.filter(m => !m.is_custom);
+  const customModels   = models.filter(m => m.is_custom);
+  const basicModels    = officialModels.filter(m => basicModelNames.includes(m.name))
     .sort((a, b) => basicModelNames.indexOf(a.name) - basicModelNames.indexOf(b.name));
-  const advancedModels = models.filter(m => !basicModelNames.includes(m.name));
+  const advancedModels = officialModels.filter(m => !basicModelNames.includes(m.name));
 
   return (
     <div className={`space-y-3 ${className}`}>
@@ -474,6 +546,66 @@ export function ModelManager({
           </AccordionItem>
         </Accordion>
       )}
+
+      {/* ── Custom Models ── */}
+      <div className="mt-4 pt-4 border-t border-gray-100">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <span className="text-lg">🎯</span>
+            <h3 className="font-semibold text-gray-900">Custom Models</h3>
+            <span className="text-xs text-gray-400">(.bin / .gguf)</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => WhisperAPI.openModelsFolder()}
+              className="text-xs text-gray-400 hover:text-blue-600 transition-colors underline underline-offset-2"
+              title="Open the models folder to drop files manually"
+            >
+              Open folder
+            </button>
+            <motion.button
+              whileHover={{ scale: 1.03 }}
+              whileTap={{ scale: 0.97 }}
+              onClick={handleImportCustomModel}
+              className="flex items-center gap-1.5 bg-purple-600 hover:bg-purple-700 text-white px-3 py-1.5 rounded-md text-sm font-medium transition-colors"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
+              </svg>
+              Import Model
+            </motion.button>
+          </div>
+        </div>
+
+        {customModels.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-6 border-2 border-dashed border-gray-200 rounded-lg text-center gap-1">
+            <span className="text-2xl">📂</span>
+            <p className="text-sm font-medium text-gray-500">No custom models yet</p>
+            <p className="text-xs text-gray-400">
+              Import a fine-tuned Whisper .bin or .gguf file for your language
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {customModels.map((model) => (
+              <ModelCard
+                key={model.name}
+                model={model}
+                isSelected={selectedModel === model.name}
+                isRecommended={false}
+                onSelect={() => {
+                  if (model.status === 'Available') selectModel(model.name);
+                }}
+                onDownload={() => {}}
+                onCancel={() => {}}
+                onDelete={() => deleteCustomModel(model.name)}
+                isDownloading={false}
+                displayName={model.name}
+              />
+            ))}
+          </div>
+        )}
+      </div>
 
       {/* Helper text */}
       {selectedModel && (
