@@ -77,6 +77,7 @@ export function ImportAudioDialog({
   const [title, setTitle] = useState('');
   const [selectedLang, setSelectedLang] = useState(selectedLanguage || 'auto');
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [speakerCount, setSpeakerCount] = useState('auto');
   const [titleModifiedByUser, setTitleModifiedByUser] = useState(false);
 
   // Always start as false — represents "dialog has not yet been opened".
@@ -139,6 +140,7 @@ export function ImportAudioDialog({
       setTitleModifiedByUser(false);
       setSelectedLang(selectedLanguage || 'auto');
       setShowAdvanced(false);
+      setSpeakerCount('auto');
 
       // Validate preselected file if provided
       if (preselectedFile) {
@@ -192,7 +194,8 @@ export function ImportAudioDialog({
       title || fileInfo.filename,
       isParakeetModel ? null : selectedLang === 'auto' ? null : selectedLang,
       selectedModel?.name || null,
-      selectedModel?.provider || null
+      selectedModel?.provider || null,
+      speakerCount === 'auto' ? null : Number.parseInt(speakerCount, 10)
     );
   };
 
@@ -402,6 +405,24 @@ export function ImportAudioDialog({
                           </Select>
                         </div>
                       )}
+
+                      <div className="space-y-2">
+                        <span className="text-sm font-medium">Speaker count</span>
+                        <Select value={speakerCount} onValueChange={setSpeakerCount}>
+                          <SelectTrigger className="w-full">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="auto">Auto detect</SelectItem>
+                            {Array.from({ length: 10 }, (_, index) => index + 1).map(count => (
+                              <SelectItem key={count} value={count.toString()}>{count}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <p className="text-xs text-muted-foreground">
+                          Leave on Auto unless you know the exact number of speakers.
+                        </p>
+                      </div>
                     </div>
                   )}
                 </div>

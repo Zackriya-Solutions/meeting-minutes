@@ -8,6 +8,7 @@ import { useRecordingState, RecordingStatus } from '@/contexts/RecordingStateCon
 import { storageService } from '@/services/storageService';
 import { transcriptService } from '@/services/transcriptService';
 import Analytics from '@/lib/analytics';
+import { waitForSpeakerLabelRefinement } from '@/lib/speaker-label-refinement';
 import {
   applyPinnedSummaryLanguageToMeeting,
   detectAndCacheSummaryLanguage,
@@ -236,6 +237,11 @@ export function useRecordingStop(
       if (isCallApi && transcriptionComplete == true) {
 
         setStatus(RecordingStatus.SAVING, 'Saving meeting to database...');
+
+        // The backend emits speaker-labels-refined before recording-stopped.
+        // Wait until the frontend state and IndexedDB have applied that event
+        // before taking the final snapshot for SQLite persistence.
+        await waitForSpeakerLabelRefinement();
 
         // Get fresh transcript state (ALL transcripts including late ones)
         const freshTranscripts = [...transcriptsRef.current];

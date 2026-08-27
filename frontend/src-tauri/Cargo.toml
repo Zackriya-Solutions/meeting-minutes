@@ -67,7 +67,6 @@ serde = { version = "1.0", features = ["derive"] }
 anyhow = "1.0"
 once_cell = "1.17.1"
 uuid = { version = "1.0", features = ["v4", "serde"] }
-posthog-rs = "0.3.7"
 
 # Cross-platform audio capture
 cpal = "0.15.3"
@@ -105,6 +104,10 @@ silero_rs = { git = "https://github.com/emotechlab/silero-rs", rev = "26a6460", 
 # Parakeet (ONNX-based fast transcription) dependencies
 ort = { version = "2.0.0-rc.10" }  # ONNX Runtime for Parakeet models
 thiserror = "2.0.16"                # Error handling for Parakeet
+sherpa-onnx = { version = "=1.13.4", default-features = false, features = ["static"] }
+sha2 = "0.10"
+bzip2 = "0.4"
+tar = "0.4"
 
 # Async
 tokio = { version = "1.32.0", features = ["full", "tracing"] }

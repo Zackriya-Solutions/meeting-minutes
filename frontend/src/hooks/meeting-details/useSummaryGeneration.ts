@@ -7,6 +7,7 @@ import { toast } from 'sonner';
 import Analytics from '@/lib/analytics';
 import { isOllamaNotInstalledError } from '@/lib/utils';
 import { BuiltInModelInfo } from '@/lib/builtin-ai';
+import { prefixSpeaker } from '@/lib/speaker-label';
 import {
   detectAndCacheSummaryLanguage,
   readMeetingSummaryLanguage,
@@ -446,9 +447,9 @@ export function useSummaryGeneration({
 
     return {
       transcriptText: allTranscripts
-        .map(t => `${formatTime(t.audio_start_time, t.timestamp)} ${t.text}`)
+        .map(t => `${formatTime(t.audio_start_time, t.timestamp)} ${prefixSpeaker(t.text, t.speaker)}`)
         .join('\n'),
-      transcriptTexts: allTranscripts.map(t => t.text),
+      transcriptTexts: allTranscripts.map(t => prefixSpeaker(t.text, t.speaker)),
     };
   }, []);
 

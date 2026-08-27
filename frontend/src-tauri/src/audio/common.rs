@@ -47,11 +47,13 @@ pub(crate) async fn unload_engine_after_batch(use_parakeet: bool) {
 }
 
 /// Create transcript segments from transcription results.
-/// Each tuple is (text, start_ms, end_ms) from VAD timestamps.
-pub(crate) fn create_transcript_segments(transcripts: &[(String, f64, f64)]) -> Vec<TranscriptSegment> {
+/// Each tuple is (text, start_ms, end_ms, speaker) from speaker-aligned VAD timestamps.
+pub(crate) fn create_transcript_segments(
+    transcripts: &[(String, f64, f64, Option<String>)],
+) -> Vec<TranscriptSegment> {
     transcripts
         .iter()
-        .map(|(text, start_ms, end_ms)| {
+        .map(|(text, start_ms, end_ms, speaker)| {
             let start_seconds = start_ms / 1000.0;
             let end_seconds = end_ms / 1000.0;
             let duration = end_seconds - start_seconds;
@@ -63,6 +65,7 @@ pub(crate) fn create_transcript_segments(transcripts: &[(String, f64, f64)]) -> 
                 audio_start_time: Some(start_seconds),
                 audio_end_time: Some(end_seconds),
                 duration: Some(duration),
+                speaker: speaker.clone(),
             }
         })
         .collect()
@@ -74,7 +77,7 @@ pub(crate) fn write_transcripts_json(folder: &Path, segments: &[TranscriptSegmen
     let temp_path = folder.join(".transcripts.json.tmp");
 
     let json = serde_json::json!({
-        "version": "1.0",
+        "version": "1.1",
         "last_updated": chrono::Utc::now().to_rfc3339(),
         "total_segments": segments.len(),
         "segments": segments.iter().enumerate().map(|(i, s)| {
@@ -85,6 +88,7 @@ pub(crate) fn write_transcripts_json(folder: &Path, segments: &[TranscriptSegmen
                 "audio_start_time": s.audio_start_time,
                 "audio_end_time": s.audio_end_time,
                 "duration": s.duration,
+                "speaker": s.speaker,
                 "sequence_id": i
             })
         }).collect::<Vec<_>>()
@@ -105,8 +109,8 @@ pub(crate) fn write_transcripts_json(folder: &Path, segments: &[TranscriptSegmen
 /// Split a long speech segment at the lowest-energy (silence) point near the target size.
 ///
 /// Scans for 100ms windows with minimal RMS energy within +/-3 seconds of each target
-/// split point. If no clear silence is found, falls back to a 1-second overlap split
-/// to avoid cutting words at boundaries.
+/// split point. The selected boundary never exceeds `max_samples`, so downstream
+/// ASR keeps its hard chunk-duration limit.
 pub(crate) fn split_segment_at_silence(
     segment: &crate::audio::vad::SpeechSegment,
     max_samples: usize,
@@ -118,16 +122,13 @@ pub(crate) fn split_segment_at_silence(
     const SEARCH_RADIUS: usize = SAMPLE_RATE * 3;
     // RMS threshold below which we consider a window "silent"
     const SILENCE_RMS_THRESHOLD: f32 = 0.02;
-    // Overlap to use when no silence boundary is found (1 second)
-    const FALLBACK_OVERLAP: usize = SAMPLE_RATE;
-
     let total = segment.samples.len();
     if total <= max_samples {
         return vec![segment.clone()];
     }
 
-    let ms_per_sample = (segment.end_timestamp_ms - segment.start_timestamp_ms)
-        / segment.samples.len() as f64;
+    let ms_per_sample =
+        (segment.end_timestamp_ms - segment.start_timestamp_ms) / segment.samples.len() as f64;
     let mut result = Vec::new();
     let mut pos = 0usize;
 
@@ -150,9 +151,10 @@ pub(crate) fn split_segment_at_silence(
         // Target split point
         let target = pos + max_samples;
 
-        // Search window: [target - SEARCH_RADIUS, target + SEARCH_RADIUS]
+        // Search before the hard limit so a quiet boundary can shorten, but never
+        // lengthen, the ASR chunk.
         let search_start = target.saturating_sub(SEARCH_RADIUS).max(pos + SAMPLE_RATE);
-        let search_end = (target + SEARCH_RADIUS).min(total.saturating_sub(ENERGY_WINDOW));
+        let search_end = target.min(total);
 
         // Find the lowest-energy 100ms window in the search range
         let mut best_split = target.min(total); // fallback: exact target
@@ -185,12 +187,7 @@ pub(crate) fn split_segment_at_silence(
             );
         }
 
-        // Determine the actual end of this chunk (with overlap if no silence)
-        let chunk_end = if best_rms > SILENCE_RMS_THRESHOLD {
-            (split_at + FALLBACK_OVERLAP).min(total)
-        } else {
-            split_at
-        };
+        let chunk_end = split_at.min(pos + max_samples).min(total);
 
         let chunk_samples = segment.samples[pos..chunk_end].to_vec();
         let chunk_start_ms = segment.start_timestamp_ms + (pos as f64 * ms_per_sample);
@@ -203,8 +200,6 @@ pub(crate) fn split_segment_at_silence(
             confidence: segment.confidence,
         });
 
-        // Advance position to where the current chunk actually ends
-        // to avoid transcribing the overlap region twice
         pos = chunk_end;
     }
 
@@ -232,5 +227,28 @@ mod tests {
 
         acquired_rx.await.unwrap();
         waiter.await.unwrap();
+    }
+
+    #[test]
+    fn split_segment_respects_hard_maximum() {
+        let segment = crate::audio::vad::SpeechSegment {
+            samples: vec![0.5; 60 * 16_000],
+            start_timestamp_ms: 0.0,
+            end_timestamp_ms: 60_000.0,
+            confidence: 1.0,
+        };
+
+        let chunks = split_segment_at_silence(&segment, 25 * 16_000);
+
+        assert!(chunks
+            .iter()
+            .all(|chunk| chunk.samples.len() <= 25 * 16_000));
+        assert_eq!(
+            chunks
+                .iter()
+                .map(|chunk| chunk.samples.len())
+                .sum::<usize>(),
+            segment.samples.len()
+        );
     }
 }

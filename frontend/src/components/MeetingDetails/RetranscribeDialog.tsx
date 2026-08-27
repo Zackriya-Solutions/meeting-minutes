@@ -63,6 +63,7 @@ export function RetranscribeDialog({
   const [progress, setProgress] = useState<RetranscriptionProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selectedLang, setSelectedLang] = useState(selectedLanguage || 'auto');
+  const [speakerCount, setSpeakerCount] = useState('auto');
 
   // Use centralized model fetching hook
   const {
@@ -112,6 +113,7 @@ export function RetranscribeDialog({
       setProgress(null);
       setError(null);
       setSelectedLang(selectedLanguage || 'auto');
+      setSpeakerCount('auto');
 
       // Fetch available models using centralized hook
       fetchModels();
@@ -220,6 +222,7 @@ export function RetranscribeDialog({
         language: languageToSend,
         model: selectedModelDetails?.name || null,
         provider: selectedModelDetails?.provider || null,
+        speakerCount: speakerCount === 'auto' ? null : Number.parseInt(speakerCount, 10),
       });
     } catch (err: any) {
       setIsProcessing(false);
@@ -356,6 +359,26 @@ export function RetranscribeDialog({
               </Select>
               <p className="text-xs text-muted-foreground">
                 Choose a transcription model
+              </p>
+            </div>
+          )}
+
+          {!isProcessing && !error && (
+            <div className="space-y-3">
+              <span className="text-sm font-medium">Speaker count</span>
+              <Select value={speakerCount} onValueChange={setSpeakerCount}>
+                <SelectTrigger className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="auto">Auto detect</SelectItem>
+                  {Array.from({ length: 10 }, (_, index) => index + 1).map(count => (
+                    <SelectItem key={count} value={count.toString()}>{count}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                Leave on Auto unless you know the exact number of speakers.
               </p>
             </div>
           )}

@@ -51,7 +51,8 @@ export interface UseImportAudioReturn {
     title: string,
     language?: string | null,
     model?: string | null,
-    provider?: string | null
+    provider?: string | null,
+    speakerCount?: number | null
   ) => Promise<void>;
   cancelImport: () => Promise<void>;
   reset: () => void;
@@ -208,7 +209,8 @@ export function useImportAudio({
       title: string,
       language?: string | null,
       model?: string | null,
-      provider?: string | null
+      provider?: string | null,
+      speakerCount?: number | null
     ) => {
       isCancelledRef.current = false;
       setStatus('processing');
@@ -232,6 +234,7 @@ export function useImportAudio({
           language: language || null,
           model: model || null,
           provider: provider || null,
+          speakerCount: speakerCount || null,
         });
       } catch (err: any) {
         setStatus('error');

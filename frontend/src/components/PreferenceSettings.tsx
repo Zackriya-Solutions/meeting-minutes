@@ -5,7 +5,6 @@ import { Switch } from "./ui/switch"
 import { FolderOpen } from "lucide-react"
 import { invoke } from "@tauri-apps/api/core"
 import Analytics from "@/lib/analytics"
-import AnalyticsConsentSwitch from "./AnalyticsConsentSwitch"
 import { useConfig, NotificationSettings } from "@/contexts/ConfigContext"
 
 export function PreferenceSettings() {
@@ -220,10 +219,6 @@ export function PreferenceSettings() {
         </div>
       </div>
 
-      {/* Analytics Section */}
-      <div className="bg-white rounded-lg border border-gray-200 p-6 shadow-sm">
-        <AnalyticsConsentSwitch />
-      </div>
     </div>
   )
 }

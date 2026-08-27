@@ -26,6 +26,8 @@ export interface StoredTranscript {
   audio_start_time?: number;  // Recording-relative start time in seconds
   audio_end_time?: number;    // Recording-relative end time in seconds
   duration?: number;          // Duration in seconds
+  speaker?: string | null;
+  speaker_is_provisional?: boolean;
   [key: string]: any;         // Allow additional fields from TranscriptUpdate
 }
 
@@ -268,6 +270,44 @@ class IndexedDBService {
       console.warn('Failed to save transcript to IndexedDB:', error);
       // Fail silently - don't interrupt recording
     }
+  }
+
+  async updateSpeakerLabels(
+    meetingId: string,
+    labels: Array<{ sequence_id: number; speaker?: string | null }>
+  ): Promise<void> {
+    if (!this.db || labels.length === 0) {
+      if (!this.db) await this.init();
+      if (labels.length === 0) return;
+    }
+
+    const bySequence = new Map(labels.map(label => [label.sequence_id, label.speaker ?? null]));
+    const transaction = this.db!.transaction(['transcripts'], 'readwrite');
+    const store = transaction.objectStore('transcripts');
+    const index = store.index('meetingId');
+    const range = IDBKeyRange.only(meetingId);
+
+    await new Promise<void>((resolve, reject) => {
+      const request = index.openCursor(range);
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error ?? new Error('Speaker label update aborted'));
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => {
+        const cursor = request.result;
+        if (!cursor) {
+          return;
+        }
+        const value = cursor.value as StoredTranscript;
+        const sequenceId = value.sequence_id ?? value.sequenceId;
+        if (bySequence.has(sequenceId)) {
+          value.speaker = bySequence.get(sequenceId) ?? null;
+          value.speaker_is_provisional = false;
+          cursor.update(value);
+        }
+        cursor.continue();
+      };
+    });
   }
 
   /**
