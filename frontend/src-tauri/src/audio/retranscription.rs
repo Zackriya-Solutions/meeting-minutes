@@ -736,6 +736,7 @@ fn write_retranscription_metadata(
         let existing = std::fs::read_to_string(&metadata_path)?;
         let mut value: serde_json::Value = serde_json::from_str(&existing)?;
         if let Some(obj) = value.as_object_mut() {
+            obj.insert("duration_seconds".to_string(), serde_json::json!(duration_seconds));
             obj.insert("retranscribed_at".to_string(), serde_json::json!(now));
             obj.insert("status".to_string(), serde_json::json!("completed"));
             obj.insert("transcript_file".to_string(), serde_json::json!("transcripts.json"));
@@ -1012,5 +1013,41 @@ mod tests {
         // Non-audio formats
         assert!(!AUDIO_EXTENSIONS.contains(&"txt"));
         assert!(!AUDIO_EXTENSIONS.contains(&"pdf"));
+    }
+
+    #[test]
+    fn retranscription_metadata_replaces_stale_duration_without_losing_existing_fields() {
+        let dir = tempfile::tempdir().unwrap();
+        let metadata_path = dir.path().join("metadata.json");
+        std::fs::write(
+            &metadata_path,
+            serde_json::to_string_pretty(&serde_json::json!({
+                "meeting_id": "existing-meeting",
+                "duration_seconds": 2523.2,
+                "audio_file": "recording.m4a",
+                "summary_language": "fr",
+                "detected_summary_language": "en",
+                "custom_field": "preserve me"
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        write_retranscription_metadata(
+            dir.path(),
+            "ignored-for-existing-metadata",
+            5046.4,
+            "recording.m4a",
+        )
+        .unwrap();
+
+        let metadata: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(metadata_path).unwrap()).unwrap();
+        assert_eq!(metadata["duration_seconds"], 5046.4);
+        assert_eq!(metadata["meeting_id"], "existing-meeting");
+        assert_eq!(metadata["audio_file"], "recording.m4a");
+        assert_eq!(metadata["summary_language"], "fr");
+        assert_eq!(metadata["custom_field"], "preserve me");
+        assert!(metadata.get("detected_summary_language").is_none());
     }
 }
