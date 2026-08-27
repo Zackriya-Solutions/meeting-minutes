@@ -1,4 +1,4 @@
-use crate::whisper_engine::{is_download_cancelled, ModelInfo, WhisperEngine};
+use crate::whisper_engine::{is_download_cancelled, CancelDownloadOutcome, ModelInfo, WhisperEngine};
 use std::sync::{Arc, Mutex};
 use std::path::PathBuf;
 use tauri::{command, Emitter, Manager, AppHandle, Runtime};
@@ -492,7 +492,7 @@ pub async fn whisper_download_model(
 }
 
 #[command]
-pub async fn whisper_cancel_download(model_name: String) -> Result<(), String> {
+pub async fn whisper_cancel_download(model_name: String) -> Result<CancelDownloadOutcome, String> {
     let engine = {
         let guard = WHISPER_ENGINE.lock().unwrap();
         guard.as_ref().cloned()

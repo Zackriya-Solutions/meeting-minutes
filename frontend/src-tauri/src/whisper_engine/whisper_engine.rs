@@ -40,12 +40,27 @@ struct ActiveDownload {
     completion: watch::Sender<bool>,
 }
 
+#[cfg(test)]
+struct DownloadStateTestHook {
+    cancellation_first_lock_acquired: tokio::sync::Notify,
+    continue_cancellation: tokio::sync::Notify,
+    discovery_active_lock_acquired: tokio::sync::Notify,
+    continue_discovery: tokio::sync::Notify,
+}
+
 #[derive(Debug, thiserror::Error)]
 #[error("Download cancelled by user")]
 pub(crate) struct DownloadCancelled;
 
 pub(crate) fn is_download_cancelled(error: &anyhow::Error) -> bool {
     error.downcast_ref::<DownloadCancelled>().is_some()
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CancelDownloadOutcome {
+    Cancelled,
+    Pending,
 }
 
 const CANCEL_DOWNLOAD_CLEANUP_TIMEOUT: Duration = Duration::from_secs(5);
@@ -62,6 +77,8 @@ pub struct WhisperEngine {
     transcription_count: Arc<RwLock<u64>>,
     // A model remains active until its owning worker has completed cleanup.
     active_downloads: Arc<Mutex<HashMap<String, Arc<ActiveDownload>>>>,
+    #[cfg(test)]
+    download_state_test_hook: std::sync::Mutex<Option<Arc<DownloadStateTestHook>>>,
 }
 
 impl WhisperEngine {
@@ -175,9 +192,19 @@ impl WhisperEngine {
             // Performance optimization: reduce logging frequency
             transcription_count: Arc::new(RwLock::new(0)),
             active_downloads: Arc::new(Mutex::new(HashMap::new())),
+            #[cfg(test)]
+            download_state_test_hook: std::sync::Mutex::new(None),
         };
         
         Ok(engine)
+    }
+
+    #[cfg(test)]
+    fn test_hook(&self) -> Option<Arc<DownloadStateTestHook>> {
+        self.download_state_test_hook
+            .lock()
+            .expect("download state test hook mutex should not be poisoned")
+            .clone()
     }
     
     pub async fn discover_models(&self) -> Result<Vec<ModelInfo>> {
@@ -240,6 +267,11 @@ impl WhisperEngine {
         }
         
         let active_downloads = self.active_downloads.lock().await;
+        #[cfg(test)]
+        if let Some(hook) = self.test_hook() {
+            hook.discovery_active_lock_acquired.notify_one();
+            hook.continue_discovery.notified().await;
+        }
         let mut available_models = self.available_models.write().await;
         for model in &mut models {
             if active_downloads.contains_key(&model.name) {
@@ -999,15 +1031,20 @@ impl WhisperEngine {
                 }
             }
 
-            let mut models = self.available_models.write().await;
-            if let Some(model_info) = models.get_mut(model_name) {
-                model_info.status = ModelStatus::Missing;
-            }
-
             let removed = {
                 let mut active_downloads = self.active_downloads.lock().await;
+                #[cfg(test)]
+                if let Some(hook) = self.test_hook() {
+                    hook.cancellation_first_lock_acquired.notify_one();
+                    hook.continue_cancellation.notified().await;
+                }
+
+                let mut models = self.available_models.write().await;
                 match active_downloads.get(model_name) {
                     Some(current) if Arc::ptr_eq(current, active_download) => {
+                        if let Some(model_info) = models.get_mut(model_name) {
+                            model_info.status = ModelStatus::Missing;
+                        }
                         active_downloads.remove(model_name);
                         true
                     }
@@ -1199,7 +1236,7 @@ impl WhisperEngine {
         Ok(())
     }
 
-    pub async fn cancel_download(&self, model_name: &str) -> Result<()> {
+    pub async fn cancel_download(&self, model_name: &str) -> Result<CancelDownloadOutcome> {
         self.cancel_download_with_timeout(model_name, CANCEL_DOWNLOAD_CLEANUP_TIMEOUT)
             .await
     }
@@ -1208,11 +1245,11 @@ impl WhisperEngine {
         &self,
         model_name: &str,
         cleanup_timeout: Duration,
-    ) -> Result<()> {
+    ) -> Result<CancelDownloadOutcome> {
         log::info!("Cancelling download for model: {}", model_name);
 
         let Some(active_download) = self.active_downloads.lock().await.get(model_name).cloned() else {
-            return Ok(());
+            return Ok(CancelDownloadOutcome::Cancelled);
         };
 
         active_download.cancellation.cancel();
@@ -1225,12 +1262,12 @@ impl WhisperEngine {
                     return Err(anyhow!("Download worker ended before completing cancellation cleanup"));
                 }
                 Err(_) => {
-                    return Err(anyhow!("Timed out waiting for download cancellation cleanup"));
+                    return Ok(CancelDownloadOutcome::Pending);
                 }
             }
         }
 
-        Ok(())
+        Ok(CancelDownloadOutcome::Cancelled)
     }
 }
 
@@ -1404,26 +1441,133 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn cancelled_finalization_holds_active_ownership_before_discovery() {
+        let dir = tempfile::tempdir().unwrap();
+        let engine = Arc::new(WhisperEngine::new_with_models_dir(Some(dir.path().to_path_buf())).unwrap());
+        engine.discover_models().await.unwrap();
+
+        let active_download = engine.reserve_active_download("tiny").await.unwrap();
+        active_download.cancellation.cancel();
+
+        let hook = Arc::new(DownloadStateTestHook {
+            cancellation_first_lock_acquired: tokio::sync::Notify::new(),
+            continue_cancellation: tokio::sync::Notify::new(),
+            discovery_active_lock_acquired: tokio::sync::Notify::new(),
+            continue_discovery: tokio::sync::Notify::new(),
+        });
+        *engine.download_state_test_hook.lock().unwrap() = Some(Arc::clone(&hook));
+
+        let finalization_engine = Arc::clone(&engine);
+        let finalization_owner = Arc::clone(&active_download);
+        let model_path = dir.path().join("ggml-tiny.bin");
+        let finalization = tokio::spawn(async move {
+            finalization_engine
+                .finish_download(
+                    "tiny",
+                    &finalization_owner,
+                    &model_path,
+                    Err(DownloadCancelled.into()),
+                )
+                .await
+        });
+
+        timeout(
+            Duration::from_secs(1),
+            hook.cancellation_first_lock_acquired.notified(),
+        )
+        .await
+        .expect("cancellation finalization should reach its first lock");
+
+        let discovery_engine = Arc::clone(&engine);
+        let discovery = tokio::spawn(async move { discovery_engine.discover_models().await });
+
+        assert!(
+            timeout(
+                Duration::from_millis(100),
+                hook.discovery_active_lock_acquired.notified(),
+            )
+            .await
+            .is_err(),
+            "discovery must wait for cancellation to release active ownership"
+        );
+
+        hook.continue_cancellation.notify_one();
+        let finalization_result = timeout(Duration::from_secs(1), finalization)
+            .await
+            .expect("cancelled finalization should complete")
+            .unwrap()
+            .unwrap_err();
+        assert!(is_download_cancelled(&finalization_result));
+
+        timeout(
+            Duration::from_secs(1),
+            hook.discovery_active_lock_acquired.notified(),
+        )
+        .await
+        .expect("discovery should acquire active ownership after cancellation finalizes");
+        hook.continue_discovery.notify_one();
+
+        let models = timeout(Duration::from_secs(1), discovery)
+            .await
+            .expect("discovery should complete")
+            .unwrap()
+            .unwrap();
+        assert!(matches!(tiny_model(&models).status, ModelStatus::Missing));
+        assert!(!engine.active_downloads.lock().await.contains_key("tiny"));
+    }
+
+    #[tokio::test]
     async fn cancelling_an_unresponsive_download_keeps_ownership_reserved() {
         let dir = tempfile::tempdir().unwrap();
         let engine = WhisperEngine::new_with_models_dir(Some(dir.path().to_path_buf())).unwrap();
         let active_download = engine.reserve_active_download("tiny").await.unwrap();
 
-        let error = engine
+        let outcome = engine
             .cancel_download_with_timeout("tiny", Duration::from_millis(1))
             .await
-            .unwrap_err();
+            .expect("an unresponsive download should report cancellation pending");
 
-        assert_eq!(
-            error.to_string(),
-            "Timed out waiting for download cancellation cleanup"
-        );
+        assert_eq!(outcome, CancelDownloadOutcome::Pending);
         assert!(active_download.cancellation.is_cancelled());
         assert!(matches!(
             engine.active_downloads.lock().await.get("tiny"),
             Some(current) if Arc::ptr_eq(current, &active_download)
         ));
         assert!(engine.reserve_active_download("tiny").await.is_err());
+    }
+
+    #[tokio::test]
+    async fn late_cancellation_preserves_a_completed_model_state() {
+        let dir = tempfile::tempdir().unwrap();
+        let engine = WhisperEngine::new_with_models_dir(Some(dir.path().to_path_buf())).unwrap();
+        let model_path = dir.path().join("ggml-tiny.bin");
+
+        std::fs::write(&model_path, b"ggml\0\0\0\0").unwrap();
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&model_path)
+            .unwrap()
+            .set_len(68 * 1024 * 1024)
+            .unwrap();
+
+        engine.discover_models().await.unwrap();
+        let active_download = engine.reserve_active_download("tiny").await.unwrap();
+        engine
+            .finish_download("tiny", &active_download, &model_path, Ok(()))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            engine
+                .cancel_download_with_timeout("tiny", Duration::from_millis(1))
+                .await
+                .unwrap(),
+            CancelDownloadOutcome::Cancelled
+        );
+        assert!(matches!(
+            tiny_model(&engine.discover_models().await.unwrap()).status,
+            ModelStatus::Available
+        ));
     }
 
     async fn stalled_http_server(
