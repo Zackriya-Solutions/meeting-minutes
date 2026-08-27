@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { RecordingControls } from '@/components/RecordingControls';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
@@ -21,8 +21,10 @@ import { useTeamsDetection } from '@/hooks/useTeamsDetection';
 import { TranscriptRecovery } from '@/components/TranscriptRecovery';
 import { TeamsDetectionPopup } from '@/components/TeamsDetectionPopup';
 import { indexedDBService } from '@/services/indexedDBService';
+import { recordingService } from '@/services/recordingService';
 import { toast } from 'sonner';
 import { useRouter } from 'next/navigation';
+import { appDataDir } from '@tauri-apps/api/path';
 
 export default function Home() {
   // Local page state (not moved to contexts)
@@ -51,11 +53,26 @@ export default function Home() {
     setIsRecordingDisabled
   );
 
+  // Full stop flow for Teams auto-detection: must invoke stop_recording on the Rust backend
+  // before calling handleRecordingStop (which only does post-processing)
+  const handleTeamsStop = useCallback(async () => {
+    try {
+      const dataDir = await appDataDir();
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      await recordingService.stopRecording(`${dataDir}/recording-${timestamp}.wav`);
+      Analytics.trackTranscriptionSuccess();
+    } catch (error) {
+      console.error('Teams auto-stop: error stopping recording:', error);
+      // Continue to post-processing even on error (may already be stopped)
+    }
+    await handleRecordingStop(true);
+  }, [handleRecordingStop]);
+
   // Teams meeting detection
   const teamsDetection = useTeamsDetection(
     recordingState.isRecording,
     handleRecordingStart,
-    () => handleRecordingStop(true)
+    handleTeamsStop
   );
 
   // Recovery hook

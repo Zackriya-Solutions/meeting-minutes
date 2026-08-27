@@ -104,7 +104,7 @@ export function useTeamsDetection(
             setShowEndPopup(false);
             onStopRef.current();
           }, 0);
-          return COUNTDOWN_SECONDS;
+          return 0;
         }
         return prev - 1;
       });
