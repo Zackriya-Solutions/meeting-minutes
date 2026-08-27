@@ -17,6 +17,11 @@ static SEQUENCE_COUNTER: AtomicU64 = AtomicU64::new(0);
 // Speech detection flag - reset per recording session
 static SPEECH_DETECTED_EMITTED: AtomicBool = AtomicBool::new(false);
 
+// Confidence is preserved as metadata, but emission depends only on transcript content.
+fn should_emit_transcript(transcript: &str, _confidence: Option<f32>) -> bool {
+    !transcript.trim().is_empty()
+}
+
 /// Reset the speech detected flag for a new recording session
 pub fn reset_speech_detected_flag() {
     SPEECH_DETECTED_EMITTED.store(false, Ordering::SeqCst);
@@ -152,24 +157,15 @@ pub fn start_transcription_task<R: Runtime>(
                             .await
                             {
                                 Ok((transcript, confidence_opt, is_partial)) => {
-                                    // Provider-aware confidence threshold
-                                    let confidence_threshold = match &engine_clone {
-                                        TranscriptionEngine::Whisper(_) | TranscriptionEngine::Provider(_) => 0.3,
-                                        TranscriptionEngine::Parakeet(_) => 0.0, // Parakeet has no confidence, accept all
-                                    };
-
                                     let confidence_str = match confidence_opt {
                                         Some(c) => format!("{:.2}", c),
                                         None => "N/A".to_string(),
                                     };
 
-                                    info!("🔍 Worker {} transcription result: text='{}', confidence={}, partial={}, threshold={:.2}",
-                                          worker_id, transcript, confidence_str, is_partial, confidence_threshold);
+                                    info!("🔍 Worker {} transcription result: text='{}', confidence={}, partial={}",
+                                          worker_id, transcript, confidence_str, is_partial);
 
-                                    // Check confidence threshold (or accept if no confidence provided)
-                                    let meets_threshold = confidence_opt.map_or(true, |c| c >= confidence_threshold);
-
-                                    if !transcript.trim().is_empty() && meets_threshold {
+                                    if should_emit_transcript(&transcript, confidence_opt) {
                                         // PERFORMANCE: Only log transcription results, not every processing step
                                         info!("✅ Worker {} transcribed: {} (confidence: {}, partial: {})",
                                               worker_id, transcript, confidence_str, is_partial);
@@ -227,12 +223,6 @@ pub fn start_transcription_task<R: Runtime>(
                                             );
                                         }
                                         // PERFORMANCE: Removed verbose logging of every emission
-                                    } else if !transcript.trim().is_empty() && should_log_this_chunk
-                                    {
-                                        // PERFORMANCE: Only log low-confidence results occasionally
-                                        if let Some(c) = confidence_opt {
-                                            info!("Worker {} low-confidence transcription (confidence: {:.2}), skipping", worker_id, c);
-                                        }
                                     }
                                 }
                                 Err(e) => {
@@ -593,4 +583,31 @@ fn format_recording_time(seconds: f64) -> String {
     let secs = total_seconds % 60;
 
     format!("[{:02}:{:02}]", minutes, secs)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_emit_transcript;
+
+    #[test]
+    fn accepts_short_nonempty_transcripts_regardless_of_confidence() {
+        for (transcript, confidence) in [
+            ("OK", 0.12),
+            ("Yes", 0.13),
+            ("No", 0.12),
+            ("Sure", 0.14),
+            ("Got it", 0.16),
+            ("Thanks", 0.16),
+        ] {
+            assert!(
+                should_emit_transcript(transcript, Some(confidence)),
+                "expected short transcript '{transcript}' to be emitted"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_whitespace_only_transcript() {
+        assert!(!should_emit_transcript("   ", Some(1.0)));
+    }
 }
