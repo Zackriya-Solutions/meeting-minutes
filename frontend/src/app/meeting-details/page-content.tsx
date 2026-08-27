@@ -191,6 +191,9 @@ export default function PageContent({
           meetingId={meeting.id}
           meetingFolderPath={meeting.folder_path}
           onRefetchTranscripts={onRefetchTranscripts}
+          // Export props (#441)
+          meetingTitle={meeting.title}
+          meetingCreatedAt={meeting.created_at}
         />
         <SummaryPanel
           meeting={meeting}
