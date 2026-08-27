@@ -5,12 +5,154 @@ use regex::Regex;
 use reqwest::Client;
 use std::path::PathBuf;
 use tokio_util::sync::CancellationToken;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 // Compile regex once and reuse (significant performance improvement for repeated calls)
 static THINKING_TAG_REGEX: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"(?s)<think(?:ing)?>.*?</think(?:ing)?>").unwrap()
+    // Capture inner reasoning text from closed think tags
+    Regex::new(r"(?is)<think(?:ing)?>(.*?)</think(?:ing)?>").unwrap()
 });
+
+static OPEN_THINK_TAG_REGEX: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"(?i)<think(?:ing)?>").unwrap()
+});
+
+static HEADING_LINE_START_REGEX: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"\n(#{1,6}\s)").unwrap()
+});
+
+fn strip_unclosed_think_tags(text: &str) -> (String, Option<String>) {
+    let Some(open_match) = OPEN_THINK_TAG_REGEX.find(text) else {
+        return (text.to_string(), None);
+    };
+
+    let prefix = &text[..open_match.start()];
+    let after_open = &text[open_match.end()..];
+
+    if let Some(m) = HEADING_LINE_START_REGEX.find(after_open) {
+        let reasoning = after_open[..m.start()].trim();
+        let summary = &after_open[m.start() + 1..];
+        let cleaned = format!("{}{}", prefix, summary).trim().to_string();
+        let reasoning = (!reasoning.is_empty()).then(|| reasoning.to_string());
+        return (cleaned, reasoning);
+    }
+
+    let reasoning = after_open.trim();
+    let reasoning = (!reasoning.is_empty()).then(|| reasoning.to_string());
+    (prefix.trim().to_string(), reasoning)
+}
+
+/// Leading meta/CoT headings/phrases seen with thinking models (issue #592).
+static LEADING_COT_LINE_REGEX: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(
+        r"(?i)^(#{1,6}\s*)?(Thinking|Self-Correction|Decision Strategy|Strict Interpretation|Wait\.{0,3}|Actually checking.*)$",
+    )
+    .unwrap()
+});
+
+fn strip_leading_plaintext_cot(text: &str) -> (String, Option<String>) {
+    let mut lines = text.lines().peekable();
+    let mut cot_lines = Vec::new();
+    while let Some(line) = lines.peek() {
+        let t = line.trim();
+        if t.is_empty() || LEADING_COT_LINE_REGEX.is_match(t) {
+            if !t.is_empty() {
+                cot_lines.push(t.to_string());
+            }
+            lines.next();
+            continue;
+        }
+        break;
+    }
+    let cleaned = lines.collect::<Vec<_>>().join("\n").trim().to_string();
+    let reasoning = (!cot_lines.is_empty()).then(|| cot_lines.join("\n"));
+    (cleaned, reasoning)
+}
+
+/// Result of cleaning LLM markdown, including any extracted reasoning text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CleanedLlmMarkdown {
+    pub markdown: String,
+    pub reasoning: Option<String>,
+}
+
+fn merge_reasoning(parts: &[Option<String>]) -> Option<String> {
+    let joined = parts
+        .iter()
+        .filter_map(|p| p.as_deref())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    (!joined.is_empty()).then_some(joined)
+}
+
+/// Cleans markdown and returns any stripped reasoning for the UI.
+pub fn clean_llm_markdown_detailed(markdown: &str) -> CleanedLlmMarkdown {
+    let original = markdown.to_string();
+
+    let mut think_parts = Vec::new();
+    for caps in THINKING_TAG_REGEX.captures_iter(markdown) {
+        if let Some(inner) = caps.get(1) {
+            let t = inner.as_str().trim();
+            if !t.is_empty() {
+                think_parts.push(t.to_string());
+            }
+        }
+    }
+    let closed_reasoning = (!think_parts.is_empty()).then(|| think_parts.join("\n\n"));
+
+    let without_closed = THINKING_TAG_REGEX.replace_all(markdown, "");
+    let (without_thinking, unclosed_reasoning) = strip_unclosed_think_tags(&without_closed);
+    let (without_cot, cot_reasoning) = strip_leading_plaintext_cot(&without_thinking);
+    let trimmed = without_cot.trim();
+
+    let reasoning = merge_reasoning(&[closed_reasoning, unclosed_reasoning, cot_reasoning]);
+
+    if trimmed.is_empty() {
+        warn!("clean_llm_markdown_output produced empty output; keeping original");
+        return CleanedLlmMarkdown {
+            markdown: original,
+            reasoning: None,
+        };
+    }
+
+    const PREFIXES: &[&str] = &["```markdown\n", "```\n"];
+    const SUFFIX: &str = "```";
+    for prefix in PREFIXES {
+        if trimmed.starts_with(prefix) && trimmed.ends_with(SUFFIX) {
+            let content = &trimmed[prefix.len()..trimmed.len() - SUFFIX.len()];
+            let c = content.trim();
+            if c.is_empty() {
+                warn!("clean_llm_markdown_output fence strip emptied content; keeping original");
+                return CleanedLlmMarkdown {
+                    markdown: original,
+                    reasoning: None,
+                };
+            }
+            return CleanedLlmMarkdown {
+                markdown: c.to_string(),
+                reasoning,
+            };
+        }
+    }
+
+    CleanedLlmMarkdown {
+        markdown: trimmed.to_string(),
+        reasoning,
+    }
+}
+
+/// Cleans markdown output from LLM by removing thinking tags and code fences
+///
+/// # Arguments
+/// * `markdown` - Raw markdown output from LLM
+///
+/// # Returns
+/// Cleaned markdown string
+pub fn clean_llm_markdown_output(markdown: &str) -> String {
+    clean_llm_markdown_detailed(markdown).markdown
+}
 
 const ENGLISH_BASE_SUMMARY_INSTRUCTION: &str =
     "**Write the summary/report in English regardless of transcript language; non-English prose is invalid.**";
@@ -136,13 +278,13 @@ fn translation_system_prompt(target_language: &str) -> String {
 
 fn build_chunk_summary_user_prompt(chunk: &str) -> String {
     format!(
-        "{ENGLISH_BASE_SUMMARY_INSTRUCTION}\n\nProvide a concise but comprehensive summary of the following transcript chunk. Capture all key points, decisions, action items, and mentioned individuals.\n\n<transcript_chunk>\n{chunk}\n</transcript_chunk>"
+        "{ENGLISH_BASE_SUMMARY_INSTRUCTION}\n\nProvide a concise but comprehensive summary of the following transcript chunk. Capture all key points, decisions, action items, and mentioned individuals. Do not include reasoning, self-correction, or meta-commentary — output only the summary content.\n\n<transcript_chunk>\n{chunk}\n</transcript_chunk>"
     )
 }
 
 fn build_combine_summary_user_prompt(combined_text: &str) -> String {
     format!(
-        "{ENGLISH_BASE_SUMMARY_INSTRUCTION}\n\nThe following are consecutive summaries of a meeting. Combine them into a single, coherent, and detailed narrative summary that retains all important details, organized logically.\n\n<summaries>\n{combined_text}\n</summaries>"
+        "{ENGLISH_BASE_SUMMARY_INSTRUCTION}\n\nThe following are consecutive summaries of a meeting. Combine them into a single, coherent, and detailed narrative summary that retains all important details, organized logically. Do not include reasoning, self-correction, or meta-commentary — output only the summary content.\n\n<summaries>\n{combined_text}\n</summaries>"
     )
 }
 
@@ -160,7 +302,8 @@ fn build_final_report_system_prompt(
 4. Fill each template section per its instructions.
 5. If a section has no relevant info, write "None noted in this section."
 6. Output **only** the completed Markdown report.
-7. If unsure about something, omit it.
+7. Do not include reasoning, thinking, self-correction, decision strategy, or any meta-commentary sections — output only the completed Markdown report.
+8. If unsure about something, omit it.
 
 **SECTION-SPECIFIC INSTRUCTIONS:**
 {section_instructions}
@@ -256,35 +399,6 @@ pub fn chunk_text(text: &str, chunk_size_tokens: usize, overlap_tokens: usize) -
     chunks
 }
 
-/// Cleans markdown output from LLM by removing thinking tags and code fences
-///
-/// # Arguments
-/// * `markdown` - Raw markdown output from LLM
-///
-/// # Returns
-/// Cleaned markdown string
-pub fn clean_llm_markdown_output(markdown: &str) -> String {
-    // Remove <think>...</think> or <thinking>...</thinking> blocks using cached regex
-    let without_thinking = THINKING_TAG_REGEX.replace_all(markdown, "");
-
-    let trimmed = without_thinking.trim();
-
-    // List of possible language identifiers for code blocks
-    const PREFIXES: &[&str] = &["```markdown\n", "```\n"];
-    const SUFFIX: &str = "```";
-
-    for prefix in PREFIXES {
-        if trimmed.starts_with(prefix) && trimmed.ends_with(SUFFIX) {
-            // Extract content between the fences
-            let content = &trimmed[prefix.len()..trimmed.len() - SUFFIX.len()];
-            return content.trim().to_string();
-        }
-    }
-
-    // If no fences found, return the trimmed string
-    trimmed.to_string()
-}
-
 /// Extracts meeting name from the first heading in markdown
 ///
 /// # Arguments
@@ -322,9 +436,10 @@ pub fn extract_meeting_name_from_markdown(markdown: &str) -> Option<String> {
 /// * `cached_english` - Optional previously-generated English summary to skip pass 1 when translating
 ///
 /// # Returns
-/// Tuple of (final_summary_markdown, english_summary_markdown, number_of_chunks_processed)
+/// Tuple of (final_summary_markdown, english_summary_markdown, number_of_chunks_processed, stripped_reasoning)
 /// where english_summary_markdown is the canonical AI-generated English summary
-/// (equals final_summary_markdown when target language is English)
+/// (equals final_summary_markdown when target language is English).
+/// `stripped_reasoning` is present when model thinking/CoT was removed from the summary.
 pub async fn generate_meeting_summary(
     client: &Client,
     provider: &LLMProvider,
@@ -345,7 +460,7 @@ pub async fn generate_meeting_summary(
     summary_language: Option<&str>,
     detected_transcript_language: Option<&str>,
     cached_english: Option<&str>,
-) -> Result<(String, String, i64), String> {
+) -> Result<(String, String, i64, Option<String>), String> {
     if let Some(token) = cancellation_token {
         if token.is_cancelled() {
             return Err("Summary generation was cancelled".to_string());
@@ -359,13 +474,13 @@ pub async fn generate_meeting_summary(
     let total_tokens = rough_token_count(text);
     info!("Transcript length: {} tokens", total_tokens);
 
-    let (mut english_markdown, successful_chunk_count) = if let Some(cached) =
+    let (mut english_markdown, successful_chunk_count, mut stripped_reasoning) = if let Some(cached) =
         resolve_cached_english(cached_english, summary_language)
     {
         info!("✓ Using cached English summary ({} chars), skipping pass 1", cached.len());
-        (cached.to_string(), 1_i64)
+        (cached.to_string(), 1_i64, None)
     } else {
-        let content_to_summarize: String;
+        let mut content_to_summarize: String;
         let successful_chunk_count: i64;
 
         // Strategy: Use single-pass for cloud providers or short transcripts
@@ -422,7 +537,7 @@ pub async fn generate_meeting_summary(
                 .await
                 {
                     Ok(summary) => {
-                        chunk_summaries.push(summary);
+                        chunk_summaries.push(clean_llm_markdown_output(&summary));
                         info!("✓ Chunk {}/{} processed successfully", i + 1, num_chunks);
                     }
                     Err(e) => {
@@ -457,7 +572,7 @@ pub async fn generate_meeting_summary(
                 let combined_text = chunk_summaries.join("\n---\n");
                 let system_prompt_combine = "You are an expert at synthesizing meeting summaries.";
                 let user_prompt_combine = build_combine_summary_user_prompt(&combined_text);
-                generate_summary(
+                let combined = generate_summary(
                     client,
                     provider,
                     model_name,
@@ -472,9 +587,10 @@ pub async fn generate_meeting_summary(
                     app_data_dir,
                     cancellation_token,
                 )
-                .await?
+                .await?;
+                clean_llm_markdown_output(&combined)
             } else {
-                chunk_summaries.remove(0)
+                chunk_summaries.remove(0) // already cleaned on push
             };
         }
 
@@ -522,10 +638,14 @@ pub async fn generate_meeting_summary(
         )
         .await?;
 
-        let english_markdown = clean_llm_markdown_output(&raw_markdown);
-        info!("Summary pass completed ({} chars)", english_markdown.len());
+        let cleaned = clean_llm_markdown_detailed(&raw_markdown);
+        info!(
+            "Summary pass completed ({} chars, reasoning_stripped={})",
+            cleaned.markdown.len(),
+            cleaned.reasoning.is_some()
+        );
 
-        (english_markdown, successful_chunk_count)
+        (cleaned.markdown, successful_chunk_count, cleaned.reasoning)
     };
 
     let final_markdown = match resolve_final_language_action(summary_language, detected_transcript_language) {
@@ -547,7 +667,11 @@ pub async fn generate_meeting_summary(
             )
             .await
             {
-                Ok(translated) => translated,
+                Ok(translated) => {
+                    let cleaned = clean_llm_markdown_detailed(&translated);
+                    stripped_reasoning = merge_reasoning(&[stripped_reasoning, cleaned.reasoning]);
+                    cleaned.markdown
+                }
                 Err(e) => return Err(format!("Translation to {} failed: {}", name, e)),
             }
         }
@@ -574,14 +698,21 @@ pub async fn generate_meeting_summary(
                 )
                 .await,
             )?;
-            english_markdown = normalized.clone();
-            normalized
+            let cleaned = clean_llm_markdown_detailed(&normalized);
+            stripped_reasoning = merge_reasoning(&[stripped_reasoning, cleaned.reasoning]);
+            english_markdown = cleaned.markdown.clone();
+            cleaned.markdown
         }
         FinalLanguageAction::ReturnEnglish => english_markdown.clone(),
     };
 
     info!("Summary generation completed successfully");
-    Ok((final_markdown, english_markdown, successful_chunk_count))
+    Ok((
+        final_markdown,
+        english_markdown,
+        successful_chunk_count,
+        stripped_reasoning,
+    ))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -762,6 +893,24 @@ mod tests {
     }
 
     #[test]
+    fn final_report_prompt_forbids_reasoning_output() {
+        let prompt = build_final_report_system_prompt("Fill", "# Title");
+        assert!(prompt.to_lowercase().contains("no reasoning")
+            || prompt.contains("meta-commentary")
+            || prompt.contains("self-correction"));
+    }
+
+    #[test]
+    fn chunk_prompt_forbids_reasoning_output() {
+        let prompt = build_chunk_summary_user_prompt("x");
+        assert!(
+            prompt.contains("Do not include reasoning")
+                || prompt.contains("meta-commentary")
+                || prompt.contains("self-correction")
+        );
+    }
+
+    #[test]
     fn english_base_instruction_marks_non_english_prose_invalid_without_bloat() {
         assert!(ENGLISH_BASE_SUMMARY_INSTRUCTION.contains("non-English prose is invalid"));
         assert!(ENGLISH_BASE_SUMMARY_INSTRUCTION.len() <= 120);
@@ -880,5 +1029,49 @@ mod tests {
     fn underscore_locale_variant_returns_none() {
         // OS locale APIs (notably macOS) may emit "en_GB" with underscore.
         assert_eq!(resolve_cached_english(Some("body"), Some("en_GB")), None);
+    }
+
+    #[test]
+    fn clean_detailed_returns_stripped_reasoning() {
+        let input = "<think>internal plan</think>\n# Meeting\nHello";
+        let cleaned = clean_llm_markdown_detailed(input);
+        assert_eq!(cleaned.markdown, "# Meeting\nHello");
+        assert_eq!(cleaned.reasoning.as_deref(), Some("internal plan"));
+    }
+
+    #[test]
+    fn clean_strips_think_tags() {
+        let input = "<think>internal</think>\n# Meeting\nHello";
+        assert_eq!(clean_llm_markdown_output(input), "# Meeting\nHello");
+    }
+
+    #[test]
+    fn clean_strips_unclosed_think_tag() {
+        let input = "<think>still thinking\n# Meeting\nHello";
+        let out = clean_llm_markdown_output(input);
+        assert!(!out.contains("<think>"));
+        assert!(out.contains("# Meeting"));
+    }
+
+    #[test]
+    fn clean_strips_leading_plaintext_cot() {
+        let input = "Thinking\n\nSelf-Correction\nActually checking...\n\n# Key Decisions\n- Ship it\n";
+        let out = clean_llm_markdown_output(input);
+        assert!(!out.contains("Self-Correction"));
+        assert!(out.starts_with("# Key Decisions") || out.contains("# Key Decisions"));
+        assert!(out.contains("Ship it"));
+    }
+
+    #[test]
+    fn clean_preserves_clean_summary() {
+        let input = "# Standup\n\n## Action Items\n- Alice: deploy\n";
+        assert_eq!(clean_llm_markdown_output(input), input.trim());
+    }
+
+    #[test]
+    fn clean_empty_after_strip_keeps_original() {
+        let input = "<think>only thinking</think>";
+        // After strip, content is empty/whitespace → keep original (safety)
+        assert_eq!(clean_llm_markdown_output(input), input);
     }
 }

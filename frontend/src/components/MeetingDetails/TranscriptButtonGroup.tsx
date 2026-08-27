@@ -51,36 +51,36 @@ export function TranscriptButtonGroup({
           title={transcriptCount === 0 ? 'No transcript available' : 'Copy Transcript'}
         >
           <Copy />
-          <span className="hidden lg:inline">Copy</span>
+          <span className="hidden @[20rem]:inline">Copy</span>
         </Button>
 
         <Button
           size="sm"
           variant="outline"
-          className="xl:px-4"
+          className="@[20rem]:px-4"
           onClick={() => {
             Analytics.trackButtonClick('open_recording_folder', 'meeting_details');
             onOpenMeetingFolder();
           }}
           title="Open Recording Folder"
         >
-          <FolderOpen className="xl:mr-2" size={18} />
-          <span className="hidden lg:inline">Recording</span>
+          <FolderOpen className="@[20rem]:mr-2" size={18} />
+          <span className="hidden @[20rem]:inline">Recording</span>
         </Button>
 
         {betaFeatures.importAndRetranscribe && meetingId && meetingFolderPath && (
           <Button
             size="sm"
             variant="outline"
-            className="bg-gradient-to-r from-blue-50 to-purple-50 hover:from-blue-100 hover:to-purple-100 border-blue-200 xl:px-4"
+            className="bg-gradient-to-r from-blue-50 to-purple-50 hover:from-blue-100 hover:to-purple-100 border-blue-200 @[20rem]:px-4"
             onClick={() => {
               Analytics.trackButtonClick('enhance_transcript', 'meeting_details');
               setShowRetranscribeDialog(true);
             }}
             title="Retranscribe to enhance your recorded audio"
           >
-            <RefreshCw className="xl:mr-2" size={18} />
-            <span className="hidden lg:inline">Enhance</span>
+            <RefreshCw className="@[20rem]:mr-2" size={18} />
+            <span className="hidden @[20rem]:inline">Enhance</span>
           </Button>
         )}
       </ButtonGroup>
