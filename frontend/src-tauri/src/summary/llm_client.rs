@@ -1,11 +1,19 @@
+use std::sync::LazyLock;
 use reqwest::{header, Client};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
-use tracing::info;
+use tracing::{info, warn};
 
 const REQUEST_TIMEOUT_DURATION: Duration = Duration::from_secs(300);
+
+static OLLAMA_REASONING_EFFORT_REJECTION_REGEX: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new(
+        r#"(?i)^(unknown|unsupported|unrecognized) (parameter|field) ["']?reasoning_effort["']?[.:]?$|^reasoning_effort is not supported[.:]?$"#,
+    )
+    .unwrap()
+});
 
 // Generic structure for OpenAI-compatible API chat messages
 #[derive(Debug, Serialize)]
@@ -25,13 +33,11 @@ pub struct ChatRequest {
     pub temperature: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub top_p: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning_effort: Option<&'static str>,
 }
 
 /// Build OpenAI-compat JSON body.
-///
-/// Ollama thinking/reasoning stays enabled (no `reasoning_effort: none`) so
-/// capable models can reason; Meetily strips reasoning from the saved summary
-/// and surfaces it to the UI separately.
 pub fn build_openai_compat_chat_body(
     provider: &LLMProvider,
     model_name: &str,
@@ -62,6 +68,7 @@ pub fn build_openai_compat_chat_body(
         max_tokens: max_tokens_val,
         temperature: temperature_val,
         top_p: top_p_val,
+        reasoning_effort: (*provider == LLMProvider::Ollama).then_some("none"),
     })
 }
 
@@ -78,10 +85,12 @@ pub struct Choice {
 
 #[derive(Deserialize, Debug)]
 pub struct MessageContent {
+    #[serde(default)]
     pub content: String,
-    /// Ollama thinking models may return reasoning separately from content.
     #[serde(default)]
     pub reasoning: Option<String>,
+    #[serde(default)]
+    pub reasoning_content: Option<String>,
 }
 
 // Claude-specific request structure
@@ -101,19 +110,84 @@ pub struct ClaudeChatResponse {
 
 #[derive(Deserialize, Debug)]
 pub struct ClaudeChatContent {
-    // Only `text` blocks carry this field. Models that enable thinking by
-    // default (Sonnet 5, Opus 5) also return `thinking` blocks, which don't.
+    #[serde(rename = "type")]
+    pub block_type: String,
     pub text: Option<String>,
 }
 
 impl ClaudeChatResponse {
-    /// First block that carries text. With thinking enabled the leading block
-    /// is a `thinking` block, so `content[0]` is not necessarily the answer.
-    fn first_text(&self) -> Option<&str> {
-        self.content.iter().find_map(|block| block.text.as_deref())
+    fn completion(&self) -> Option<LlmCompletion> {
+        let content = self
+            .content
+            .iter()
+            .find(|block| block.block_type == "text")
+            .and_then(|block| block.text.as_deref())?
+            .trim()
+            .to_string();
+        Some(LlmCompletion {
+            content,
+            reasoning_stripped: self.content.iter().any(|block| {
+                matches!(block.block_type.as_str(), "thinking" | "redacted_thinking")
+            }),
+        })
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct LlmCompletion {
+    pub content: String,
+    pub reasoning_stripped: bool,
+}
+
+impl ChatResponse {
+    fn completion(&self) -> Result<LlmCompletion, String> {
+        let message = &self
+            .choices
+            .first()
+            .ok_or("No content in LLM response")?
+            .message;
+        Ok(LlmCompletion {
+            content: message.content.trim().to_string(),
+            reasoning_stripped: [message.reasoning.as_deref(), message.reasoning_content.as_deref()]
+                .into_iter()
+                .flatten()
+                .any(|reasoning| !reasoning.trim().is_empty()),
+        })
+    }
+}
+
+pub(crate) fn ollama_rejects_reasoning_effort(status: reqwest::StatusCode, body: &str) -> bool {
+    if !matches!(status.as_u16(), 400 | 422) {
+        return false;
+    }
+
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(body) else {
+        return false;
+    };
+    let matches_field = |value: Option<&serde_json::Value>| {
+        value.and_then(serde_json::Value::as_str) == Some("reasoning_effort")
+    };
+    if matches_field(value.get("param"))
+        || matches_field(value.get("field"))
+        || matches_field(value.get("error").and_then(|error| error.get("param")))
+    {
+        return true;
+    }
+
+    let matches_message = [
+        value.as_str(),
+        value.get("error").and_then(serde_json::Value::as_str),
+        value.get("message").and_then(serde_json::Value::as_str),
+        value
+            .get("error")
+            .and_then(|error| error.get("message"))
+            .and_then(serde_json::Value::as_str),
+    ]
+    .into_iter()
+    .flatten()
+    .any(|message| OLLAMA_REASONING_EFFORT_REJECTION_REGEX.is_match(message));
+    matches_message
+}
 /// LLM Provider enumeration for multi-provider support
 #[derive(Debug, Clone, PartialEq)]
 pub enum LLMProvider {
@@ -159,9 +233,8 @@ impl LLMProvider {
 /// * `app_data_dir` - Optional app data directory (for BuiltInAI provider)
 /// * `cancellation_token` - Optional token to cancel the request
 ///
-/// # Returns
-/// The generated summary text or an error message
-pub async fn generate_summary(
+/// The generated visible content and whether private reasoning was removed.
+pub(crate) async fn generate_summary(
     client: &Client,
     provider: &LLMProvider,
     model_name: &str,
@@ -175,7 +248,7 @@ pub async fn generate_summary(
     top_p: Option<f32>,
     app_data_dir: Option<&PathBuf>,
     cancellation_token: Option<&CancellationToken>,
-) -> Result<String, String> {
+) -> Result<LlmCompletion, String> {
     // Check if cancelled before starting
     if let Some(token) = cancellation_token {
         if token.is_cancelled() {
@@ -196,6 +269,10 @@ pub async fn generate_summary(
             cancellation_token,
         )
         .await
+        .map(|content| LlmCompletion {
+            content,
+            reasoning_stripped: false,
+        })
         .map_err(|e| e.to_string());
     }
 
@@ -296,8 +373,8 @@ pub async fn generate_summary(
 
     // Send request with timeout and cancellation support
     let request_future = client
-        .post(api_url)
-        .headers(headers)
+        .post(api_url.clone())
+        .headers(headers.clone())
         .json(&request_body)
         .timeout(REQUEST_TIMEOUT_DURATION)
         .send();
@@ -328,6 +405,42 @@ pub async fn generate_summary(
         })?
     };
 
+    let response = if response.status().is_success() {
+        response
+    } else {
+        let status = response.status();
+        let error_body = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "Unknown error".to_string());
+        if provider != &LLMProvider::Ollama || !ollama_rejects_reasoning_effort(status, &error_body) {
+            return Err(format!("LLM API request failed: {}", error_body));
+        }
+
+        warn!("Ollama rejected reasoning_effort; retrying once without it");
+        let mut retry_body = request_body;
+        retry_body
+            .as_object_mut()
+            .expect("OpenAI-compatible request body is an object")
+            .remove("reasoning_effort");
+        let retry_future = client
+            .post(api_url)
+            .headers(headers)
+            .json(&retry_body)
+            .timeout(REQUEST_TIMEOUT_DURATION)
+            .send();
+        if let Some(token) = cancellation_token {
+            tokio::select! {
+                result = retry_future => result.map_err(|e| format!("Failed to send retry request to LLM: {}", e))?,
+                _ = token.cancelled() => return Err("Summary generation was cancelled".to_string()),
+            }
+        } else {
+            retry_future
+                .await
+                .map_err(|e| format!("Failed to send retry request to LLM: {}", e))?
+        }
+    };
+
     if !response.status().is_success() {
         let error_body = response
             .text()
@@ -345,11 +458,10 @@ pub async fn generate_summary(
 
         info!("🐞 LLM Response received from Claude");
 
-        let content = chat_response
-            .first_text()
-            .ok_or("No text content in LLM response")?
-            .trim();
-        Ok(content.to_string())
+        let completion = chat_response
+            .completion()
+            .ok_or("No text content in LLM response")?;
+        Ok(completion)
     } else {
         let chat_response = response
             .json::<ChatResponse>()
@@ -357,58 +469,91 @@ pub async fn generate_summary(
             .map_err(|e| format!("Failed to parse LLM response: {}", e))?;
 
         info!("🐞 LLM Response received from {}", provider_name(provider));
-
-        let message = &chat_response
-            .choices
-            .get(0)
-            .ok_or("No content in LLM response")?
-            .message;
-        let content = message.content.trim();
-        // Fold separate reasoning into <think> so existing cleaners can extract it
-        // and the UI can be notified that reasoning was present.
-        if let Some(reasoning) = message
-            .reasoning
-            .as_deref()
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-        {
-            Ok(format!("<think>\n{reasoning}\n</think>\n{content}"))
-        } else {
-            Ok(content.to_string())
-        }
+        chat_response.completion()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
-    fn ollama_body_leaves_reasoning_enabled() {
-        let body = build_openai_compat_chat_body(
-            &LLMProvider::Ollama,
-            "qwen3.5:9b",
-            "sys",
-            "user",
-            None,
-            None,
-            None,
+    fn only_ollama_disables_reasoning_and_custom_sampling_is_preserved() {
+        for provider in [
+            LLMProvider::OpenAI,
+            LLMProvider::Groq,
+            LLMProvider::OpenRouter,
+            LLMProvider::CustomOpenAI,
+        ] {
+            assert!(build_openai_compat_chat_body(&provider, "model", "sys", "user", None, None, None)
+                .get("reasoning_effort")
+                .is_none());
+        }
+        let ollama = build_openai_compat_chat_body(
+            &LLMProvider::Ollama, "model", "sys", "user", None, None, None,
         );
-        assert!(body.get("reasoning_effort").is_none());
+        assert_eq!(ollama["reasoning_effort"], "none");
+        let custom = build_openai_compat_chat_body(
+            &LLMProvider::CustomOpenAI, "model", "sys", "user", Some(12), Some(0.3), Some(0.8),
+        );
+        assert_eq!(custom["max_tokens"], 12);
+        assert_eq!(custom["temperature"].as_f64(), Some(0.3_f32 as f64));
+        assert_eq!(custom["top_p"].as_f64(), Some(0.8_f32 as f64));
     }
 
     #[test]
-    fn openai_body_omits_reasoning_effort() {
-        let body = build_openai_compat_chat_body(
-            &LLMProvider::OpenAI,
-            "gpt-4o",
-            "sys",
-            "user",
-            None,
-            None,
-            None,
+    fn compatible_reasoning_is_separate_from_visible_content() {
+        let response: ChatResponse = serde_json::from_value(json!({
+            "choices": [{"message": {"reasoning_content": "private"}}]
+        }))
+        .unwrap();
+        assert_eq!(
+            response.completion().unwrap(),
+            LlmCompletion {
+                content: String::new(),
+                reasoning_stripped: true,
+            }
         );
-        assert!(body.get("reasoning_effort").is_none());
+    }
+
+    #[test]
+    fn legacy_ollama_rejection_requires_exact_status_and_shape() {
+        assert!(ollama_rejects_reasoning_effort(
+            reqwest::StatusCode::BAD_REQUEST,
+            r#"{"error":{"param":"reasoning_effort"}}"#,
+        ));
+        assert!(ollama_rejects_reasoning_effort(
+            reqwest::StatusCode::UNPROCESSABLE_ENTITY,
+            r#"{"message":"Unsupported parameter 'reasoning_effort'."}"#,
+        ));
+        assert!(!ollama_rejects_reasoning_effort(
+            reqwest::StatusCode::BAD_REQUEST,
+            r#"{"message":"reasoning_effort might be unsupported"}"#,
+        ));
+        assert!(!ollama_rejects_reasoning_effort(
+            reqwest::StatusCode::UNAUTHORIZED,
+            r#"{"error":{"param":"reasoning_effort"}}"#,
+        ));
+    }
+
+    #[test]
+    fn claude_response_uses_exact_block_types() {
+        let response: ClaudeChatResponse = serde_json::from_value(json!({
+            "content": [
+                {"type": "analysis", "text": "not visible"},
+                {"type": "thinking", "thinking": "private"},
+                {"type": "text", "text": "Meeting summary."}
+            ]
+        }))
+        .unwrap();
+        assert_eq!(
+            response.completion(),
+            Some(LlmCompletion {
+                content: "Meeting summary.".to_string(),
+                reasoning_stripped: true,
+            })
+        );
     }
 }
 
@@ -425,43 +570,4 @@ fn provider_name(provider: &LLMProvider) -> &str {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
 
-    #[test]
-    fn claude_response_skips_leading_thinking_block() {
-        // Shape returned by models with thinking enabled by default,
-        // e.g. claude-sonnet-5 / claude-opus-5.
-        let response: ClaudeChatResponse = serde_json::from_value(json!({
-            "content": [
-                {"type": "thinking", "thinking": "", "signature": "abc"},
-                {"type": "text", "text": "Meeting summary."}
-            ]
-        }))
-        .expect("thinking blocks must not fail deserialization");
-
-        assert_eq!(response.first_text(), Some("Meeting summary."));
-    }
-
-    #[test]
-    fn claude_response_reads_plain_text_block() {
-        let response: ClaudeChatResponse = serde_json::from_value(json!({
-            "content": [{"type": "text", "text": "Meeting summary."}]
-        }))
-        .unwrap();
-
-        assert_eq!(response.first_text(), Some("Meeting summary."));
-    }
-
-    #[test]
-    fn claude_response_without_text_block_returns_none() {
-        let response: ClaudeChatResponse = serde_json::from_value(json!({
-            "content": [{"type": "thinking", "thinking": "", "signature": "abc"}]
-        }))
-        .unwrap();
-
-        assert_eq!(response.first_text(), None);
-    }
-}

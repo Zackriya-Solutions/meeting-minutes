@@ -139,15 +139,9 @@ fn build_summary_result_json(
     english_markdown: &str,
     source: SummaryCacheSource,
     output_language: Option<&str>,
-    stripped_reasoning: Option<&str>,
+    reasoning_stripped: bool,
 ) -> serde_json::Value {
-    let reasoning = stripped_reasoning
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(str::to_string);
-    let reasoning_stripped = reasoning.is_some();
-
-    let mut value = serde_json::json!({
+    serde_json::json!({
         "markdown": strip_title_if_present(final_markdown),
         ENGLISH_CACHE_FIELD: EnglishSummaryCache {
             markdown: english_markdown.to_string(),
@@ -155,13 +149,7 @@ fn build_summary_result_json(
             output_language: normalise_summary_language_for_cache(output_language),
         },
         "reasoning_stripped": reasoning_stripped,
-    });
-
-    if let Some(reasoning) = reasoning {
-        value["reasoning"] = serde_json::Value::String(reasoning);
-    }
-
-    value
+    })
 }
 
 /// Parses a `summary_processes.result` JSON blob and extracts a cached English
@@ -548,14 +536,14 @@ impl SummaryService {
         Self::cleanup_cancellation_token(&meeting_id);
 
         match result {
-            Ok((final_markdown, english_markdown, num_chunks, stripped_reasoning)) => {
+            Ok(generated) => {
                 info!(
                     "✓ Successfully processed {} chunks for meeting_id: {}. Duration: {:.2}s",
-                    num_chunks, meeting_id, duration
+                    generated.successful_chunk_count, meeting_id, duration
                 );
-                info!("Final markdown generated ({} chars)", final_markdown.len());
+                info!("Final markdown generated ({} chars)", generated.final_markdown.len());
 
-                if let Some(name) = extract_meeting_name_from_markdown(&final_markdown)
+                if let Some(name) = extract_meeting_name_from_markdown(&generated.final_markdown)
                     .filter(|n| !n.is_empty())
                 {
                     info!("Extracted meeting name from summary: '{}'", name);
@@ -569,11 +557,11 @@ impl SummaryService {
                 }
 
                 let result_json = build_summary_result_json(
-                    &final_markdown,
-                    &english_markdown,
+                    &generated.final_markdown,
+                    &generated.english_markdown,
                     cache_source,
                     summary_language.as_deref(),
-                    stripped_reasoning.as_deref(),
+                    generated.reasoning_stripped,
                 );
 
                 // Update database with completed status
@@ -581,7 +569,7 @@ impl SummaryService {
                     &pool,
                     &meeting_id,
                     result_json,
-                    num_chunks,
+                    generated.successful_chunk_count,
                     duration,
                 )
                 .await
@@ -779,7 +767,7 @@ mod tests {
             "# Meeting\n## Points\nHello",
             source.clone(),
             Some("fr"),
-            None,
+            false,
         )
         .to_string();
 
@@ -797,7 +785,7 @@ mod tests {
             "# Meeting\n## Points\nHello",
             source.clone(),
             Some("fr"),
-            None,
+            false,
         )
         .to_string();
 
@@ -816,7 +804,7 @@ mod tests {
             "# Meeting\n## Points\nHello",
             source,
             Some("fr"),
-            None,
+            false,
         )
         .to_string();
 
@@ -937,7 +925,7 @@ mod tests {
             "# Meeting\n## Points\nHello",
             source.clone(),
             Some("fr"),
-            None,
+            false,
         )
         .to_string();
 
@@ -960,7 +948,7 @@ mod tests {
             "# Meeting\n## Points\nHello",
             source.clone(),
             Some("fr"),
-            None,
+            false,
         )
         .to_string();
 
@@ -982,7 +970,7 @@ mod tests {
             "# English Title\n## Decisions\nDone",
             sample_cache_source(),
             Some("fr"),
-            None,
+            false,
         );
 
         assert_eq!(result["markdown"], "## Decisions\nDone");
@@ -990,6 +978,19 @@ mod tests {
             result["english_cache"]["markdown"],
             "# English Title\n## Decisions\nDone"
         );
+    }
+
+    #[test]
+    fn result_json_never_persists_reasoning_text() {
+        let result = build_summary_result_json(
+            "# Title\nVisible",
+            "# Title\nVisible",
+            sample_cache_source(),
+            None,
+            true,
+        );
+        assert_eq!(result["reasoning_stripped"], true);
+        assert!(result.get("reasoning").is_none());
     }
 
     #[test]

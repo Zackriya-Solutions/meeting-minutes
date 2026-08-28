@@ -274,15 +274,12 @@ export function useSummaryGeneration({
           // Check if backend returned markdown format (new flow)
           if (pollingResult.data.markdown) {
             console.log('Received markdown format from backend');
-            setAiSummary({
+            const generatedSummary = {
               markdown: pollingResult.data.markdown,
-              ...(pollingResult.data.reasoning_stripped
-                ? {
-                    reasoning_stripped: true,
-                    reasoning: pollingResult.data.reasoning,
-                  }
-                : {}),
-            } as any);
+              reasoning_stripped: Boolean(pollingResult.data.reasoning_stripped),
+            };
+            // Legacy setter type does not model Markdown summaries.
+            setAiSummary(generatedSummary as unknown as Summary);
             setSummaryStatus('completed');
 
             // Show success toast

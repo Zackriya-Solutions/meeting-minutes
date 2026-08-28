@@ -223,6 +223,19 @@ async fn resolve_meeting_folder(
     Ok(MeetingFolderResolution::Folder(PathBuf::from(folder_path)))
 }
 
+fn redact_flagged_reasoning(mut result: serde_json::Value) -> serde_json::Value {
+    if result
+        .get("reasoning_stripped")
+        .and_then(serde_json::Value::as_bool)
+        == Some(true)
+    {
+        if let Some(object) = result.as_object_mut() {
+            object.remove("reasoning");
+        }
+    }
+    result
+}
+
 /// Gets summary status and data (Native SQLx implementation)
 ///
 /// Returns summary status (pending/processing/completed/failed) and parsed result data
@@ -248,7 +261,7 @@ pub async fn api_get_summary<R: Runtime>(
             // This allows displaying restored summaries after cancellation or failure
             let data = if let Some(result_str) = process.result {
                 match serde_json::from_str::<serde_json::Value>(&result_str) {
-                    Ok(parsed) => Some(parsed),
+                    Ok(parsed) => Some(redact_flagged_reasoning(parsed)),
                     Err(e) => {
                         log_error!("Failed to parse summary result JSON: {}", e);
                         None
@@ -440,5 +453,27 @@ pub async fn api_cancel_summary<R: Runtime>(
             "message": "No active summary generation to cancel",
             "meeting_id": meeting_id,
         }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn redacts_only_flagged_historical_reasoning() {
+        assert_eq!(
+            redact_flagged_reasoning(json!({
+                "reasoning_stripped": true,
+                "reasoning": "private",
+                "markdown": "visible",
+            })),
+            json!({"reasoning_stripped": true, "markdown": "visible"})
+        );
+        assert_eq!(
+            redact_flagged_reasoning(json!({"reasoning": "custom", "markdown": "visible"})),
+            json!({"reasoning": "custom", "markdown": "visible"})
+        );
     }
 }

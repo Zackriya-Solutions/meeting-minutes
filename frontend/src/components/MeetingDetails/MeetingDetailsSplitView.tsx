@@ -1,17 +1,8 @@
 'use client';
 
-import {
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-  type ReactNode,
-} from 'react';
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { FileText, Sparkles } from 'lucide-react';
-import { motion } from 'framer-motion';
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 const STORAGE_KEY = 'meetily.meetingDetails.transcriptPaneRatio';
 const DEFAULT_RATIO = 0.3;
 const MIN_RATIO = 0.2;
@@ -39,10 +30,6 @@ interface MeetingDetailsSplitViewProps {
   onTabChange: (tab: MeetingDetailsTab) => void;
 }
 
-/**
- * Desktop: side-by-side panes with a light, hover-emphasized drag separator.
- * Small screens: Settings-style Transcript / Summary tabs (one panel mounted).
- */
 export function MeetingDetailsSplitView({
   transcript,
   summary,
@@ -50,11 +37,10 @@ export function MeetingDetailsSplitView({
   onTabChange,
 }: MeetingDetailsSplitViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const [ratio, setRatio] = useState(DEFAULT_RATIO);
   const [isDesktop, setIsDesktop] = useState(true);
-  const [underlineStyle, setUnderlineStyle] = useState({ left: 0, width: 0 });
   const dragging = useRef(false);
+  const clampRatio = (value: number) => Math.min(MAX_RATIO, Math.max(MIN_RATIO, value));
 
   useEffect(() => {
     setRatio(readStoredRatio());
@@ -63,60 +49,92 @@ export function MeetingDetailsSplitView({
   useEffect(() => {
     const mediaQuery = window.matchMedia('(min-width: 768px)');
     const updateLayout = () => setIsDesktop(mediaQuery.matches);
-
     updateLayout();
     mediaQuery.addEventListener('change', updateLayout);
     return () => mediaQuery.removeEventListener('change', updateLayout);
   }, []);
 
-  useLayoutEffect(() => {
-    if (isDesktop) return;
-    const activeIndex = TABS.findIndex((tab) => tab.value === activeTab);
-    const activeTabElement = tabRefs.current[activeIndex];
-    if (activeTabElement) {
-      const { offsetLeft, offsetWidth } = activeTabElement;
-      setUnderlineStyle({ left: offsetLeft, width: offsetWidth });
-    }
-  }, [activeTab, isDesktop]);
-
-  const onPointerDown = useCallback((e: React.PointerEvent) => {
-    e.preventDefault();
+  const onPointerDown = useCallback((event: React.PointerEvent) => {
+    event.preventDefault();
     dragging.current = true;
-    (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+    event.currentTarget.setPointerCapture(event.pointerId);
   }, []);
 
-  const onPointerMove = useCallback((e: React.PointerEvent) => {
+  const onPointerMove = useCallback((event: React.PointerEvent) => {
     if (!dragging.current || !containerRef.current) return;
     const rect = containerRef.current.getBoundingClientRect();
-    const next = (e.clientX - rect.left) / rect.width;
-    const clamped = Math.min(MAX_RATIO, Math.max(MIN_RATIO, next));
-    setRatio(clamped);
+    setRatio(clampRatio((event.clientX - rect.left) / rect.width));
   }, []);
 
   const onPointerUp = useCallback(() => {
     if (!dragging.current) return;
     dragging.current = false;
-    setRatio((r) => {
-      localStorage.setItem(STORAGE_KEY, String(r));
-      return r;
+    setRatio((current) => {
+      localStorage.setItem(STORAGE_KEY, String(current));
+      return current;
     });
   }, []);
 
-  if (isDesktop) {
-    return (
+  const onSeparatorKeyDown = useCallback((event: React.KeyboardEvent) => {
+    const current = ratio;
+    const next =
+      event.key === 'ArrowLeft' ? clampRatio(current - 0.05) :
+      event.key === 'ArrowRight' ? clampRatio(current + 0.05) :
+      event.key === 'Home' ? MIN_RATIO :
+      event.key === 'End' ? MAX_RATIO :
+      null;
+    if (next === null) return;
+    event.preventDefault();
+    setRatio(next);
+    localStorage.setItem(STORAGE_KEY, String(next));
+  }, [ratio]);
+
+  const transcriptPanelProps = isDesktop
+    ? { role: 'region' as const, 'aria-label': 'Transcript', tabIndex: -1 }
+    : {};
+  const summaryPanelProps = isDesktop
+    ? { role: 'region' as const, 'aria-label': 'Summary', tabIndex: -1 }
+    : {};
+
+  return (
+    <Tabs
+      value={activeTab}
+      onValueChange={(value) => onTabChange(value as MeetingDetailsTab)}
+      className="flex flex-1 min-h-0 min-w-0 flex-col overflow-hidden"
+    >
+      <div className="shrink-0 bg-white px-2 md:hidden">
+        <TabsList className="relative h-auto w-full justify-start rounded-none border-b border-gray-200 bg-transparent p-0">
+          {TABS.map((tab) => {
+            const Icon = tab.icon;
+            return (
+              <TabsTrigger
+                key={tab.value}
+                value={tab.value}
+                className="relative z-10 flex items-center gap-2 rounded-none border-0 bg-transparent px-6 py-4 text-gray-600 data-[state=active]:bg-transparent data-[state=active]:text-blue-600 data-[state=active]:shadow-none hover:text-gray-900"
+              >
+                <Icon className="h-4 w-4" />
+                {tab.label}
+              </TabsTrigger>
+            );
+          })}
+        </TabsList>
+      </div>
       <div
         ref={containerRef}
-        className="flex flex-1 min-w-0 overflow-hidden"
+        className="flex flex-1 min-h-0 min-w-0 flex-col md:flex-row"
+        style={{ '--transcript-pane-width': `${ratio * 100}%` } as CSSProperties}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerUp}
       >
-        <div
-          className="min-w-0 h-full flex flex-col overflow-hidden"
-          style={{ width: `${ratio * 100}%`, flexShrink: 0 }}
+        <TabsContent
+          value="transcript"
+          forceMount
+          className="mt-0 flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden data-[state=inactive]:hidden md:w-[var(--transcript-pane-width)] md:flex-none md:data-[state=inactive]:flex"
+          {...transcriptPanelProps}
         >
           {transcript}
-        </div>
+        </TabsContent>
         <div
           role="separator"
           aria-orientation="vertical"
@@ -125,57 +143,21 @@ export function MeetingDetailsSplitView({
           aria-valuemax={Math.round(MAX_RATIO * 100)}
           aria-label="Resize transcript and summary"
           tabIndex={0}
-          className="group relative z-10 flex w-2 flex-shrink-0 cursor-col-resize items-stretch justify-center"
+          className="group relative z-10 hidden w-2 flex-shrink-0 cursor-col-resize items-stretch justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-inset md:flex"
           onPointerDown={onPointerDown}
+          onKeyDown={onSeparatorKeyDown}
         >
-          <div
-            className="h-full w-px bg-gray-200 transition-[width,background-color] duration-150 ease-out group-hover:w-1 group-hover:bg-blue-400 group-active:w-1 group-active:bg-blue-500"
-          />
+          <div className="h-full w-px bg-gray-200 transition-[width,background-color] duration-150 ease-out group-hover:w-1 group-hover:bg-blue-400 group-active:w-1 group-active:bg-blue-500" />
         </div>
-        <div className="flex-1 min-w-0 h-full flex flex-col overflow-hidden">
+        <TabsContent
+          value="summary"
+          forceMount
+          className="mt-0 flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden data-[state=inactive]:hidden md:data-[state=inactive]:flex"
+          {...summaryPanelProps}
+        >
           {summary}
-        </div>
+        </TabsContent>
       </div>
-    );
-  }
-
-  return (
-    <div className="flex flex-1 min-w-0 flex-col overflow-hidden">
-      <Tabs
-        value={activeTab}
-        onValueChange={(v) => onTabChange(v as MeetingDetailsTab)}
-        className="flex flex-1 min-w-0 flex-col overflow-hidden"
-      >
-        <div className="bg-white px-2 shrink-0">
-          <TabsList className="bg-transparent relative rounded-none border-b border-gray-200 p-0 h-auto w-full justify-start">
-            {TABS.map((tab, index) => {
-              const Icon = tab.icon;
-              return (
-                <TabsTrigger
-                  key={tab.value}
-                  value={tab.value}
-                  ref={(el) => {
-                    tabRefs.current[index] = el;
-                  }}
-                  className="flex items-center gap-2 px-6 py-4 bg-transparent rounded-none border-0 data-[state=active]:bg-transparent data-[state=active]:text-blue-600 data-[state=active]:shadow-none text-gray-600 hover:text-gray-900 relative z-10"
-                >
-                  <Icon className="w-4 h-4" />
-                  {tab.label}
-                </TabsTrigger>
-              );
-            })}
-            <motion.div
-              className="absolute bottom-0 z-20 h-0.5 bg-blue-600"
-              layoutId="meeting-details-underline"
-              style={{ left: underlineStyle.left, width: underlineStyle.width }}
-              transition={{ type: 'spring', stiffness: 400, damping: 40 }}
-            />
-          </TabsList>
-        </div>
-        <div className="flex-1 min-h-0 min-w-0 overflow-hidden">
-          {activeTab === 'transcript' ? transcript : summary}
-        </div>
-      </Tabs>
-    </div>
+    </Tabs>
   );
 }
