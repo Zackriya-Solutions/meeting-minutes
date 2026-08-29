@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { MeetingSummary, Summary, SummaryDataResponse, Transcript } from '@/types';
 import { ModelConfig } from '@/components/ModelSettingsModal';
 import { CurrentMeeting, useSidebar } from '@/components/Sidebar/SidebarProvider';
@@ -75,6 +75,7 @@ export function useSummaryGeneration({
 }: UseSummaryGenerationProps) {
   const [summaryStatus, setSummaryStatus] = useState<SummaryStatus>('idle');
   const [summaryError, setSummaryError] = useState<string | null>(null);
+  const generationIdRef = useRef(0);
 
   const { startSummaryPolling, stopSummaryPolling } = useSidebar();
 
@@ -108,6 +109,7 @@ export function useSummaryGeneration({
     customPrompt?: string;
     isRegeneration?: boolean;
   }) => {
+    const generationId = ++generationIdRef.current;
     setSummaryStatus(isRegeneration ? 'regenerating' : 'processing');
     setSummaryError(null);
 
@@ -146,6 +148,8 @@ export function useSummaryGeneration({
         transcriptTexts?.length ? transcriptTexts : [transcriptText]
       );
 
+      if (generationId !== generationIdRef.current) return;
+
       // Process transcript and get process_id
       const result = await invokeTauri('api_process_transcript', {
         text: transcriptText,
@@ -160,10 +164,14 @@ export function useSummaryGeneration({
       }) as any;
 
       const process_id = result.process_id;
+
+      if (generationId !== generationIdRef.current) return;
+
       console.log('Process ID:', process_id);
 
       // Start global polling via context
       startSummaryPolling(meeting.id, process_id, async (pollingResult) => {
+        if (generationId !== generationIdRef.current) return;
         console.log('Summary status:', pollingResult);
 
         // Handle cancellation
@@ -176,6 +184,9 @@ export function useSummaryGeneration({
               meetingId: meeting.id
             }) as any;
 
+            if (generationId !== generationIdRef.current) return;
+
+
             if (existingSummary?.data) {
               console.log('Restored previous summary after cancellation');
               setAiSummary(existingSummary.data);
@@ -184,6 +195,7 @@ export function useSummaryGeneration({
               setSummaryStatus('idle');
             }
           } catch (error) {
+            if (generationId !== generationIdRef.current) return;
             console.error('Failed to reload summary after cancellation:', error);
             setSummaryStatus('idle');
           }
@@ -203,6 +215,9 @@ export function useSummaryGeneration({
               const existingSummary = await invokeTauri('api_get_summary', {
                 meetingId: meeting.id
               }) as any;
+
+              if (generationId !== generationIdRef.current) return;
+
 
               if (existingSummary?.data) {
                 console.log('Restored previous summary after regeneration failure');
@@ -225,6 +240,7 @@ export function useSummaryGeneration({
                 return;
               }
             } catch (error) {
+              if (generationId !== generationIdRef.current) return;
               console.error('Failed to reload summary after error:', error);
             }
           }
@@ -375,6 +391,7 @@ export function useSummaryGeneration({
         }
       });
     } catch (error) {
+      if (generationId !== generationIdRef.current) return;
       console.error(`Failed to ${isRegeneration ? 'regenerate' : 'generate'} summary:`, error);
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       setSummaryError(errorMessage);
@@ -640,6 +657,7 @@ export function useSummaryGeneration({
 
   // Public API: Stop ongoing summary generation
   const handleStopGeneration = useCallback(async () => {
+    generationIdRef.current += 1;
     console.log('Stopping summary generation for meeting:', meeting.id);
 
     try {
