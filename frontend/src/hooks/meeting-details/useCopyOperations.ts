@@ -1,5 +1,5 @@
 import { useCallback, RefObject } from 'react';
-import { Transcript, Summary } from '@/types';
+import { MeetingSummary, Transcript } from '@/types';
 import { BlockNoteSummaryViewRef } from '@/components/AISummary/BlockNoteSummaryView';
 import { toast } from 'sonner';
 import Analytics from '@/lib/analytics';
@@ -9,7 +9,7 @@ interface UseCopyOperationsProps {
   meeting: any;
   transcripts: Transcript[];
   meetingTitle: string;
-  aiSummary: Summary | null;
+  aiSummary: MeetingSummary | null;
   blockNoteSummaryRef: RefObject<BlockNoteSummaryViewRef>;
 }
 
@@ -119,9 +119,9 @@ export function useCopyOperations({
       }
 
       // Fallback: Check if aiSummary has markdown property
-      if (!summaryMarkdown && aiSummary && 'markdown' in aiSummary) {
+      if (!summaryMarkdown && aiSummary && typeof aiSummary.markdown === 'string') {
         console.log('📝 Using markdown from aiSummary');
-        summaryMarkdown = (aiSummary as any).markdown || '';
+        summaryMarkdown = aiSummary.markdown;
         console.log('📝 Markdown from aiSummary, length:', summaryMarkdown.length);
       }
 

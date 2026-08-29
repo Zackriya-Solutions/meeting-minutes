@@ -1,6 +1,6 @@
 "use client";
 
-import { Summary, SummaryResponse, Transcript } from '@/types';
+import { MeetingSummary, Summary, SummaryResponse, Transcript } from '@/types';
 import { BlockNoteSummaryView, BlockNoteSummaryViewRef } from '@/components/AISummary/BlockNoteSummaryView';
 import { EmptyStateSummary } from '@/components/EmptyStateSummary';
 import { ModelConfig } from '@/components/ModelSettingsModal';
@@ -28,17 +28,13 @@ interface SummaryPanelProps {
     created_at: string;
   };
   meetingTitle: string;
-  onTitleChange: (title: string) => void;
-  isEditingTitle: boolean;
-  onStartEditTitle: () => void;
-  onFinishEditTitle: () => void;
-  isTitleDirty: boolean;
+  isSummaryDirty: boolean;
   summaryRef: RefObject<BlockNoteSummaryViewRef>;
   isSaving: boolean;
   onSaveAll: () => Promise<void>;
   onCopySummary: () => Promise<void>;
   onOpenFolder: () => Promise<void>;
-  aiSummary: Summary | null;
+  aiSummary: MeetingSummary | null;
   summaryStatus: 'idle' | 'processing' | 'summarizing' | 'regenerating' | 'completed' | 'error';
   transcripts: Transcript[];
   modelConfig: ModelConfig;
@@ -48,7 +44,7 @@ interface SummaryPanelProps {
   onStopGeneration: () => void;
   customPrompt: string;
   summaryResponse: SummaryResponse | null;
-  onSaveSummary: (summary: Summary | { markdown?: string; summary_json?: any[] }) => Promise<void>;
+  onSaveSummary: (summary: MeetingSummary) => Promise<void>;
   onSummaryChange: (summary: Summary) => void;
   onDirtyChange: (isDirty: boolean) => void;
   summaryError: string | null;
@@ -64,11 +60,7 @@ interface SummaryPanelProps {
 export function SummaryPanel({
   meeting,
   meetingTitle,
-  onTitleChange,
-  isEditingTitle,
-  onStartEditTitle,
-  onFinishEditTitle,
-  isTitleDirty,
+  isSummaryDirty,
   summaryRef,
   isSaving,
   onSaveAll,
@@ -280,7 +272,7 @@ export function SummaryPanel({
             <div className="flex-shrink-0">
               <SummaryUpdaterButtonGroup
                 isSaving={isSaving}
-                isDirty={isTitleDirty || (summaryRef.current?.isDirty || false)}
+                isDirty={isSummaryDirty}
                 onSave={onSaveAll}
                 onCopy={onCopySummary}
                 onFind={() => {

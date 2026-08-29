@@ -85,6 +85,8 @@ export interface SummaryDataResponse {
   [key: string]: any; // For legacy section data
 }
 
+export type MeetingSummary = Summary | SummaryDataResponse;
+
 // Pagination types for optimized transcript loading
 export interface MeetingMetadata {
   id: string;

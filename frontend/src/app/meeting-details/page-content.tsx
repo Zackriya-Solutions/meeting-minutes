@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
-import { Summary, SummaryResponse } from '@/types';
+import { MeetingSummary, SummaryResponse } from '@/types';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
 import Analytics from '@/lib/analytics';
 import { invoke } from '@tauri-apps/api/core';
@@ -35,7 +35,7 @@ export default function PageContent({
   onLoadMore,
 }: {
   meeting: any;
-  summaryData: Summary | null;
+  summaryData: MeetingSummary | null;
   shouldAutoGenerate?: boolean;
   onAutoGenerateComplete?: () => void;
   onMeetingUpdated?: () => Promise<void>;
@@ -62,6 +62,7 @@ export default function PageContent({
 
   // Ref to store the modal open function from SummaryGeneratorButtonGroup
   const openModelSettingsRef = useRef<(() => void) | null>(null);
+  const autoSwitchedSummaryMeetingIdsRef = useRef(new Set<string>());
 
   // Sidebar context
   const { serverAddress } = useSidebar();
@@ -142,10 +143,14 @@ export default function PageContent({
   }, []);
 
   useEffect(() => {
-    if (meetingData.aiSummary || summaryGeneration.summaryStatus === 'completed') {
+    if (
+      (meetingData.aiSummary || summaryGeneration.summaryStatus === 'completed') &&
+      !autoSwitchedSummaryMeetingIdsRef.current.has(meeting.id)
+    ) {
+      autoSwitchedSummaryMeetingIdsRef.current.add(meeting.id);
       setActiveTab('summary');
     }
-  }, [meetingData.aiSummary, summaryGeneration.summaryStatus]);
+  }, [meeting.id, meetingData.aiSummary, summaryGeneration.summaryStatus]);
 
   // Auto-generate summary when flag is set
   useEffect(() => {
@@ -207,13 +212,9 @@ export default function PageContent({
             <SummaryPanel
               meeting={meeting}
               meetingTitle={meetingData.meetingTitle}
-              onTitleChange={meetingData.handleTitleChange}
-              isEditingTitle={meetingData.isEditingTitle}
-              onStartEditTitle={() => meetingData.setIsEditingTitle(true)}
-              onFinishEditTitle={() => meetingData.setIsEditingTitle(false)}
-              isTitleDirty={meetingData.isTitleDirty}
               summaryRef={meetingData.blockNoteSummaryRef}
               isSaving={meetingData.isSaving}
+              isSummaryDirty={meetingData.isSummaryDirty}
               onSaveAll={meetingData.saveAllChanges}
               onCopySummary={copyOperations.handleCopySummary}
               onOpenFolder={meetingOperations.handleOpenMeetingFolder}

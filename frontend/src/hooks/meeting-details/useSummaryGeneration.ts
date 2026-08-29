@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import { Transcript, Summary } from '@/types';
+import { MeetingSummary, Summary, SummaryDataResponse, Transcript } from '@/types';
 import { ModelConfig } from '@/components/ModelSettingsModal';
 import { CurrentMeeting, useSidebar } from '@/components/Sidebar/SidebarProvider';
 import { invoke as invokeTauri } from '@tauri-apps/api/core';
@@ -58,7 +58,7 @@ interface UseSummaryGenerationProps {
   selectedTemplate: string;
   onMeetingUpdated?: () => Promise<void>;
   updateMeetingTitle: (title: string) => void;
-  setAiSummary: (summary: Summary | null) => void;
+  setAiSummary: (summary: MeetingSummary | null) => void;
   onOpenModelSettings?: () => void;
 }
 
@@ -274,12 +274,11 @@ export function useSummaryGeneration({
           // Check if backend returned markdown format (new flow)
           if (pollingResult.data.markdown) {
             console.log('Received markdown format from backend');
-            const generatedSummary = {
+            const generatedSummary: SummaryDataResponse = {
               markdown: pollingResult.data.markdown,
               reasoning_stripped: Boolean(pollingResult.data.reasoning_stripped),
             };
-            // Legacy setter type does not model Markdown summaries.
-            setAiSummary(generatedSummary as unknown as Summary);
+            setAiSummary(generatedSummary);
             setSummaryStatus('completed');
 
             // Show success toast

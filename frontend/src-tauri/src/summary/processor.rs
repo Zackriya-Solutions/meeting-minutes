@@ -5,7 +5,7 @@ use regex::Regex;
 use reqwest::Client;
 use std::path::PathBuf;
 use tokio_util::sync::CancellationToken;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 static LEADING_THINK_ENVELOPE_REGEX: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"(?is)^\s*<think(?:ing)?>(.*?)</think(?:ing)?>").unwrap());
@@ -66,6 +66,12 @@ pub fn require_visible_markdown(stage: &str, cleaned: &CleanedLlmMarkdown) -> Re
     }
 }
 
+const MAX_CHUNK_ATTEMPTS: usize = 2;
+
+fn should_retry_chunk_failure(attempt: usize, error: &str) -> bool {
+    attempt < MAX_CHUNK_ATTEMPTS && !error.contains("cancelled")
+}
+
 const ENGLISH_BASE_SUMMARY_INSTRUCTION: &str =
     "**Write the summary/report in English regardless of transcript language; non-English prose is invalid.**";
 
@@ -117,10 +123,13 @@ fn english_markdown_after_normalization_result(
 ) -> Result<CleanedLlmMarkdown, String> {
     match normalization_result {
         Ok(cleaned) if !cleaned.markdown.is_empty() => Ok(cleaned),
-        Ok(cleaned) => Ok(CleanedLlmMarkdown {
-            markdown: original_markdown.to_string(),
-            reasoning_stripped: cleaned.reasoning_stripped,
-        }),
+        Ok(cleaned) => {
+            warn!("English normalization returned no visible content; returning pass-1 markdown");
+            Ok(CleanedLlmMarkdown {
+                markdown: original_markdown.to_string(),
+                reasoning_stripped: cleaned.reasoning_stripped,
+            })
+        }
         Err(e) if e.contains("cancelled") => Err(e),
         Err(e) => {
             error!(
@@ -381,31 +390,63 @@ pub(crate) async fn generate_meeting_summary(
             {
                 let chunks = chunk_text(text, token_threshold - 300, 100);
                 let num_chunks = chunks.len();
-                let mut chunk_summaries = Vec::new();
+                let mut chunk_summaries = Vec::with_capacity(num_chunks);
                 for (index, chunk) in chunks.iter().enumerate() {
                     if cancellation_token.is_some_and(CancellationToken::is_cancelled) {
                         return Err("Summary generation was cancelled".to_string());
                     }
                     let prompt = build_chunk_summary_user_prompt(chunk);
-                    match generate_summary(
-                        client, provider, model_name, api_key, "You are an expert meeting summarizer.",
-                        &prompt, ollama_endpoint, custom_openai_endpoint, max_tokens, temperature,
-                        top_p, app_data_dir, cancellation_token,
-                    )
-                    .await
-                    {
-                        Ok(completion) => {
-                            let cleaned = clean_llm_markdown_detailed(&completion.content);
-                            stage_reasoning_stripped |=
-                                completion.reasoning_stripped || cleaned.reasoning_stripped;
-                            if let Err(error) = require_visible_markdown("Summary chunk", &cleaned) {
-                                error!("Failed processing chunk {}/{}: {}", index + 1, num_chunks, error);
-                            } else {
+                    for attempt in 1..=MAX_CHUNK_ATTEMPTS {
+                        let result = match generate_summary(
+                            client, provider, model_name, api_key, "You are an expert meeting summarizer.",
+                            &prompt, ollama_endpoint, custom_openai_endpoint, max_tokens, temperature,
+                            top_p, app_data_dir, cancellation_token,
+                        )
+                        .await
+                        {
+                            Ok(completion) => {
+                                let cleaned = clean_llm_markdown_detailed(&completion.content);
+                                stage_reasoning_stripped |=
+                                    completion.reasoning_stripped || cleaned.reasoning_stripped;
+                                require_visible_markdown("Summary chunk", &cleaned).map(|()| cleaned)
+                            }
+                            Err(error) => Err(error),
+                        };
+
+                        match result {
+                            Ok(cleaned) => {
                                 chunk_summaries.push(cleaned.markdown);
+                                break;
+                            }
+                            Err(error) if error.contains("cancelled") => return Err(error),
+                            Err(error) if should_retry_chunk_failure(attempt, &error) => {
+                                warn!(
+                                    "Failed processing chunk {}/{} on attempt {}/{}: {}; retrying",
+                                    index + 1,
+                                    num_chunks,
+                                    attempt,
+                                    MAX_CHUNK_ATTEMPTS,
+                                    error
+                                );
+                            }
+                            Err(error) => {
+                                error!(
+                                    "Failed processing chunk {}/{} on attempt {}/{}: {}",
+                                    index + 1,
+                                    num_chunks,
+                                    attempt,
+                                    MAX_CHUNK_ATTEMPTS,
+                                    error
+                                );
+                                return Err(format!(
+                                    "Summary generation could not complete because transcript section {} of {} failed after {} attempts: {}. Please retry.",
+                                    index + 1,
+                                    num_chunks,
+                                    MAX_CHUNK_ATTEMPTS,
+                                    error
+                                ));
                             }
                         }
-                        Err(error) if error.contains("cancelled") => return Err(error),
-                        Err(error) => error!("Failed processing chunk {}/{}: {}", index + 1, num_chunks, error),
                     }
                 }
                 if chunk_summaries.is_empty() {
@@ -709,6 +750,13 @@ mod tests {
             Err("Summary generation was cancelled".to_string()),
         )
         .is_err());
+    }
+
+    #[test]
+    fn chunk_retries_once_unless_cancelled() {
+        assert!(should_retry_chunk_failure(1, "request failed"));
+        assert!(!should_retry_chunk_failure(2, "request failed"));
+        assert!(!should_retry_chunk_failure(1, "Summary generation was cancelled"));
     }
 
     // resolve_cached_english matrix -------------------------------------------

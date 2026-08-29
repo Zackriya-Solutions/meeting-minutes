@@ -15,10 +15,21 @@ const TABS = [
 
 function readStoredRatio(): number {
   if (typeof window === 'undefined') return DEFAULT_RATIO;
-  const raw = localStorage.getItem(STORAGE_KEY);
-  const n = raw == null ? NaN : Number(raw);
-  if (!Number.isFinite(n) || n < MIN_RATIO || n > MAX_RATIO) return DEFAULT_RATIO;
-  return n;
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    const n = raw == null ? NaN : Number(raw);
+    return Number.isFinite(n) && n >= MIN_RATIO && n <= MAX_RATIO ? n : DEFAULT_RATIO;
+  } catch {
+    return DEFAULT_RATIO;
+  }
+}
+
+function writeStoredRatio(value: number): void {
+  try {
+    localStorage.setItem(STORAGE_KEY, String(value));
+  } catch {
+    // Layout persistence is optional.
+  }
 }
 
 export type MeetingDetailsTab = 'transcript' | 'summary';
@@ -70,7 +81,7 @@ export function MeetingDetailsSplitView({
     if (!dragging.current) return;
     dragging.current = false;
     setRatio((current) => {
-      localStorage.setItem(STORAGE_KEY, String(current));
+      writeStoredRatio(current);
       return current;
     });
   }, []);
@@ -86,7 +97,7 @@ export function MeetingDetailsSplitView({
     if (next === null) return;
     event.preventDefault();
     setRatio(next);
-    localStorage.setItem(STORAGE_KEY, String(next));
+    writeStoredRatio(next);
   }, [ratio]);
 
   const transcriptPanelProps = isDesktop

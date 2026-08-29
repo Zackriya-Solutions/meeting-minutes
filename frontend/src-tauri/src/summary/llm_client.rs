@@ -1,4 +1,3 @@
-use std::sync::LazyLock;
 use reqwest::{header, Client};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -7,13 +6,6 @@ use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 
 const REQUEST_TIMEOUT_DURATION: Duration = Duration::from_secs(300);
-
-static OLLAMA_REASONING_EFFORT_REJECTION_REGEX: LazyLock<regex::Regex> = LazyLock::new(|| {
-    regex::Regex::new(
-        r#"(?i)^(unknown|unsupported|unrecognized) (parameter|field) ["']?reasoning_effort["']?[.:]?$|^reasoning_effort is not supported[.:]?$"#,
-    )
-    .unwrap()
-});
 
 // Generic structure for OpenAI-compatible API chat messages
 #[derive(Debug, Serialize)]
@@ -165,11 +157,14 @@ pub(crate) fn ollama_rejects_reasoning_effort(status: reqwest::StatusCode, body:
         return false;
     };
     let matches_field = |value: Option<&serde_json::Value>| {
-        value.and_then(serde_json::Value::as_str) == Some("reasoning_effort")
+        value
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|field| field.eq_ignore_ascii_case("reasoning_effort"))
     };
     if matches_field(value.get("param"))
         || matches_field(value.get("field"))
         || matches_field(value.get("error").and_then(|error| error.get("param")))
+        || matches_field(value.get("error").and_then(|error| error.get("field")))
     {
         return true;
     }
@@ -185,7 +180,13 @@ pub(crate) fn ollama_rejects_reasoning_effort(status: reqwest::StatusCode, body:
     ]
     .into_iter()
     .flatten()
-    .any(|message| OLLAMA_REASONING_EFFORT_REJECTION_REGEX.is_match(message));
+    .any(|message| {
+        let message = message.to_ascii_lowercase();
+        message.contains("reasoning_effort")
+            || (message.contains("think value")
+                && message.contains("none")
+                && (message.contains("not supported") || message.contains("invalid")))
+    });
     matches_message
 }
 /// LLM Provider enumeration for multi-provider support
@@ -385,7 +386,10 @@ pub(crate) async fn generate_summary(
             result = request_future => {
                 result.map_err(|e| {
                     if e.is_timeout() {
-                        format!("LLM request timed out after 60 seconds")
+                        format!(
+                            "LLM request timed out after {} seconds",
+                            REQUEST_TIMEOUT_DURATION.as_secs()
+                        )
                     } else {
                         format!("Failed to send request to LLM: {}", e)
                     }
@@ -398,7 +402,10 @@ pub(crate) async fn generate_summary(
     } else {
         request_future.await.map_err(|e| {
             if e.is_timeout() {
-                format!("LLM request timed out after 60 seconds")
+                format!(
+                    "LLM request timed out after {} seconds",
+                    REQUEST_TIMEOUT_DURATION.as_secs()
+                )
             } else {
                 format!("Failed to send request to LLM: {}", e)
             }
@@ -414,14 +421,17 @@ pub(crate) async fn generate_summary(
             .await
             .unwrap_or_else(|_| "Unknown error".to_string());
         if provider != &LLMProvider::Ollama || !ollama_rejects_reasoning_effort(status, &error_body) {
-            return Err(format!("LLM API request failed: {}", error_body));
+            return Err(format!(
+                "LLM API request failed with status {}: {}",
+                status, error_body
+            ));
         }
 
         warn!("Ollama rejected reasoning_effort; retrying once without it");
         let mut retry_body = request_body;
         retry_body
             .as_object_mut()
-            .expect("OpenAI-compatible request body is an object")
+            .ok_or_else(|| "Failed to prepare Ollama compatibility retry".to_string())?
             .remove("reasoning_effort");
         let retry_future = client
             .post(api_url)
@@ -431,22 +441,42 @@ pub(crate) async fn generate_summary(
             .send();
         if let Some(token) = cancellation_token {
             tokio::select! {
-                result = retry_future => result.map_err(|e| format!("Failed to send retry request to LLM: {}", e))?,
+                result = retry_future => result.map_err(|e| {
+                    if e.is_timeout() {
+                        format!(
+                            "LLM retry request timed out after {} seconds",
+                            REQUEST_TIMEOUT_DURATION.as_secs()
+                        )
+                    } else {
+                        format!("Failed to send retry request to LLM: {}", e)
+                    }
+                })?,
                 _ = token.cancelled() => return Err("Summary generation was cancelled".to_string()),
             }
         } else {
-            retry_future
-                .await
-                .map_err(|e| format!("Failed to send retry request to LLM: {}", e))?
+            retry_future.await.map_err(|e| {
+                if e.is_timeout() {
+                    format!(
+                        "LLM retry request timed out after {} seconds",
+                        REQUEST_TIMEOUT_DURATION.as_secs()
+                    )
+                } else {
+                    format!("Failed to send retry request to LLM: {}", e)
+                }
+            })?
         }
     };
 
     if !response.status().is_success() {
+        let status = response.status();
         let error_body = response
             .text()
             .await
             .unwrap_or_else(|_| "Unknown error".to_string());
-        return Err(format!("LLM API request failed: {}", error_body));
+        return Err(format!(
+            "LLM API request failed with status {}: {}",
+            status, error_body
+        ));
     }
 
     // Parse response based on provider
@@ -518,22 +548,30 @@ mod tests {
     }
 
     #[test]
-    fn legacy_ollama_rejection_requires_exact_status_and_shape() {
+    fn legacy_ollama_rejection_requires_compatible_error() {
         assert!(ollama_rejects_reasoning_effort(
             reqwest::StatusCode::BAD_REQUEST,
             r#"{"error":{"param":"reasoning_effort"}}"#,
         ));
         assert!(ollama_rejects_reasoning_effort(
             reqwest::StatusCode::UNPROCESSABLE_ENTITY,
-            r#"{"message":"Unsupported parameter 'reasoning_effort'."}"#,
+            r#"{"message":"Unsupported parameter 'ReAsOnInG_EfFoRt'."}"#,
+        ));
+        assert!(ollama_rejects_reasoning_effort(
+            reqwest::StatusCode::BAD_REQUEST,
+            r#"{"error":"think value \"none\" is not supported for this model"}"#,
         ));
         assert!(!ollama_rejects_reasoning_effort(
             reqwest::StatusCode::BAD_REQUEST,
-            r#"{"message":"reasoning_effort might be unsupported"}"#,
+            r#"{"message":"invalid model"}"#,
         ));
         assert!(!ollama_rejects_reasoning_effort(
             reqwest::StatusCode::UNAUTHORIZED,
             r#"{"error":{"param":"reasoning_effort"}}"#,
+        ));
+        assert!(!ollama_rejects_reasoning_effort(
+            reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+            r#"{"error":"think value \"none\" is not supported"}"#,
         ));
     }
 
