@@ -32,21 +32,9 @@ const Logo = React.forwardRef<HTMLButtonElement, LogoProps>(
           </DialogTrigger>
         ) : (
           <DialogTrigger asChild>
-            <button
-              ref={ref}
-              type="button"
-              className="mb-2 flex w-full cursor-pointer items-center justify-center bg-transparent border-none p-0 hover:opacity-80 transition-opacity"
-              aria-label="About Meetily"
-            >
-              <Image
-                src="/logo.png"
-                alt="Meetily"
-                width={137}
-                height={48}
-                className="h-9 w-auto object-contain"
-                priority
-              />
-            </button>
+            <span className="text-lg text-center border rounded-full bg-blue-50 border-white font-semibold text-gray-700 mb-2 block items-center cursor-pointer hover:opacity-80 transition-opacity">
+              <span>Meetily</span>
+            </span>
           </DialogTrigger>
         )}
         <DialogContent>
