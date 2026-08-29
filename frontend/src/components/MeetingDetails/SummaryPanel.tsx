@@ -20,7 +20,6 @@ import {
   saveMeetingSummaryLanguage,
   SummaryLanguageStorage,
 } from '@/lib/summary-language-preferences';
-import { cn } from '@/lib/utils';
 
 interface SummaryPanelProps {
   meeting: {
@@ -60,7 +59,6 @@ interface SummaryPanelProps {
   onTemplateSelect: (templateId: string, templateName: string) => void;
   isModelConfigLoading?: boolean;
   onOpenModelSettings?: (openFn: () => void) => void;
-  className?: string;
 }
 
 export function SummaryPanel({
@@ -97,7 +95,6 @@ export function SummaryPanel({
   onTemplateSelect,
   isModelConfigLoading = false,
   onOpenModelSettings,
-  className,
 }: SummaryPanelProps) {
   const [summaryLang, setSummaryLang] = useState<string | null>(null);
   const [summaryLangStorage, setSummaryLangStorage] = useState<SummaryLanguageStorage>('metadata');
@@ -255,7 +252,7 @@ export function SummaryPanel({
   );
 
   return (
-    <div className={cn("flex-1 min-w-0 flex flex-col bg-white overflow-hidden h-full w-full @container", className)}>
+    <div className="flex-1 min-w-0 flex flex-col bg-white overflow-hidden h-full w-full @container">
       {/* Top-level actions — always visible, same pattern as TranscriptPanel */}
       <div className="p-4 border-b border-gray-200">
         <div className="flex items-center justify-center w-full min-w-0 gap-2 flex-wrap">
