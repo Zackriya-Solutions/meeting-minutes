@@ -2,7 +2,7 @@ use crate::parakeet_engine::model::ParakeetModel;
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::fs;
 use tokio::io::{AsyncWriteExt, BufWriter};
@@ -116,7 +116,7 @@ pub struct ParakeetEngine {
     current_model: Arc<RwLock<Option<ParakeetModel>>>,
     current_model_name: Arc<RwLock<Option<String>>>,
     pub(crate) available_models: Arc<RwLock<HashMap<String, ModelInfo>>>,
-    cancel_download_flag: Arc<RwLock<Option<String>>>, // Model name being cancelled
+    cancelled_downloads: Arc<RwLock<HashSet<String>>>, // Models with pending cancellation requests
     // Active downloads tracking to prevent concurrent downloads
     pub(crate) active_downloads: Arc<RwLock<HashSet<String>>>, // Set of models currently being downloaded
 }
@@ -157,7 +157,7 @@ impl ParakeetEngine {
             current_model: Arc::new(RwLock::new(None)),
             current_model_name: Arc::new(RwLock::new(None)),
             available_models: Arc::new(RwLock::new(HashMap::new())),
-            cancel_download_flag: Arc::new(RwLock::new(None)),
+            cancelled_downloads: Arc::new(RwLock::new(HashSet::new())),
             // Initialize active downloads tracking
             active_downloads: Arc::new(RwLock::new(HashSet::new())),
         })
@@ -325,51 +325,25 @@ impl ParakeetEngine {
         Ok(())
     }
 
-    /// Clean incomplete model directory before download
-    /// Removes all files if directory exists but model is not Available
-    async fn clean_incomplete_model_directory(&self, model_dir: &PathBuf) -> Result<()> {
-        if !model_dir.exists() {
-            return Ok(()); // Nothing to clean
-        }
-
-        // Validate the directory
-        match self.validate_model_directory(model_dir).await {
-            Ok(_) => {
-                log::info!("Model directory is valid, no cleanup needed");
-                return Ok(());
-            }
-            Err(validation_error) => {
-                log::warn!(
-                    "Model directory exists but is invalid: {}. Cleaning up...",
-                    validation_error
-                );
-
-                // List and remove all files in the directory
-                let mut entries = fs::read_dir(model_dir).await
-                    .map_err(|e| anyhow!("Failed to read model directory: {}", e))?;
-
-                let mut removed_count = 0;
-                while let Some(entry) = entries.next_entry().await
-                    .map_err(|e| anyhow!("Failed to read directory entry: {}", e))?
-                {
-                    let path = entry.path();
-                    if path.is_file() {
-                        match fs::remove_file(&path).await {
-                            Ok(_) => {
-                                log::info!("Removed incomplete file: {:?}", path.file_name());
-                                removed_count += 1;
-                            }
-                            Err(e) => {
-                                log::warn!("Failed to remove file {:?}: {}", path, e);
-                            }
-                        }
-                    }
-                }
-
-                log::info!("Cleaned {} incomplete files from model directory", removed_count);
-                Ok(())
+    /// Count bytes that can be reused by the per-file skip/resume logic.
+    async fn existing_artifact_bytes(
+        model_dir: &Path,
+        filenames: &[&str],
+        expected_sizes: &HashMap<&str, u64>,
+    ) -> u64 {
+        let mut reusable_bytes = 0;
+        for filename in filenames {
+            let file_path = model_dir.join(filename);
+            if let (Ok(metadata), Some(expected_size)) =
+                (fs::metadata(&file_path).await, expected_sizes.get(filename))
+            {
+                // 这些尺寸是近似值，只能用于进度估算，不能据此删除文件；
+                // 缺失、偏小或版本变化后的偏大 artifact 都交给逐文件下载/校验流程处理。
+                reusable_bytes += metadata.len().min(*expected_size);
             }
         }
+
+        reusable_bytes
     }
 
     /// Load a Parakeet model
@@ -547,38 +521,54 @@ impl ParakeetEngine {
     ) -> Result<()> {
         log::info!("Starting download for Parakeet model: {}", model_name);
 
-        // Check if download is already in progress for this model
-        {
-            let active = self.active_downloads.read().await;
-            if active.contains(model_name) {
-                log::warn!("Download already in progress for Parakeet model: {}", model_name);
-                return Err(anyhow!("Download already in progress for model: {}", model_name));
-            }
-        }
-
-        // Add to active downloads
+        // 检查与注册必须在同一写锁内完成，避免两个重试任务同时通过检查并写入同一个 artifact。
         {
             let mut active = self.active_downloads.write().await;
+            if active.contains(model_name) {
+                log::warn!(
+                    "Download already in progress for Parakeet model: {}",
+                    model_name
+                );
+                return Err(anyhow!(
+                    "Download already in progress for model: {}",
+                    model_name
+                ));
+            }
+
+            // cancel_download 采用相同的 active -> cancelled 锁顺序；因此这里清理的只能是
+            // 上一次任务留下的请求，新取消请求会在注册完成后写入，不会被启动流程吞掉。
+            self.cancelled_downloads.write().await.remove(model_name);
             active.insert(model_name.to_string());
         }
 
-        // Clear any previous cancellation flag for this model
-        {
-            let mut cancel_flag = self.cancel_download_flag.write().await;
-            *cancel_flag = None;
-        }
+        let result = self
+            .download_model_detailed_inner(model_name, progress_callback)
+            .await;
 
+        // active 标记由最外层统一释放，确保 TLS、代理、文件 I/O 和取消等所有返回路径
+        // 都不会遗留“already in progress”，也不会在 worker 尚未退出时过早允许重试。
+        if result.is_err() {
+            let mut models = self.available_models.write().await;
+            if let Some(model) = models.get_mut(model_name) {
+                model.status = ModelStatus::Missing;
+            }
+        }
+        self.active_downloads.write().await.remove(model_name);
+
+        result
+    }
+
+    async fn download_model_detailed_inner(
+        &self,
+        model_name: &str,
+        progress_callback: Option<Box<dyn Fn(DownloadProgress) + Send>>,
+    ) -> Result<()> {
         // Get model info
         let model_info = {
             let models = self.available_models.read().await;
             match models.get(model_name).cloned() {
                 Some(info) => info,
-                None => {
-                    // Remove from active downloads on error
-                    let mut active = self.active_downloads.write().await;
-                    active.remove(model_name);
-                    return Err(anyhow!("Model {} not found", model_name));
-                }
+                None => return Err(anyhow!("Model {} not found", model_name)),
             }
         };
 
@@ -618,18 +608,8 @@ impl ParakeetEngine {
         let model_dir = &model_info.path;
         if !model_dir.exists() {
             if let Err(e) = fs::create_dir_all(model_dir).await {
-                // Remove from active downloads on error
-                let mut active = self.active_downloads.write().await;
-                active.remove(model_name);
                 return Err(anyhow!("Failed to create model directory: {}", e));
             }
-        }
-
-        // Clean up incomplete downloads before starting
-        log::info!("Checking for incomplete model files to clean up...");
-        if let Err(e) = self.clean_incomplete_model_directory(model_dir).await {
-            log::warn!("Failed to clean incomplete model directory: {}", e);
-            // Continue anyway - we'll handle errors during download
         }
 
         // Optimized HTTP client for large file downloads
@@ -682,20 +662,9 @@ impl ParakeetEngine {
             .copied()
             .sum();
 
-        // Check for existing downloads (complete or partial) to calculate resume offset
-        let mut already_downloaded: u64 = 0;
-        for filename in &files_to_download {
-            let file_path = model_dir.join(filename);
-            if file_path.exists() {
-                if let Ok(metadata) = fs::metadata(&file_path).await {
-                    let file_size = metadata.len();
-                    let expected_size = file_sizes.get(*filename).copied().unwrap_or(0);
-                    // Count all existing bytes (complete files capped at expected size, partial as-is)
-                    // This ensures progress starts from where we left off
-                    already_downloaded += file_size.min(expected_size);
-                }
-            }
-        }
+        // 只读取现有 artifact 来计算续传进度；单个文件失败时不再删除已完成的兄弟文件。
+        let already_downloaded =
+            Self::existing_artifact_bytes(model_dir, &files_to_download, &file_sizes).await;
 
         let mut total_downloaded: u64 = already_downloaded;
 
@@ -780,8 +749,6 @@ impl ParakeetEngine {
                     );
 
                     if let Err(e) = fs::remove_file(&file_path).await {
-                        let mut active = self.active_downloads.write().await;
-                        active.remove(model_name);
                         return Err(anyhow!("Failed to delete incomplete file {}: {}", filename, e));
                     }
 
@@ -791,8 +758,6 @@ impl ParakeetEngine {
                         .map_err(|e| anyhow!("Retry failed for {}: {}", filename, e))?;
 
                     if !response.status().is_success() {
-                        let mut active = self.active_downloads.write().await;
-                        active.remove(model_name);
                         return Err(anyhow!("Retry failed for {} with status: {}", filename, response.status()));
                     }
 
@@ -800,8 +765,6 @@ impl ParakeetEngine {
                 }
             } else {
                 // Other errors
-                let mut active = self.active_downloads.write().await;
-                active.remove(model_name);
                 return Err(anyhow!("Download failed for {} with status: {}", filename, response.status()));
             };
 
@@ -829,15 +792,12 @@ impl ParakeetEngine {
             loop {
                 // Check for cancellation before processing chunk
                 {
-                    let cancel_flag = self.cancel_download_flag.read().await;
-                    if cancel_flag.as_ref() == Some(&model_name.to_string()) {
+                    let cancelled_downloads = self.cancelled_downloads.read().await;
+                    if cancelled_downloads.contains(model_name) {
                         log::info!("Download cancelled for {}", model_name);
                         // Flush and keep partial file for resume on next attempt
                         let _ = writer.flush().await;
                         drop(writer);
-                        // Remove from active downloads on cancellation
-                        let mut active = self.active_downloads.write().await;
-                        active.remove(model_name);
                         return Err(anyhow!("Download cancelled by user"));
                     }
                 }
@@ -850,12 +810,6 @@ impl ParakeetEngine {
                     Err(_) => {
                         log::warn!("Download timeout for {}: no data received for 30 seconds", model_name);
                         let _ = writer.flush().await;
-
-                        // Remove from active downloads
-                        {
-                            let mut active = self.active_downloads.write().await;
-                            active.remove(model_name);
-                        }
 
                         // Update model status to Missing so retry can work
                         {
@@ -877,12 +831,6 @@ impl ParakeetEngine {
                             Err(e) => {
                                 log::error!("Download error for {}: {:?}", model_name, e);
                                 let _ = writer.flush().await;
-
-                                // Remove from active downloads
-                                {
-                                    let mut active = self.active_downloads.write().await;
-                                    active.remove(model_name);
-                                }
 
                                 // Update model status to Missing so retry can work
                                 {
@@ -909,12 +857,6 @@ impl ParakeetEngine {
                 };
 
                 if let Err(e) = writer.write_all(&chunk).await {
-                    // Remove from active downloads on error
-                    {
-                        let mut active = self.active_downloads.write().await;
-                        active.remove(model_name);
-                    }
-
                     // Update model status to Missing so retry can work
                     {
                         let mut models = self.available_models.write().await;
@@ -983,12 +925,6 @@ impl ParakeetEngine {
 
             // Flush the buffered writer
             if let Err(e) = writer.flush().await {
-                // Remove from active downloads on error
-                {
-                    let mut active = self.active_downloads.write().await;
-                    active.remove(model_name);
-                }
-
                 // Update model status to Missing so retry can work
                 {
                     let mut models = self.available_models.write().await;
@@ -1029,19 +965,7 @@ impl ParakeetEngine {
             }
         }
 
-        // Remove from active downloads on completion
-        {
-            let mut active = self.active_downloads.write().await;
-            active.remove(model_name);
-        }
-
-        // Clear cancellation flag on successful completion
-        {
-            let mut cancel_flag = self.cancel_download_flag.write().await;
-            if cancel_flag.as_ref() == Some(&model_name.to_string()) {
-                *cancel_flag = None;
-            }
-        }
+        self.cancelled_downloads.write().await.remove(model_name);
 
         log::info!("Download completed for Parakeet model: {}", model_name);
         Ok(())
@@ -1051,16 +975,16 @@ impl ParakeetEngine {
     pub async fn cancel_download(&self, model_name: &str) -> Result<()> {
         log::info!("Cancelling download for Parakeet model: {}", model_name);
 
-        // Set cancellation flag to interrupt the download loop
+        // 与下载注册保持 active -> cancelled 的固定锁顺序，关闭“刚注册就误清取消”的窗口。
+        // 没有活跃 worker 时无需留下会污染下一次下载的陈旧请求。
         {
-            let mut cancel_flag = self.cancel_download_flag.write().await;
-            *cancel_flag = Some(model_name.to_string());
-        }
-
-        // Remove from active downloads
-        {
-            let mut active = self.active_downloads.write().await;
-            active.remove(model_name);
+            let active = self.active_downloads.read().await;
+            if active.contains(model_name) {
+                self.cancelled_downloads
+                    .write()
+                    .await
+                    .insert(model_name.to_string());
+            }
         }
 
         // Update model status to Missing (so it can be retried)
@@ -1071,18 +995,211 @@ impl ParakeetEngine {
             }
         }
 
-        // Clean up partially downloaded files
-        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await; // Brief delay to let download loop exit
-
-        let model_path = self.models_dir.join(model_name);
-        if model_path.exists() {
-            if let Err(e) = fs::remove_dir_all(&model_path).await {
-                log::warn!("Failed to clean up cancelled download directory: {}", e);
-            } else {
-                log::info!("Cleaned up cancelled download directory: {}", model_path.display());
-            }
-        }
+        // 取消只发出停止信号，不提前释放 active 标记：旧任务 flush 并退出前，不允许重试任务并发写同一文件。
+        // 部分文件和已完整的兄弟文件都保留；整个模型目录仅能由显式的 delete_model 操作删除。
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    const TEST_MODEL_NAME: &str = "parakeet-tdt-0.6b-v3-int8";
+
+    #[tokio::test]
+    async fn missing_artifact_does_not_delete_existing_siblings() {
+        let temp_dir = tempdir().expect("create temporary models directory");
+        let model_dir = temp_dir.path().join(TEST_MODEL_NAME);
+        fs::create_dir_all(&model_dir)
+            .await
+            .expect("create model directory");
+
+        // 缺失 vocab 时，其他文件可能是完整文件，也可能是可续传的部分文件；两者都不能被连带删除。
+        let existing_artifacts: [(&str, &[u8]); 3] = [
+            ("encoder-model.int8.onnx", b"encoder-partial"),
+            ("decoder_joint-model.int8.onnx", b"decoder-complete"),
+            ("nemo128.onnx", b"preprocessor-complete"),
+        ];
+        for (filename, contents) in existing_artifacts {
+            fs::write(model_dir.join(filename), contents)
+                .await
+                .expect("seed existing artifact");
+        }
+
+        let expected_sizes = HashMap::from([
+            ("encoder-model.int8.onnx", 64),
+            (
+                "decoder_joint-model.int8.onnx",
+                b"decoder-complete".len() as u64,
+            ),
+            ("nemo128.onnx", b"preprocessor-complete".len() as u64),
+            ("vocab.txt", 32),
+        ]);
+        let filenames = [
+            "encoder-model.int8.onnx",
+            "decoder_joint-model.int8.onnx",
+            "nemo128.onnx",
+            "vocab.txt",
+        ];
+
+        let reusable_bytes =
+            ParakeetEngine::existing_artifact_bytes(&model_dir, &filenames, &expected_sizes).await;
+        let expected_reusable_bytes: u64 = existing_artifacts
+            .iter()
+            .map(|(_, contents)| contents.len() as u64)
+            .sum();
+        assert_eq!(reusable_bytes, expected_reusable_bytes);
+
+        for (filename, contents) in existing_artifacts {
+            assert_eq!(
+                fs::read(model_dir.join(filename))
+                    .await
+                    .expect("existing artifact must be preserved"),
+                contents
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn failed_download_releases_active_registration() {
+        let temp_dir = tempdir().expect("create temporary models directory");
+        let engine = ParakeetEngine::new_with_models_dir(Some(temp_dir.path().to_path_buf()))
+            .expect("create Parakeet engine");
+        let missing_model = "unknown-model";
+
+        let error = engine
+            .download_model_detailed(missing_model, None)
+            .await
+            .expect_err("unknown model must fail before network access");
+
+        assert!(error.to_string().contains("not found"));
+        assert!(
+            !engine.active_downloads.read().await.contains(missing_model),
+            "outer cleanup must release active registration on every error path"
+        );
+    }
+
+    #[tokio::test]
+    async fn concurrent_retry_keeps_existing_active_registration() {
+        let temp_dir = tempdir().expect("create temporary models directory");
+        let engine = ParakeetEngine::new_with_models_dir(Some(temp_dir.path().to_path_buf()))
+            .expect("create Parakeet engine");
+        engine
+            .active_downloads
+            .write()
+            .await
+            .insert(TEST_MODEL_NAME.to_string());
+
+        let error = engine
+            .download_model_detailed(TEST_MODEL_NAME, None)
+            .await
+            .expect_err("a second worker must not bypass active registration");
+
+        assert!(error.to_string().contains("already in progress"));
+        assert!(
+            engine
+                .active_downloads
+                .read()
+                .await
+                .contains(TEST_MODEL_NAME),
+            "the existing worker remains the owner of the active registration"
+        );
+    }
+
+    #[tokio::test]
+    async fn starting_another_model_preserves_pending_cancellation() {
+        let temp_dir = tempdir().expect("create temporary models directory");
+        let engine = ParakeetEngine::new_with_models_dir(Some(temp_dir.path().to_path_buf()))
+            .expect("create Parakeet engine");
+        engine
+            .active_downloads
+            .write()
+            .await
+            .insert(TEST_MODEL_NAME.to_string());
+        engine
+            .cancel_download(TEST_MODEL_NAME)
+            .await
+            .expect("record cancellation request");
+
+        let _ = engine.download_model_detailed("unknown-model", None).await;
+
+        assert!(
+            engine
+                .cancelled_downloads
+                .read()
+                .await
+                .contains(TEST_MODEL_NAME),
+            "starting another model must not consume this model's cancellation request"
+        );
+    }
+
+    #[tokio::test]
+    async fn rejected_retry_preserves_active_workers_cancellation() {
+        let temp_dir = tempdir().expect("create temporary models directory");
+        let engine = ParakeetEngine::new_with_models_dir(Some(temp_dir.path().to_path_buf()))
+            .expect("create Parakeet engine");
+        engine
+            .active_downloads
+            .write()
+            .await
+            .insert(TEST_MODEL_NAME.to_string());
+        engine
+            .cancel_download(TEST_MODEL_NAME)
+            .await
+            .expect("record cancellation request");
+
+        let _ = engine.download_model_detailed(TEST_MODEL_NAME, None).await;
+
+        assert!(
+            engine
+                .cancelled_downloads
+                .read()
+                .await
+                .contains(TEST_MODEL_NAME),
+            "a rejected retry must not clear the active worker's cancellation request"
+        );
+    }
+
+    #[tokio::test]
+    async fn cancellation_preserves_downloaded_artifacts_for_resume() {
+        let temp_dir = tempdir().expect("create temporary models directory");
+        let engine = ParakeetEngine::new_with_models_dir(Some(temp_dir.path().to_path_buf()))
+            .expect("create Parakeet engine");
+        let model_dir = engine.models_dir.join(TEST_MODEL_NAME);
+        fs::create_dir_all(&model_dir)
+            .await
+            .expect("create model directory");
+        let encoder_path = model_dir.join("encoder-model.int8.onnx");
+        fs::write(&encoder_path, b"downloaded-encoder")
+            .await
+            .expect("seed downloaded artifact");
+        engine
+            .active_downloads
+            .write()
+            .await
+            .insert(TEST_MODEL_NAME.to_string());
+
+        engine
+            .cancel_download(TEST_MODEL_NAME)
+            .await
+            .expect("cancel model download");
+
+        assert_eq!(
+            fs::read(encoder_path)
+                .await
+                .expect("cancellation must preserve resumable artifacts"),
+            b"downloaded-encoder"
+        );
+        assert!(
+            engine
+                .active_downloads
+                .read()
+                .await
+                .contains(TEST_MODEL_NAME),
+            "the download worker owns the active registration until it exits"
+        );
     }
 }
