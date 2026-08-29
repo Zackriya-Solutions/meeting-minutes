@@ -43,6 +43,7 @@ export function TranscriptButtonGroup({
         <Button
           variant="outline"
           size="sm"
+          className="px-2 @[22rem]:px-3"
           onClick={() => {
             Analytics.trackButtonClick('copy_transcript', 'meeting_details');
             onCopyTranscript();
@@ -51,36 +52,36 @@ export function TranscriptButtonGroup({
           title={transcriptCount === 0 ? 'No transcript available' : 'Copy Transcript'}
         >
           <Copy />
-          <span className="hidden @[20rem]:inline">Copy</span>
+          <span className="hidden @[22rem]:inline">Copy</span>
         </Button>
 
         <Button
           size="sm"
           variant="outline"
-          className="@[20rem]:px-4"
+          className="px-2 @[22rem]:px-4"
           onClick={() => {
             Analytics.trackButtonClick('open_recording_folder', 'meeting_details');
             onOpenMeetingFolder();
           }}
           title="Open Recording Folder"
         >
-          <FolderOpen className="@[20rem]:mr-2" size={18} />
-          <span className="hidden @[20rem]:inline">Recording</span>
+          <FolderOpen className="@[22rem]:mr-2" size={18} />
+          <span className="hidden @[22rem]:inline">Recording</span>
         </Button>
 
         {betaFeatures.importAndRetranscribe && meetingId && meetingFolderPath && (
           <Button
             size="sm"
             variant="outline"
-            className="bg-gradient-to-r from-blue-50 to-purple-50 hover:from-blue-100 hover:to-purple-100 border-blue-200 @[20rem]:px-4"
+            className="bg-gradient-to-r from-blue-50 to-purple-50 hover:from-blue-100 hover:to-purple-100 border-blue-200 px-2 @[22rem]:px-4"
             onClick={() => {
               Analytics.trackButtonClick('enhance_transcript', 'meeting_details');
               setShowRetranscribeDialog(true);
             }}
             title="Retranscribe to enhance your recorded audio"
           >
-            <RefreshCw className="@[20rem]:mr-2" size={18} />
-            <span className="hidden @[20rem]:inline">Enhance</span>
+            <RefreshCw className="@[22rem]:mr-2" size={18} />
+            <span className="hidden @[22rem]:inline">Enhance</span>
           </Button>
         )}
       </ButtonGroup>

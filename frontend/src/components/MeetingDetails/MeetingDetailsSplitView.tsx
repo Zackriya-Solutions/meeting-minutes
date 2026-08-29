@@ -5,7 +5,7 @@ import { FileText, Sparkles } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 const STORAGE_KEY = 'meetily.meetingDetails.transcriptPaneRatio';
 const DEFAULT_RATIO = 0.3;
-const MIN_RATIO = 0.2;
+const MIN_RATIO = 0.3;
 const MAX_RATIO = 0.5;
 
 const TABS = [
