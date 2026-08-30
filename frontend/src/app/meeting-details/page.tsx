@@ -207,15 +207,15 @@ function MeetingDetailsContent() {
 
         console.log('FETCH SUMMARY: Raw response:', summary);
 
-        // Check if the summary request failed with 404 or error status, or if no summary exists yet (idle)
-        // Note: 'cancelled' and 'failed' statuses can still have data if backup was restored
-        if (summary.status === 'idle' || (!summary.data && summary.status === 'error')) {
-          console.warn('Meeting summary not found or no summary generated yet:', summary.error || 'idle');
+        // Cancelled/failed processes may carry a restored backup, but a process
+        // without result data must not be represented as an empty summary object.
+        if (summary.status === 'idle' || !summary.data) {
+          console.warn('Meeting summary not found or has no renderable data:', summary.error || summary.status);
           setMeetingSummary(null);
           return;
         }
 
-        const summaryData = summary.data || {};
+        const summaryData = summary.data;
 
         // Parse if it's a JSON string (backend may return double-encoded JSON)
         let parsedData = summaryData;
@@ -290,6 +290,12 @@ function MeetingDetailsContent() {
             console.warn(`LEGACY FORMAT: Error processing section ${key}:`, error);
             // Continue processing other sections
           }
+        }
+
+        if (Object.keys(formattedSummary).length === 0) {
+          console.warn('Meeting summary contained no renderable legacy sections');
+          setMeetingSummary(null);
+          return;
         }
 
         console.log('LEGACY FORMAT: Formatted summary:', formattedSummary);
