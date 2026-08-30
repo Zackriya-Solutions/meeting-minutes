@@ -136,12 +136,17 @@ pub(crate) fn build_openai_chat_request(
     temperature: Option<f32>,
     top_p: Option<f32>,
 ) -> ChatRequest {
-    let (max_tokens, max_completion_tokens) =
-        if max_tokens.is_some() && uses_max_completion_tokens(model_name) {
-            (None, max_tokens)
-        } else {
-            (max_tokens, None)
-        };
+    let uses_completion_tokens = uses_max_completion_tokens(model_name);
+    let (max_tokens, max_completion_tokens) = if max_tokens.is_some() && uses_completion_tokens {
+        (None, max_tokens)
+    } else {
+        (max_tokens, None)
+    };
+    let (temperature, top_p) = if uses_completion_tokens {
+        (None, None)
+    } else {
+        (temperature, top_p)
+    };
 
     ChatRequest {
         model: model_name.to_string(),
@@ -157,16 +162,14 @@ pub(crate) fn build_openai_chat_request_with_max_completion_tokens(
     model_name: &str,
     messages: Vec<ChatMessage>,
     max_tokens: Option<u32>,
-    temperature: Option<f32>,
-    top_p: Option<f32>,
 ) -> ChatRequest {
     ChatRequest {
         model: model_name.to_string(),
         messages,
         max_tokens: None,
         max_completion_tokens: max_tokens,
-        temperature,
-        top_p,
+        temperature: None,
+        top_p: None,
     }
 }
 
@@ -441,8 +444,6 @@ pub async fn generate_summary(
                     model_name,
                     openai_chat_messages(system_prompt, user_prompt),
                     max_tokens_val,
-                    temperature_val,
-                    top_p_val,
                 ));
 
             response =
@@ -608,13 +609,47 @@ mod tests {
                 content: "Hi".to_string(),
             }],
             Some(512),
-            None,
-            None,
         ))
         .unwrap();
 
         assert_eq!(payload["max_completion_tokens"], 512);
         assert!(payload.get("max_tokens").is_none());
+    }
+
+    #[test]
+    fn reasoning_model_payloads_omit_unsupported_sampling_parameters() {
+        let payload = serde_json::to_value(build_openai_chat_request(
+            "gpt-5.1-chat",
+            vec![ChatMessage {
+                role: "user".to_string(),
+                content: "Hi".to_string(),
+            }],
+            Some(512),
+            Some(0.7),
+            Some(0.9),
+        ))
+        .unwrap();
+
+        assert_eq!(payload["max_completion_tokens"], 512);
+        assert!(payload.get("temperature").is_none());
+        assert!(payload.get("top_p").is_none());
+    }
+
+    #[test]
+    fn completion_token_retry_omits_unsupported_sampling_parameters() {
+        let payload = serde_json::to_value(build_openai_chat_request_with_max_completion_tokens(
+            "prod-summary-deployment",
+            vec![ChatMessage {
+                role: "user".to_string(),
+                content: "Hi".to_string(),
+            }],
+            Some(512),
+        ))
+        .unwrap();
+
+        assert_eq!(payload["max_completion_tokens"], 512);
+        assert!(payload.get("temperature").is_none());
+        assert!(payload.get("top_p").is_none());
     }
 
     #[test]
@@ -633,6 +668,25 @@ mod tests {
 
         assert_eq!(payload["max_tokens"], 512);
         assert!(payload.get("max_completion_tokens").is_none());
+    }
+
+    #[test]
+    fn legacy_max_token_payloads_keep_sampling_parameters() {
+        let payload = serde_json::to_value(build_openai_chat_request(
+            "gpt-5-chat",
+            vec![ChatMessage {
+                role: "user".to_string(),
+                content: "Hi".to_string(),
+            }],
+            Some(512),
+            Some(0.7),
+            Some(0.9),
+        ))
+        .unwrap();
+
+        assert_eq!(payload["max_tokens"], 512);
+        assert_eq!(payload["temperature"], 0.7);
+        assert_eq!(payload["top_p"], 0.9);
     }
 
     #[test]

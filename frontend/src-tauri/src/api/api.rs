@@ -1341,8 +1341,6 @@ pub async fn api_test_custom_openai_connection<R: Runtime>(
                             content: "Hi".to_string(),
                         }],
                         Some(5),
-                        None,
-                        None,
                     );
 
                 match send_test_request(&retry_request).await {
