@@ -6,6 +6,7 @@ import { DeviceSelection, SelectedDevices } from '@/components/DeviceSelection';
 import Analytics from '@/lib/analytics';
 import { toast } from 'sonner';
 import { useRecordingState } from '@/contexts/RecordingStateContext';
+import { useConfig } from '@/contexts/ConfigContext';
 
 export interface RecordingPreferences {
   save_folder: string;
@@ -31,6 +32,7 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
   const [saving, setSaving] = useState(false);
   const [showRecordingNotification, setShowRecordingNotification] = useState(true);
   const { isRecording } = useRecordingState();
+  const { setSelectedDevices } = useConfig();
 
   // Load recording preferences on component mount
   useEffect(() => {
@@ -88,6 +90,11 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
       preferred_system_device: devices.systemDevice
     };
     setPreferences(newPreferences);
+    // Sync the in-memory selection ConfigContext exposes to the start path.
+    // Without this, the picker only writes to disk (loaded into context once at
+    // app mount), so a newly-chosen mic isn't honored until the next launch —
+    // start keeps sending the stale launch-time device.
+    setSelectedDevices(devices);
     await savePreferences(newPreferences);
 
     // Track default device preference changes
