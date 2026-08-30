@@ -456,6 +456,22 @@ impl AudioStreamManager {
         }
     }
 
+    /// Stop only the microphone stream, keeping system audio running.
+    /// Used for mic hot-swap when default input device changes.
+    pub fn stop_mic_stream(&mut self) -> Result<()> {
+        if let Some(mic_stream) = self.microphone_stream.take() {
+            info!("Stopping microphone stream for hot-swap");
+            mic_stream.stop()?;
+            info!("Microphone stream stopped for hot-swap");
+        }
+        Ok(())
+    }
+
+    /// Set a new microphone stream (used after hot-swap creation).
+    pub fn set_mic_stream(&mut self, stream: AudioStream) {
+        self.microphone_stream = Some(stream);
+    }
+
     /// Get stream count
     pub fn active_stream_count(&self) -> usize {
         let mut count = 0;

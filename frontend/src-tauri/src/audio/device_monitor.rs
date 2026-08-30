@@ -82,6 +82,11 @@ pub struct AudioDeviceMonitor {
     monitor_handle: Option<JoinHandle<()>>,
     event_sender: mpsc::UnboundedSender<DeviceEvent>,
     stop_signal: Arc<tokio::sync::Notify>,
+    /// Mailbox for hot-swap device updates. When a mic hot-swap completes,
+    /// the new device names are written here. The monitor loop reads it on
+    /// its next poll cycle and updates its tracked device list.
+    /// Format: (new_mic_name, optional_new_system_name)
+    device_update_mailbox: Arc<std::sync::Mutex<Option<(String, Option<String>)>>>,
 }
 
 impl AudioDeviceMonitor {
@@ -95,9 +100,21 @@ impl AudioDeviceMonitor {
                 monitor_handle: None,
                 event_sender,
                 stop_signal,
+                device_update_mailbox: Arc::new(std::sync::Mutex::new(None)),
             },
             event_receiver,
         )
+    }
+
+    /// Notify the monitor that the mic has been hot-swapped to a new device.
+    /// Optionally also update the system audio tracked name (since BT devices
+    /// like AirPods are often both mic AND speaker — when they disconnect,
+    /// both entries go stale). The monitor loop picks this up on its next
+    /// poll cycle.
+    pub fn notify_mic_swapped(&self, new_mic_name: String, new_system_name: Option<String>) {
+        if let Ok(mut mailbox) = self.device_update_mailbox.lock() {
+            *mailbox = Some((new_mic_name, new_system_name));
+        }
     }
 
     /// Start monitoring specified devices
@@ -137,9 +154,10 @@ impl AudioDeviceMonitor {
 
         let event_sender = self.event_sender.clone();
         let stop_signal = self.stop_signal.clone();
+        let device_update_mailbox = self.device_update_mailbox.clone();
 
         let handle = tokio::spawn(async move {
-            Self::monitor_loop(monitored_devices, event_sender, stop_signal).await;
+            Self::monitor_loop(monitored_devices, event_sender, stop_signal, device_update_mailbox).await;
         });
 
         self.monitor_handle = Some(handle);
@@ -164,6 +182,7 @@ impl AudioDeviceMonitor {
         mut monitored_devices: Vec<MonitoredDevice>,
         event_sender: mpsc::UnboundedSender<DeviceEvent>,
         stop_signal: Arc<tokio::sync::Notify>,
+        device_update_mailbox: Arc<std::sync::Mutex<Option<(String, Option<String>)>>>,
     ) {
         let mut last_device_list = Vec::new();
         let check_interval = Duration::from_secs(2); // Poll every 2 seconds
@@ -188,6 +207,31 @@ impl AudioDeviceMonitor {
                     continue;
                 }
             };
+
+            // Check for hot-swap device update from the mailbox.
+            // If a hot-swap completed since our last cycle, update our tracked
+            // devices so we stop polling for the dead ones and start watching
+            // the fallback devices instead. Rebuilding via MonitoredDevice::new
+            // re-derives is_bluetooth from the new name and resets
+            // consecutive_missing.
+            if let Ok(mut mailbox) = device_update_mailbox.lock() {
+                if let Some((new_mic_name, new_system_name)) = mailbox.take() {
+                    for dev in &mut monitored_devices {
+                        match dev.device_type {
+                            DeviceMonitorType::Microphone => {
+                                info!("[DEVICE_MONITOR] Updated tracked mic: '{}' → '{}' (hot-swap)", dev.name, new_mic_name);
+                                *dev = MonitoredDevice::new(new_mic_name.clone(), dev.device_type.clone());
+                            }
+                            DeviceMonitorType::SystemAudio => {
+                                if let Some(ref sys_name) = new_system_name {
+                                    info!("[DEVICE_MONITOR] Updated tracked system audio: '{}' → '{}' (hot-swap)", dev.name, sys_name);
+                                    *dev = MonitoredDevice::new(sys_name.clone(), dev.device_type.clone());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
 
             // Check if device list changed
             if current_devices.len() != last_device_list.len() {

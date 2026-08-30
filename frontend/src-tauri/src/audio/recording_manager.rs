@@ -45,6 +45,9 @@ pub enum StreamManagerType {
 #[cfg(target_os = "macos")]
 const AUDIO_WAKE_DURATION: Duration = Duration::from_millis(300);
 
+#[cfg(target_os = "macos")]
+const AUDIO_WAKE_SWAP_DURATION: Duration = Duration::from_millis(150);
+
 /// Synchronous implementation of the wake. Must be called from a blocking
 /// thread (not directly from async code) because it sleeps 300 ms and does
 /// sync cpal I/O. The async wrapper below routes to it via spawn_blocking.
@@ -111,6 +114,67 @@ async fn wake_audio_connection(speaker_device_name: &str) -> Result<()> {
     }).await.map_err(|e| anyhow::anyhow!("Join error: {}", e))?
 }
 
+/// Public async wake for use by the disconnect-fallback hot-swap path in
+/// `recording_commands.rs::trigger_mic_fallback_to_default`.
+///
+/// Differences from the start-time wake:
+///   - Shorter 150 ms sleep to minimize fallback latency (the window of no
+///     audio between primary death and secondary-taking-over)
+///   - Falls back to the system default output if the named device isn't
+///     found (e.g. the original BT output just disappeared, and we're
+///     waking the MacBook speakers instead)
+///   - Still handles both F32 and I16 sample formats for robustness
+#[cfg(target_os = "macos")]
+pub async fn wake_audio_connection_for_swap(speaker_device_name: &str) -> Result<()> {
+    let name = speaker_device_name.to_string();
+    tokio::task::spawn_blocking(move || {
+        info!("[AUDIO_WAKE] Hot-swap wake via speaker: '{}'", name);
+        let host = cpal::default_host();
+        // Try the specified device first, fall back to default output. During
+        // a BT disconnect the original output device name may no longer
+        // enumerate, so the fallback is what actually runs in practice.
+        let (output_device, config) = host.output_devices()?
+            .find(|d| d.name().ok().as_deref() == Some(&*name))
+            .and_then(|d| d.default_output_config().ok().map(|c| (d, c)))
+            .or_else(|| {
+                info!("[AUDIO_WAKE] '{}' not found or config failed — using default output device", name);
+                host.default_output_device()
+                    .and_then(|d| d.default_output_config().ok().map(|c| (d, c)))
+            })
+            .ok_or_else(|| anyhow::anyhow!("No output device available for wake"))?;
+        let stream = match config.sample_format() {
+            cpal::SampleFormat::F32 => {
+                output_device.build_output_stream(
+                    &config.into(),
+                    |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
+                        for sample in data.iter_mut() { *sample = 0.0; }
+                    },
+                    |err| error!("[AUDIO_WAKE] Hot-swap wake error: {}", err),
+                    None,
+                )?
+            }
+            cpal::SampleFormat::I16 => {
+                output_device.build_output_stream(
+                    &config.into(),
+                    |data: &mut [i16], _: &cpal::OutputCallbackInfo| {
+                        for sample in data.iter_mut() { *sample = 0; }
+                    },
+                    |err| error!("[AUDIO_WAKE] Hot-swap wake error: {}", err),
+                    None,
+                )?
+            }
+            format => {
+                return Err(anyhow::anyhow!("Unsupported sample format for wake: {:?}", format));
+            }
+        };
+        stream.play()?;
+        std::thread::sleep(AUDIO_WAKE_SWAP_DURATION);
+        drop(stream);
+        info!("[AUDIO_WAKE] Hot-swap wake completed");
+        Ok(())
+    }).await.map_err(|e| anyhow::anyhow!("Join error: {}", e))?
+}
+
 /// Simplified recording manager that coordinates all audio components
 pub struct RecordingManager {
     state: Arc<RecordingState>,
@@ -118,7 +182,6 @@ pub struct RecordingManager {
     pipeline_manager: AudioPipelineManager,
     recording_saver: RecordingSaver,
     device_monitor: Option<AudioDeviceMonitor>,
-    #[allow(dead_code)] // kept for upcoming device-event consumer; only reader was removed as dead code
     device_event_receiver: Option<mpsc::UnboundedReceiver<DeviceEvent>>,
 }
 
@@ -510,9 +573,35 @@ impl RecordingManager {
         self.recording_saver.get_meeting_folder().map(|p| p.clone())
     }
 
-    /// Check if currently attempting to reconnect
-    pub fn is_reconnecting(&self) -> bool {
-        self.state.is_reconnecting()
+    /// Take ownership of the device event receiver for use by a background processor.
+    pub fn take_device_event_receiver(&mut self) -> Option<mpsc::UnboundedReceiver<DeviceEvent>> {
+        self.device_event_receiver.take()
+    }
+
+    /// Stop only the mic stream for hot-swap (Phase 1).
+    /// System audio continues uninterrupted.
+    pub fn stop_mic_stream_for_swap(&mut self) -> Result<()> {
+        self.stream_manager.stop_mic_stream()
+    }
+
+    /// Set new mic stream and update device state after hot-swap (Phase 3).
+    pub fn set_mic_stream_after_swap(&mut self, stream: super::stream::AudioStream, device: Arc<AudioDevice>) {
+        self.stream_manager.set_mic_stream(stream);
+        // Notify the device monitor so it tracks the new mic (and updated
+        // system output) instead of the dead ones (M8 fix). BT devices like
+        // AirPods are often both mic AND speaker — when they disconnect, both
+        // monitor entries go stale. Resolve the *current* default output at
+        // notify time; `state.get_system_device()` still holds the pre-swap
+        // reference (e.g. AirPods) because we don't mutate system_device
+        // during a mic-only hot-swap, which would leave the monitor tracking
+        // the dead name and spamming "missing for N checks".
+        if let Some(ref monitor) = self.device_monitor {
+            let system_name = super::devices::default_output_device()
+                .ok()
+                .map(|d| d.name);
+            monitor.notify_mic_swapped(device.name.clone(), system_name);
+        }
+        self.state.set_microphone_device(device);
     }
 
     /// Get reference to recording state for external access

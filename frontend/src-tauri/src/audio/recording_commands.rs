@@ -4,7 +4,7 @@
 // Delegates to transcription and recording modules for actual implementation.
 
 use anyhow::Result;
-use log::{error, info, warn};
+use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -19,6 +19,7 @@ use super::{
     default_output_device,  // Get default system audio
     RecordingManager,
 };
+use super::device_monitor::{DeviceEvent, DeviceMonitorType};
 
 // Import transcription modules
 use super::transcription::{
@@ -241,10 +242,19 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
         .await
         .map_err(|e| format!("Failed to start recording: {}", e))?;
 
+    // Take the device event receiver BEFORE storing manager globally.
+    // A background task will process device events (hot-swap) without frontend polling.
+    let device_event_receiver = manager.take_device_event_receiver();
+
     // Store the manager globally to keep it alive
     {
         let mut global_manager = RECORDING_MANAGER.lock().unwrap();
         *global_manager = Some(manager);
+    }
+
+    // Spawn background device event processor (mic-disconnect fallback).
+    if let Some(receiver) = device_event_receiver {
+        spawn_device_event_processor(app.clone(), receiver);
     }
 
     // Set recording flag and reset speech detection flag
@@ -417,10 +427,19 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
         .await
         .map_err(|e| format!("Failed to start recording: {}", e))?;
 
+    // Take the device event receiver BEFORE storing manager globally.
+    // A background task will process device events (hot-swap) without frontend polling.
+    let device_event_receiver = manager.take_device_event_receiver();
+
     // Store the manager globally to keep it alive
     {
         let mut global_manager = RECORDING_MANAGER.lock().unwrap();
         *global_manager = Some(manager);
+    }
+
+    // Spawn background device event processor (mic-disconnect fallback).
+    if let Some(receiver) = device_event_receiver {
+        spawn_device_event_processor(app.clone(), receiver);
     }
 
     // Set recording flag and reset speech detection flag
@@ -1077,3 +1096,337 @@ pub async fn get_active_audio_output() -> Result<super::playback_monitor::AudioO
         .map_err(|e| format!("Failed to get audio output info: {}", e))
 }
 
+
+// ============================================================================
+// MIC HOT-SWAP (disconnect recovery)
+// ============================================================================
+
+// Guard against concurrent mic hot-swap tasks. Only used by the disconnect
+// fallback path (trigger_mic_fallback_to_default) — the "chase the new
+// default" auto-swap has been removed.
+static MIC_SWAP_IN_PROGRESS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Perform mic hot-swap using phased locking — never holds RECORDING_MANAGER during I/O.
+/// If CPAL hangs during stream creation, only this task blocks; stop flow stays unblocked.
+async fn perform_mic_hot_swap_task<R: Runtime>(new_device_name: String, app: AppHandle<R>) -> Result<(), String> {
+    info!("[HOT_SWAP] Starting mic hot-swap to '{}'", new_device_name);
+
+    match do_mic_swap(&new_device_name).await {
+        Ok(()) => {
+            info!("[HOT_SWAP] Mic switched to '{}'", new_device_name);
+            let _ = app.emit("mic-device-switched", serde_json::json!({
+                "device_name": new_device_name
+            }));
+            Ok(())
+        }
+        Err(e) => {
+            warn!("[HOT_SWAP] First attempt failed: {} — retrying in 500ms", e);
+            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+
+            match do_mic_swap(&new_device_name).await {
+                Ok(()) => {
+                    info!("[HOT_SWAP] Mic switched to '{}' on retry", new_device_name);
+                    let _ = app.emit("mic-device-switched", serde_json::json!({
+                        "device_name": new_device_name
+                    }));
+                    Ok(())
+                }
+                Err(e) => {
+                    error!("[HOT_SWAP] Mic swap failed after retry: {}", e);
+                    let _ = app.emit("mic-swap-failed", serde_json::json!({
+                        "error": e,
+                        "device_name": new_device_name
+                    }));
+                    Err(e)
+                }
+            }
+        }
+    }
+}
+
+/// Phased mic swap — lock is never held during async I/O.
+async fn do_mic_swap(device_name: &str) -> Result<(), String> {
+    // Phase 1: Lock briefly — stop old stream, get state Arc
+    let state = {
+        let mut guard = RECORDING_MANAGER.lock().unwrap();
+        if let Some(manager) = guard.as_mut() {
+            if !manager.is_recording() {
+                return Err("Recording stopped — aborting mic hot-swap".to_string());
+            }
+            manager.stop_mic_stream_for_swap()
+                .map_err(|e| format!("Failed to stop old mic stream: {}", e))?;
+            manager.get_state().clone()
+        } else {
+            return Err("Recording manager not available".to_string());
+        }
+    }; // lock released
+
+    // Phase 2: Async I/O WITHOUT lock — may be slow, that's OK
+    tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+
+    // Build the AudioDevice directly from the name — the caller
+    // (trigger_mic_fallback_to_default) already resolved it via
+    // default_input_device(). Skipping list_audio_devices() here avoids a
+    // full cpal enumeration on the exact BT-transition hot path where it's
+    // known to hang 100+ s (see H2 in PR-175 review). The real device
+    // validation happens inside AudioStream::create → get_device_and_config
+    // which does a targeted host.input_devices() lookup by name.
+    let device_arc = std::sync::Arc::new(super::AudioDevice::new(
+        device_name.to_string(),
+        super::DeviceType::Input,
+    ));
+
+    info!("[HOT_SWAP] Creating new mic stream for '{}' (lock released)", device_name);
+    let new_stream = super::stream::AudioStream::create(
+        device_arc.clone(),
+        state,
+        super::recording_state::DeviceType::Microphone,
+        None,
+    ).await.map_err(|e| format!("Failed to create mic stream: {}", e))?;
+
+    // Phase 3: Lock briefly — set new stream
+    {
+        let mut guard = RECORDING_MANAGER.lock().unwrap();
+        if let Some(manager) = guard.as_mut() {
+            manager.set_mic_stream_after_swap(new_stream, device_arc);
+            info!("[HOT_SWAP] Mic hot-swap to '{}' completed", device_name);
+        } else {
+            return Err("Recording manager gone during hot-swap".to_string());
+        }
+    } // lock released
+
+    Ok(())
+}
+
+/// Background processor for device monitor events during a recording session.
+///
+/// The ONLY mid-recording mic switch that is allowed is the fallback from a
+/// dead device to the system default, triggered by the device monitor's
+/// DeviceDisconnected event. Any other device event is explicitly ignored —
+/// recording stays on whatever device was picked at start time until the
+/// meeting ends.
+///
+/// Rationale: auto-swapping to a freshly-connected BT device during recording
+/// triggers a reliable hang inside cpal's stream creation on macOS. Locking
+/// the device at start eliminates that hang and also makes the recording
+/// session predictable.
+///
+/// The task stops automatically when the receiver is dropped (recording
+/// ends / monitor stops).
+fn spawn_device_event_processor<R: Runtime>(
+    app: AppHandle<R>,
+    mut receiver: tokio::sync::mpsc::UnboundedReceiver<DeviceEvent>,
+) {
+    tokio::spawn(async move {
+        info!("[DEVICE_EVENTS] Background event processor started");
+
+        while let Some(event) = receiver.recv().await {
+            // Skip if recording has stopped
+            if !IS_RECORDING.load(Ordering::SeqCst) {
+                info!("[DEVICE_EVENTS] Recording stopped — ignoring event: {:?}", event);
+                continue;
+            }
+
+            match event {
+                DeviceEvent::DeviceDisconnected { ref device_name, ref device_type } => {
+                    info!("[DEVICE_EVENTS] Device disconnected: '{}' ({:?})", device_name, device_type);
+                    // The only automatic mid-recording mic change allowed:
+                    // when the active microphone dies, fall back to the
+                    // system default input. Triggered after the device
+                    // monitor's polling threshold fires.
+                    if matches!(device_type, DeviceMonitorType::Microphone) {
+                        let name = device_name.clone();
+                        let app_clone = app.clone();
+                        tokio::spawn(async move {
+                            trigger_mic_fallback_to_default(app_clone, name).await;
+                        });
+                    }
+                }
+                DeviceEvent::DeviceReconnected { ref device_name, ref device_type } => {
+                    // Per product decision: once we have fallen back to the
+                    // built-in mic we stay there for the rest of the meeting.
+                    // This is intentional — just log and do nothing.
+                    info!("[DEVICE_EVENTS] Device reconnected: '{}' ({:?}) — staying on current mic (fallback is sticky)", device_name, device_type);
+                }
+                DeviceEvent::DeviceListChanged => {
+                    debug!("[DEVICE_EVENTS] Device list changed");
+                }
+            }
+        }
+        info!("[DEVICE_EVENTS] Background event processor stopped (channel closed)");
+    });
+}
+
+/// Disconnect fallback: swap the active mic to the system default input
+/// device. Triggered from the background device event processor after the
+/// device monitor's polling threshold (3 × 2s) fires `DeviceDisconnected`
+/// for the active microphone.
+///
+/// `disconnected_name` is the device that just died. We keep it to detect
+/// the edge case where macOS hasn't yet updated the system default input
+/// away from the dead device — we wait and retry in that case rather than
+/// swapping back to the same broken device.
+///
+/// This function takes the MIC_SWAP_IN_PROGRESS guard itself; the caller
+/// must NOT already hold it. If a swap is somehow already running this
+/// returns immediately.
+async fn trigger_mic_fallback_to_default<R: Runtime>(
+    app: AppHandle<R>,
+    disconnected_name: String,
+) {
+    if !IS_RECORDING.load(Ordering::SeqCst) {
+        info!(
+            "[MIC_FALLBACK] Not recording — skipping fallback for '{}'",
+            disconnected_name
+        );
+        return;
+    }
+
+    if MIC_SWAP_IN_PROGRESS
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
+        info!(
+            "[MIC_FALLBACK] Swap already in progress — skipping fallback for '{}'",
+            disconnected_name
+        );
+        return;
+    }
+
+    // Guard that clears MIC_SWAP_IN_PROGRESS on any return path below so a
+    // panic or early return can't leave the flag stuck.
+    struct SwapGuard;
+    impl Drop for SwapGuard {
+        fn drop(&mut self) {
+            MIC_SWAP_IN_PROGRESS.store(false, Ordering::SeqCst);
+        }
+    }
+    let _guard = SwapGuard;
+
+    info!(
+        "[MIC_FALLBACK] Starting fallback from disconnected device '{}'",
+        disconnected_name
+    );
+
+    // Let macOS finish swapping the system default input away from the dead
+    // device. 150ms is enough in practice for the built-in mic to become the
+    // default when an explicitly-selected BT device disconnects.
+    tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
+
+    // Query the current system default input. If it still reports the
+    // disconnected device, back off once more and re-query — this handles
+    // the edge case where the OS hasn't propagated the change yet.
+    let fallback_name = match default_input_device() {
+        Ok(dev) => dev.name,
+        Err(e) => {
+            error!("[MIC_FALLBACK] Failed to query default input device: {}", e);
+            let _ = app.emit(
+                "mic-swap-failed",
+                serde_json::json!({
+                    "error": format!("Failed to query default input: {}", e),
+                    "device_name": disconnected_name,
+                }),
+            );
+            return;
+        }
+    };
+
+    let fallback_name = if fallback_name == disconnected_name {
+        warn!(
+            "[MIC_FALLBACK] Default input still reports disconnected device '{}' — retrying after 300ms",
+            disconnected_name
+        );
+        tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
+        match default_input_device() {
+            Ok(dev) if dev.name != disconnected_name => dev.name,
+            Ok(dev) => {
+                error!(
+                    "[MIC_FALLBACK] Default input still '{}' after retry — aborting fallback",
+                    dev.name
+                );
+                let _ = app.emit(
+                    "mic-swap-failed",
+                    serde_json::json!({
+                        "error": "System default input still reports disconnected device after retry",
+                        "device_name": disconnected_name,
+                    }),
+                );
+                return;
+            }
+            Err(e) => {
+                error!("[MIC_FALLBACK] Failed to re-query default input device: {}", e);
+                let _ = app.emit(
+                    "mic-swap-failed",
+                    serde_json::json!({
+                        "error": format!("Failed to re-query default input: {}", e),
+                        "device_name": disconnected_name,
+                    }),
+                );
+                return;
+            }
+        }
+    } else {
+        fallback_name
+    };
+
+    info!(
+        "[MIC_FALLBACK] Falling back '{}' → '{}'",
+        disconnected_name, fallback_name
+    );
+
+    // macOS Core Audio pre-wake for the hot-swap path — before we call the
+    // rebuild path (which internally calls `AudioDeviceStart` on the new
+    // mic), play 150ms of digital silence through the current system
+    // output device to force the Core Audio hardware unit out of its idle
+    // power state. Without this, `AudioDeviceStart` can return `noErr` but
+    // the IO proc will not fire for 10-30 seconds until some other audio
+    // nudges the hardware awake — the "backend idle until you play YouTube"
+    // symptom from earlier testing.
+    //
+    // `wake_audio_connection_for_swap` has a built-in fallback: if the
+    // current system device name doesn't enumerate (e.g. the BT output just
+    // disappeared), it plays through `default_output_device()` instead,
+    // which on macOS will now be the built-in speakers — exactly the
+    // hardware unit we want to wake for the fallback mic.
+    //
+    // Non-fatal: on error we log and proceed to the swap anyway. A failed
+    // wake is strictly better than no wake.
+    #[cfg(target_os = "macos")]
+    {
+        // Grab the current system device name without holding the recording
+        // manager lock across the blocking wake.
+        let sys_device_name = {
+            let guard = RECORDING_MANAGER.lock().unwrap();
+            guard
+                .as_ref()
+                .and_then(|m| m.get_state().get_system_device())
+                .map(|d| d.name.clone())
+        };
+        if let Some(name) = sys_device_name {
+            match super::recording_manager::wake_audio_connection_for_swap(&name).await {
+                Ok(()) => info!("[MIC_FALLBACK] Pre-swap audio wake completed"),
+                Err(e) => warn!(
+                    "[MIC_FALLBACK] Pre-swap audio wake failed: {} — proceeding anyway",
+                    e
+                ),
+            }
+        } else {
+            log::debug!("[MIC_FALLBACK] No system device recorded — skipping pre-swap wake");
+        }
+    }
+
+    // perform_mic_hot_swap_task performs its own retry-once logic on failure
+    // and emits the mic-device-switched / mic-swap-failed events, so we can
+    // just delegate here. It does NOT touch MIC_SWAP_IN_PROGRESS internally.
+    match perform_mic_hot_swap_task(fallback_name.clone(), app.clone()).await {
+        Ok(()) => {
+            info!(
+                "[MIC_FALLBACK] Fallback complete: now recording via '{}'",
+                fallback_name
+            );
+        }
+        Err(e) => {
+            error!("[MIC_FALLBACK] Fallback swap failed: {}", e);
+        }
+    }
+}
