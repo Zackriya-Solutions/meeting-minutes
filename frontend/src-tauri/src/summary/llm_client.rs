@@ -110,23 +110,34 @@ fn model_matches_family(model: &str, family: &str) -> bool {
             .is_some_and(|suffix| suffix.starts_with('-'))
 }
 
-fn uses_max_completion_tokens(model_name: &str) -> bool {
-    let model = model_name.trim().to_ascii_lowercase();
-
-    let newer_gpt_chat_model = ["gpt-5.1", "gpt-5.2", "gpt-4.1", "gpt-4.2"]
+fn is_reasoning_style_model(model: &str) -> bool {
+    let newer_gpt5_model = ["gpt-5.1", "gpt-5.2"]
         .iter()
-        .any(|family| model_matches_family(&model, family));
-
+        .any(|family| model_matches_family(model, family));
     let gpt5_reasoning_model = model == "gpt-5"
         || ["gpt-5-mini", "gpt-5-nano", "gpt-5-pro"]
             .iter()
-            .any(|family| model_matches_family(&model, family));
-
+            .any(|family| model_matches_family(model, family));
     let reasoning_model = ["o1", "o3", "o4"]
         .iter()
-        .any(|prefix| model_matches_family(&model, prefix));
+        .any(|prefix| model_matches_family(model, prefix));
 
-    newer_gpt_chat_model || gpt5_reasoning_model || reasoning_model
+    newer_gpt5_model || gpt5_reasoning_model || reasoning_model
+}
+
+fn uses_max_completion_tokens(model_name: &str) -> bool {
+    let model = model_name.trim().to_ascii_lowercase();
+    let newer_gpt4_model = ["gpt-4.1", "gpt-4.2"]
+        .iter()
+        .any(|family| model_matches_family(&model, family));
+
+    newer_gpt4_model || is_reasoning_style_model(&model)
+}
+
+fn omits_sampling_parameters(model_name: &str) -> bool {
+    let model = model_name.trim().to_ascii_lowercase();
+
+    is_reasoning_style_model(&model)
 }
 
 pub(crate) fn build_openai_chat_request(
@@ -142,7 +153,7 @@ pub(crate) fn build_openai_chat_request(
     } else {
         (max_tokens, None)
     };
-    let (temperature, top_p) = if uses_completion_tokens {
+    let (temperature, top_p) = if omits_sampling_parameters(model_name) {
         (None, None)
     } else {
         (temperature, top_p)
@@ -756,6 +767,25 @@ mod tests {
         assert_eq!(payload["max_completion_tokens"], 512);
         assert!(payload.get("temperature").is_none());
         assert!(payload.get("top_p").is_none());
+    }
+
+    #[test]
+    fn gpt_4_completion_payloads_keep_sampling_parameters() {
+        let payload = serde_json::to_value(build_openai_chat_request(
+            "gpt-4.1-mini",
+            vec![ChatMessage {
+                role: "user".to_string(),
+                content: "Hi".to_string(),
+            }],
+            Some(512),
+            Some(0.7),
+            Some(0.9),
+        ))
+        .unwrap();
+
+        assert_eq!(payload["max_completion_tokens"], 512);
+        assert_eq!(payload["temperature"], 0.7);
+        assert_eq!(payload["top_p"], 0.9);
     }
 
     #[test]
