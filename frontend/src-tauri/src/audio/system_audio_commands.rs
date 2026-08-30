@@ -53,12 +53,14 @@ pub async fn start_system_audio_monitoring(
     let callback = new_system_audio_callback(move |event| {
         match event {
             SystemAudioEvent::SystemAudioStarted(apps) => {
-                tracing::info!("System audio started by apps: {:?}", apps);
+                log::info!("System audio started; app_count={}", apps.len());
+                #[cfg(debug_assertions)]
+                log::debug!("System audio processes: {:?}", apps);
                 let _ = app_handle.emit("system-audio-started", apps);
             }
             SystemAudioEvent::SystemAudioStopped => {
                 let _ = app_handle.emit("system-audio-stopped", ());
-                tracing::info!("System audio stopped");
+                log::info!("System audio stopped");
             }
         }
     });

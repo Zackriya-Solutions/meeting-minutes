@@ -2,7 +2,7 @@ use crate::database::models::SummaryProcess;
 use chrono::Utc;
 use serde_json::Value;
 use sqlx::SqlitePool;
-use tracing::{error, info as log_info};
+use log::{error, info as log_info};
 
 pub struct SummaryProcessesRepository;
 

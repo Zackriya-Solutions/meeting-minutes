@@ -1,7 +1,7 @@
 use crate::api::{TranscriptSearchResult, TranscriptSegment};
 use chrono::Utc;
 use sqlx::{Connection, Error as SqlxError, SqlitePool};
-use tracing::{error, info};
+use log::{error, info};
 use uuid::Uuid;
 
 pub struct TranscriptsRepository;

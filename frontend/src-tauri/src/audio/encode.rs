@@ -6,7 +6,7 @@ use std::{
     path::PathBuf,
     process::{Command, Stdio},
 };
-use tracing::{debug, error};
+use log::{debug, error};
 
 pub struct AudioInput {
     pub data: Arc<Vec<f32>>,

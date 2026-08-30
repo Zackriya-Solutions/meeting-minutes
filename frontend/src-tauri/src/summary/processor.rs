@@ -5,7 +5,7 @@ use regex::Regex;
 use reqwest::Client;
 use std::path::PathBuf;
 use tokio_util::sync::CancellationToken;
-use tracing::{error, info};
+use log::{debug, error, info};
 
 // Compile regex once and reuse (significant performance improvement for repeated calls)
 static THINKING_TAG_REGEX: Lazy<Regex> = Lazy::new(|| {
@@ -401,7 +401,7 @@ pub async fn generate_meeting_summary(
                     }
                 }
 
-                info!("Processing chunk {}/{}", i + 1, num_chunks);
+                debug!("Processing summary chunk {}/{}", i + 1, num_chunks);
                 let user_prompt_chunk = build_chunk_summary_user_prompt(chunk);
 
                 match generate_summary(
@@ -423,7 +423,7 @@ pub async fn generate_meeting_summary(
                 {
                     Ok(summary) => {
                         chunk_summaries.push(summary);
-                        info!("✓ Chunk {}/{} processed successfully", i + 1, num_chunks);
+                        debug!("Summary chunk {}/{} processed", i + 1, num_chunks);
                     }
                     Err(e) => {
                         // Check if error is due to cancellation

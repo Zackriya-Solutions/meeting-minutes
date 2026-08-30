@@ -17,7 +17,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Manager};
 use tokio_util::sync::CancellationToken;
-use tracing::{error, info, warn};
+use log::{error, info, warn};
 use once_cell::sync::Lazy;
 
 // Global cache for model metadata (5 minute TTL)
