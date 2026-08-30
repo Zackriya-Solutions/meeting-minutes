@@ -191,13 +191,49 @@ pub(crate) fn build_openai_chat_request_with_max_tokens(
 }
 
 fn is_unsupported_parameter_error(error_body: &str, parameter: &str) -> bool {
-    let error = error_body.to_ascii_lowercase();
+    if let Ok(payload) = serde_json::from_str::<serde_json::Value>(error_body) {
+        if let Some(error) = payload
+            .get("error")
+            .or_else(|| payload.is_object().then_some(&payload))
+        {
+            let rejected_parameter = error.get("param").and_then(|value| value.as_str());
+            let unsupported_code = error
+                .get("code")
+                .and_then(|value| value.as_str())
+                .is_some_and(|code| {
+                    code.eq_ignore_ascii_case("unsupported_parameter")
+                        || code.eq_ignore_ascii_case("unknown_parameter")
+                });
+            let unsupported_message = error
+                .get("message")
+                .and_then(|value| value.as_str())
+                .is_some_and(|message| text_explicitly_rejects_parameter(message, parameter));
 
-    error.contains(parameter)
-        && (error.contains("unsupported_parameter")
-            || error.contains("unsupported parameter")
-            || error.contains("not supported")
-            || error.contains("unsupported"))
+            return match rejected_parameter {
+                Some(rejected) if rejected.eq_ignore_ascii_case(parameter) => {
+                    unsupported_code || unsupported_message
+                }
+                Some(_) => false,
+                None => unsupported_code && unsupported_message,
+            };
+        }
+    }
+
+    text_explicitly_rejects_parameter(error_body, parameter)
+}
+
+fn text_explicitly_rejects_parameter(error: &str, parameter: &str) -> bool {
+    let error = error.to_ascii_lowercase().replace(['\'', '"', '`'], "");
+    let parameter = parameter.to_ascii_lowercase();
+
+    error.contains(&format!("unsupported parameter: {parameter}"))
+        || error.contains(&format!("unsupported parameter {parameter}"))
+        || error.contains(&format!("unknown parameter: {parameter}"))
+        || error.contains(&format!("unknown parameter {parameter}"))
+        || error.contains(&format!("parameter {parameter} is not supported"))
+        || error.contains(&format!("{parameter} parameter is not supported"))
+        || error.contains(&format!("{parameter} is not supported"))
+        || error.contains(&format!("does not support {parameter}"))
 }
 
 pub(crate) fn is_max_tokens_unsupported_error(error_body: &str) -> bool {
@@ -532,10 +568,93 @@ fn provider_name(provider: &LLMProvider) -> &str {
         LLMProvider::CustomOpenAI => "Custom OpenAI",
     }
 }
+
+#[cfg(test)]
+pub(crate) mod test_support {
+    use serde_json::Value;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+    use tokio::sync::mpsc;
+
+    pub(crate) async fn spawn_chat_server(
+        responses: Vec<(u16, Value)>,
+    ) -> (
+        String,
+        mpsc::UnboundedReceiver<Value>,
+        tokio::task::JoinHandle<()>,
+    ) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let (request_sender, request_receiver) = mpsc::unbounded_channel();
+
+        let server = tokio::spawn(async move {
+            for (status, response_body) in responses {
+                let (mut socket, _) =
+                    tokio::time::timeout(std::time::Duration::from_secs(2), listener.accept())
+                        .await
+                        .expect("expected another chat request")
+                        .unwrap();
+                let request_body = read_request_body(&mut socket).await;
+                request_sender.send(request_body).unwrap();
+
+                let response_body = response_body.to_string();
+                let reason = match status {
+                    200 => "OK",
+                    400 => "Bad Request",
+                    429 => "Too Many Requests",
+                    500 => "Internal Server Error",
+                    _ => "Response",
+                };
+                let headers = format!(
+                    "HTTP/1.1 {status} {reason}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    response_body.len()
+                );
+                socket.write_all(headers.as_bytes()).await.unwrap();
+                socket.write_all(response_body.as_bytes()).await.unwrap();
+                socket.flush().await.unwrap();
+            }
+        });
+
+        (format!("http://{address}"), request_receiver, server)
+    }
+
+    async fn read_request_body(socket: &mut tokio::net::TcpStream) -> Value {
+        let mut request = Vec::new();
+        let mut buffer = [0_u8; 1024];
+
+        loop {
+            let bytes_read = socket.read(&mut buffer).await.unwrap();
+            assert!(bytes_read > 0, "request ended before its JSON body arrived");
+            request.extend_from_slice(&buffer[..bytes_read]);
+
+            let Some(header_end) = request.windows(4).position(|window| window == b"\r\n\r\n")
+            else {
+                continue;
+            };
+            let body_start = header_end + 4;
+            let headers = String::from_utf8_lossy(&request[..header_end]);
+            let content_length = headers
+                .lines()
+                .find_map(|line| {
+                    let (name, value) = line.split_once(':')?;
+                    name.eq_ignore_ascii_case("content-length")
+                        .then(|| value.trim().parse::<usize>().unwrap())
+                })
+                .unwrap_or(0);
+
+            if request.len() >= body_start + content_length {
+                return serde_json::from_slice(&request[body_start..body_start + content_length])
+                    .unwrap();
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+    use test_support::spawn_chat_server;
 
     fn request_json_for_model(model: &str, max_tokens: Option<u32>) -> serde_json::Value {
         serde_json::to_value(build_openai_chat_request(
@@ -697,6 +816,9 @@ mod tests {
         assert!(is_max_tokens_unsupported_error(
             "The max_tokens parameter is not supported by this model"
         ));
+        assert!(is_max_tokens_unsupported_error(
+            r#""The max_tokens parameter is not supported by this model""#
+        ));
         assert!(!is_max_tokens_unsupported_error(
             r#"{"error":{"code":"invalid_api_key"}}"#
         ));
@@ -713,6 +835,154 @@ mod tests {
         assert!(!is_max_completion_tokens_unsupported_error(
             r#"{"error":{"code":"unsupported_parameter","param":"max_tokens"}}"#
         ));
+    }
+
+    #[test]
+    fn ignores_unrelated_unsupported_parameters_that_mention_token_fields() {
+        assert!(!is_max_tokens_unsupported_error(
+            r#"{"error":{"code":"unsupported_parameter","param":"temperature","message":"temperature is unsupported; max_tokens remains allowed"}}"#
+        ));
+        assert!(!is_max_completion_tokens_unsupported_error(
+            r#"{"error":{"code":"unsupported_parameter","param":"top_p","message":"top_p is unsupported; max_completion_tokens remains allowed"}}"#
+        ));
+    }
+
+    fn successful_chat_response(content: &str) -> serde_json::Value {
+        json!({"choices": [{"message": {"content": content}}]})
+    }
+
+    async fn custom_summary(
+        endpoint: &str,
+        model: &str,
+        max_tokens: Option<u32>,
+        temperature: Option<f32>,
+        top_p: Option<f32>,
+    ) -> Result<String, String> {
+        generate_summary(
+            &Client::new(),
+            &LLMProvider::CustomOpenAI,
+            model,
+            "test-key",
+            "system",
+            "user",
+            None,
+            Some(endpoint),
+            max_tokens,
+            temperature,
+            top_p,
+            None,
+            None,
+        )
+        .await
+    }
+
+    #[tokio::test]
+    async fn summary_retries_max_tokens_with_sampling_omitted() {
+        let (endpoint, mut requests, server) = spawn_chat_server(vec![
+            (
+                400,
+                json!({"error": {"code": "unsupported_parameter", "param": "max_tokens"}}),
+            ),
+            (200, successful_chat_response("retried")),
+        ])
+        .await;
+
+        let summary = custom_summary(
+            &endpoint,
+            "azure-deployment",
+            Some(512),
+            Some(0.7),
+            Some(0.9),
+        )
+        .await
+        .unwrap();
+        server.await.unwrap();
+
+        assert_eq!(summary, "retried");
+        let first = requests.recv().await.unwrap();
+        assert_eq!(first["max_tokens"], 512);
+        assert_eq!(first["temperature"], 0.7);
+        assert_eq!(first["top_p"], 0.9);
+        let second = requests.recv().await.unwrap();
+        assert_eq!(second["max_completion_tokens"], 512);
+        assert!(second.get("max_tokens").is_none());
+        assert!(second.get("temperature").is_none());
+        assert!(second.get("top_p").is_none());
+        assert!(requests.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn summary_retries_max_completion_tokens_with_sampling_restored() {
+        let (endpoint, mut requests, server) = spawn_chat_server(vec![
+            (
+                400,
+                json!({"error": {"code": "unsupported_parameter", "param": "max_completion_tokens"}}),
+            ),
+            (200, successful_chat_response("legacy retry")),
+        ])
+        .await;
+
+        let summary = custom_summary(&endpoint, "gpt-5.1-chat", Some(512), Some(0.7), Some(0.9))
+            .await
+            .unwrap();
+        server.await.unwrap();
+
+        assert_eq!(summary, "legacy retry");
+        let first = requests.recv().await.unwrap();
+        assert_eq!(first["max_completion_tokens"], 512);
+        assert!(first.get("temperature").is_none());
+        assert!(first.get("top_p").is_none());
+        let second = requests.recv().await.unwrap();
+        assert_eq!(second["max_tokens"], 512);
+        assert!(second.get("max_completion_tokens").is_none());
+        assert_eq!(second["temperature"], 0.7);
+        assert_eq!(second["top_p"], 0.9);
+        assert!(requests.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn summary_does_not_retry_an_unrelated_unsupported_parameter() {
+        let original_error = json!({
+            "error": {
+                "code": "unsupported_parameter",
+                "param": "temperature",
+                "message": "temperature is unsupported; max_tokens remains allowed"
+            }
+        });
+        let (endpoint, mut requests, server) =
+            spawn_chat_server(vec![(400, original_error.clone())]).await;
+
+        let error = custom_summary(&endpoint, "azure-deployment", Some(512), Some(0.7), None)
+            .await
+            .unwrap_err();
+        server.await.unwrap();
+
+        assert_eq!(error, format!("LLM API request failed: {original_error}"));
+        assert!(requests.recv().await.is_some());
+        assert!(requests.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn summary_returns_the_terminal_retry_failure_without_a_third_request() {
+        let retry_error = json!({"error": {"code": "rate_limit", "message": "retry failed"}});
+        let (endpoint, mut requests, server) = spawn_chat_server(vec![
+            (
+                400,
+                json!({"error": {"code": "unsupported_parameter", "param": "max_tokens"}}),
+            ),
+            (429, retry_error.clone()),
+        ])
+        .await;
+
+        let error = custom_summary(&endpoint, "azure-deployment", Some(512), None, None)
+            .await
+            .unwrap_err();
+        server.await.unwrap();
+
+        assert_eq!(error, format!("LLM API request failed: {retry_error}"));
+        assert!(requests.recv().await.is_some());
+        assert!(requests.recv().await.is_some());
+        assert!(requests.try_recv().is_err());
     }
 
     #[test]

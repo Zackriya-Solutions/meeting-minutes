@@ -1277,6 +1277,14 @@ pub async fn api_test_custom_openai_connection<R: Runtime>(
     api_key: Option<String>,
     model: String,
 ) -> Result<serde_json::Value, String> {
+    perform_custom_openai_connection_test(endpoint, api_key, model).await
+}
+
+async fn perform_custom_openai_connection_test(
+    endpoint: String,
+    api_key: Option<String>,
+    model: String,
+) -> Result<serde_json::Value, String> {
     log_info!(
         "api_test_custom_openai_connection called: endpoint='{}', model='{}'",
         &endpoint,
@@ -1457,5 +1465,46 @@ pub async fn api_test_custom_openai_connection<R: Runtime>(
                 Err(format!("Connection failed: {}", e))
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::summary::llm_client::test_support::spawn_chat_server;
+    use serde_json::json;
+
+    #[tokio::test]
+    async fn connection_test_retries_with_completion_tokens_once() {
+        let (endpoint, mut requests, server) = spawn_chat_server(vec![
+            (
+                400,
+                json!({"error": {"code": "unsupported_parameter", "param": "max_tokens"}}),
+            ),
+            (
+                200,
+                json!({"choices": [{"message": {"content": "connected"}}]}),
+            ),
+        ])
+        .await;
+
+        let result = perform_custom_openai_connection_test(
+            endpoint,
+            Some("test-key".to_string()),
+            "azure-deployment".to_string(),
+        )
+        .await
+        .unwrap();
+        server.await.unwrap();
+
+        assert_eq!(result["status"], "success");
+        let first = requests.recv().await.unwrap();
+        assert_eq!(first["max_tokens"], 5);
+        let second = requests.recv().await.unwrap();
+        assert_eq!(second["max_completion_tokens"], 5);
+        assert!(second.get("max_tokens").is_none());
+        assert!(second.get("temperature").is_none());
+        assert!(second.get("top_p").is_none());
+        assert!(requests.try_recv().is_err());
     }
 }
