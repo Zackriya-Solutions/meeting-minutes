@@ -61,6 +61,88 @@ pub struct TranscriptionStatus {
 }
 
 // ============================================================================
+// DEVICE RESOLUTION
+// ============================================================================
+
+/// Resolve the microphone to record with: requested device (if it actually
+/// enumerates) → system default → none (system-audio-only recording).
+///
+/// The device picker has no "no microphone" option: choosing "Default
+/// Microphone" sends `None`, so `None` here means "use the system default",
+/// NOT "record without a mic". A specifically-requested mic that isn't in
+/// cpal's current enumeration (a stale saved device, or a Continuity
+/// "iPhone Microphone" that isn't available right now) is downgraded to the
+/// system default — the same `default_input_device()` helper the
+/// mid-recording disconnect path uses — so start never hard-fails with
+/// "Device not found".
+///
+/// Emits at most one event per call:
+/// - `mic-device-switched` — a specific mic was requested but unavailable,
+///   and we fell back to the default (reuses the existing frontend listener).
+/// - `mic-unavailable` — no usable mic at all; recording proceeds with
+///   system audio only. If system audio is also unavailable, start_streams'
+///   own guard reports it.
+/// Resolving `None` to the default is the user's actual choice, so it's silent.
+///
+/// ponytail: sync pre-flight substitution (matches Pro), not catch-and-retry —
+/// stream.rs keeps its hard-fail as the last line of defense. cpal calls
+/// block briefly either way.
+fn resolve_mic_or_default<R: Runtime>(
+    app: &AppHandle<R>,
+    requested_name: Option<&str>,
+) -> Option<Arc<super::AudioDevice>> {
+    use cpal::traits::{DeviceTrait, HostTrait};
+
+    let requested_specific = requested_name.is_some();
+
+    if let Some(name) = requested_name {
+        match parse_audio_device(name) {
+            Ok(device) => {
+                let exists = cpal::default_host()
+                    .input_devices()
+                    .map(|mut it| it.any(|d| d.name().map(|n| n == device.name).unwrap_or(false)))
+                    .unwrap_or(false);
+                if exists {
+                    info!("✅ Using requested microphone: '{}'", device.name);
+                    return Some(Arc::new(device));
+                }
+                warn!(
+                    "⚠️ Requested mic '{}' not enumerated — falling back to system default",
+                    device.name
+                );
+            }
+            Err(e) => {
+                warn!(
+                    "⚠️ Requested mic '{}' not available: {} — falling back to system default",
+                    name, e
+                );
+            }
+        }
+    }
+
+    match default_input_device() {
+        Ok(device) => {
+            info!("✅ Using default microphone: '{}'", device.name);
+            if requested_specific {
+                // Tell the user their selected mic wasn't available and which
+                // mic is actually recording. Reuses the mic-device-switched
+                // listener the disconnect path wires up.
+                let _ = app.emit(
+                    "mic-device-switched",
+                    serde_json::json!({ "device_name": device.name }),
+                );
+            }
+            Some(Arc::new(device))
+        }
+        Err(e) => {
+            warn!("❌ No microphone available: {} — recording system audio only", e);
+            let _ = app.emit("mic-unavailable", serde_json::json!({}));
+            None
+        }
+    }
+}
+
+// ============================================================================
 // RECORDING COMMANDS
 // ============================================================================
 
@@ -130,50 +212,7 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
             }
         };
 
-    // ============================================================================
-    // MICROPHONE DEVICE RESOLUTION: Preference → Default → Error
-    // ============================================================================
-    let microphone_device = match preferred_mic_name {
-        Some(pref_name) => {
-            info!("🎤 Attempting to use preferred microphone: '{}'", pref_name);
-            match parse_audio_device(&pref_name) {
-                Ok(device) => {
-                    info!("✅ Using preferred microphone: '{}'", device.name);
-                    Some(Arc::new(device))
-                }
-                Err(e) => {
-                    warn!("⚠️ Preferred microphone '{}' not available: {}", pref_name, e);
-                    warn!("   Falling back to system default microphone...");
-                    match default_input_device() {
-                        Ok(device) => {
-                            info!("✅ Using default microphone: '{}'", device.name);
-                            Some(Arc::new(device))
-                        }
-                        Err(default_err) => {
-                            error!("❌ No microphone available (preferred and default both failed)");
-                            return Err(format!(
-                                "No microphone device available. Preferred device '{}' not found, and default microphone unavailable: {}",
-                                pref_name, default_err
-                            ));
-                        }
-                    }
-                }
-            }
-        }
-        None => {
-            info!("🎤 No microphone preference set, using system default");
-            match default_input_device() {
-                Ok(device) => {
-                    info!("✅ Using default microphone: '{}'", device.name);
-                    Some(Arc::new(device))
-                }
-                Err(e) => {
-                    error!("❌ No default microphone available");
-                    return Err(format!("No microphone device available: {}", e));
-                }
-            }
-        }
-    };
+    let microphone_device = resolve_mic_or_default(&app, preferred_mic_name.as_deref());
 
     // ============================================================================
     // SYSTEM AUDIO DEVICE RESOLUTION: Preference → Default → None (optional)
@@ -370,86 +409,7 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
         "message": "Recording initialization started"
     })).map_err(|e| e.to_string())?;
 
-    // Parse devices
-    let mic_device = if let Some(ref name) = mic_device_name {
-        Some(Arc::new(parse_audio_device(name).map_err(|e| {
-            format!("Invalid microphone device '{}': {}", name, e)
-        })?))
-    } else {
-        None
-    };
-
-    // Backend safety net for stale/unavailable mic selections, and for the
-    // "Default Microphone" choice which reaches this path as `None`.
-    //
-    // The device picker has no "no microphone" option: choosing "Default
-    // Microphone" sends `None` (DeviceSelection.tsx), so `None` here means "use
-    // the system default", NOT "record without a mic". A specifically-requested
-    // mic that isn't in cpal's current enumeration (a stale saved device, or a
-    // Continuity "iPhone Microphone" that isn't available right now) is
-    // downgraded to the system default too — the same `default_input_device()`
-    // helper the mid-recording disconnect path uses — so start never hard-fails
-    // with "Device not found".
-    //
-    // ponytail: pre-flight substitution (matches Pro), not catch-and-retry —
-    // stream.rs keeps its hard-fail as the last line of defense. Only the
-    // requested-but-unavailable case toasts the user (an unexpected fallback);
-    // resolving `None` to the default is the user's actual choice, so it's silent.
-    let mic_device = {
-        use cpal::traits::{DeviceTrait, HostTrait};
-        let host = cpal::default_host();
-        // (keep_requested, notify_fallback): keep the requested device only when
-        // it's actually enumerated; notify only when a specific mic was asked for
-        // but is unavailable.
-        let (keep_requested, notify_fallback) = match &mic_device {
-            Some(requested) => {
-                let exists = host
-                    .input_devices()
-                    .map(|mut it| it.any(|d| d.name().map(|n| n == requested.name).unwrap_or(false)))
-                    .unwrap_or(false);
-                if exists {
-                    (true, false)
-                } else {
-                    warn!(
-                        "[start_recording] Requested mic '{}' not enumerated — falling back to system default",
-                        requested.name
-                    );
-                    (false, true)
-                }
-            }
-            None => (false, false), // "Default Microphone" selection → resolve default, no toast
-        };
-
-        if keep_requested {
-            mic_device
-        } else {
-            match default_input_device() {
-                Ok(default_dev) => {
-                    info!(
-                        "[start_recording] Using default input device: '{}'",
-                        default_dev.name
-                    );
-                    if notify_fallback {
-                        // Tell the user their selected mic wasn't available and
-                        // which mic is actually recording. Reuses the
-                        // mic-device-switched listener the disconnect path wires up.
-                        let _ = app.emit(
-                            "mic-device-switched",
-                            serde_json::json!({ "device_name": default_dev.name }),
-                        );
-                    }
-                    Some(Arc::new(default_dev))
-                }
-                Err(e) => {
-                    // No usable mic at all — record system audio only rather than
-                    // failing the whole recording. If system audio is also
-                    // unavailable, start_streams' own guard reports it.
-                    warn!("[start_recording] No default input device available: {}", e);
-                    None
-                }
-            }
-        }
-    };
+    let mic_device = resolve_mic_or_default(&app, mic_device_name.as_deref());
 
     let system_device = if let Some(ref name) = system_device_name {
         Some(Arc::new(parse_audio_device(name).map_err(|e| {

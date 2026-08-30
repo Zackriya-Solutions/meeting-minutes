@@ -207,6 +207,18 @@ export class RecordingService {
   }
 
   /**
+   * Listen for mic-unavailable event (no usable microphone at recording start —
+   * recording proceeds with system audio only)
+   * @param callback - Function to call when no microphone is available
+   * @returns Promise that resolves to unlisten function
+   */
+  async onMicUnavailable(callback: () => void): Promise<UnlistenFn> {
+    return listen('mic-unavailable', () => {
+      callback();
+    });
+  }
+
+  /**
    * Listen for mic-swap-failed event (mid-recording mic hot-swap failed)
    * @param callback - Function to call when the mic swap fails
    * @returns Promise that resolves to unlisten function

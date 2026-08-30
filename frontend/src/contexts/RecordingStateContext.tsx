@@ -254,6 +254,7 @@ export function RecordingStateProvider({ children }: { children: React.ReactNode
     let cancelled = false;
     let unlistenSwitched: (() => void) | undefined;
     let unlistenFailed: (() => void) | undefined;
+    let unlistenMicUnavailable: (() => void) | undefined;
 
     const setup = async () => {
       try {
@@ -284,6 +285,18 @@ export function RecordingStateProvider({ children }: { children: React.ReactNode
         });
         if (cancelled) { fnFailed(); return; }
         unlistenFailed = fnFailed;
+
+        const fnUnavailable = await recordingService.onMicUnavailable(() => {
+          console.log('[RecordingStateContext] mic-unavailable');
+          // Fires at recording start, before isRecording flips true, so this
+          // is intentionally NOT gated by isRecordingRef.
+          toast.error(
+            'No microphone available — recording system audio only.',
+            { duration: 8000 }
+          );
+        });
+        if (cancelled) { fnUnavailable(); return; }
+        unlistenMicUnavailable = fnUnavailable;
       } catch (e) {
         console.error('[RecordingStateContext] Failed to set up hot-swap listeners:', e);
       }
@@ -295,6 +308,7 @@ export function RecordingStateProvider({ children }: { children: React.ReactNode
       cancelled = true;
       unlistenSwitched?.();
       unlistenFailed?.();
+      unlistenMicUnavailable?.();
     };
   }, []);
 
