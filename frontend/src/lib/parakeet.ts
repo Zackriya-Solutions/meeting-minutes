@@ -34,7 +34,8 @@ export interface ModelDisplayInfo {
   icon: string;
   tagline: string;
   recommended?: boolean;
-  tier: 'fastest' | 'balanced' | 'precise';
+  beta?: boolean;
+  tier: 'fastest' | 'balanced' | 'precise' | 'beta';
 }
 
 export const MODEL_DISPLAY_CONFIG: Record<string, ModelDisplayInfo> = {
@@ -44,6 +45,13 @@ export const MODEL_DISPLAY_CONFIG: Record<string, ModelDisplayInfo> = {
     tagline: 'Real time • Best for speed, great accuracy',
     recommended: true,
     tier: 'fastest'
+  },
+  'parakeet-ctc-es-0.6b-int8': {
+    friendlyName: 'Spanish Beta',
+    icon: '🇪🇸',
+    tagline: 'Beta • LATAM Spanish, Spanglish, technical English mix',
+    beta: true,
+    tier: 'beta'
   },
   'parakeet-tdt-0.6b-v2-int8': {
     friendlyName: 'Compact',
@@ -68,6 +76,13 @@ export const PARAKEET_MODEL_CONFIGS: Record<string, Partial<ParakeetModelInfo>> 
     size_mb: 670, // Actual download: 652MB encoder + 18.2MB decoder + 0.2MB extras
     accuracy: 'High',
     speed: 'Ultra Fast',
+    quantization: 'Int8'
+  },
+  'parakeet-ctc-es-0.6b-int8': {
+    description: 'Beta Spanish-first realtime model for LATAM and Spanglish-heavy speech',
+    size_mb: 658,
+    accuracy: 'High',
+    speed: 'Very Fast',
     quantization: 'Int8'
   },
   'parakeet-tdt-0.6b-v2-int8': {
@@ -105,6 +120,28 @@ export function getModelDisplayName(modelName: string): string {
 // Get model display info (icon, tagline, etc.)
 export function getModelDisplayInfo(modelName: string): ModelDisplayInfo | null {
   return MODEL_DISPLAY_CONFIG[modelName] || null;
+}
+
+export function getParakeetModelSections<T extends { name: string }>(models: T[]): {
+  recommended: T | null;
+  others: T[];
+} {
+  const recommended = models.find(model => model.name === 'parakeet-tdt-0.6b-v3-int8') || null;
+  const otherOrder = [
+    'parakeet-ctc-es-0.6b-int8',
+    'parakeet-tdt-0.6b-v2-int8',
+    'parakeet-tdt-0.6b-v3-fp32',
+  ];
+
+  const others = models
+    .filter(model => model.name !== 'parakeet-tdt-0.6b-v3-int8')
+    .sort((a, b) => {
+      const aIndex = otherOrder.indexOf(a.name);
+      const bIndex = otherOrder.indexOf(b.name);
+      return (aIndex === -1 ? Number.MAX_SAFE_INTEGER : aIndex) - (bIndex === -1 ? Number.MAX_SAFE_INTEGER : bIndex);
+    });
+
+  return { recommended, others };
 }
 
 export function getStatusColor(status: ModelStatus): string {

@@ -1,4 +1,4 @@
-# Building Meetily from Source
+# Building Meet4Specs from Source
 
 This guide provides detailed instructions for building Meetily from source on different operating systems.
 
@@ -7,7 +7,7 @@ This guide provides detailed instructions for building Meetily from source on di
 
 ## 🐧 Building on Linux
 
-This guide helps you build Meetily on Linux with **automatic GPU acceleration**. The build system detects your hardware and configures the best performance automatically.
+This guide helps you build Meet4Specs on Linux with **automatic GPU acceleration**. The build system detects your hardware and configures the best performance automatically.
 
 ---
 
@@ -224,11 +224,14 @@ TAURI_GPU_FEATURE=openblas ./build-gpu.sh
 
 #### Build Output Location
 
-After successful build:
+After a successful build (`build-gpu.sh` or `clean_build.sh`), all artifacts live under `frontend/src-tauri/target/release/`:
 
-```
-src-tauri/target/release/bundle/appimage/Meetily_<version>_amd64.AppImage
-```
+| Artifact             | Path                                            |
+| -------------------- | ----------------------------------------------- |
+| AppImage installer   | `bundle/appimage/<app>_<version>_amd64.AppImage` |
+| Debian package       | `bundle/deb/<app>_<version>_amd64.deb`           |
+| Raw executable       | `<productName>`                                  |
+| Static frontend      | `frontend/out/`                                  |
 
 ---
 
@@ -297,22 +300,49 @@ The application will be built with Metal GPU acceleration automatically.
 
 ## 🪟 Building on Windows
 
-### 1. Install Dependencies
+### 1. Install Dependencies (required BEFORE building)
 
 - **Node.js:** Download and install from [nodejs.org](https://nodejs.org/).
+- **pnpm:** `npm install -g pnpm`.
 - **Rust:** Install from [rust-lang.org](https://www.rust-lang.org/tools/install).
-- **Visual Studio Build Tools:** Install the "Desktop development with C++" workload from the Visual Studio Installer.
-- **CMake:** Download and install from [cmake.org](https://cmake.org/download/).
+- **CMake:** Download from [cmake.org](https://cmake.org/download/) (check "Add CMake to the system PATH").
+- **Visual Studio 2022 Build Tools (required):** install the "Desktop development with C++" workload with these individual components — the exact ones the project's install script (`backend/install_dependancies_for_windows.ps1`) validates:
+  - `Microsoft.VisualStudio.Component.VC.Tools.x86.x64` — MSVC x64 compiler
+  - `Microsoft.VisualStudio.Component.Windows11SDK.22000` — Windows SDK
+
+  One-line install with Chocolatey:
+
+  ```powershell
+  choco install visualstudio2022buildtools -y --package-parameters "--add Microsoft.VisualStudio.Component.VC.Tools.x86.x64 --add Microsoft.VisualStudio.Component.Windows11SDK.22000"
+  ```
+
+  > ⚠️ Older toolchains (VS 2019 or earlier) will not work: the build links against the VS 2022 MSVC toolset.
+
+- **LLVM:** required by `whisper-rs-sys` (bindgen needs `libclang`, otherwise the whisper build fails). Install from the [LLVM releases page](https://github.com/llvm/llvm-project/releases) and set `LIBCLANG_PATH=C:\Program Files\LLVM\bin` before building (the helper scripts below do this for you).
 
 ### 2. Build and Run
 
 ```powershell
 # Development mode (with hot reload)
-pnpm tauri:dev
+.\clean_run_windows.bat
 
-# Production build
-pnpm tauri:build
+# Production build (cleans node_modules first)
+.\clean_build_windows.bat
+
+# Or manually:
+pnpm tauri build
 ```
+
+### 3. Build Output Location
+
+After a successful build, all artifacts live under `frontend\src-tauri\target\release\`:
+
+| Artifact             | Path                                  |
+| -------------------- | ------------------------------------- |
+| NSIS installer       | `bundle\nsis\<app>_x64-setup.exe`      |
+| MSI installer        | `bundle\msi\<app>_x64_en-US.msi`       |
+| Raw executable       | `<productName>.exe`                    |
+| Static frontend      | `frontend\out\`                        |
 
 By default, the application will be built with CPU-only processing. To enable GPU acceleration, see the [GPU Acceleration Guide](GPU_ACCELERATION.md).
 

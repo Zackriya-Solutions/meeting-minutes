@@ -20,8 +20,10 @@ export interface UserSession {
 
 export class Analytics {
   private static initialized = false;
+  private static criticalInitialized = false;
   private static currentUserId: string | null = null;
   private static initializationPromise: Promise<void> | null = null;
+  private static criticalInitializationPromise: Promise<void> | null = null;
   private static sessionStartTime: number | null = null;
   private static meetingsInSession: number = 0;
   private static deviceInfo: DeviceInfo | null = null;
@@ -52,6 +54,34 @@ export class Analytics {
     } finally {
       this.initializationPromise = null;
     }
+  }
+
+  static async initCriticalTelemetry(): Promise<void> {
+    if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
+      return;
+    }
+
+    if (this.criticalInitialized) {
+      return;
+    }
+
+    if (this.criticalInitializationPromise) {
+      return this.criticalInitializationPromise;
+    }
+
+    this.criticalInitializationPromise = (async () => {
+      try {
+        await invoke('init_critical_analytics');
+        this.criticalInitialized = true;
+      } catch (error) {
+        console.error('Failed to initialize critical telemetry:', error);
+        throw error;
+      } finally {
+        this.criticalInitializationPromise = null;
+      }
+    })();
+
+    return this.criticalInitializationPromise;
   }
 
   static async disable(): Promise<void> {
@@ -182,10 +212,10 @@ export class Analytics {
     } catch (error) {
       console.error('Failed to get persistent user ID:', error);
       // Fallback to session storage
-      let userId = sessionStorage.getItem('meetily_user_id');
+      let userId = sessionStorage.getItem('meet4specs_user_id');
       if (!userId) {
         userId = `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-        sessionStorage.setItem('meetily_user_id', userId);
+        sessionStorage.setItem('meet4specs_user_id', userId);
         sessionStorage.setItem('is_first_launch', 'true');
       }
       return userId;
@@ -351,7 +381,7 @@ export class Analytics {
     try {
       const { Store } = await import('@tauri-apps/plugin-store');
       const store = await Store.load('analytics.json');
-      const features = await store.get<Record<string, any>>('features_used') || {};
+      const features = await store.get<Record<string, unknown>>('features_used') || {};
       return !!features[featureName];
     } catch (error) {
       console.error(`Failed to check feature usage for ${featureName}:`, error);
@@ -363,7 +393,7 @@ export class Analytics {
     try {
       const { Store } = await import('@tauri-apps/plugin-store');
       const store = await Store.load('analytics.json');
-      const features = await store.get<Record<string, any>>('features_used') || {};
+      const features = await store.get<Record<string, { first_used: string; use_count: number }>>('features_used') || {};
 
       if (!features[featureName]) {
         features[featureName] = {
@@ -371,7 +401,7 @@ export class Analytics {
           use_count: 1
         };
       } else {
-        features[featureName].use_count++;
+        features[featureName].use_count += 1;
       }
 
       await store.set('features_used', features);
@@ -461,7 +491,7 @@ export class Analytics {
   }
 
   // Feature usage tracking with platform info
-  static async trackFeatureUsedEnhanced(featureName: string, properties?: Record<string, any>): Promise<void> {
+  static async trackFeatureUsedEnhanced(featureName: string, properties?: Record<string, unknown>): Promise<void> {
     if (!this.initialized) return;
 
     try {
@@ -490,7 +520,7 @@ export class Analytics {
   }
 
   // Copy tracking with frequency
-  static async trackCopy(copyType: 'transcript' | 'summary', properties?: Record<string, any>): Promise<void> {
+  static async trackCopy(copyType: 'transcript' | 'summary', properties?: Record<string, unknown>): Promise<void> {
     if (!this.initialized) return;
 
     try {
@@ -500,7 +530,7 @@ export class Analytics {
 
       // Get today's date
       const today = new Date().toISOString().split('T')[0];
-      const copyCounts = await store.get<Record<string, any>>('copy_counts') || {};
+      const copyCounts = await store.get<Record<string, Partial<Record<'transcript' | 'summary', number>>>>('copy_counts') || {};
       const todayCounts = copyCounts[today] || {};
       const copyCount = todayCounts[copyType] || 0;
 
@@ -602,11 +632,56 @@ export class Analytics {
     await this.track(`button_click_${buttonName}`, properties);
   }
 
-  static async trackError(errorType: string, errorMessage: string): Promise<void> {
-    await this.track('error', { 
-      error_type: errorType, 
-      error_message: errorMessage 
-    });
+  private static sanitizeErrorText(value: string | undefined | null): string {
+    if (!value) return '';
+    return value
+      .replace(/file:\/\/[^\s)]+/g, '[path]')
+      .replace(/([A-Za-z]:\\[^\s)]+)/g, '[path]')
+      .replace(/(\/[^\s)]+)+/g, '[path]')
+      .slice(0, 1000);
+  }
+
+  static async trackCriticalError(
+    errorType: string,
+    errorMessage: string,
+    properties: AnalyticsProperties = {}
+  ): Promise<void> {
+    if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
+      return;
+    }
+
+    try {
+      await this.initCriticalTelemetry();
+      const userId = await this.getPersistentUserId();
+      await invoke('track_critical_event', {
+        eventName: 'critical_error',
+        properties: {
+          error_type: errorType,
+          error_message: this.sanitizeErrorText(errorMessage),
+          anonymous_user_id: userId,
+          environment: 'production',
+          ...properties,
+        },
+      });
+    } catch (error) {
+      console.error(`Failed to track critical error ${errorType}:`, error);
+    }
+  }
+
+  static async trackError(
+    errorType: string,
+    errorMessage: string,
+    properties: AnalyticsProperties = {}
+  ): Promise<void> {
+    await this.trackCriticalError(errorType, errorMessage, properties);
+
+    if (this.initialized) {
+      await this.track('error', {
+        error_type: errorType,
+        error_message: this.sanitizeErrorText(errorMessage),
+        ...properties,
+      });
+    }
   }
 
   static async trackAppStarted(): Promise<void> {
@@ -623,8 +698,10 @@ export class Analytics {
   // Reset initialization state (useful for testing)
   static reset(): void {
     this.initialized = false;
+    this.criticalInitialized = false;
     this.currentUserId = null;
     this.initializationPromise = null;
+    this.criticalInitializationPromise = null;
   }
 
   // Wait for analytics to be initialized

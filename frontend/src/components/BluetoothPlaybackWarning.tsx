@@ -81,7 +81,7 @@ export function BluetoothPlaybackWarning({
             <strong>wired headphones</strong>.
             <br />
             <a
-              href="https://github.com/your-org/meetily/blob/main/BLUETOOTH_PLAYBACK_NOTICE.md"
+              href="https://github.com/your-org/meet4specs/blob/main/BLUETOOTH_PLAYBACK_NOTICE.md"
               target="_blank"
               rel="noopener noreferrer"
               className="underline hover:text-yellow-900 font-medium mt-2 inline-block"

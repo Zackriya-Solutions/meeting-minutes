@@ -9,8 +9,10 @@ import {
   ParakeetAPI,
   getModelDisplayInfo,
   getModelDisplayName,
+  getParakeetModelSections,
   formatFileSize
 } from '../lib/parakeet';
+import { useI18n } from '@/hooks/useI18n';
 
 interface ParakeetModelManagerProps {
   selectedModel?: string;
@@ -25,6 +27,7 @@ export function ParakeetModelManager({
   className = '',
   autoSave = false
 }: ParakeetModelManagerProps) {
+  const { t } = useI18n();
   const [models, setModels] = useState<ParakeetModelInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -348,12 +351,7 @@ export function ParakeetModelManager({
     );
   }
 
-  const recommendedModel = models.find(m =>
-    m.name === 'parakeet-tdt-0.6b-v3-int8'
-  );
-  const otherModels = models.filter(m =>
-    m.name !== 'parakeet-tdt-0.6b-v3-int8'
-  );
+  const { recommended: recommendedModel, others: otherModels } = getParakeetModelSections(models);
 
   return (
     <div className={`space-y-3 ${className}`}>
@@ -405,7 +403,7 @@ export function ParakeetModelManager({
           animate={{ opacity: 1, y: 0 }}
           className="text-xs text-gray-500 text-center pt-2"
         >
-          Using {getModelDisplayName(selectedModel)} for transcription
+          {t('transcriptSettings.parakeetUsingModel', { model: selectedModel === 'parakeet-ctc-es-0.6b-int8' ? t('transcriptSettings.parakeetCtcEsName') : getModelDisplayName(selectedModel) })}
         </motion.div>
       )}
     </div>
@@ -434,11 +432,17 @@ function ModelCard({
   onDelete,
   isDownloading
 }: ModelCardProps) {
+  const { t } = useI18n();
   const [isHovered, setIsHovered] = useState(false);
   const displayInfo = getModelDisplayInfo(model.name);
-  const displayName = displayInfo?.friendlyName || model.name;
+  const isBetaModel = displayInfo?.beta ?? false;
+  const displayName = model.name === 'parakeet-ctc-es-0.6b-int8'
+    ? t('transcriptSettings.parakeetCtcEsName')
+    : displayInfo?.friendlyName || model.name;
   const icon = displayInfo?.icon || '📦';
-  const tagline = displayInfo?.tagline || model.description || '';
+  const tagline = model.name === 'parakeet-ctc-es-0.6b-int8'
+    ? t('transcriptSettings.parakeetCtcEsTagline')
+    : displayInfo?.tagline || model.description || '';
 
   const isAvailable = model.status === 'Available';
   const isMissing = model.status === 'Missing';

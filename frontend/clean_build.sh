@@ -16,17 +16,10 @@ case $LOG_LEVEL in
         ;;
 esac
 
-# Check and install CMake if needed
-echo "Checking CMake version..."
+# Check CMake
 if ! command -v cmake &> /dev/null; then
-    echo "CMake not found. Installing via Homebrew..."
-    brew install cmake
-else
-    CMAKE_VERSION=$(cmake --version | head -n1 | cut -d" " -f3)
-    if [[ "$CMAKE_VERSION" < "3.5" ]]; then
-        echo "CMake version $CMAKE_VERSION is too old. Updating via Homebrew..."
-        brew upgrade cmake
-    fi
+    echo "CMake not found. Install it first: sudo apt install cmake (Linux) / brew install cmake (macOS)"
+    exit 1
 fi
 
 # Clean up previous builds
@@ -49,9 +42,15 @@ pnpm install
 echo "Building Next.js application..."
 pnpm run build
 
-# Set environment variables for the build
+# Choose Tauri config based on signing environment
 
 echo "Building Tauri app..."
-pnpm run tauri build
-sleep
+if [ -n "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+    echo "Signing key detected. Using default Tauri config with updater artifacts enabled."
+    pnpm tauri build
+else
+    echo "No TAURI_SIGNING_PRIVATE_KEY detected. Using local Tauri override: src-tauri/tauri.local.conf.json"
+    echo "Updater signing artifacts disabled for local build."
+    pnpm tauri build --config src-tauri/tauri.local.conf.json
+fi
 

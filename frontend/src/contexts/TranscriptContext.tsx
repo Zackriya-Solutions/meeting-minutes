@@ -24,6 +24,10 @@ interface TranscriptContextType {
 
 const TranscriptContext = createContext<TranscriptContextType | undefined>(undefined);
 
+export function shouldAutoScrollOnTranscriptChange(transcriptCount: number, isUserAtBottom: boolean): boolean {
+  return transcriptCount > 0 && isUserAtBottom;
+}
+
 export function TranscriptProvider({ children }: { children: ReactNode }) {
   const [transcripts, setTranscripts] = useState<Transcript[]>([]);
   const [meetingTitle, setMeetingTitle] = useState('+ New Call');
@@ -61,24 +65,25 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  // Auto-scroll when transcripts change (only if user is at bottom)
+  // Auto-scroll when transcripts change (only if user is at bottom and we actually have transcript content)
   useEffect(() => {
-    // Only auto-scroll if user was at the bottom before new content
-    if (isUserAtBottomRef.current && transcriptContainerRef.current) {
-      // Wait for Framer Motion animation to complete (150ms) before scrolling
-      // This ensures scrollHeight includes the full rendered height of the new transcript
-      const scrollTimeout = setTimeout(() => {
-        const container = transcriptContainerRef.current;
-        if (container) {
-          container.scrollTo({
-            top: container.scrollHeight,
-            behavior: 'smooth'
-          });
-        }
-      }, 150); // Match Framer Motion transition duration
-
-      return () => clearTimeout(scrollTimeout);
+    if (!shouldAutoScrollOnTranscriptChange(transcripts.length, isUserAtBottomRef.current) || !transcriptContainerRef.current) {
+      return;
     }
+
+    // Wait for Framer Motion animation to complete (150ms) before scrolling
+    // This ensures scrollHeight includes the full rendered height of the new transcript
+    const scrollTimeout = setTimeout(() => {
+      const container = transcriptContainerRef.current;
+      if (container) {
+        container.scrollTo({
+          top: container.scrollHeight,
+          behavior: 'smooth'
+        });
+      }
+    }, 150); // Match Framer Motion transition duration
+
+    return () => clearTimeout(scrollTimeout);
   }, [transcripts]);
 
   // Initialize IndexedDB and listen for recording-started/stopped events
@@ -338,7 +343,12 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
         console.log('✅ MAIN transcript listener setup complete');
       } catch (error) {
         console.error('❌ Failed to setup MAIN transcript listener:', error);
-        alert('Failed to setup transcript listener. Check console for details.');
+        // A transcript event listener is an enhancement, not a reason to
+        // freeze the whole desktop application. `alert()` is modal in
+        // WebView2 and blocks every control until dismissed; it also turns a
+        // transient IPC startup failure into an apparently unresponsive app.
+        // Keep the detailed error in the console and let the rest of the UI
+        // remain usable; the listener will be recreated on the next mount.
       }
     };
 

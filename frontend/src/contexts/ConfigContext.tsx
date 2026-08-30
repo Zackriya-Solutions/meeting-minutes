@@ -55,9 +55,13 @@ interface ConfigContextType {
   selectedDevices: SelectedDevices;
   setSelectedDevices: (devices: SelectedDevices) => void;
 
-  // Language preference
+  // Transcription language preference
   selectedLanguage: string;
   setSelectedLanguage: (lang: string) => void;
+
+  // App UI language
+  appLanguage: 'es' | 'en';
+  setAppLanguage: (lang: 'es' | 'en') => void;
 
   // UI preferences
   showConfidenceIndicator: boolean;
@@ -136,13 +140,22 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     systemDevice: null
   });
 
-  // Language preference state
+  // Transcription language preference state
   const [selectedLanguage, setSelectedLanguage] = useState<string>(() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('primaryLanguage');
       return saved || 'auto';
     }
     return 'auto';
+  });
+
+  // App UI language state
+  const [appLanguage, setAppLanguageState] = useState<'es' | 'en'>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('appLanguage');
+      return saved === 'en' ? 'en' : 'es';
+    }
+    return 'es';
   });
 
   // UI preferences state
@@ -211,7 +224,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     loadTranscriptConfig();
   }, []);
 
-  // Sync language preference to Rust on mount (fixes startup desync bug)
+  // Sync transcription language preference to Rust on mount (fixes startup desync bug)
   useEffect(() => {
     if (selectedLanguage) {
       invoke('set_language_preference', { language: selectedLanguage })
@@ -222,7 +235,14 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
           console.error('[ConfigContext] Failed to sync language preference to Rust on startup:', err);
         });
     }
-  }, []); 
+  }, []);
+
+  // Sync app UI language to Rust on mount
+  useEffect(() => {
+    invoke('set_ui_language', { language: appLanguage }).catch(err => {
+      console.error('[ConfigContext] Failed to sync app language to Rust on startup:', err);
+    });
+  }, []);
 
   // Load model configuration on mount
   useEffect(() => {
@@ -482,6 +502,16 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     );
   }, []);
 
+  const handleSetAppLanguage = useCallback((lang: 'es' | 'en') => {
+    setAppLanguageState(lang);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('appLanguage', lang);
+    }
+    invoke('set_ui_language', { language: lang }).catch(err =>
+      console.error('Failed to sync app language to Rust:', err)
+    );
+  }, []);
+
   const value: ConfigContextType = useMemo(() => ({
     modelConfig,
     setModelConfig,
@@ -495,6 +525,8 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     setSelectedDevices,
     selectedLanguage,
     setSelectedLanguage: handleSetSelectedLanguage,
+    appLanguage,
+    setAppLanguage: handleSetAppLanguage,
     showConfidenceIndicator,
     toggleConfidenceIndicator,
     betaFeatures,
@@ -517,6 +549,8 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     selectedDevices,
     selectedLanguage,
     handleSetSelectedLanguage,
+    appLanguage,
+    handleSetAppLanguage,
     showConfidenceIndicator,
     toggleConfidenceIndicator,
     betaFeatures,

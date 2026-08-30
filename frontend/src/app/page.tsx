@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { motion } from 'framer-motion';
 import { RecordingControls } from '@/components/RecordingControls';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
 import { usePermissionCheck } from '@/hooks/usePermissionCheck';
@@ -21,6 +20,7 @@ import { TranscriptRecovery } from '@/components/TranscriptRecovery';
 import { indexedDBService } from '@/services/indexedDBService';
 import { toast } from 'sonner';
 import { useRouter } from 'next/navigation';
+import { useImportDialog } from '@/contexts/ImportDialogContext';
 
 export default function Home() {
   // Local page state (not moved to contexts)
@@ -61,6 +61,7 @@ export default function Home() {
   } = useTranscriptRecovery();
 
   const router = useRouter();
+  const { openImportDialog } = useImportDialog();
 
   useEffect(() => {
     // Track page view
@@ -190,12 +191,7 @@ export default function Home() {
   const isProcessingStop = status === RecordingStatus.PROCESSING_TRANSCRIPTS || isProcessing;
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3, ease: 'easeOut' }}
-      className="flex flex-col h-screen bg-gray-50"
-    >
+    <div className="flex flex-col h-screen bg-gray-50">
       {/* All Modals supported*/}
       <SettingsModals
         modals={modals}
@@ -217,6 +213,8 @@ export default function Home() {
           isProcessingStop={isProcessingStop}
           isStopping={isStopping}
           showModal={showModal}
+          onStartRecording={handleRecordingStart}
+          onImportAudio={() => openImportDialog()}
         />
 
         {/* Recording controls - only show when permissions are granted or already recording and not showing status messages */}
@@ -260,6 +258,6 @@ export default function Home() {
           sidebarCollapsed={sidebarCollapsed}
         />
       </div>
-    </motion.div>
+    </div>
   );
 }
