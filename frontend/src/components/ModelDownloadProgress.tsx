@@ -13,7 +13,7 @@ export function ModelDownloadProgress({ status, modelName, onCancel }: ModelDown
     return null;
   }
 
-  const progress = status.Downloading;
+  const progress = status.Downloading.progress;
   const isCompleted = progress >= 100;
 
   return (

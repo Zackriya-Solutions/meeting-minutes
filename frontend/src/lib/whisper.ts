@@ -15,9 +15,11 @@ export type ProcessingSpeed = 'Slow' | 'Medium' | 'Fast' | 'Very Fast';
 export type ModelStatus =
   | 'Available'
   | 'Missing'
-  | { Downloading: number }
+  | { Downloading: { progress: number } }
   | { Error: string }
   | { Corrupted: { file_size: number; expected_min_size: number } };
+
+export type CancelDownloadOutcome = 'cancelled' | 'pending';
 
 export interface ModelDownloadProgress {
   modelName: string;
@@ -312,8 +314,8 @@ export class WhisperAPI {
     await invoke('whisper_download_model', { modelName });
   }
 
-  static async cancelDownload(modelName: string): Promise<void> {
-    await invoke('whisper_cancel_download', { modelName });
+  static async cancelDownload(modelName: string): Promise<CancelDownloadOutcome> {
+    return await invoke<CancelDownloadOutcome>('whisper_cancel_download', { modelName });
   }
 
   static async deleteCorruptedModel(modelName: string): Promise<string> {
