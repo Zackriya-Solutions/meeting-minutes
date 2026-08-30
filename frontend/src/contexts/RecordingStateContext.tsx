@@ -44,6 +44,7 @@ interface RecordingStateContextType extends RecordingState {
   isStopping: boolean;
   isProcessing: boolean;
   isSaving: boolean;
+  isStartingRecording: boolean;
 }
 
 const RecordingStateContext = createContext<RecordingStateContextType | null>(null);
@@ -150,6 +151,15 @@ export function RecordingStateProvider({ children }: { children: React.ReactNode
         });
         unsubscribers.push(unlistenStarted);
 
+        // Recording starting (startup in progress)
+        const unlistenStarting = await recordingService.onRecordingStarting(() => {
+          console.log('[RecordingStateContext] Recording starting event');
+          setState(prev => prev.status === RecordingStatus.RECORDING
+            ? prev
+            : { ...prev, status: RecordingStatus.STARTING, statusMessage: 'Starting recording...' });
+        });
+        unsubscribers.push(unlistenStarting);
+
         // Recording stopped
         const unlistenStopped = await recordingService.onRecordingStopped((payload) => {
           console.log('[RecordingStateContext] Recording stopped event:', payload);
@@ -232,6 +242,7 @@ export function RecordingStateProvider({ children }: { children: React.ReactNode
     isStopping: state.status === RecordingStatus.STOPPING,
     isProcessing: state.status === RecordingStatus.PROCESSING_TRANSCRIPTS,
     isSaving: state.status === RecordingStatus.SAVING,
+    isStartingRecording: state.status === RecordingStatus.STARTING,
   }), [state, setStatus]);
 
   return (

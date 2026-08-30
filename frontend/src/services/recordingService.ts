@@ -117,6 +117,15 @@ export class RecordingService {
   }
 
   /**
+   * Listen for recording-starting event (fires when start begins)
+   * @param callback - Function to call when recording start begins
+   * @returns Promise that resolves to unlisten function
+   */
+  async onRecordingStarting(callback: () => void): Promise<UnlistenFn> {
+    return listen('recording-starting', callback);
+  }
+
+  /**
    * Listen for recording-stopped event (with metadata)
    * @param callback - Function to call when recording stops
    * @returns Promise that resolves to unlisten function

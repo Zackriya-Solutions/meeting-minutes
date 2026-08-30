@@ -104,6 +104,11 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
     }
     info!("✅ Transcription model validation passed");
 
+    // Notify frontend that startup has begun (surfaces STARTING state)
+    app.emit("recording-starting", serde_json::json!({
+        "message": "Recording initialization started"
+    })).map_err(|e| e.to_string())?;
+
     // Async-first approach - no more blocking operations!
     info!("🚀 Starting async recording initialization");
 
@@ -349,6 +354,11 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
         return Err(validation_error);
     }
     info!("✅ Transcription model validation passed");
+
+    // Notify frontend that startup has begun (surfaces STARTING state)
+    app.emit("recording-starting", serde_json::json!({
+        "message": "Recording initialization started"
+    })).map_err(|e| e.to_string())?;
 
     // Parse devices
     let mic_device = if let Some(ref name) = mic_device_name {
