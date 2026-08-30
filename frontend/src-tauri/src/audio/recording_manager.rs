@@ -2,6 +2,10 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 use anyhow::Result;
 use log::{debug, error, info, warn};
+#[cfg(target_os = "macos")]
+use std::time::Duration;
+#[cfg(target_os = "macos")]
+use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
 use super::devices::{AudioDevice, list_audio_devices};
 
@@ -19,6 +23,97 @@ use super::device_monitor::{AudioDeviceMonitor, DeviceEvent, DeviceMonitorType};
 /// Stream manager type enumeration
 pub enum StreamManagerType {
     Standard(AudioStreamManager),
+}
+
+// ============================================================================
+// macOS Core Audio "pre-wake" — ported from feat/audio-device-handling
+// (commit 8bf6af8b, with refinements from d266feac + 7107adc7 + a10f8e55).
+// ============================================================================
+//
+// When a macOS Mac has a Bluetooth device as the active audio output, the
+// built-in audio hardware unit — and, crucially, the BT audio connection
+// itself — can sit in a low-power state where registered IO procs do not
+// fire even though `AudioDeviceStart` returned `noErr`. The symptom is a
+// 60–90 second "silent" period at recording start (or during a disconnect
+// fallback) where the mic is technically capturing but no samples reach
+// the pipeline, until something nudges Core Audio back to life.
+//
+// The workaround, empirically validated by Sujith in the audio-device-
+// handling branch: briefly play 300 ms of digital silence through the
+// output device by name. The name-based enumeration is itself part of the
+// fix ("enumeration wake" — it forces the HAL to bring the device out of
+// its idle power state). The subsequent `stream.play()` on the output
+// activates the hardware unit fully, at which point the built-in mic's
+// IO proc starts firing normally. Total cost: ~300 ms added to recording
+// start, ~150 ms added to the disconnect-fallback hot-swap path.
+
+#[cfg(target_os = "macos")]
+const AUDIO_WAKE_DURATION: Duration = Duration::from_millis(300);
+
+/// Synchronous implementation of the wake. Must be called from a blocking
+/// thread (not directly from async code) because it sleeps 300 ms and does
+/// sync cpal I/O. The async wrapper below routes to it via spawn_blocking.
+#[cfg(target_os = "macos")]
+fn wake_audio_connection_sync(speaker_device_name: &str) -> Result<()> {
+    info!("[AUDIO_WAKE] Waking audio via speaker: '{}'", speaker_device_name);
+
+    let host = cpal::default_host();
+
+    let output_device = host.output_devices()?
+        .find(|d| d.name().ok().as_deref() == Some(speaker_device_name))
+        .ok_or_else(|| anyhow::anyhow!("Output device '{}' not found", speaker_device_name))?;
+
+    let config = output_device.default_output_config()?;
+    info!("[AUDIO_WAKE] Output config: {} Hz, {} channels",
+          config.sample_rate().0, config.channels());
+
+    let stream = match config.sample_format() {
+        cpal::SampleFormat::F32 => {
+            output_device.build_output_stream(
+                &config.into(),
+                |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
+                    for sample in data.iter_mut() { *sample = 0.0; }
+                },
+                |err| error!("[AUDIO_WAKE] Output stream error: {}", err),
+                None,
+            )?
+        }
+        cpal::SampleFormat::I16 => {
+            // BT HFP mode frequently picks I16 for the output config — without
+            // this branch the wake would error out exactly when we need it most.
+            output_device.build_output_stream(
+                &config.into(),
+                |data: &mut [i16], _: &cpal::OutputCallbackInfo| {
+                    for sample in data.iter_mut() { *sample = 0; }
+                },
+                |err| error!("[AUDIO_WAKE] Output stream error: {}", err),
+                None,
+            )?
+        }
+        format => {
+            return Err(anyhow::anyhow!("Unsupported sample format: {:?}", format));
+        }
+    };
+
+    stream.play()?;
+    info!("[AUDIO_WAKE] Playing silence for {} ms to wake audio connection...", AUDIO_WAKE_DURATION.as_millis());
+    std::thread::sleep(AUDIO_WAKE_DURATION);
+    drop(stream);
+    info!("[AUDIO_WAKE] Audio wake completed");
+
+    Ok(())
+}
+
+/// Async wrapper around `wake_audio_connection_sync`. Used at recording start
+/// so the 300 ms sleep doesn't block the tokio runtime. Non-fatal — the caller
+/// should log the error and proceed if this fails; recording will still work,
+/// it just may have the 60-90s silent startup on BT.
+#[cfg(target_os = "macos")]
+async fn wake_audio_connection(speaker_device_name: &str) -> Result<()> {
+    let name = speaker_device_name.to_string();
+    tokio::task::spawn_blocking(move || {
+        wake_audio_connection_sync(&name)
+    }).await.map_err(|e| anyhow::anyhow!("Join error: {}", e))?
 }
 
 /// Simplified recording manager that coordinates all audio components
@@ -117,6 +212,26 @@ impl RecordingManager {
             sys_name,
             sys_kind,
         )?;
+
+        // Wake the audio connection on macOS before opening capture streams.
+        // Without this, a deep-cold Bluetooth link can deliver no mic audio
+        // for the first 60-90 seconds of recording. Non-fatal on failure.
+        #[cfg(target_os = "macos")]
+        {
+            let wake_name = system_device
+                .as_ref()
+                .map(|s| s.name.clone())
+                .or_else(|| {
+                    cpal::default_host()
+                        .default_output_device()
+                        .and_then(|d| d.name().ok())
+                });
+            if let Some(name) = wake_name {
+                if let Err(e) = wake_audio_connection(&name).await {
+                    warn!("[AUDIO_WAKE] Wake failed: {} — proceeding anyway", e);
+                }
+            }
+        }
 
         // Give the pipeline a moment to fully initialize before starting streams
         tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
@@ -611,5 +726,17 @@ impl Drop for RecordingManager {
     fn drop(&mut self) {
         // Note: Can't call async cleanup in Drop, but streams have their own Drop implementations
         self.state.cleanup();
+    }
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod wake_tests {
+    use super::*;
+
+    #[test]
+    fn wake_fails_gracefully_for_unknown_device() {
+        // Nonexistent device name fails at the `find` step — no audio hardware needed.
+        // Asserts the wake is non-fatal (returns Err, does not panic).
+        assert!(wake_audio_connection_sync("__no_such_device__").is_err());
     }
 }
