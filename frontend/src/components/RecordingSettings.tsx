@@ -5,6 +5,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { DeviceSelection, SelectedDevices } from '@/components/DeviceSelection';
 import Analytics from '@/lib/analytics';
 import { toast } from 'sonner';
+import { useRecordingState } from '@/contexts/RecordingStateContext';
 
 export interface RecordingPreferences {
   save_folder: string;
@@ -29,6 +30,7 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [showRecordingNotification, setShowRecordingNotification] = useState(true);
+  const { isRecording } = useRecordingState();
 
   // Load recording preferences on component mount
   useEffect(() => {
@@ -235,6 +237,16 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
             Set your preferred microphone and system audio devices for recording. These will be automatically selected when starting new recordings.
           </p>
 
+          {isRecording && (
+            <p
+              role="status"
+              aria-live="polite"
+              className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-md p-2 mb-4"
+            >
+              Device selection is locked while a recording is in progress. Connecting a new device mid-recording will not switch to it. Stop the current meeting to change devices.
+            </p>
+          )}
+
           <div className="border rounded-lg p-4 bg-gray-50">
             <DeviceSelection
               selectedDevices={{
@@ -242,7 +254,7 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
                 systemDevice: preferences.preferred_system_device
               }}
               onDeviceChange={handleDeviceChange}
-              disabled={saving}
+              disabled={saving || isRecording}
             />
           </div>
         </div>
