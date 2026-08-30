@@ -471,7 +471,11 @@ pub async fn generate_summary(
 
         if provider == &LLMProvider::CustomOpenAI
             && request_body.get("max_tokens").is_some()
-            && is_max_tokens_unsupported_error(&error_body)
+            && (is_max_tokens_unsupported_error(&error_body)
+                || (request_body.get("temperature").is_some()
+                    && is_unsupported_parameter_error(&error_body, "temperature"))
+                || (request_body.get("top_p").is_some()
+                    && is_unsupported_parameter_error(&error_body, "top_p")))
         {
             info!("Retrying Custom OpenAI request with max_completion_tokens");
 
@@ -912,6 +916,41 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn summary_retries_when_sampling_is_rejected_before_max_tokens() {
+        let (endpoint, mut requests, server) = spawn_chat_server(vec![
+            (
+                400,
+                json!({"error": {"code": "unsupported_parameter", "param": "temperature"}}),
+            ),
+            (200, successful_chat_response("sampling-free retry")),
+        ])
+        .await;
+
+        let summary = custom_summary(
+            &endpoint,
+            "azure-deployment",
+            Some(512),
+            Some(0.7),
+            Some(0.9),
+        )
+        .await
+        .unwrap();
+        server.await.unwrap();
+
+        assert_eq!(summary, "sampling-free retry");
+        let first = requests.recv().await.unwrap();
+        assert_eq!(first["max_tokens"], 512);
+        assert_eq!(first["temperature"], 0.7);
+        assert_eq!(first["top_p"], 0.9);
+        let second = requests.recv().await.unwrap();
+        assert_eq!(second["max_completion_tokens"], 512);
+        assert!(second.get("max_tokens").is_none());
+        assert!(second.get("temperature").is_none());
+        assert!(second.get("top_p").is_none());
+        assert!(requests.try_recv().is_err());
+    }
+
+    #[tokio::test]
     async fn summary_retries_max_completion_tokens_with_sampling_restored() {
         let (endpoint, mut requests, server) = spawn_chat_server(vec![
             (
@@ -945,8 +984,8 @@ mod tests {
         let original_error = json!({
             "error": {
                 "code": "unsupported_parameter",
-                "param": "temperature",
-                "message": "temperature is unsupported; max_tokens remains allowed"
+                "param": "frequency_penalty",
+                "message": "frequency_penalty is unsupported; max_tokens remains allowed"
             }
         });
         let (endpoint, mut requests, server) =
