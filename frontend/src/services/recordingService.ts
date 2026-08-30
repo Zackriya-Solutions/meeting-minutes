@@ -72,9 +72,9 @@ export class RecordingService {
     meetingName: string
   ): Promise<void> {
     return invoke('start_recording_with_devices_and_meeting', {
-      mic_device_name: micDeviceName,
-      system_device_name: systemDeviceName,
-      meeting_name: meetingName
+      micDeviceName,
+      systemDeviceName,
+      meetingName
     });
   }
 
