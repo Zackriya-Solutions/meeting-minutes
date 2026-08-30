@@ -1,7 +1,7 @@
-# GPU-accelerated build script for Meetily (Windows PowerShell)
+# GPU-accelerated build script for Meet4Specs (Windows PowerShell)
 # Automatically detects and builds with optimal GPU features
 
-Write-Host "GPU-Accelerated Build Script for Meetily" -ForegroundColor Blue
+Write-Host "GPU-Accelerated Build Script for Meet4Specs" -ForegroundColor Blue
 Write-Host ""
 
 # Function to check if command exists
@@ -26,7 +26,7 @@ if (Test-Path "package.json") {
 }
 
 Write-Host ""
-Write-Host "Building Meetily..." -ForegroundColor Blue
+Write-Host "Building Meet4Specs..." -ForegroundColor Blue
 Write-Host ""
 
 # Build command using npm scripts
@@ -42,13 +42,13 @@ try {
         exit 1
     }
 
-    Write-Host "Building complete Tauri application with Vulkan acceleration..." -ForegroundColor Cyan
+    Write-Host "Building complete Tauri application with auto-detected acceleration..." -ForegroundColor Cyan
     Write-Host ""
 
     if ($usePnpm) {
-        pnpm run tauri:build:vulkan
+        pnpm run tauri:build
     } else {
-        npm run tauri:build:vulkan
+        npm run tauri:build
     }
 
     if ($LASTEXITCODE -eq 0) {

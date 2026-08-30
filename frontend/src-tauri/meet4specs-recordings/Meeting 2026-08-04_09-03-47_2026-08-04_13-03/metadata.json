@@ -1,0 +1,16 @@
+{
+  "version": "1.0",
+  "meeting_id": null,
+  "meeting_name": "Meeting 2026-08-04_09-03-47",
+  "created_at": "2026-08-04T13:03:47.823805385+00:00",
+  "completed_at": null,
+  "duration_seconds": null,
+  "devices": {
+    "microphone": "default",
+    "system_audio": "default"
+  },
+  "audio_file": "audio.mp4",
+  "transcript_file": "transcripts.json",
+  "sample_rate": 48000,
+  "status": "recording"
+}

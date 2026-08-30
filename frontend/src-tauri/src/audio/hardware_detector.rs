@@ -1,3 +1,4 @@
+#[cfg(target_os = "windows")]
 use std::path::Path;
 use std::sync::OnceLock;
 use log::info;
@@ -196,6 +197,7 @@ impl HardwareProfile {
         Self::has_windows_vulkan_loader(Path::new(r"C:\Windows"))
     }
 
+    #[cfg(target_os = "windows")]
     fn has_windows_vulkan_loader(system_root: &Path) -> bool {
         system_root.join("System32").join("vulkan-1.dll").is_file()
     }
@@ -308,6 +310,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(target_os = "windows")]
     fn hardware_detector_finds_windows_vulkan_loader_in_system32() {
         let temp_dir = tempfile::tempdir().unwrap();
         let system32 = temp_dir.path().join("System32");
@@ -318,6 +321,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(target_os = "windows")]
     fn hardware_detector_rejects_missing_windows_vulkan_loader() {
         let temp_dir = tempfile::tempdir().unwrap();
 

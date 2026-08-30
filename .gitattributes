@@ -1,0 +1,4 @@
+# Normalize line endings across OSes — prevents CRLF/LF churn between Windows/Linux clones
+* text=auto eol=lf
+*.bat text eol=crlf
+*.ps1 text eol=crlf

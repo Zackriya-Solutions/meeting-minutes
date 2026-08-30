@@ -30,17 +30,17 @@ export const DEFAULT_BETA_FEATURES: BetaFeatures = {
 
 
 /**
- * Human-readable feature names for UI display
+ * i18n key mapping for feature names (resolved via useI18n's t() in components)
  */
-export const BETA_FEATURE_NAMES: Record<keyof BetaFeatures, string> = {
-  importAndRetranscribe: 'Import Audio & Retranscribe',
+export const BETA_FEATURE_NAME_KEYS: Record<keyof BetaFeatures, string> = {
+  importAndRetranscribe: 'beta.importAndRetranscribeName',
 };
 
 /**
- * Feature descriptions for UI tooltips/help text
+ * i18n key mapping for feature descriptions (resolved via useI18n's t() in components)
  */
-export const BETA_FEATURE_DESCRIPTIONS: Record<keyof BetaFeatures, string> = {
-  importAndRetranscribe: 'Import audio files to transcribe or retranscribe existing meetings with different language settings.',
+export const BETA_FEATURE_DESCRIPTION_KEYS: Record<keyof BetaFeatures, string> = {
+  importAndRetranscribe: 'beta.importAndRetranscribeDescription',
 };
 
 /**

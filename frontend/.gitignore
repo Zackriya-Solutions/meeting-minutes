@@ -51,3 +51,5 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+# Local Pi runtime state
+.atl/

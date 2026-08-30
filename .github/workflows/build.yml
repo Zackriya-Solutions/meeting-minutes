@@ -593,6 +593,52 @@ jobs:
           releaseId: ${{ inputs.release-id }}
           args: ${{ inputs.build-args }} ${{ steps.build-features.outputs.features }}
 
+      - name: Verify Windows artifact signatures
+        if: contains(inputs.platform, 'windows') && inputs.sign-binaries
+        shell: pwsh
+        run: |
+          Write-Host "=== Post-Build Authenticode Signature Verification ==="
+
+          $profile = "${{ steps.build-profile.outputs.profile }}"
+          $target = "${{ inputs.target }}"
+          $bundleDir = if ($target -ne "") { "target/$target/$profile/bundle" } else { "target/$profile/bundle" }
+
+          Write-Host "Scanning: $bundleDir"
+
+          $artifacts = Get-ChildItem -Path $bundleDir -Recurse -Include "*.exe","*.msi" -ErrorAction SilentlyContinue
+
+          if ($artifacts.Count -eq 0) {
+            Write-Error "No .exe or .msi artifacts found in $bundleDir"
+            exit 1
+          }
+
+          $failed = $false
+          foreach ($file in $artifacts) {
+            $sig = Get-AuthenticodeSignature -FilePath $file.FullName
+            $publisher = if ($sig.SignerCertificate) { $sig.SignerCertificate.Subject } else { "UNSIGNED" }
+            $hasTimestamp = $null -ne $sig.TimeStamperCertificate
+
+            if ($sig.Status -eq 'Valid' -and $hasTimestamp) {
+              Write-Host "  [OK]  $($file.Name) — $publisher"
+            } elseif ($sig.Status -eq 'Valid' -and -not $hasTimestamp) {
+              Write-Error "  [FAIL]  $($file.Name) — Signed but missing RFC3161 timestamp"
+              $failed = $true
+            } else {
+              Write-Error "  [FAIL]  $($file.Name) — Status: $($sig.Status) (publisher: $publisher)"
+              $failed = $true
+            }
+          }
+
+          if ($failed) {
+            Write-Error ""
+            Write-Error "Signature verification FAILED. Unsigned or timestamp-less artifacts detected."
+            Write-Error "Distributing these binaries will trigger Windows Defender SmartScreen."
+            exit 1
+          }
+
+          Write-Host ""
+          Write-Host "All $($artifacts.Count) artifact(s) verified: valid Authenticode signature + RFC3161 timestamp."
+
       - name: Upload artifacts (macOS)
         if: inputs.upload-artifacts && contains(inputs.platform, 'macos')
         uses: actions/upload-artifact@v4

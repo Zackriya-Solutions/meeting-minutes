@@ -9,9 +9,11 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { useI18n } from '@/hooks/useI18n';
 
 export function SetupOverviewStep() {
   const { goNext } = useOnboarding();
+  const { t } = useI18n();
   const [isMac, setIsMac] = useState(false);
 
   useEffect(() => {
@@ -30,12 +32,12 @@ export function SetupOverviewStep() {
     {
       number: 1,
       type: 'transcription',
-      title: 'Download Transcription Engine',
+      title: t('onboarding.transcriptionEngineTitle'),
     },
     {
       number: 2,
       type: 'summarization',
-      title: 'Download Summarization Engine',
+      title: t('onboarding.summarizationEngineTitle'),
     },
   ];
 
@@ -45,8 +47,8 @@ export function SetupOverviewStep() {
 
   return (
     <OnboardingContainer
-      title="Setup Overview"
-      description="Meetily requires that you download the Transcription & Summarization AI models for the software to work."
+      title={t('onboarding.setupOverviewTitle')}
+      description={t('onboarding.setupOverviewDescription')}
       step={2}
       totalSteps={isMac ? 4 : 3}
     >
@@ -54,7 +56,7 @@ export function SetupOverviewStep() {
         {/* Steps Card */}
         <div className="w-full max-w-md bg-white rounded-lg border border-gray-200 p-4">
           <div className="space-y-4">
-            {steps.map((step, idx) => {
+            {steps.map((step) => {
               return (
                 <div
                   key={step.number}
@@ -62,7 +64,7 @@ export function SetupOverviewStep() {
                 >
                   <div className="flex-1 ml-1">
                     <h3 className="font-medium text-gray-900 flex items-center gap-2">
-                        Step {step.number} :  {step.title}
+                        {t('onboarding.stepLabel', { step: step.number, title: step.title })}
 
                         {step.type === "summarization" && (
                             <TooltipProvider>
@@ -73,8 +75,7 @@ export function SetupOverviewStep() {
                                 </button>
                                 </TooltipTrigger>
                                 <TooltipContent className="max-w-xs text-sm">
-                                You can also select external AI providers like OpenAI, Claude, or
-                                Ollama for summary generation in settings.
+                                {t('onboarding.summaryInfo')}
                                 </TooltipContent>
                             </Tooltip>
                             </TooltipProvider>
@@ -94,7 +95,7 @@ export function SetupOverviewStep() {
             onClick={handleContinue}
             className="w-full h-11 bg-gray-900 hover:bg-gray-800 text-white"
           >
-            Let's Go
+            {t('onboarding.letsGo')}
           </Button>
           <div className="text-center">
             <a
@@ -103,7 +104,7 @@ export function SetupOverviewStep() {
               rel="noopener noreferrer"
               className="text-xs text-gray-600 hover:underline"
             >
-              Report issues on GitHub
+              {t('onboarding.reportIssues')}
             </a>
           </div>
         </div>

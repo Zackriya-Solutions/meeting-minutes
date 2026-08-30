@@ -1,41 +1,85 @@
-use std::sync::Arc;
 use std::collections::HashMap;
+use std::sync::Arc;
 use tauri::command;
 use crate::analytics::{AnalyticsClient, AnalyticsConfig};
 
-// Global analytics client
+const POSTHOG_PROJECT_API_KEY: &str = "phc_kGVhn2QJhu4G7P6SVHWg5jGFEFCwmD3NkTK56QfAp9wn";
+const POSTHOG_HOST: &str = "https://us.i.posthog.com";
+
+// Global analytics client for opted-in usage analytics.
 static ANALYTICS_CLIENT: std::sync::Mutex<Option<Arc<AnalyticsClient>>> = std::sync::Mutex::new(None);
+// Global analytics client for production critical-error telemetry.
+static CRITICAL_ANALYTICS_CLIENT: std::sync::Mutex<Option<Arc<AnalyticsClient>>> = std::sync::Mutex::new(None);
+
+fn analytics_config() -> AnalyticsConfig {
+    AnalyticsConfig {
+        api_key: POSTHOG_PROJECT_API_KEY.to_string(),
+        host: Some(POSTHOG_HOST.to_string()),
+        enabled: true,
+    }
+}
+
+async fn critical_analytics_client() -> Result<Arc<AnalyticsClient>, String> {
+    {
+        let guard = CRITICAL_ANALYTICS_CLIENT
+            .lock()
+            .map_err(|_| "Critical analytics client mutex poisoned".to_string())?;
+        if let Some(client) = guard.as_ref() {
+            return Ok(Arc::clone(client));
+        }
+    }
+
+    let client = Arc::new(AnalyticsClient::new(analytics_config()).await);
+    let mut guard = CRITICAL_ANALYTICS_CLIENT
+        .lock()
+        .map_err(|_| "Critical analytics client mutex poisoned".to_string())?;
+    let stored = guard.get_or_insert_with(|| Arc::clone(&client));
+    Ok(Arc::clone(stored))
+}
+
+fn analytics_client() -> Result<Option<Arc<AnalyticsClient>>, String> {
+    let guard = ANALYTICS_CLIENT
+        .lock()
+        .map_err(|_| "Analytics client mutex poisoned".to_string())?;
+    Ok(guard.as_ref().cloned())
+}
+
 
 #[command]
 pub async fn init_analytics() -> Result<(), String> {
-    let config = AnalyticsConfig {
-        api_key: "phc_Aa9PqeCkDkVbtbRsYjtmHANBfcscjCVupxZwrtL5vZ77".to_string(),
-        host: Some("https://us.i.posthog.com".to_string()),
-        enabled: true,
-    };
-    
-    let client = Arc::new(AnalyticsClient::new(config).await);
-    
-    let mut guard = ANALYTICS_CLIENT.lock().unwrap();
+    let client = Arc::new(AnalyticsClient::new(analytics_config()).await);
+
+    let mut guard = ANALYTICS_CLIENT
+        .lock()
+        .map_err(|_| "Analytics client mutex poisoned".to_string())?;
     *guard = Some(client);
-    
+
+    Ok(())
+}
+
+#[command]
+pub async fn init_critical_analytics() -> Result<(), String> {
+    let client = critical_analytics_client().await?;
+    let mut guard = CRITICAL_ANALYTICS_CLIENT
+        .lock()
+        .map_err(|_| "Critical analytics client mutex poisoned".to_string())?;
+    *guard = Some(client);
     Ok(())
 }
 
 #[command]
 pub async fn disable_analytics() -> Result<(), String> {
-    let mut guard = ANALYTICS_CLIENT.lock().unwrap();
+    let mut guard = ANALYTICS_CLIENT
+        .lock()
+        .map_err(|_| "Analytics client mutex poisoned".to_string())?;
     *guard = None;
     Ok(())
 }
 
 #[command]
 pub async fn track_event(event_name: String, properties: Option<HashMap<String, String>>) -> Result<(), String> {
-    let client = {
-        let guard = ANALYTICS_CLIENT.lock().unwrap();
-        guard.as_ref().cloned()
-    };
-    
+    let client = analytics_client()?;
+
     if let Some(client) = client {
         client.track_event(&event_name, properties).await
     } else {
@@ -44,11 +88,14 @@ pub async fn track_event(event_name: String, properties: Option<HashMap<String, 
 }
 
 #[command]
+pub async fn track_critical_event(event_name: String, properties: Option<HashMap<String, String>>) -> Result<(), String> {
+    let client = critical_analytics_client().await?;
+    client.track_event(&event_name, properties).await
+}
+
+#[command]
 pub async fn identify_user(user_id: String, properties: Option<HashMap<String, String>>) -> Result<(), String> {
-    let client = {
-        let guard = ANALYTICS_CLIENT.lock().unwrap();
-        guard.as_ref().cloned()
-    };
+    let client = analytics_client()?;
     
     if let Some(client) = client {
         client.identify(user_id, properties).await
@@ -59,10 +106,7 @@ pub async fn identify_user(user_id: String, properties: Option<HashMap<String, S
 
 #[command]
 pub async fn track_meeting_started(meeting_id: String) -> Result<(), String> {
-    let client = {
-        let guard = ANALYTICS_CLIENT.lock().unwrap();
-        guard.as_ref().cloned()
-    };
+    let client = analytics_client()?;
     
     if let Some(client) = client {
         client.track_meeting_started(&meeting_id).await
@@ -73,10 +117,7 @@ pub async fn track_meeting_started(meeting_id: String) -> Result<(), String> {
 
 #[command]
 pub async fn track_recording_started(meeting_id: String) -> Result<(), String> {
-    let client = {
-        let guard = ANALYTICS_CLIENT.lock().unwrap();
-        guard.as_ref().cloned()
-    };
+    let client = analytics_client()?;
     
     if let Some(client) = client {
         client.track_recording_started(&meeting_id).await
@@ -87,10 +128,7 @@ pub async fn track_recording_started(meeting_id: String) -> Result<(), String> {
 
 #[command]
 pub async fn track_recording_stopped(meeting_id: String, duration_seconds: Option<u64>) -> Result<(), String> {
-    let client = {
-        let guard = ANALYTICS_CLIENT.lock().unwrap();
-        guard.as_ref().cloned()
-    };
+    let client = analytics_client()?;
     
     if let Some(client) = client {
         client.track_recording_stopped(&meeting_id, duration_seconds).await
@@ -101,10 +139,7 @@ pub async fn track_recording_stopped(meeting_id: String, duration_seconds: Optio
 
 #[command]
 pub async fn track_meeting_deleted(meeting_id: String) -> Result<(), String> {
-    let client = {
-        let guard = ANALYTICS_CLIENT.lock().unwrap();
-        guard.as_ref().cloned()
-    };
+    let client = analytics_client()?;
     
     if let Some(client) = client {
         client.track_meeting_deleted(&meeting_id).await
@@ -115,10 +150,7 @@ pub async fn track_meeting_deleted(meeting_id: String) -> Result<(), String> {
 
 #[command]
 pub async fn track_settings_changed(setting_type: String, new_value: String) -> Result<(), String> {
-    let client = {
-        let guard = ANALYTICS_CLIENT.lock().unwrap();
-        guard.as_ref().cloned()
-    };
+    let client = analytics_client()?;
     
     if let Some(client) = client {
         client.track_settings_changed(&setting_type, &new_value).await
@@ -129,10 +161,7 @@ pub async fn track_settings_changed(setting_type: String, new_value: String) -> 
 
 #[command]
 pub async fn track_feature_used(feature_name: String) -> Result<(), String> {
-    let client = {
-        let guard = ANALYTICS_CLIENT.lock().unwrap();
-        guard.as_ref().cloned()
-    };
+    let client = analytics_client()?;
     
     if let Some(client) = client {
         client.track_feature_used(&feature_name).await
@@ -143,17 +172,17 @@ pub async fn track_feature_used(feature_name: String) -> Result<(), String> {
 
 #[command]
 pub async fn is_analytics_enabled() -> bool {
-    let guard = ANALYTICS_CLIENT.lock().unwrap();
-    guard.as_ref().map_or(false, |client| client.is_enabled())
+    analytics_client()
+        .ok()
+        .flatten()
+        .map(|client| client.is_enabled())
+        .unwrap_or(false)
 }
 
 // Enhanced analytics commands
 #[command]
 pub async fn start_analytics_session(user_id: String) -> Result<String, String> {
-    let client = {
-        let guard = ANALYTICS_CLIENT.lock().unwrap();
-        guard.as_ref().cloned()
-    };
+    let client = analytics_client()?;
     
     if let Some(client) = client {
         client.start_session(user_id).await
@@ -164,10 +193,7 @@ pub async fn start_analytics_session(user_id: String) -> Result<String, String> 
 
 #[command]
 pub async fn end_analytics_session() -> Result<(), String> {
-    let client = {
-        let guard = ANALYTICS_CLIENT.lock().unwrap();
-        guard.as_ref().cloned()
-    };
+    let client = analytics_client()?;
     
     if let Some(client) = client {
         client.end_session().await
@@ -178,10 +204,7 @@ pub async fn end_analytics_session() -> Result<(), String> {
 
 #[command]
 pub async fn track_daily_active_user() -> Result<(), String> {
-    let client = {
-        let guard = ANALYTICS_CLIENT.lock().unwrap();
-        guard.as_ref().cloned()
-    };
+    let client = analytics_client()?;
     
     if let Some(client) = client {
         client.track_daily_active_user().await
@@ -192,10 +215,7 @@ pub async fn track_daily_active_user() -> Result<(), String> {
 
 #[command]
 pub async fn track_user_first_launch() -> Result<(), String> {
-    let client = {
-        let guard = ANALYTICS_CLIENT.lock().unwrap();
-        guard.as_ref().cloned()
-    };
+    let client = analytics_client()?;
     
     if let Some(client) = client {
         client.track_user_first_launch().await
@@ -207,10 +227,7 @@ pub async fn track_user_first_launch() -> Result<(), String> {
 // Summary generation analytics commands
 #[command]
 pub async fn track_summary_generation_started(model_provider: String, model_name: String, transcript_length: usize) -> Result<(), String> {
-    let client = {
-        let guard = ANALYTICS_CLIENT.lock().unwrap();
-        guard.as_ref().cloned()
-    };
+    let client = analytics_client()?;
     
     if let Some(client) = client {
         client.track_summary_generation_started(&model_provider, &model_name, transcript_length).await
@@ -221,10 +238,7 @@ pub async fn track_summary_generation_started(model_provider: String, model_name
 
 #[command]
 pub async fn track_summary_generation_completed(model_provider: String, model_name: String, success: bool, duration_seconds: Option<u64>, error_message: Option<String>) -> Result<(), String> {
-    let client = {
-        let guard = ANALYTICS_CLIENT.lock().unwrap();
-        guard.as_ref().cloned()
-    };
+    let client = analytics_client()?;
     
     if let Some(client) = client {
         client.track_summary_generation_completed(&model_provider, &model_name, success, duration_seconds, error_message.as_deref()).await
@@ -235,10 +249,7 @@ pub async fn track_summary_generation_completed(model_provider: String, model_na
 
 #[command]
 pub async fn track_summary_regenerated(model_provider: String, model_name: String) -> Result<(), String> {
-    let client = {
-        let guard = ANALYTICS_CLIENT.lock().unwrap();
-        guard.as_ref().cloned()
-    };
+    let client = analytics_client()?;
     
     if let Some(client) = client {
         client.track_summary_regenerated(&model_provider, &model_name).await
@@ -249,10 +260,7 @@ pub async fn track_summary_regenerated(model_provider: String, model_name: Strin
 
 #[command]
 pub async fn track_model_changed(old_provider: String, old_model: String, new_provider: String, new_model: String) -> Result<(), String> {
-    let client = {
-        let guard = ANALYTICS_CLIENT.lock().unwrap();
-        guard.as_ref().cloned()
-    };
+    let client = analytics_client()?;
     
     if let Some(client) = client {
         client.track_model_changed(&old_provider, &old_model, &new_provider, &new_model).await
@@ -263,10 +271,7 @@ pub async fn track_model_changed(old_provider: String, old_model: String, new_pr
 
 #[command]
 pub async fn track_custom_prompt_used(prompt_length: usize) -> Result<(), String> {
-    let client = {
-        let guard = ANALYTICS_CLIENT.lock().unwrap();
-        guard.as_ref().cloned()
-    };
+    let client = analytics_client()?;
 
     if let Some(client) = client {
         client.track_custom_prompt_used(prompt_length).await
@@ -290,10 +295,7 @@ pub async fn track_meeting_ended(
     transcript_segments_count: u64,
     had_fatal_error: bool,
 ) -> Result<(), String> {
-    let client = {
-        let guard = ANALYTICS_CLIENT.lock().unwrap();
-        guard.as_ref().cloned()
-    };
+    let client = analytics_client()?;
 
     if let Some(client) = client {
         client.track_meeting_ended(
@@ -318,10 +320,7 @@ pub async fn track_meeting_ended(
 // Analytics consent tracking commands
 #[command]
 pub async fn track_analytics_enabled() -> Result<(), String> {
-    let client = {
-        let guard = ANALYTICS_CLIENT.lock().unwrap();
-        guard.as_ref().cloned()
-    };
+    let client = analytics_client()?;
 
     if let Some(client) = client {
         client.track_analytics_enabled().await
@@ -332,10 +331,7 @@ pub async fn track_analytics_enabled() -> Result<(), String> {
 
 #[command]
 pub async fn track_analytics_disabled() -> Result<(), String> {
-    let client = {
-        let guard = ANALYTICS_CLIENT.lock().unwrap();
-        guard.as_ref().cloned()
-    };
+    let client = analytics_client()?;
 
     if let Some(client) = client {
         client.track_analytics_disabled().await
@@ -346,10 +342,7 @@ pub async fn track_analytics_disabled() -> Result<(), String> {
 
 #[command]
 pub async fn track_analytics_transparency_viewed() -> Result<(), String> {
-    let client = {
-        let guard = ANALYTICS_CLIENT.lock().unwrap();
-        guard.as_ref().cloned()
-    };
+    let client = analytics_client()?;
 
     if let Some(client) = client {
         client.track_analytics_transparency_viewed().await
@@ -360,14 +353,9 @@ pub async fn track_analytics_transparency_viewed() -> Result<(), String> {
 
 #[command]
 pub async fn is_analytics_session_active() -> bool {
-    let client = {
-        let guard = ANALYTICS_CLIENT.lock().unwrap();
-        guard.as_ref().cloned()
-    };
-    
-    if let Some(client) = client {
-        client.is_session_active().await
-    } else {
-        false
+    match analytics_client() {
+        Ok(Some(client)) => client.is_session_active().await,
+        Ok(None) => false,
+        Err(_) => false,
     }
 }

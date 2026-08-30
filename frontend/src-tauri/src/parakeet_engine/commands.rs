@@ -37,6 +37,43 @@ fn get_models_directory() -> Option<PathBuf> {
     MODELS_DIR.lock().unwrap().clone()
 }
 
+fn resolve_parakeet_model_to_load(
+    configured_model: Option<&str>,
+    available_models: &[ModelInfo],
+) -> Result<String, String> {
+    if available_models.is_empty() {
+        return Err(
+            "No Parakeet models are available. Please download a model to enable fast transcription."
+                .to_string(),
+        );
+    }
+
+    if let Some(configured_model) = configured_model.filter(|model| !model.is_empty()) {
+        if available_models.iter().any(|model| model.name == configured_model) {
+            return Ok(configured_model.to_string());
+        }
+
+        return Err(format!(
+            "Configured Parakeet model '{}' is not downloaded or is invalid. Please download the selected model in Settings.",
+            configured_model
+        ));
+    }
+
+    if available_models
+        .iter()
+        .any(|model| model.name == crate::config::DEFAULT_PARAKEET_MODEL)
+    {
+        return Ok(crate::config::DEFAULT_PARAKEET_MODEL.to_string());
+    }
+
+    available_models
+        .iter()
+        .find(|model| model.quantization == crate::parakeet_engine::QuantizationType::Int8)
+        .or_else(|| available_models.first())
+        .map(|model| model.name.clone())
+        .ok_or_else(|| "No Parakeet models are available. Please download a model to enable fast transcription.".to_string())
+}
+
 #[command]
 pub async fn parakeet_init() -> Result<(), String> {
     let mut guard = PARAKEET_ENGINE.lock().unwrap();
@@ -176,53 +213,10 @@ pub async fn parakeet_has_available_models() -> Result<bool, String> {
 }
 
 #[command]
-pub async fn parakeet_validate_model_ready() -> Result<String, String> {
-    let engine = {
-        let guard = PARAKEET_ENGINE.lock().unwrap();
-        guard.as_ref().cloned()
-    };
-
-    if let Some(engine) = engine {
-        // Check if a model is currently loaded
-        if engine.is_model_loaded().await {
-            if let Some(current_model) = engine.get_current_model().await {
-                return Ok(current_model);
-            }
-        }
-
-        // No model loaded, check if any models are available to load
-        let models = engine
-            .discover_models()
-            .await
-            .map_err(|e| format!("Failed to discover Parakeet models: {}", e))?;
-
-        let available_models: Vec<_> = models
-            .iter()
-            .filter(|model| matches!(model.status, crate::parakeet_engine::ModelStatus::Available))
-            .collect();
-
-        if available_models.is_empty() {
-            return Err(
-                "No Parakeet models are available. Please download a model to enable fast transcription."
-                    .to_string(),
-            );
-        }
-
-        // Try to load the first available model (prefer int8 for speed)
-        let first_model = available_models.iter()
-            .find(|m| m.quantization == crate::parakeet_engine::QuantizationType::Int8)
-            .or_else(|| available_models.first())
-            .unwrap();
-
-        engine
-            .load_model(&first_model.name)
-            .await
-            .map_err(|e| format!("Failed to load Parakeet model {}: {}", first_model.name, e))?;
-
-        Ok(first_model.name.clone())
-    } else {
-        Err("Parakeet engine not initialized".to_string())
-    }
+pub async fn parakeet_validate_model_ready<R: Runtime>(
+    app: AppHandle<R>,
+) -> Result<String, String> {
+    parakeet_validate_model_ready_with_config(&app).await
 }
 
 /// Internal version of parakeet_validate_model_ready that respects user's transcript config
@@ -236,16 +230,7 @@ pub async fn parakeet_validate_model_ready_with_config<R: tauri::Runtime>(
     };
 
     if let Some(engine) = engine {
-        // Check if a model is currently loaded
-        if engine.is_model_loaded().await {
-            if let Some(current_model) = engine.get_current_model().await {
-                log::info!("Parakeet model already loaded: {}", current_model);
-                return Ok(current_model);
-            }
-        }
-
-        // No model loaded - try to load user's configured model from transcript config
-        let model_to_load = match crate::api::api::api_get_transcript_config(
+        let configured_model = match crate::api::api::api_get_transcript_config(
             app.clone(),
             app.state(),
             None,
@@ -259,13 +244,8 @@ pub async fn parakeet_validate_model_ready_with_config<R: tauri::Runtime>(
                     config.model
                 );
                 if config.provider == "parakeet" && !config.model.is_empty() {
-                    log::info!("Using user's configured Parakeet model: {}", config.model);
                     Some(config.model)
                 } else {
-                    log::info!(
-                        "API config uses non-Parakeet provider ({}) or empty model, will auto-select",
-                        config.provider
-                    );
                     None
                 }
             }
@@ -282,55 +262,37 @@ pub async fn parakeet_validate_model_ready_with_config<R: tauri::Runtime>(
             }
         };
 
-        // Check available models
+        if engine.is_model_loaded().await {
+            if let Some(current_model) = engine.get_current_model().await {
+                if configured_model.as_deref() == Some(current_model.as_str()) || configured_model.is_none() {
+                    log::info!("Parakeet model already loaded: {}", current_model);
+                    return Ok(current_model);
+                }
+
+                log::info!(
+                    "Loaded Parakeet model '{}' does not match configured model '{:?}', reloading",
+                    current_model,
+                    configured_model
+                );
+                engine.unload_model().await;
+            }
+        }
+
         let models = engine
             .discover_models()
             .await
             .map_err(|e| format!("Failed to discover Parakeet models: {}", e))?;
 
-        let available_models: Vec<_> = models
+        let available_models: Vec<ModelInfo> = models
             .iter()
             .filter(|model| matches!(model.status, crate::parakeet_engine::ModelStatus::Available))
+            .cloned()
             .collect();
 
-        if available_models.is_empty() {
-            return Err(
-                "No Parakeet models are available. Please download a model to enable fast transcription."
-                    .to_string(),
-            );
-        }
-
-        // Try to load user's configured model if specified
-        let model_name = if let Some(configured_model) = model_to_load {
-            // Check if configured model is available
-            if available_models.iter().any(|m| m.name == configured_model) {
-                log::info!("Loading user's configured Parakeet model: {}", configured_model);
-                configured_model
-            } else {
-                log::warn!(
-                    "Configured Parakeet model '{}' not found, falling back to first available int8 model",
-                    configured_model
-                );
-                // Prefer int8 quantization for best speed/quality tradeoff
-                available_models
-                    .iter()
-                    .find(|m| m.quantization == crate::parakeet_engine::QuantizationType::Int8)
-                    .or_else(|| available_models.first())
-                    .unwrap()
-                    .name
-                    .clone()
-            }
-        } else {
-            // No configured model, prefer int8 for best speed/quality balance
-            log::info!("No configured model, loading first available int8 Parakeet model");
-            available_models
-                .iter()
-                .find(|m| m.quantization == crate::parakeet_engine::QuantizationType::Int8)
-                .or_else(|| available_models.first())
-                .unwrap()
-                .name
-                .clone()
-        };
+        let model_name = resolve_parakeet_model_to_load(
+            configured_model.as_deref(),
+            &available_models,
+        )?;
 
         engine
             .load_model(&model_name)
@@ -596,4 +558,65 @@ pub async fn open_parakeet_models_folder() -> Result<(), String> {
 
     log::info!("Opened Parakeet models folder: {}", folder_path);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::parakeet_engine::QuantizationType;
+
+    fn available_model(name: &str) -> ModelInfo {
+        ModelInfo {
+            name: name.to_string(),
+            path: PathBuf::from(format!("/tmp/{name}")),
+            size_mb: 1,
+            quantization: QuantizationType::Int8,
+            speed: "Fast".to_string(),
+            status: ModelStatus::Available,
+            description: String::new(),
+        }
+    }
+
+    #[test]
+    fn resolve_model_to_load_prefers_explicit_selected_variant() {
+        let available_models = vec![
+            available_model("parakeet-tdt-0.6b-v3-int8"),
+            available_model("parakeet-ctc-es-0.6b-int8"),
+        ];
+
+        let selected = resolve_parakeet_model_to_load(
+            Some("parakeet-ctc-es-0.6b-int8"),
+            &available_models,
+        )
+        .expect("selected beta model should resolve");
+
+        assert_eq!(selected, "parakeet-ctc-es-0.6b-int8");
+    }
+
+    #[test]
+    fn resolve_model_to_load_fails_closed_for_missing_explicit_selection() {
+        let available_models = vec![available_model("parakeet-tdt-0.6b-v3-int8")];
+
+        let error = resolve_parakeet_model_to_load(
+            Some("parakeet-ctc-es-0.6b-int8"),
+            &available_models,
+        )
+        .expect_err("missing explicit beta selection must fail closed");
+
+        assert!(error.contains("parakeet-ctc-es-0.6b-int8"));
+        assert!(error.contains("downloaded"));
+    }
+
+    #[test]
+    fn resolve_model_to_load_keeps_default_tdt_priority_without_explicit_selection() {
+        let available_models = vec![
+            available_model("parakeet-ctc-es-0.6b-int8"),
+            available_model("parakeet-tdt-0.6b-v3-int8"),
+        ];
+
+        let selected = resolve_parakeet_model_to_load(None, &available_models)
+            .expect("default path should choose recommended TDT");
+
+        assert_eq!(selected, crate::config::DEFAULT_PARAKEET_MODEL);
+    }
 }

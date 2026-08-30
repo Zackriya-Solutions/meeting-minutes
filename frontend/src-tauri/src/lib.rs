@@ -29,7 +29,9 @@ macro_rules! perf_trace {
 }
 
 // Make these macros available to other modules
+#[allow(unused_imports)]
 pub(crate) use perf_debug;
+#[allow(unused_imports)]
 pub(crate) use perf_trace;
 
 // Re-export async logging macros for external use (removed due to macro conflicts)
@@ -41,7 +43,9 @@ pub mod audio;
 pub mod config;
 pub mod console_utils;
 pub mod database;
+pub mod i18n;
 pub mod notifications;
+pub mod openspec;
 pub mod ollama;
 pub mod onboarding;
 pub mod openai;
@@ -64,9 +68,13 @@ use tokio::sync::RwLock;
 
 static RECORDING_FLAG: AtomicBool = AtomicBool::new(false);
 
-// Global language preference storage (default to "auto-translate" for automatic translation to English)
+// Global transcription language preference storage
 static LANGUAGE_PREFERENCE: std::sync::LazyLock<StdMutex<String>> =
     std::sync::LazyLock::new(|| StdMutex::new("auto-translate".to_string()));
+
+// Global UI language storage for visible app text
+static UI_LANGUAGE: std::sync::LazyLock<StdMutex<String>> =
+    std::sync::LazyLock::new(|| StdMutex::new("es".to_string()));
 
 #[derive(Debug, Deserialize)]
 struct RecordingArgs {
@@ -387,6 +395,25 @@ pub fn get_language_preference_internal() -> Option<String> {
     LANGUAGE_PREFERENCE.lock().ok().map(|lang| lang.clone())
 }
 
+#[tauri::command]
+async fn set_ui_language<R: Runtime>(app: AppHandle<R>, language: String) -> Result<(), String> {
+    let normalized = if language == "en" { "en" } else { "es" }.to_string();
+    {
+        let mut ui_lang = UI_LANGUAGE
+            .lock()
+            .map_err(|e| format!("Failed to set UI language: {}", e))?;
+        log_info!("Setting UI language to: {}", normalized);
+        *ui_lang = normalized;
+    }
+    // Re-render tray labels/tooltip in the new language, same as recording state changes do.
+    tray::update_tray_menu(&app);
+    Ok(())
+}
+
+pub fn get_ui_language_internal() -> Option<String> {
+    UI_LANGUAGE.lock().ok().map(|lang| lang.clone())
+}
+
 pub fn run() {
     log::set_max_level(log::LevelFilter::Info);
 
@@ -419,6 +446,13 @@ pub fn run() {
         .manage(summary::summary_engine::ModelManagerState(Arc::new(tokio::sync::Mutex::new(None))))
         .setup(|_app| {
             log::info!("Application setup complete");
+
+            // If a previous run already installed a portable Node.js and/or
+            // OpenSpec CLI into this app's data directory, make sure their
+            // bin directories are on PATH before anything else runs, so the
+            // existing `which::which("openspec")`-based detection in
+            // `openspec::service` finds them transparently.
+            openspec::setup::ensure_local_tools_on_path(_app.handle());
 
             // Initialize system tray
             if let Err(e) = tray::create_tray(_app.handle()) {
@@ -531,8 +565,10 @@ pub fn run() {
             read_audio_file,
             save_transcript,
             analytics::commands::init_analytics,
+            analytics::commands::init_critical_analytics,
             analytics::commands::disable_analytics,
             analytics::commands::track_event,
+            analytics::commands::track_critical_event,
             analytics::commands::identify_user,
             analytics::commands::track_meeting_started,
             analytics::commands::track_recording_started,
@@ -671,6 +707,16 @@ pub fn run() {
             summary::template_commands::api_list_templates,
             summary::template_commands::api_get_template_details,
             summary::template_commands::api_validate_template,
+            // OpenSpec generation commands
+            openspec::commands::api_generate_openspec_bundle,
+            openspec::commands::api_save_openspec_bundle_as,
+            openspec::commands::check_openspec_setup_status,
+            openspec::commands::check_node_runtime_status,
+            openspec::commands::install_node_runtime,
+            openspec::commands::install_openspec_cli,
+            openspec::commands::cancel_openspec_generation,
+            openspec::commands::install_openspec_setup,
+            openspec::commands::skip_openspec_setup,
             // Built-in AI commands
             summary::summary_engine::commands::builtin_ai_list_models,
             summary::summary_engine::commands::builtin_ai_get_model_info,
@@ -692,6 +738,7 @@ pub fn run() {
             audio::recording_preferences::get_audio_backend_info,
             // Language preference commands
             set_language_preference,
+            set_ui_language,
             // Notification system commands
             notifications::commands::get_notification_settings,
             notifications::commands::set_notification_settings,

@@ -23,16 +23,20 @@ interface TranscriptPanelProps {
   isProcessingStop: boolean;
   isStopping: boolean;
   showModal: (name: ModalType, message?: string) => void;
+  onStartRecording: () => Promise<void>;
+  onImportAudio: () => void;
 }
 
 export function TranscriptPanel({
   isProcessingStop,
   isStopping,
-  showModal
+  showModal,
+  onStartRecording,
+  onImportAudio,
 }: TranscriptPanelProps) {
   // Contexts
   const { transcripts, transcriptContainerRef, copyTranscript } = useTranscripts();
-  const { transcriptModelConfig } = useConfig();
+  const { transcriptModelConfig, betaFeatures } = useConfig();
   const { isRecording, isPaused } = useRecordingState();
   const { checkPermissions, isChecking, hasSystemAudio, hasMicrophone } = usePermissionCheck();
   const isLinux = useIsLinux();
@@ -113,6 +117,9 @@ export function TranscriptPanel({
               isStopping={isStopping}
               enableStreaming={isRecording}
               showConfidence={true}
+              onStartRecording={onStartRecording}
+              onImportAudio={onImportAudio}
+              allowImportAudio={betaFeatures.importAndRetranscribe}
             />
           </div>
         </div>

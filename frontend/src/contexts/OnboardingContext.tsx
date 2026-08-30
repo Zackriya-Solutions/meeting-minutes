@@ -176,7 +176,7 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
   const performAutoDetection = async () => {
     // Check Homebrew (macOS only)
     if (typeof navigator !== 'undefined' && navigator.platform?.toLowerCase().includes('mac')) {
-      const homebrewDbPath = '/usr/local/var/meetily/meeting_minutes.db';
+      const homebrewDbPath = '/usr/local/var/meet4specs/meeting_minutes.db';
       try {
         const homebrewCheck = await invoke<{ exists: boolean; size: number } | null>(
           'check_homebrew_database',

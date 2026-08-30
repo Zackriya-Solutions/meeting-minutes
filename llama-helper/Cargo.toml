@@ -20,3 +20,4 @@ vulkan = ["llama-cpp-2/vulkan"]
 codegen-units = 1
 lto = true
 opt-level = "s"  # Optimize for size for faster loading
+

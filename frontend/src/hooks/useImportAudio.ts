@@ -177,6 +177,9 @@ export function useImportAudio({
       setStatus('error');
       const errorMsg = typeof err === 'string' ? err : (err?.message || String(err) || 'Failed to validate file');
       setError(errorMsg);
+      await Analytics.trackError('import_audio_validation_failed', errorMsg, {
+        error_context: 'useImportAudio.validateFile',
+      });
       onErrorRef.current?.(errorMsg);
       return null;
     }
@@ -196,6 +199,9 @@ export function useImportAudio({
       setStatus('error');
       const errorMsg = typeof err === 'string' ? err : (err?.message || String(err) || 'Failed to validate file');
       setError(errorMsg);
+      await Analytics.trackError('import_audio_validation_failed', errorMsg, {
+        error_context: 'useImportAudio.validateFile',
+      });
       onErrorRef.current?.(errorMsg);
       return null;
     }

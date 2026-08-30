@@ -7,8 +7,11 @@ import { useTranscriptStreaming } from "@/hooks/useTranscriptStreaming";
 import { ConfidenceIndicator } from "./ConfidenceIndicator";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 import { RecordingStatusBar } from "./RecordingStatusBar";
+import { Button } from "./ui/button";
 import { motion, AnimatePresence } from "framer-motion";
+import { CircleHelp, FileText, Mic, Upload } from "lucide-react";
 import { TranscriptSegmentData } from "@/types";
+import { useI18n } from "@/hooks/useI18n";
 
 export interface VirtualizedTranscriptViewProps {
     /** Transcript segments to display */
@@ -34,6 +37,9 @@ export interface VirtualizedTranscriptViewProps {
     totalCount?: number;
     loadedCount?: number;
     onLoadMore?: () => void;
+    onStartRecording?: () => Promise<void>;
+    onImportAudio?: () => void;
+    allowImportAudio?: boolean;
 }
 
 // Threshold for enabling virtualization (below this, use simple rendering)
@@ -124,7 +130,11 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
     totalCount = 0,
     loadedCount = 0,
     onLoadMore,
+    onStartRecording,
+    onImportAudio,
+    allowImportAudio = false,
 }) => {
+    const { t } = useI18n();
     // Create scroll ref first - shared between virtualizer and auto-scroll hook
     const scrollRef = useRef<HTMLDivElement>(null);
     // Ref for infinite scroll trigger element
@@ -223,6 +233,10 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
     // Use simple rendering for small lists, virtualization for large lists
     const useVirtualization = segments.length >= VIRTUALIZATION_THRESHOLD;
 
+    const handleStartRecording = useCallback(() => {
+        void onStartRecording?.();
+    }, [onStartRecording]);
+
     return (
         <div ref={scrollRef} className="flex flex-col h-full overflow-y-auto px-4 py-2">
             {/* Recording Status Bar - Sticky at top, always visible when recording */}
@@ -249,17 +263,105 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                 <div className={`w-3 h-3 rounded-full ${isPaused ? 'bg-orange-500' : 'bg-blue-500 animate-pulse'}`}></div>
                             </div>
                             <p className="text-sm text-gray-600">
-                                {isPaused ? 'Recording paused' : 'Listening for speech...'}
+                                {isPaused ? t('transcriptView.recordingPaused') : t('transcriptView.listeningForSpeech')}
                             </p>
                             <p className="text-xs mt-1 text-gray-400">
-                                {isPaused ? 'Click resume to continue recording' : 'Speak to see live transcription'}
+                                {isPaused ? t('transcriptView.clickResumeToContinue') : t('transcriptView.speakToSeeLive')}
                             </p>
                         </>
                     ) : (
-                        <>
-                            <p className="text-lg font-semibold">Welcome to meetily!</p>
-                            <p className="text-xs mt-1">Start recording to see live transcription</p>
-                        </>
+                        <section className="mx-auto mt-4 w-full max-w-3xl rounded-2xl border border-gray-200 bg-white p-6 text-left shadow-sm">
+                            <header className="text-center">
+                                <p className="text-2xl font-semibold text-gray-900">{t('transcriptView.welcomeTitle')}</p>
+                                <p className="mt-2 text-sm text-gray-600">{t('transcriptView.welcomeSubtitle')}</p>
+                            </header>
+
+                            <div className="mt-5 flex flex-wrap justify-center gap-3">
+                                <Button type="button" onClick={handleStartRecording}>
+                                    <Mic />
+                                    {t('transcriptView.startRecording')}
+                                </Button>
+                                {allowImportAudio && (
+                                    <Button type="button" variant="outline" onClick={onImportAudio}>
+                                        <Upload />
+                                        {t('transcriptView.importAudio')}
+                                    </Button>
+                                )}
+                            </div>
+
+                            <section className="mt-8">
+                                <h2 className="text-base font-semibold text-gray-900">{t('transcriptView.howItWorksTitle')}</h2>
+                                <ol className="mt-4 grid gap-3 md:grid-cols-3">
+                                    <li className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+                                        <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">1</p>
+                                        <p className="mt-2 font-medium text-gray-900">{t('transcriptView.stepRecordTitle')}</p>
+                                        <p className="mt-1 text-sm text-gray-600">{t('transcriptView.stepRecordBody')}</p>
+                                    </li>
+                                    <li className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+                                        <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">2</p>
+                                        <p className="mt-2 font-medium text-gray-900">{t('transcriptView.stepImportTitle')}</p>
+                                        <p className="mt-1 text-sm text-gray-600">{t('transcriptView.stepImportBody')}</p>
+                                    </li>
+                                    <li className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+                                        <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">3</p>
+                                        <p className="mt-2 font-medium text-gray-900">{t('transcriptView.stepSpecTitle')}</p>
+                                        <p className="mt-1 text-sm text-gray-600">{t('transcriptView.stepSpecBody')}</p>
+                                    </li>
+                                </ol>
+                            </section>
+
+                            <section className="mt-8">
+                                <div className="flex items-center justify-center gap-2 text-gray-900">
+                                    <CircleHelp className="h-4 w-4" />
+                                    <h2 className="text-base font-semibold">{t('transcriptView.faqTitle')}</h2>
+                                </div>
+                                <div className="mt-4 space-y-3 text-left">
+                                    <details name="home-faq" className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+                                        <summary className="cursor-pointer list-none font-medium text-gray-900">{t('transcriptView.faqRecordQuestion')}</summary>
+                                        <p className="mt-2 text-sm leading-6 text-gray-600">{t('transcriptView.faqRecordAnswer')}</p>
+                                    </details>
+                                    <details name="home-faq" className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+                                        <summary className="cursor-pointer list-none font-medium text-gray-900">{t('transcriptView.faqImportQuestion')}</summary>
+                                        <p className="mt-2 text-sm leading-6 text-gray-600">{t('transcriptView.faqImportAnswer')}</p>
+                                    </details>
+                                    <details name="home-faq" className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+                                        <summary className="cursor-pointer list-none font-medium text-gray-900">{t('transcriptView.faqSpecQuestion')}</summary>
+                                        <div className="mt-2 flex items-start gap-2 text-sm leading-6 text-gray-600">
+                                            <FileText className="mt-0.5 h-4 w-4 shrink-0" />
+                                            <p>{t('transcriptView.faqSpecAnswer')}</p>
+                                        </div>
+                                    </details>
+                                    <details name="home-faq" className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+                                        <summary className="cursor-pointer list-none font-medium text-gray-900">{t('transcriptView.faqQualityQuestion')}</summary>
+                                        <p className="mt-2 text-sm leading-6 text-gray-600">{t('transcriptView.faqQualityAnswer')}</p>
+                                    </details>
+                                    <details name="home-faq" className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+                                        <summary className="cursor-pointer list-none font-medium text-gray-900">{t('transcriptView.faqResultsQuestion')}</summary>
+                                        <p className="mt-2 text-sm leading-6 text-gray-600">{t('transcriptView.faqResultsAnswer')}</p>
+                                    </details>
+                                    <details name="home-faq" className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+                                        <summary className="cursor-pointer list-none font-medium text-gray-900">{t('transcriptView.faqModelsQuestion')}</summary>
+                                        <p className="mt-2 text-sm leading-6 text-gray-600">{t('transcriptView.faqModelsAnswer')}</p>
+                                    </details>
+                                    <details name="home-faq" className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+                                        <summary className="cursor-pointer list-none font-medium text-gray-900">{t('transcriptView.faqFeatureQuestion')}</summary>
+                                        <p className="mt-2 text-sm leading-6 text-gray-600">{t('transcriptView.faqFeatureAnswer')}</p>
+                                    </details>
+                                    <details name="home-faq" className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+                                        <summary className="cursor-pointer list-none font-medium text-gray-900">{t('transcriptView.faqLanguageQuestion')}</summary>
+                                        <p className="mt-2 text-sm leading-6 text-gray-600">{t('transcriptView.faqLanguageAnswer')}</p>
+                                    </details>
+                                    <details name="home-faq" className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+                                        <summary className="cursor-pointer list-none font-medium text-gray-900">{t('transcriptView.faqRetranscribeQuestion')}</summary>
+                                        <p className="mt-2 text-sm leading-6 text-gray-600">{t('transcriptView.faqRetranscribeAnswer')}</p>
+                                    </details>
+                                    <details name="home-faq" className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+                                        <summary className="cursor-pointer list-none font-medium text-gray-900">{t('transcriptView.faqSaveQuestion')}</summary>
+                                        <p className="mt-2 text-sm leading-6 text-gray-600">{t('transcriptView.faqSaveAnswer')}</p>
+                                    </details>
+                                </div>
+                            </section>
+                        </section>
                     )}
                 </motion.div>
             ) : useVirtualization ? (
@@ -308,11 +410,11 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                             {isLoadingMore ? (
                                 <div className="flex items-center gap-2 text-gray-500">
                                     <div className="w-4 h-4 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin" />
-                                    <span className="text-sm">Loading more...</span>
+                                    <span className="text-sm">{t('virtualizedTranscriptView.loadingMore')}</span>
                                 </div>
                             ) : hasMore && totalCount > 0 ? (
                                 <span className="text-sm text-gray-400">
-                                    Showing {loadedCount} of {totalCount} segments
+                                    {t('virtualizedTranscriptView.showingCount', { loadedCount, totalCount })}
                                 </span>
                             ) : null}
                         </div>
@@ -327,7 +429,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                             className="flex items-center gap-2 mt-4 text-gray-500"
                         >
                             <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
-                            <span className="text-sm">Listening...</span>
+                            <span className="text-sm">{t('sidebar.listening')}</span>
                         </motion.div>
                     )}
                 </>
@@ -364,11 +466,11 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                             {isLoadingMore ? (
                                 <div className="flex items-center gap-2 text-gray-500">
                                     <div className="w-4 h-4 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin" />
-                                    <span className="text-sm">Loading more...</span>
+                                    <span className="text-sm">{t('virtualizedTranscriptView.loadingMore')}</span>
                                 </div>
                             ) : hasMore && totalCount > 0 ? (
                                 <span className="text-sm text-gray-400">
-                                    Showing {loadedCount} of {totalCount} segments
+                                    {t('virtualizedTranscriptView.showingCount', { loadedCount, totalCount })}
                                 </span>
                             ) : null}
                         </div>
@@ -383,7 +485,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                             className="flex items-center gap-2 mt-4 text-gray-500"
                         >
                             <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
-                            <span className="text-sm">Listening...</span>
+                            <span className="text-sm">{t('sidebar.listening')}</span>
                         </motion.div>
                     )}
                 </>
