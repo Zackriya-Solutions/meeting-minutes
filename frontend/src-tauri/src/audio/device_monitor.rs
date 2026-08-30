@@ -6,6 +6,9 @@ use tokio::task::JoinHandle;
 use anyhow::Result;
 use log::{debug, info, warn, error};
 
+#[cfg(target_os = "macos")]
+use cidre::{core_audio as ca, os};
+
 use super::devices::{AudioDevice, list_audio_devices};
 
 /// Device monitoring events
@@ -77,11 +80,96 @@ impl MonitoredDevice {
     }
 }
 
+//---------- Core Audio callback-driven device detection (macOS)----------
+
+/// Callback data shared between the Core Audio listener and the monitor loop.
+#[cfg(target_os = "macos")]
+struct ListenerCallbackData {
+    /// Wakes the monitor loop for immediate device check
+    notify: Arc<tokio::sync::Notify>,
+}
+
+/// RAII guard that unregisters the Core Audio property listener on drop.
+#[cfg(target_os = "macos")]
+struct DeviceChangeListenerGuard {
+    data_ptr: *mut ListenerCallbackData,
+}
+
+// SAFETY: data_ptr points to a Box<ListenerCallbackData> whose fields are Send + Sync.
+// The pointer is created in register_device_change_listeners() and only
+// used for cleanup in Drop — always on the same tokio task.
+#[cfg(target_os = "macos")]
+unsafe impl Send for DeviceChangeListenerGuard {}
+
+#[cfg(target_os = "macos")]
+impl Drop for DeviceChangeListenerGuard {
+    fn drop(&mut self) {
+        let ptr = self.data_ptr as *mut ();
+        let _ = ca::System::OBJ.remove_prop_listener(
+            &ca::PropSelector::HW_DEVICES.global_addr(),
+            device_list_changed_callback,
+            ptr,
+        );
+        // Deliberately leak the Box'd callback data (~100 bytes) instead of freeing it.
+        // AudioObjectRemovePropertyListener does not fence in-flight callbacks: a
+        // callback already dispatched on Core Audio's internal queue can still
+        // dereference this pointer after removal returns, so freeing here would be a
+        // use-after-free. The leak is bounded — one allocation per recording session,
+        // reclaimed at app exit. Same tradeoff as the Core Audio listeners in
+        // system_detector.rs.
+        // unsafe { let _ = Box::from_raw(self.data_ptr); }
+        info!("Core Audio device change listener removed (1 listener, callback data intentionally leaked)");
+    }
+}
+
+/// Core Audio callback: hardware device list changed (add/remove).
+#[cfg(target_os = "macos")]
+extern "C-unwind" fn device_list_changed_callback(
+    _obj_id: ca::Obj,
+    _number_addresses: u32,
+    _addresses: *const ca::PropAddr,
+    client_data: *mut (),
+) -> os::Status {
+    let data = unsafe { &*(client_data as *const ListenerCallbackData) };
+    data.notify.notify_one();
+    debug!("Core Audio device list changed — waking monitor loop");
+    os::Status::NO_ERR
+}
+
+/// Register the Core Audio property listener for device list changes.
+/// Returns an RAII guard that unregisters the listener on drop.
+#[cfg(target_os = "macos")]
+fn register_device_change_listeners(
+    notify: Arc<tokio::sync::Notify>,
+) -> Option<DeviceChangeListenerGuard> {
+    let data_ptr = Box::into_raw(Box::new(ListenerCallbackData { notify }));
+    let ptr = data_ptr as *mut ();
+
+    // Register HW_DEVICES listener (required — bail if fails)
+    match ca::System::OBJ.add_prop_listener(
+        &ca::PropSelector::HW_DEVICES.global_addr(),
+        device_list_changed_callback,
+        ptr,
+    ) {
+        Ok(()) => info!("Registered Core Audio HW_DEVICES listener"),
+        Err(e) => {
+            error!("Failed to register HW_DEVICES listener: {:?}", e);
+            unsafe { let _ = Box::from_raw(data_ptr); }
+            return None;
+        }
+    }
+
+    Some(DeviceChangeListenerGuard { data_ptr })
+}
+
 /// Audio device monitor that detects disconnects and reconnects
 pub struct AudioDeviceMonitor {
     monitor_handle: Option<JoinHandle<()>>,
     event_sender: mpsc::UnboundedSender<DeviceEvent>,
     stop_signal: Arc<tokio::sync::Notify>,
+    /// Wakes the monitor loop instantly when Core Audio reports a device
+    /// change (macOS); never signaled on other platforms.
+    device_change_notify: Arc<tokio::sync::Notify>,
     /// Mailbox for hot-swap device updates. When a mic hot-swap completes,
     /// the new device names are written here. The monitor loop reads it on
     /// its next poll cycle and updates its tracked device list.
@@ -94,12 +182,14 @@ impl AudioDeviceMonitor {
     pub fn new() -> (Self, mpsc::UnboundedReceiver<DeviceEvent>) {
         let (event_sender, event_receiver) = mpsc::unbounded_channel();
         let stop_signal = Arc::new(tokio::sync::Notify::new());
+        let device_change_notify = Arc::new(tokio::sync::Notify::new());
 
         (
             Self {
                 monitor_handle: None,
                 event_sender,
                 stop_signal,
+                device_change_notify,
                 device_update_mailbox: Arc::new(std::sync::Mutex::new(None)),
             },
             event_receiver,
@@ -154,10 +244,11 @@ impl AudioDeviceMonitor {
 
         let event_sender = self.event_sender.clone();
         let stop_signal = self.stop_signal.clone();
+        let device_change_notify = self.device_change_notify.clone();
         let device_update_mailbox = self.device_update_mailbox.clone();
 
         let handle = tokio::spawn(async move {
-            Self::monitor_loop(monitored_devices, event_sender, stop_signal, device_update_mailbox).await;
+            Self::monitor_loop(monitored_devices, event_sender, stop_signal, device_change_notify, device_update_mailbox).await;
         });
 
         self.monitor_handle = Some(handle);
@@ -182,10 +273,14 @@ impl AudioDeviceMonitor {
         mut monitored_devices: Vec<MonitoredDevice>,
         event_sender: mpsc::UnboundedSender<DeviceEvent>,
         stop_signal: Arc<tokio::sync::Notify>,
+        device_change_notify: Arc<tokio::sync::Notify>,
         device_update_mailbox: Arc<std::sync::Mutex<Option<(String, Option<String>)>>>,
     ) {
         let mut last_device_list = Vec::new();
         let check_interval = Duration::from_secs(2); // Poll every 2 seconds
+
+        #[cfg(target_os = "macos")]
+        let _listener_guard = register_device_change_listeners(device_change_notify.clone());
 
         loop {
             // Check for stop signal with timeout
@@ -193,6 +288,10 @@ impl AudioDeviceMonitor {
                 _ = stop_signal.notified() => {
                     info!("Device monitor received stop signal");
                     break;
+                }
+                _ = device_change_notify.notified() => {
+                    debug!("Device monitor woken by Core Audio callback — checking devices immediately");
+                    // Fall through to poll/diff below
                 }
                 _ = tokio::time::sleep(check_interval) => {
                     // Continue with monitoring check
