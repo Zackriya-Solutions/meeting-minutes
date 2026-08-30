@@ -22,6 +22,27 @@ export interface RecordingStoppedPayload {
   meeting_name?: string;
 }
 
+// Bound the start invoke: > ~40s Bluetooth mic cold-start and ~90s worst-case
+// Windows device enumeration, but still finite so a hung native start settles
+// the UI into ERROR instead of an eternal STARTING spinner.
+const START_TIMEOUT_MS = 120000;
+
+// ponytail: on timeout we only reject — no auto stop_recording. Calling stop
+// against a stuck start could itself block; the ERROR state lets the user
+// retry and the backend engine-lifecycle lock serializes that retry.
+function withStartTimeout<T>(promise: Promise<T>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error('Recording start timed out after 120s')),
+      START_TIMEOUT_MS
+    );
+    promise.then(
+      (value) => { clearTimeout(timer); resolve(value); },
+      (err) => { clearTimeout(timer); reject(err); }
+    );
+  });
+}
+
 /**
  * Recording Service
  * Singleton service for managing recording lifecycle operations
@@ -56,7 +77,7 @@ export class RecordingService {
    * @returns Promise<void>
    */
   async startRecording(): Promise<void> {
-    return invoke('start_recording');
+    return withStartTimeout(invoke('start_recording'));
   }
 
   /**
@@ -71,11 +92,11 @@ export class RecordingService {
     systemDeviceName: string | null,
     meetingName: string
   ): Promise<void> {
-    return invoke('start_recording_with_devices_and_meeting', {
+    return withStartTimeout(invoke('start_recording_with_devices_and_meeting', {
       micDeviceName,
       systemDeviceName,
       meetingName
-    });
+    }));
   }
 
   /**
@@ -172,6 +193,28 @@ export class RecordingService {
    */
   async onSpeechDetected(callback: () => void): Promise<UnlistenFn> {
     return listen('speech-detected', callback);
+  }
+
+  /**
+   * Listen for mic-device-switched event (mid-recording mic hot-swap succeeded)
+   * @param callback - Function to call when the mic is switched to a new device
+   * @returns Promise that resolves to unlisten function
+   */
+  async onMicDeviceSwitched(callback: (payload: { device_name: string }) => void): Promise<UnlistenFn> {
+    return listen<{ device_name: string }>('mic-device-switched', (event) => {
+      callback(event.payload);
+    });
+  }
+
+  /**
+   * Listen for mic-swap-failed event (mid-recording mic hot-swap failed)
+   * @param callback - Function to call when the mic swap fails
+   * @returns Promise that resolves to unlisten function
+   */
+  async onMicSwapFailed(callback: (payload: { error: string; device_name: string }) => void): Promise<UnlistenFn> {
+    return listen<{ error: string; device_name: string }>('mic-swap-failed', (event) => {
+      callback(event.payload);
+    });
   }
 }
 

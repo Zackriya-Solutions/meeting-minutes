@@ -515,6 +515,13 @@ pub async fn stop_recording<R: Runtime>(
         "🛑 Starting optimized recording shutdown - ensuring ALL transcript chunks are preserved"
     );
 
+    // A stop issued while startup is still in flight must WAIT for the start
+    // command to finish (it holds this lock until after IS_RECORDING is set),
+    // instead of no-oping on a still-false IS_RECORDING and orphaning the
+    // recording. Held (RAII) through the whole teardown so a new start can't
+    // interleave with it either.
+    let _engine_lifecycle_guard = super::common::acquire_engine_lifecycle_lock().await;
+
     // Check if recording is active
     if !IS_RECORDING.load(Ordering::SeqCst) {
         info!("Recording was not active");

@@ -185,8 +185,8 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
   }, [onRecordingStop]);
 
   const handleStopRecording = useCallback(async () => {
-    console.log('handleStopRecording called - isRecording:', isRecording, 'isStarting:', isStarting, 'isStopping:', isStopping);
-    if (!isRecording || isStarting || isStopping) {
+    console.log('handleStopRecording called - isRecording:', isRecording, 'isStarting:', isStarting, 'isStopping:', isStopping, 'isStartingRecording:', isStartingRecording);
+    if (!isRecording || isStarting || isStopping || isStartingRecording) {
       console.log('Early return from handleStopRecording due to state check');
       return;
     }
@@ -200,7 +200,7 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
 
     // Immediately trigger the stop action
     await stopRecordingAction();
-  }, [isRecording, isStarting, isStopping, stopRecordingAction, onStopInitiated]);
+  }, [isRecording, isStarting, isStopping, isStartingRecording, stopRecordingAction, onStopInitiated]);
 
   const handlePauseRecording = useCallback(async () => {
     if (!isRecording || isPaused || isPausing) return;
@@ -453,8 +453,8 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
                               Analytics.trackButtonClick('stop_recording', 'recording_controls');
                               handleStopRecording();
                             }}
-                            disabled={isStopping || isPausing || isResuming}
-                            className={`w-10 h-10 flex items-center justify-center ${isStopping || isPausing || isResuming ? 'bg-gray-400' : 'bg-red-500 hover:bg-red-600'
+                            disabled={isStopping || isPausing || isResuming || isStartingRecording}
+                            className={`w-10 h-10 flex items-center justify-center ${isStopping || isPausing || isResuming || isStartingRecording ? 'bg-gray-400' : 'bg-red-500 hover:bg-red-600'
                               } rounded-full text-white transition-colors relative`}
                           >
                             <Square size={16} />
