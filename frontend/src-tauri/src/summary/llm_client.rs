@@ -1,11 +1,27 @@
 use reqwest::{header, Client};
 use serde::{Deserialize, Serialize};
+use std::future::Future;
 use std::path::PathBuf;
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 
 const REQUEST_TIMEOUT_DURATION: Duration = Duration::from_secs(300);
+
+async fn await_or_cancel<T>(
+    operation: impl Future<Output = T>,
+    cancellation_token: Option<&CancellationToken>,
+) -> Result<T, String> {
+    let Some(token) = cancellation_token else {
+        return Ok(operation.await);
+    };
+
+    tokio::select! {
+        biased;
+        _ = token.cancelled() => Err("Summary generation was cancelled".to_string()),
+        result = operation => Ok(result),
+    }
+}
 
 // Generic structure for OpenAI-compatible API chat messages
 #[derive(Debug, Serialize)]
@@ -416,9 +432,8 @@ pub(crate) async fn generate_summary(
         response
     } else {
         let status = response.status();
-        let error_body = response
-            .text()
-            .await
+        let error_body = await_or_cancel(response.text(), cancellation_token)
+            .await?
             .unwrap_or_else(|_| "Unknown error".to_string());
         if provider != &LLMProvider::Ollama || !ollama_rejects_reasoning_effort(status, &error_body) {
             return Err(format!(
@@ -439,22 +454,9 @@ pub(crate) async fn generate_summary(
             .json(&retry_body)
             .timeout(REQUEST_TIMEOUT_DURATION)
             .send();
-        if let Some(token) = cancellation_token {
-            tokio::select! {
-                result = retry_future => result.map_err(|e| {
-                    if e.is_timeout() {
-                        format!(
-                            "LLM retry request timed out after {} seconds",
-                            REQUEST_TIMEOUT_DURATION.as_secs()
-                        )
-                    } else {
-                        format!("Failed to send retry request to LLM: {}", e)
-                    }
-                })?,
-                _ = token.cancelled() => return Err("Summary generation was cancelled".to_string()),
-            }
-        } else {
-            retry_future.await.map_err(|e| {
+        await_or_cancel(retry_future, cancellation_token)
+            .await?
+            .map_err(|e| {
                 if e.is_timeout() {
                     format!(
                         "LLM retry request timed out after {} seconds",
@@ -464,7 +466,6 @@ pub(crate) async fn generate_summary(
                     format!("Failed to send retry request to LLM: {}", e)
                 }
             })?
-        }
     };
 
     if !response.status().is_success() {
@@ -507,6 +508,7 @@ pub(crate) async fn generate_summary(
 mod tests {
     use super::*;
     use serde_json::json;
+    use std::{cell::Cell, task::Poll};
 
     #[test]
     fn only_ollama_disables_reasoning_and_custom_sampling_is_preserved() {
@@ -573,6 +575,25 @@ mod tests {
             reqwest::StatusCode::INTERNAL_SERVER_ERROR,
             r#"{"error":"think value \"none\" is not supported"}"#,
         ));
+    }
+
+    #[tokio::test]
+    async fn cancellation_prevents_compatibility_io_from_being_polled() {
+        let cancellation_token = CancellationToken::new();
+        cancellation_token.cancel();
+        let polled = Cell::new(false);
+
+        let result = await_or_cancel(
+            std::future::poll_fn(|_| {
+                polled.set(true);
+                Poll::<()>::Pending
+            }),
+            Some(&cancellation_token),
+        )
+        .await;
+
+        assert_eq!(result, Err("Summary generation was cancelled".to_string()));
+        assert!(!polled.get());
     }
 
     #[test]
