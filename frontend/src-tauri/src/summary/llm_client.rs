@@ -441,7 +441,7 @@ pub async fn generate_summary(
     };
 
     // Build request body based on provider
-    let request_body = if provider != &LLMProvider::Claude {
+    let mut request_body = if provider != &LLMProvider::Claude {
         serde_json::json!(build_openai_chat_request(
             model_name,
             openai_chat_messages(system_prompt, user_prompt),
@@ -480,13 +480,38 @@ pub async fn generate_summary(
             .await
             .unwrap_or_else(|_| "Unknown error".to_string());
 
-        if provider == &LLMProvider::CustomOpenAI
+        let rejected_sampling_parameter = (request_body.get("temperature").is_some()
+            && is_unsupported_parameter_error(&error_body, "temperature"))
+            || (request_body.get("top_p").is_some()
+                && is_unsupported_parameter_error(&error_body, "top_p"));
+
+        if provider == &LLMProvider::CustomOpenAI && rejected_sampling_parameter {
+            info!("Retrying Custom OpenAI request without sampling parameters");
+
+            if let Some(request) = request_body.as_object_mut() {
+                request.remove("temperature");
+                request.remove("top_p");
+            }
+
+            response = send_chat_request(
+                client,
+                &api_url,
+                &headers,
+                &request_body,
+                cancellation_token,
+            )
+            .await?;
+
+            if !response.status().is_success() {
+                let retry_error_body = response
+                    .text()
+                    .await
+                    .unwrap_or_else(|_| "Unknown error".to_string());
+                return Err(format!("LLM API request failed: {}", retry_error_body));
+            }
+        } else if provider == &LLMProvider::CustomOpenAI
             && request_body.get("max_tokens").is_some()
-            && (is_max_tokens_unsupported_error(&error_body)
-                || (request_body.get("temperature").is_some()
-                    && is_unsupported_parameter_error(&error_body, "temperature"))
-                || (request_body.get("top_p").is_some()
-                    && is_unsupported_parameter_error(&error_body, "top_p")))
+            && is_max_tokens_unsupported_error(&error_body)
         {
             info!("Retrying Custom OpenAI request with max_completion_tokens");
 
@@ -946,7 +971,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn summary_retries_when_sampling_is_rejected_before_max_tokens() {
+    async fn summary_retries_without_sampling_while_preserving_max_tokens() {
         let (endpoint, mut requests, server) = spawn_chat_server(vec![
             (
                 400,
@@ -970,6 +995,35 @@ mod tests {
         assert_eq!(summary, "sampling-free retry");
         let first = requests.recv().await.unwrap();
         assert_eq!(first["max_tokens"], 512);
+        assert_eq!(first["temperature"], 0.7);
+        assert_eq!(first["top_p"], 0.9);
+        let second = requests.recv().await.unwrap();
+        assert_eq!(second["max_tokens"], 512);
+        assert!(second.get("max_completion_tokens").is_none());
+        assert!(second.get("temperature").is_none());
+        assert!(second.get("top_p").is_none());
+        assert!(requests.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn summary_retries_without_sampling_while_preserving_completion_tokens() {
+        let (endpoint, mut requests, server) = spawn_chat_server(vec![
+            (
+                400,
+                json!({"error": {"code": "unsupported_parameter", "param": "top_p"}}),
+            ),
+            (200, successful_chat_response("sampling-free GPT-4 retry")),
+        ])
+        .await;
+
+        let summary = custom_summary(&endpoint, "gpt-4.1-mini", Some(512), Some(0.7), Some(0.9))
+            .await
+            .unwrap();
+        server.await.unwrap();
+
+        assert_eq!(summary, "sampling-free GPT-4 retry");
+        let first = requests.recv().await.unwrap();
+        assert_eq!(first["max_completion_tokens"], 512);
         assert_eq!(first["temperature"], 0.7);
         assert_eq!(first["top_p"], 0.9);
         let second = requests.recv().await.unwrap();
