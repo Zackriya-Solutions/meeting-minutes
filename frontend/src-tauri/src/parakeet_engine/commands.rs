@@ -1,3 +1,4 @@
+use crate::parakeet_engine::parakeet_engine::{is_download_cancelled, CancelDownloadOutcome};
 use crate::parakeet_engine::{DownloadProgress, ModelInfo, ParakeetEngine};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -443,18 +444,34 @@ pub async fn parakeet_download_model<R: Runtime>(
 
                 Ok(())
             }
-            Err(e) => {
-                // Emit error event
-                if let Err(emit_e) = app_handle.emit(
+            Err(error) if is_download_cancelled(&error) => {
+                if let Err(emit_error) = app_handle.emit(
+                    "parakeet-model-download-progress",
+                    serde_json::json!({
+                        "modelName": model_name,
+                        "progress": 0,
+                        "status": "cancelled"
+                    }),
+                ) {
+                    log::error!(
+                        "Failed to emit Parakeet cancellation event: {}",
+                        emit_error
+                    );
+                }
+                log::info!("Parakeet download cancelled: {}", model_name);
+                Ok(())
+            }
+            Err(error) => {
+                if let Err(emit_error) = app_handle.emit(
                     "parakeet-model-download-error",
                     serde_json::json!({
                         "modelName": model_name,
-                        "error": e.to_string()
+                        "error": error.to_string()
                     }),
                 ) {
-                    log::error!("Failed to emit parakeet download error event: {}", emit_e);
+                    log::error!("Failed to emit parakeet download error event: {}", emit_error);
                 }
-                Err(format!("Failed to download Parakeet model: {}", e))
+                Err(format!("Failed to download Parakeet model: {}", error))
             }
         }
     } else {
@@ -463,36 +480,19 @@ pub async fn parakeet_download_model<R: Runtime>(
 }
 
 #[command]
-pub async fn parakeet_cancel_download<R: Runtime>(
-    app_handle: AppHandle<R>,
+pub async fn parakeet_cancel_download(
     model_name: String,
-) -> Result<(), String> {
+) -> Result<CancelDownloadOutcome, String> {
     let engine = {
         let guard = PARAKEET_ENGINE.lock().unwrap();
         guard.as_ref().cloned()
     };
 
-    if let Some(engine) = engine {
-        engine
-            .cancel_download(&model_name)
-            .await
-            .map_err(|e| format!("Failed to cancel Parakeet download: {}", e))?;
-
-        // Emit cancellation event to update UI (global toast and component state)
-        let _ = app_handle.emit(
-            "parakeet-model-download-progress",
-            serde_json::json!({
-                "modelName": model_name,
-                "progress": 0,
-                "status": "cancelled"
-            }),
-        );
-
-        log::info!("Parakeet download cancelled: {}", model_name);
-        Ok(())
-    } else {
-        Err("Parakeet engine not initialized".to_string())
-    }
+    let engine = engine.ok_or_else(|| "Parakeet engine not initialized".to_string())?;
+    engine
+        .cancel_download(&model_name)
+        .await
+        .map_err(|error| format!("Failed to cancel Parakeet download: {}", error))
 }
 
 #[command]
@@ -508,8 +508,8 @@ pub async fn parakeet_retry_download<R: Runtime>(
     };
 
     if engine.is_some() {
-        // 重试必须复用常规下载入口的原子 active 注册；旧 worker 退出前不能强删标记，
-        // 否则取消后立即重试会让两个任务并发写入同一个 artifact。
+        // Retry uses the normal download entrypoint, whose owner reservation rejects
+        // a second writer until cancellation cleanup has completed.
         parakeet_download_model(app_handle, model_name).await
     } else {
         Err("Parakeet engine not initialized".to_string())

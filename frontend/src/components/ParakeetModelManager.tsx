@@ -4,12 +4,13 @@ import { invoke } from '@tauri-apps/api/core';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
 import {
-  ParakeetModelInfo,
   ModelStatus,
   ParakeetAPI,
+  ParakeetDownloadProgressEvent,
+  ParakeetModelInfo,
+  formatFileSize,
   getModelDisplayInfo,
-  getModelDisplayName,
-  formatFileSize
+  getModelDisplayName
 } from '../lib/parakeet';
 
 interface ParakeetModelManagerProps {
@@ -30,6 +31,7 @@ export function ParakeetModelManager({
   const [error, setError] = useState<string | null>(null);
   const [initialized, setInitialized] = useState(false);
   const [downloadingModels, setDownloadingModels] = useState<Set<string>>(new Set());
+  const [cancellingModels, setCancellingModels] = useState<Set<string>>(new Set());
 
   // Refs for stable callbacks
   const onModelSelectRef = useRef(onModelSelect);
@@ -37,12 +39,78 @@ export function ParakeetModelManager({
 
   // Progress throttle map to prevent rapid updates
   const progressThrottleRef = useRef<Map<string, { progress: number; timestamp: number }>>(new Map());
+  const cancellationReconciliationModelsRef = useRef<Set<string>>(new Set());
+  const cancellationReconcileTimersRef = useRef<Map<string, NodeJS.Timeout>>(new Map());
 
   // Update refs when props change
   useEffect(() => {
     onModelSelectRef.current = onModelSelect;
     autoSaveRef.current = autoSave;
   }, [onModelSelect, autoSave]);
+
+  const clearCancellationReconciliation = (modelName: string) => {
+    cancellationReconciliationModelsRef.current.delete(modelName);
+    const timer = cancellationReconcileTimersRef.current.get(modelName);
+    if (timer !== undefined) {
+      clearTimeout(timer);
+      cancellationReconcileTimersRef.current.delete(modelName);
+    }
+    setCancellingModels(prev => {
+      const next = new Set(prev);
+      next.delete(modelName);
+      return next;
+    });
+  };
+
+  const reconcileCancellation = (modelName: string) => {
+    if (cancellationReconciliationModelsRef.current.has(modelName)) return;
+
+    cancellationReconciliationModelsRef.current.add(modelName);
+    setCancellingModels(prev => new Set([...prev, modelName]));
+
+    const scheduleNextCheck = () => {
+      if (!cancellationReconciliationModelsRef.current.has(modelName)) return;
+      const timer = setTimeout(() => {
+        cancellationReconcileTimersRef.current.delete(modelName);
+        void reconcile();
+      }, 1000);
+      cancellationReconcileTimersRef.current.set(modelName, timer);
+    };
+
+    const reconcile = async () => {
+      try {
+        const modelList = await ParakeetAPI.getAvailableModels();
+        if (!cancellationReconciliationModelsRef.current.has(modelName)) return;
+
+        const model = modelList.find(candidate => candidate.name === modelName);
+        const isStillDownloading =
+          typeof model?.status === 'object' && 'Downloading' in model.status;
+        if (model && !isStillDownloading) {
+          clearCancellationReconciliation(modelName);
+          setDownloadingModels(prev => {
+            const next = new Set(prev);
+            next.delete(modelName);
+            return next;
+          });
+          setModels(modelList);
+          progressThrottleRef.current.delete(modelName);
+          toast.info(
+            model.status === 'Available'
+              ? `${getModelDisplayName(modelName)} download completed before cancellation`
+              : `${getModelDisplayName(modelName)} download cancelled`,
+            { duration: 3000 }
+          );
+          return;
+        }
+      } catch (err) {
+        console.warn('Failed to reconcile pending Parakeet cancellation:', err);
+      }
+
+      scheduleNextCheck();
+    };
+
+    void reconcile();
+  };
 
   // Initialize and load models
   useEffect(() => {
@@ -81,14 +149,18 @@ export function ParakeetModelManager({
       console.log('[ParakeetModelManager] Setting up event listeners...');
 
       // Download progress with throttling
-      unlistenProgress = await listen<{ modelName: string; progress: number }>(
+      unlistenProgress = await listen<ParakeetDownloadProgressEvent>(
         'parakeet-model-download-progress',
         (event) => {
-          const { modelName, progress } = event.payload;
+          const { modelName, progress, status } = event.payload;
+          if (status === 'cancelled') {
+            progressThrottleRef.current.delete(modelName);
+            reconcileCancellation(modelName);
+            return;
+          }
+
           const now = Date.now();
           const throttleData = progressThrottleRef.current.get(modelName);
-
-          // Throttle: only update if 300ms passed OR progress jumped by 5%+
           const shouldUpdate = !throttleData ||
             now - throttleData.timestamp > 300 ||
             Math.abs(progress - throttleData.progress) >= 5;
@@ -96,11 +168,10 @@ export function ParakeetModelManager({
           if (shouldUpdate) {
             console.log(`[ParakeetModelManager] Progress update for ${modelName}: ${progress}%`);
             progressThrottleRef.current.set(modelName, { progress, timestamp: now });
-
             setModels(prevModels =>
               prevModels.map(model =>
                 model.name === modelName
-                  ? { ...model, status: { Downloading: progress } as ModelStatus }
+                  ? { ...model, status: { Downloading: { progress } } as ModelStatus }
                   : model
               )
             );
@@ -115,6 +186,7 @@ export function ParakeetModelManager({
           const { modelName } = event.payload;
           const displayInfo = getModelDisplayInfo(modelName);
           const displayName = displayInfo?.friendlyName || modelName;
+          clearCancellationReconciliation(modelName);
 
           setModels(prevModels =>
             prevModels.map(model =>
@@ -155,6 +227,7 @@ export function ParakeetModelManager({
           const { modelName, error } = event.payload;
           const displayInfo = getModelDisplayInfo(modelName);
           const displayName = displayInfo?.friendlyName || modelName;
+          clearCancellationReconciliation(modelName);
 
           setModels(prevModels =>
             prevModels.map(model =>
@@ -192,6 +265,11 @@ export function ParakeetModelManager({
       if (unlistenProgress) unlistenProgress();
       if (unlistenComplete) unlistenComplete();
       if (unlistenError) unlistenError();
+      for (const timer of cancellationReconcileTimersRef.current.values()) {
+        clearTimeout(timer);
+      }
+      cancellationReconcileTimersRef.current.clear();
+      cancellationReconciliationModelsRef.current.clear();
     };
   }, []); // Empty dependency array - listeners use refs for stable callbacks
 
@@ -211,30 +289,18 @@ export function ParakeetModelManager({
     const displayInfo = getModelDisplayInfo(modelName);
     const displayName = displayInfo?.friendlyName || modelName;
 
+    setCancellingModels(prev => new Set([...prev, modelName]));
     try {
-      await ParakeetAPI.cancelDownload(modelName);
-
-      setDownloadingModels(prev => {
-        const newSet = new Set(prev);
-        newSet.delete(modelName);
-        return newSet;
-      });
-
-      setModels(prevModels =>
-        prevModels.map(model =>
-          model.name === modelName
-            ? { ...model, status: 'Missing' as ModelStatus }
-            : model
-        )
-      );
-
-      // Clean up throttle data
-      progressThrottleRef.current.delete(modelName);
-
-      toast.info(`${displayName} download cancelled`, {
-        duration: 3000
-      });
+      const outcome = await ParakeetAPI.cancelDownload(modelName);
+      reconcileCancellation(modelName);
+      if (outcome === 'pending') {
+        toast.info(`Cancelling ${displayName}...`, {
+          description: 'The download is still shutting down. Retry will be available when cleanup completes.',
+          duration: 4000
+        });
+      }
     } catch (err) {
+      clearCancellationReconciliation(modelName);
       console.error('Failed to cancel download:', err);
       toast.error('Failed to cancel download', {
         description: err instanceof Error ? err.message : 'Unknown error',
@@ -244,7 +310,8 @@ export function ParakeetModelManager({
   };
 
   const downloadModel = async (modelName: string) => {
-    if (downloadingModels.has(modelName)) return;
+    if (downloadingModels.has(modelName) || cancellingModels.has(modelName)) return;
+    clearCancellationReconciliation(modelName);
 
     const displayInfo = getModelDisplayInfo(modelName);
     const displayName = displayInfo?.friendlyName || modelName;
@@ -255,7 +322,7 @@ export function ParakeetModelManager({
       setModels(prevModels =>
         prevModels.map(model =>
           model.name === modelName
-            ? { ...model, status: { Downloading: 0 } as ModelStatus }
+            ? { ...model, status: { Downloading: { progress: 0 } } as ModelStatus }
             : model
         )
       );
@@ -372,6 +439,7 @@ export function ParakeetModelManager({
           onCancel={() => cancelDownload(recommendedModel.name)}
           onDelete={() => deleteModel(recommendedModel.name)}
           isDownloading={downloadingModels.has(recommendedModel.name)}
+          isCancelling={cancellingModels.has(recommendedModel.name)}
         />
       )}
 
@@ -393,6 +461,7 @@ export function ParakeetModelManager({
               onCancel={() => cancelDownload(model.name)}
               onDelete={() => deleteModel(model.name)}
               isDownloading={downloadingModels.has(model.name)}
+              isCancelling={cancellingModels.has(model.name)}
             />
           ))}
         </div>
@@ -422,6 +491,7 @@ interface ModelCardProps {
   onCancel: () => void;
   onDelete: () => void;
   isDownloading: boolean;
+  isCancelling: boolean;
 }
 
 function ModelCard({
@@ -432,7 +502,8 @@ function ModelCard({
   onDownload,
   onCancel,
   onDelete,
-  isDownloading
+  isDownloading,
+  isCancelling
 }: ModelCardProps) {
   const [isHovered, setIsHovered] = useState(false);
   const displayInfo = getModelDisplayInfo(model.name);
@@ -446,8 +517,9 @@ function ModelCard({
   const isCorrupted = typeof model.status === 'object' && 'Corrupted' in model.status;
   const downloadProgress =
     typeof model.status === 'object' && 'Downloading' in model.status
-      ? model.status.Downloading
+      ? model.status.Downloading.progress
       : null;
+  const displayedProgress = downloadProgress ?? 0;
 
   return (
     <motion.div
@@ -501,7 +573,7 @@ function ModelCard({
 
           {/* Status/Action */}
           <div className="ml-4 flex items-center gap-2">
-            {isAvailable && (
+            {isAvailable && !isCancelling && (
               <>
                 <div className="flex items-center gap-1.5 text-green-600">
                   <div className="w-2 h-2 bg-green-500 rounded-full"></div>
@@ -530,7 +602,7 @@ function ModelCard({
               </>
             )}
 
-            {isMissing && (
+            {isMissing && !isCancelling && (
               <button
                 onClick={(e) => {
                   e.stopPropagation();
@@ -542,7 +614,7 @@ function ModelCard({
               </button>
             )}
 
-            {downloadProgress === null && isError && (
+            {downloadProgress === null && isError && !isCancelling && (
               <button
                 onClick={(e) => {
                   e.stopPropagation();
@@ -554,7 +626,7 @@ function ModelCard({
               </button>
             )}
 
-            {isCorrupted && (
+            {isCorrupted && !isCancelling && (
               <div className="flex gap-2">
                 <button
                   onClick={(e) => {
@@ -580,7 +652,7 @@ function ModelCard({
         </div>
 
         {/* Full-width Download Progress Bar - PROMINENT */}
-        {downloadProgress !== null && (
+        {(downloadProgress !== null || isCancelling) && (
           <motion.div
             initial={{ opacity: 0, height: 0 }}
             animate={{ opacity: 1, height: 'auto' }}
@@ -589,32 +661,44 @@ function ModelCard({
           >
             <div className="flex items-center justify-between mb-2">
               <div className="flex items-center gap-2">
-                <span className="text-sm font-medium text-blue-600">Downloading...</span>
-                <span className="text-sm font-semibold text-blue-600">{Math.round(downloadProgress)}%</span>
+                <span className="text-sm font-medium text-blue-600">
+                  {isCancelling ? 'Cancelling…' : 'Downloading...'}
+                </span>
+                {!isCancelling && (
+                  <span className="text-sm font-semibold text-blue-600">
+                    {Math.round(displayedProgress)}%
+                  </span>
+                )}
               </div>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onCancel();
-                }}
-                className="text-xs text-gray-600 hover:text-red-600 font-medium transition-colors px-2 py-1 rounded hover:bg-red-50"
-                title="Cancel download"
-              >
-                Cancel
-              </button>
+              {isCancelling ? (
+                <span className="text-xs text-gray-500 font-medium px-2 py-1">
+                  Cancellation requested
+                </span>
+              ) : (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onCancel();
+                  }}
+                  className="text-xs text-gray-600 hover:text-red-600 font-medium transition-colors px-2 py-1 rounded hover:bg-red-50"
+                  title="Cancel download"
+                >
+                  Cancel
+                </button>
+              )}
             </div>
             <div className="w-full h-2 bg-gray-200 rounded-full overflow-hidden">
               <motion.div
                 className="h-full bg-gradient-to-r from-blue-500 to-blue-600 rounded-full"
                 initial={{ width: 0 }}
-                animate={{ width: `${downloadProgress}%` }}
+                animate={{ width: `${displayedProgress}%` }}
                 transition={{ duration: 0.3, ease: 'easeOut' }}
               />
             </div>
             <p className="text-xs text-gray-500 mt-1">
               {model.size_mb ? (
                 <>
-                  {formatFileSize(model.size_mb * downloadProgress / 100)} / {formatFileSize(model.size_mb)}
+                  {formatFileSize(model.size_mb * displayedProgress / 100)} / {formatFileSize(model.size_mb)}
                 </>
               ) : (
                 'Downloading...'
