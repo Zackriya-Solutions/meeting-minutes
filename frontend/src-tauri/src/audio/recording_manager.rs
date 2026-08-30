@@ -7,18 +7,13 @@ use std::time::Duration;
 #[cfg(target_os = "macos")]
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
-use super::devices::{AudioDevice, list_audio_devices};
+use super::devices::AudioDevice;
 
-#[cfg(target_os = "macos")]
-use super::devices::get_safe_recording_devices_macos;
-
-#[cfg(not(target_os = "macos"))]
-use super::devices::{default_input_device, default_output_device};
-use super::recording_state::{RecordingState, AudioChunk, DeviceType as RecordingDeviceType};
+use super::recording_state::{RecordingState, AudioChunk};
 use super::pipeline::AudioPipelineManager;
 use super::stream::AudioStreamManager;
 use super::recording_saver::RecordingSaver;
-use super::device_monitor::{AudioDeviceMonitor, DeviceEvent, DeviceMonitorType};
+use super::device_monitor::{AudioDeviceMonitor, DeviceEvent};
 
 /// Stream manager type enumeration
 pub enum StreamManagerType {
@@ -123,6 +118,7 @@ pub struct RecordingManager {
     pipeline_manager: AudioPipelineManager,
     recording_saver: RecordingSaver,
     device_monitor: Option<AudioDeviceMonitor>,
+    #[allow(dead_code)] // kept for upcoming device-event consumer; only reader was removed as dead code
     device_event_receiver: Option<mpsc::UnboundedReceiver<DeviceEvent>>,
 }
 
@@ -254,90 +250,6 @@ impl RecordingManager {
                self.stream_manager.active_stream_count());
 
         Ok(transcription_receiver)
-    }
-
-    /// Start recording with default devices and auto_save setting
-    ///
-    /// # Arguments
-    /// * `auto_save` - Whether to save audio checkpoints (true) or just transcripts/metadata (false)
-    ///
-    /// # Platform-Specific Behavior
-    ///
-    /// **macOS**: Uses smart device selection that automatically overrides
-    /// Bluetooth devices to built-in wired devices for stable, consistent sample rates.
-    /// This prevents Core Audio/ScreenCaptureKit from delivering variable sample rate
-    /// streams that cause sync issues when mixing mic + system audio.
-    ///
-    /// **Windows/Linux**: Uses system default devices directly without override.
-    ///
-    /// # macOS Bluetooth Override Strategy
-    ///
-    /// - Microphone: If Bluetooth → Use built-in MacBook mic
-    /// - Speaker: If Bluetooth → Use built-in MacBook speaker (for ScreenCaptureKit)
-    /// - Each device is checked INDEPENDENTLY
-    ///
-    /// Rationale: Bluetooth devices on macOS can have variable sample rates as Core Audio
-    /// and the Bluetooth stack may resample dynamically. Built-in devices provide
-    /// fixed, consistent sample rates for reliable audio mixing.
-    ///
-    /// User still hears audio via Bluetooth (playback), but recording captures
-    /// via stable wired path for best quality.
-    pub async fn start_recording_with_defaults_and_auto_save(&mut self, auto_save: bool) -> Result<mpsc::UnboundedReceiver<AudioChunk>> {
-        #[cfg(target_os = "macos")]
-        {
-            info!("🎙️ [macOS] Starting recording with smart device selection (Bluetooth override enabled)");
-
-            // Get safe recording devices with automatic Bluetooth fallback
-            // This function handles all the detection and override logic for macOS
-            let (microphone_device, system_device) = get_safe_recording_devices_macos()?;
-
-            // Wrap in Arc for sharing across threads
-            let microphone_device = microphone_device.map(Arc::new);
-            let system_device = system_device.map(Arc::new);
-
-            // Ensure at least microphone is available
-            if microphone_device.is_none() {
-                return Err(anyhow::anyhow!("❌ No microphone device available for recording"));
-            }
-
-            // Start recording with selected devices and auto_save setting
-            self.start_recording(microphone_device, system_device, auto_save).await
-        }
-
-        #[cfg(not(target_os = "macos"))]
-        {
-            info!("Starting recording with default devices");
-
-            // Get default devices (no Bluetooth override on Windows/Linux)
-            let microphone_device = match default_input_device() {
-                Ok(device) => {
-                    info!("Using default microphone: {}", device.name);
-                    Some(Arc::new(device))
-                }
-                Err(e) => {
-                    warn!("No default microphone available: {}", e);
-                    None
-                }
-            };
-
-            let system_device = match default_output_device() {
-                Ok(device) => {
-                    info!("Using default system audio: {}", device.name);
-                    Some(Arc::new(device))
-                }
-                Err(e) => {
-                    warn!("No default system audio available: {}", e);
-                    None
-                }
-            };
-
-            // Ensure at least microphone is available
-            if microphone_device.is_none() {
-                return Err(anyhow::anyhow!("No microphone device available"));
-            }
-
-            self.start_recording(microphone_device, system_device, auto_save).await
-        }
     }
 
     /// Stop recording streams without saving (for use when waiting for transcription)
@@ -596,113 +508,6 @@ impl RecordingManager {
     /// Returns None if no meeting name was set or folder structure not initialized
     pub fn get_meeting_folder(&self) -> Option<std::path::PathBuf> {
         self.recording_saver.get_meeting_folder().map(|p| p.clone())
-    }
-
-    /// Check for device events (disconnects/reconnects)
-    /// Returns Some(DeviceEvent) if an event occurred, None otherwise
-    pub fn poll_device_events(&mut self) -> Option<DeviceEvent> {
-        if let Some(ref mut receiver) = self.device_event_receiver {
-            receiver.try_recv().ok()
-        } else {
-            None
-        }
-    }
-
-    /// Attempt to reconnect a disconnected device
-    /// Returns true if reconnection successful
-    pub async fn attempt_device_reconnect(&mut self, device_name: &str, device_type: DeviceMonitorType) -> Result<bool> {
-        info!("🔄 Attempting to reconnect device: {} ({:?})", device_name, device_type);
-
-        // List current devices
-        let available_devices = list_audio_devices().await?;
-
-        // Find the device by name
-        let device = available_devices.iter()
-            .find(|d| d.name == device_name)
-            .cloned();
-
-        if let Some(device) = device {
-            info!("✅ Device '{}' found, recreating stream...", device_name);
-
-            // Determine which device to reconnect based on type
-            let device_arc: Arc<AudioDevice> = Arc::new(device);
-            match device_type {
-                DeviceMonitorType::Microphone => {
-                    // Stop existing mic stream and start new one
-                    // We need to keep system audio running if it exists
-                    let system_device = self.state.get_system_device();
-
-                    // Restart streams with new microphone
-                    self.stream_manager.stop_streams()?;
-                    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-
-                    self.stream_manager.start_streams(Some(device_arc.clone()), system_device, None).await?;
-                    self.state.set_microphone_device(device_arc);
-
-                    info!("✅ Microphone reconnected successfully");
-                    Ok(true)
-                }
-                DeviceMonitorType::SystemAudio => {
-                    // Stop existing system audio stream and start new one
-                    let microphone_device = self.state.get_microphone_device();
-
-                    // Restart streams with new system audio
-                    self.stream_manager.stop_streams()?;
-                    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-
-                    self.stream_manager.start_streams(microphone_device, Some(device_arc.clone()), None).await?;
-                    self.state.set_system_device(device_arc);
-
-                    info!("✅ System audio reconnected successfully");
-                    Ok(true)
-                }
-            }
-        } else {
-            warn!("❌ Device '{}' not yet available", device_name);
-            Ok(false)
-        }
-    }
-
-    /// Handle a device disconnect event
-    /// Pauses recording and attempts reconnection
-    pub async fn handle_device_disconnect(&mut self, device_name: String, device_type: DeviceMonitorType) {
-        warn!("📱 Device disconnected: {} ({:?})", device_name, device_type);
-
-        // Mark state as reconnecting (keeps recording alive but in waiting state)
-        let device = match device_type {
-            DeviceMonitorType::Microphone => self.state.get_microphone_device(),
-            DeviceMonitorType::SystemAudio => self.state.get_system_device(),
-        };
-
-        if let Some(device) = device {
-            let recording_device_type = match device_type {
-                DeviceMonitorType::Microphone => RecordingDeviceType::Microphone,
-                DeviceMonitorType::SystemAudio => RecordingDeviceType::System,
-            };
-            self.state.start_reconnecting(device, recording_device_type);
-        }
-    }
-
-    /// Handle a device reconnect event
-    pub async fn handle_device_reconnect(&mut self, device_name: String, device_type: DeviceMonitorType) -> Result<()> {
-        info!("📱 Device reconnected: {} ({:?})", device_name, device_type);
-
-        // Attempt to reconnect the device
-        match self.attempt_device_reconnect(&device_name, device_type).await {
-            Ok(true) => {
-                info!("✅ Successfully reconnected device: {}", device_name);
-                self.state.stop_reconnecting();
-                Ok(())
-            }
-            Ok(false) => {
-                warn!("Device reconnect attempt failed (device not yet available)");
-                Err(anyhow::anyhow!("Device not available"))
-            }
-            Err(e) => {
-                error!("Device reconnect failed: {}", e);
-                Err(e)
-            }
-        }
     }
 
     /// Check if currently attempting to reconnect
