@@ -39,77 +39,12 @@ export function ParakeetModelManager({
 
   // Progress throttle map to prevent rapid updates
   const progressThrottleRef = useRef<Map<string, { progress: number; timestamp: number }>>(new Map());
-  const cancellationReconciliationModelsRef = useRef<Set<string>>(new Set());
-  const cancellationReconcileTimersRef = useRef<Map<string, NodeJS.Timeout>>(new Map());
-
-  // Update refs when props change
-  useEffect(() => {
-    onModelSelectRef.current = onModelSelect;
-    autoSaveRef.current = autoSave;
-  }, [onModelSelect, autoSave]);
-
-  const clearCancellationReconciliation = (modelName: string) => {
-    cancellationReconciliationModelsRef.current.delete(modelName);
-    const timer = cancellationReconcileTimersRef.current.get(modelName);
-    if (timer !== undefined) {
-      clearTimeout(timer);
-      cancellationReconcileTimersRef.current.delete(modelName);
-    }
+  const clearCancellingModel = (modelName: string) => {
     setCancellingModels(prev => {
       const next = new Set(prev);
       next.delete(modelName);
       return next;
     });
-  };
-
-  const reconcileCancellation = (modelName: string) => {
-    if (cancellationReconciliationModelsRef.current.has(modelName)) return;
-
-    cancellationReconciliationModelsRef.current.add(modelName);
-    setCancellingModels(prev => new Set([...prev, modelName]));
-
-    const scheduleNextCheck = () => {
-      if (!cancellationReconciliationModelsRef.current.has(modelName)) return;
-      const timer = setTimeout(() => {
-        cancellationReconcileTimersRef.current.delete(modelName);
-        void reconcile();
-      }, 1000);
-      cancellationReconcileTimersRef.current.set(modelName, timer);
-    };
-
-    const reconcile = async () => {
-      try {
-        const modelList = await ParakeetAPI.getAvailableModels();
-        if (!cancellationReconciliationModelsRef.current.has(modelName)) return;
-
-        const model = modelList.find(candidate => candidate.name === modelName);
-        const isStillDownloading =
-          typeof model?.status === 'object' && 'Downloading' in model.status;
-        if (model && !isStillDownloading) {
-          clearCancellationReconciliation(modelName);
-          setDownloadingModels(prev => {
-            const next = new Set(prev);
-            next.delete(modelName);
-            return next;
-          });
-          setModels(modelList);
-          progressThrottleRef.current.delete(modelName);
-          toast.info(
-            model.status === 'Available'
-              ? `${getModelDisplayName(modelName)} download completed before cancellation`
-              : `${getModelDisplayName(modelName)} download cancelled`,
-            { duration: 3000 }
-          );
-          return;
-        }
-      } catch (err) {
-        console.warn('Failed to reconcile pending Parakeet cancellation:', err);
-      }
-
-      scheduleNextCheck();
-    };
-
-    void reconcile();
   };
 
   // Initialize and load models
@@ -155,7 +90,22 @@ export function ParakeetModelManager({
           const { modelName, progress, status } = event.payload;
           if (status === 'cancelled') {
             progressThrottleRef.current.delete(modelName);
-            reconcileCancellation(modelName);
+            clearCancellingModel(modelName);
+            setDownloadingModels(prev => {
+              const next = new Set(prev);
+              next.delete(modelName);
+              return next;
+            });
+            setModels(prevModels =>
+              prevModels.map(model =>
+                model.name === modelName
+                  ? { ...model, status: 'Missing' as ModelStatus }
+                  : model
+              )
+            );
+            toast.info(`${getModelDisplayName(modelName)} download cancelled`, {
+              duration: 3000
+            });
             return;
           }
 
@@ -186,7 +136,7 @@ export function ParakeetModelManager({
           const { modelName } = event.payload;
           const displayInfo = getModelDisplayInfo(modelName);
           const displayName = displayInfo?.friendlyName || modelName;
-          clearCancellationReconciliation(modelName);
+          clearCancellingModel(modelName);
 
           setModels(prevModels =>
             prevModels.map(model =>
@@ -227,7 +177,7 @@ export function ParakeetModelManager({
           const { modelName, error } = event.payload;
           const displayInfo = getModelDisplayInfo(modelName);
           const displayName = displayInfo?.friendlyName || modelName;
-          clearCancellationReconciliation(modelName);
+          clearCancellingModel(modelName);
 
           setModels(prevModels =>
             prevModels.map(model =>
@@ -265,11 +215,6 @@ export function ParakeetModelManager({
       if (unlistenProgress) unlistenProgress();
       if (unlistenComplete) unlistenComplete();
       if (unlistenError) unlistenError();
-      for (const timer of cancellationReconcileTimersRef.current.values()) {
-        clearTimeout(timer);
-      }
-      cancellationReconcileTimersRef.current.clear();
-      cancellationReconciliationModelsRef.current.clear();
     };
   }, []); // Empty dependency array - listeners use refs for stable callbacks
 
@@ -292,7 +237,6 @@ export function ParakeetModelManager({
     setCancellingModels(prev => new Set([...prev, modelName]));
     try {
       const outcome = await ParakeetAPI.cancelDownload(modelName);
-      reconcileCancellation(modelName);
       if (outcome === 'pending') {
         toast.info(`Cancelling ${displayName}...`, {
           description: 'The download is still shutting down. Retry will be available when cleanup completes.',
@@ -300,7 +244,7 @@ export function ParakeetModelManager({
         });
       }
     } catch (err) {
-      clearCancellationReconciliation(modelName);
+      clearCancellingModel(modelName);
       console.error('Failed to cancel download:', err);
       toast.error('Failed to cancel download', {
         description: err instanceof Error ? err.message : 'Unknown error',
@@ -311,7 +255,7 @@ export function ParakeetModelManager({
 
   const downloadModel = async (modelName: string) => {
     if (downloadingModels.has(modelName) || cancellingModels.has(modelName)) return;
-    clearCancellationReconciliation(modelName);
+    clearCancellingModel(modelName);
 
     const displayInfo = getModelDisplayInfo(modelName);
     const displayName = displayInfo?.friendlyName || modelName;

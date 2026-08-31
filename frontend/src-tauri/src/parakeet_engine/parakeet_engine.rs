@@ -1141,7 +1141,7 @@ mod tests {
     use tempfile::tempdir;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
-
+    use tokio::sync::oneshot;
     const TEST_MODEL_NAME: &str = "parakeet-test";
     const SMALL_ARTIFACTS: &[ArtifactSpec] = &[
         ArtifactSpec { filename: "encoder.bin", exact_bytes: 4 },
@@ -1157,6 +1157,7 @@ mod tests {
         content_length: Option<u64>,
         content_range: Option<&'static str>,
         body: &'static [u8],
+        release_after_body: Option<oneshot::Receiver<()>>,
     }
 
     fn response(
@@ -1173,6 +1174,7 @@ mod tests {
             content_length: Some(body.len() as u64),
             content_range,
             body,
+            release_after_body: None,
         }
     }
 
@@ -1226,6 +1228,9 @@ mod tests {
                     .write_all(expected.body)
                     .await
                     .expect("write response body");
+                if let Some(release_after_body) = expected.release_after_body {
+                    release_after_body.await.expect("release partial response");
+                }
             }
         });
 
@@ -1363,16 +1368,73 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn near_complete_artifact_is_resumed_not_skipped() {
+    async fn cancelled_near_complete_artifact_is_resumed_on_retry() {
         const ARTIFACTS: &[ArtifactSpec] = &[ArtifactSpec {
             filename: "near.bin",
             exact_bytes: 100,
         }];
+        const PREFIX: &[u8] = &[b'A'; 99];
+
         let (_temp_dir, engine, model_dir) = test_engine().await;
-        fs::create_dir_all(&model_dir).await.expect("create model directory");
-        fs::write(model_dir.join("near.bin"), vec![b'A'; 99])
+        let (release_tx, release_rx) = oneshot::channel();
+        let (progress_tx, progress_rx) = oneshot::channel();
+        let progress_tx = Arc::new(std::sync::Mutex::new(Some(progress_tx)));
+        let (base_url, server) = serve_requests(vec![ExpectedResponse {
+            filename: "near.bin",
+            range: None,
+            status: "200 OK",
+            content_length: Some(100),
+            content_range: None,
+            body: PREFIX,
+            release_after_body: Some(release_rx),
+        }])
+        .await;
+
+        let download_engine = Arc::clone(&engine);
+        let download_dir = model_dir.clone();
+        let download = tokio::spawn(async move {
+            download_engine
+                .download_model_detailed_from_source(
+                    TEST_MODEL_NAME,
+                    &download_dir,
+                    &base_url,
+                    ARTIFACTS,
+                    Some(Box::new(move |progress| {
+                        if progress.downloaded_bytes == 99 {
+                            if let Some(sender) = progress_tx
+                                .lock()
+                                .expect("lock progress sender")
+                                .take()
+                            {
+                                let _ = sender.send(());
+                            }
+                        }
+                    })),
+                )
+                .await
+        });
+
+        tokio::time::timeout(Duration::from_secs(5), progress_rx)
             .await
-            .expect("seed 99 percent artifact");
+            .expect("receive near-complete progress")
+            .expect("progress sender remains connected");
+        assert_eq!(
+            engine
+                .cancel_download_with_timeout(TEST_MODEL_NAME, Duration::from_secs(5))
+                .await
+                .expect("cancel near-complete download"),
+            CancelDownloadOutcome::Cancelled
+        );
+        release_tx.send(()).expect("release partial response");
+        let error = download
+            .await
+            .expect("join cancelled download")
+            .expect_err("cancelled download must not succeed");
+        server.await.expect("join partial-response server");
+
+        assert!(is_download_cancelled(&error));
+        assert_eq!(fs::metadata(model_dir.join("near.bin")).await.unwrap().len(), 99);
+        assert!(matches!(test_model_status(&engine).await, ModelStatus::Missing));
 
         let (base_url, server) = serve_requests(vec![response(
             "near.bin",
@@ -1391,12 +1453,11 @@ mod tests {
                 None,
             )
             .await
-            .expect("99 percent artifact must resume");
-        server.await.expect("join resume server");
-        assert_eq!(
-            fs::metadata(model_dir.join("near.bin")).await.unwrap().len(),
-            100
-        );
+            .expect("retry resumes the cancelled near-complete artifact");
+        server.await.expect("join retry server");
+
+        assert_eq!(fs::metadata(model_dir.join("near.bin")).await.unwrap().len(), 100);
+        assert!(matches!(test_model_status(&engine).await, ModelStatus::Available));
     }
 
     #[tokio::test]
@@ -1508,6 +1569,7 @@ mod tests {
                     content_length: Some(3),
                     content_range: Some("bytes invalid"),
                     body: b"XYZ",
+                    release_after_body: None,
                 },
             ),
             (
@@ -1519,6 +1581,7 @@ mod tests {
                     content_length: Some(4),
                     content_range: Some("bytes 0-3/4"),
                     body: b"ABCD",
+                    release_after_body: None,
                 },
             ),
             (
@@ -1530,6 +1593,7 @@ mod tests {
                     content_length: Some(3),
                     content_range: Some("bytes 1-3/5"),
                     body: b"XYZ",
+                    release_after_body: None,
                 },
             ),
             (
@@ -1541,6 +1605,7 @@ mod tests {
                     content_length: Some(4),
                     content_range: None,
                     body: b"ABC",
+                    release_after_body: None,
                 },
             ),
             (
@@ -1552,6 +1617,7 @@ mod tests {
                     content_length: Some(5),
                     content_range: None,
                     body: b"ABCDE",
+                    release_after_body: None,
                 },
             ),
         ];
