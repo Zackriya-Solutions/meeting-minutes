@@ -585,20 +585,24 @@ impl RecordingManager {
     }
 
     /// Set new mic stream and update device state after hot-swap (Phase 3).
-    pub fn set_mic_stream_after_swap(&mut self, stream: super::stream::AudioStream, device: Arc<AudioDevice>) {
+    pub fn set_mic_stream_after_swap(
+        &mut self,
+        stream: super::stream::AudioStream,
+        device: Arc<AudioDevice>,
+        system_name: Option<String>,
+    ) {
         self.stream_manager.set_mic_stream(stream);
         // Notify the device monitor so it tracks the new mic (and updated
         // system output) instead of the dead ones (M8 fix). BT devices like
         // AirPods are often both mic AND speaker — when they disconnect, both
-        // monitor entries go stale. Resolve the *current* default output at
-        // notify time; `state.get_system_device()` still holds the pre-swap
+        // monitor entries go stale. `system_name` is the *current* default
+        // output, resolved lock-free in Phase 2 by the caller (do_mic_swap)
+        // so a CoreAudio stall can't happen under the RECORDING_MANAGER lock;
+        // `state.get_system_device()` still holds the pre-swap
         // reference (e.g. AirPods) because we don't mutate system_device
         // during a mic-only hot-swap, which would leave the monitor tracking
         // the dead name and spamming "missing for N checks".
         if let Some(ref monitor) = self.device_monitor {
-            let system_name = super::devices::default_output_device()
-                .ok()
-                .map(|d| d.name);
             monitor.notify_mic_swapped(device.name.clone(), system_name);
         }
         self.state.set_microphone_device(device);

@@ -1216,11 +1216,15 @@ async fn do_mic_swap(device_name: &str) -> Result<(), String> {
         None,
     ).await.map_err(|e| format!("Failed to create mic stream: {}", e))?;
 
+    // Resolve the current default output OUTSIDE the lock — a CoreAudio stall here
+    // must not block stop_recording (which needs RECORDING_MANAGER). (P1 #1)
+    let system_name = default_output_device().ok().map(|d| d.name);
+
     // Phase 3: Lock briefly — set new stream
     {
         let mut guard = RECORDING_MANAGER.lock().unwrap();
         if let Some(manager) = guard.as_mut() {
-            manager.set_mic_stream_after_swap(new_stream, device_arc);
+            manager.set_mic_stream_after_swap(new_stream, device_arc, system_name);
             info!("[HOT_SWAP] Mic hot-swap to '{}' completed", device_name);
         } else {
             return Err("Recording manager gone during hot-swap".to_string());
