@@ -17,6 +17,7 @@ import { useTemplates } from '@/hooks/meeting-details/useTemplates';
 import { useCopyOperations } from '@/hooks/meeting-details/useCopyOperations';
 import { useMeetingOperations } from '@/hooks/meeting-details/useMeetingOperations';
 import { useConfig } from '@/contexts/ConfigContext';
+import { NewTranscriptAnnotation, TranscriptAnnotation } from '@/types';
 
 export default function PageContent({
   meeting,
@@ -32,6 +33,9 @@ export default function PageContent({
   totalCount,
   loadedCount,
   onLoadMore,
+  annotations = [],
+  onAddAnnotation,
+  getAnnotationImage,
 }: {
   meeting: any;
   summaryData: Summary | null;
@@ -46,6 +50,9 @@ export default function PageContent({
   totalCount?: number;
   loadedCount?: number;
   onLoadMore?: () => void;
+  annotations?: TranscriptAnnotation[];
+  onAddAnnotation?: (annotation: NewTranscriptAnnotation) => Promise<void> | void;
+  getAnnotationImage?: (annotation: TranscriptAnnotation) => Promise<string | null>;
 }) {
   console.log('📄 PAGE CONTENT: Initializing with data:', {
     meetingId: meeting.id,
@@ -191,6 +198,9 @@ export default function PageContent({
           meetingId={meeting.id}
           meetingFolderPath={meeting.folder_path}
           onRefetchTranscripts={onRefetchTranscripts}
+          annotations={annotations}
+          onAddAnnotation={onAddAnnotation}
+          getAnnotationImage={getAnnotationImage}
         />
         <SummaryPanel
           meeting={meeting}

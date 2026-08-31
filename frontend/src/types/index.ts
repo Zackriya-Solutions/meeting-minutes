@@ -112,3 +112,18 @@ export interface TranscriptSegmentData {
   source?: string;
   confidence?: number;
 }
+
+export type AnnotationType = 'bookmark' | 'note' | 'image';
+
+export interface TranscriptAnnotation {
+  id: string;
+  type: AnnotationType;
+  anchorTime: number;
+  createdAt: string;
+  text?: string;
+  imageFile?: string;
+  imageData?: number[];
+  imageMime?: string;
+}
+
+export type NewTranscriptAnnotation = Omit<TranscriptAnnotation, 'id' | 'createdAt'>;

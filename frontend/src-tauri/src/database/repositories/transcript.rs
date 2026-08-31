@@ -1,6 +1,8 @@
-use crate::api::{TranscriptSearchResult, TranscriptSegment};
+use crate::api::{TranscriptAnnotationInput, TranscriptSearchResult, TranscriptSegment};
+use super::annotation::AnnotationsRepository;
 use chrono::Utc;
 use sqlx::{Connection, Error as SqlxError, SqlitePool};
+use std::path::Path;
 use tracing::{error, info};
 use uuid::Uuid;
 
@@ -15,6 +17,8 @@ impl TranscriptsRepository {
         meeting_title: &str,
         transcripts: &[TranscriptSegment],
         folder_path: Option<String>,
+        annotations: &[TranscriptAnnotationInput],
+        annotation_dir: &Path,
     ) -> Result<String, SqlxError> {
         let meeting_id = format!("meeting-{}", Uuid::new_v4());
 
@@ -79,6 +83,15 @@ impl TranscriptsRepository {
 
         // Commit the transaction
         transaction.commit().await?;
+
+        if !annotations.is_empty() {
+            let directory = if folder_path.is_some() {
+                annotation_dir.to_path_buf()
+            } else {
+                annotation_dir.join(&meeting_id).join("annotations")
+            };
+            AnnotationsRepository::save(pool, &meeting_id, annotations, &directory).await?;
+        }
 
         Ok(meeting_id)
     }
@@ -188,7 +201,7 @@ mod tests {
             segment("seg-legacy", "segmento antigo", 2.0, None),
         ];
         let meeting_id =
-            TranscriptsRepository::save_transcript(&pool, "Reunião de teste", &segments, None)
+            TranscriptsRepository::save_transcript(&pool, "Reunião de teste", &segments, None, &[], std::path::Path::new("/tmp"))
                 .await
                 .expect("save_transcript must succeed");
 

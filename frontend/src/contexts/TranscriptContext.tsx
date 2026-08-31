@@ -1,16 +1,18 @@
 'use client';
 
 import React, { createContext, useContext, useState, useEffect, useRef, useCallback, ReactNode, MutableRefObject } from 'react';
-import { Transcript, TranscriptUpdate } from '@/types';
+import { NewTranscriptAnnotation, Transcript, TranscriptAnnotation, TranscriptUpdate } from '@/types';
 import { toast } from 'sonner';
 import { useRecordingState } from './RecordingStateContext';
 import { transcriptService } from '@/services/transcriptService';
 import { recordingService } from '@/services/recordingService';
-import { indexedDBService } from '@/services/indexedDBService';
+import { indexedDBService, StoredAnnotation } from '@/services/indexedDBService';
 
 interface TranscriptContextType {
   transcripts: Transcript[];
+  annotations: TranscriptAnnotation[];
   transcriptsRef: MutableRefObject<Transcript[]>
+  annotationsRef: MutableRefObject<TranscriptAnnotation[]>;
   addTranscript: (update: TranscriptUpdate) => void;
   copyTranscript: () => void;
   flushBuffer: () => void;
@@ -20,12 +22,15 @@ interface TranscriptContextType {
   clearTranscripts: () => void;
   currentMeetingId: string | null;
   markMeetingAsSaved: () => Promise<void>;
+  addAnnotation: (annotation: NewTranscriptAnnotation) => Promise<void>;
+  clearAnnotations: () => void;
 }
 
 const TranscriptContext = createContext<TranscriptContextType | undefined>(undefined);
 
 export function TranscriptProvider({ children }: { children: ReactNode }) {
   const [transcripts, setTranscripts] = useState<Transcript[]>([]);
+  const [annotations, setAnnotations] = useState<TranscriptAnnotation[]>([]);
   const [meetingTitle, setMeetingTitle] = useState('+ New Call');
   const [currentMeetingId, setCurrentMeetingId] = useState<string | null>(null);
 
@@ -34,6 +39,7 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
 
   // Refs for transcript management
   const transcriptsRef = useRef<Transcript[]>(transcripts);
+  const annotationsRef = useRef<TranscriptAnnotation[]>(annotations);
   const isUserAtBottomRef = useRef<boolean>(true);
   const transcriptContainerRef = useRef<HTMLDivElement>(null);
   const finalFlushRef = useRef<(() => void) | null>(null);
@@ -42,6 +48,10 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     transcriptsRef.current = transcripts;
   }, [transcripts]);
+
+  useEffect(() => {
+    annotationsRef.current = annotations;
+  }, [annotations]);
 
   // Smart auto-scroll: Track user scroll position
   useEffect(() => {
@@ -97,6 +107,8 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
             // Generate unique meeting ID
             const meetingId = `meeting-${Date.now()}`;
             setCurrentMeetingId(meetingId);
+            annotationsRef.current = [];
+            setAnnotations([]);
 
             // Store in sessionStorage as fallback for markMeetingAsSaved
             sessionStorage.setItem('indexeddb_current_meeting_id', meetingId);
@@ -370,6 +382,13 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
 
           // Fetch transcript history from backend
           const history = await transcriptService.getTranscriptHistory();
+          const recoveryMeetingId = sessionStorage.getItem('indexeddb_current_meeting_id');
+          if (recoveryMeetingId) {
+            const recoveredAnnotations = await indexedDBService.getAnnotations(recoveryMeetingId);
+            setCurrentMeetingId(recoveryMeetingId);
+            annotationsRef.current = recoveredAnnotations as TranscriptAnnotation[];
+            setAnnotations(annotationsRef.current);
+          }
           console.log(`[Reload Sync] Retrieved ${history.length} transcript segments from backend`);
 
           // Convert backend format to frontend Transcript format
@@ -486,7 +505,33 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
   // Clear transcripts (used when starting new recording)
   const clearTranscripts = useCallback(() => {
     setTranscripts([]);
+    annotationsRef.current = [];
+    setAnnotations([]);
     // Don't clear currentMeetingId here - it will be set by recording-started event
+  }, []);
+
+  const addAnnotation = useCallback(async (input: NewTranscriptAnnotation) => {
+    const meetingId = currentMeetingId || sessionStorage.getItem('indexeddb_current_meeting_id');
+    const annotation: TranscriptAnnotation = {
+      ...input,
+      id: `annotation-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      createdAt: new Date().toISOString(),
+    };
+    const updatedAnnotations = [...annotationsRef.current, annotation]
+      .sort((a, b) => a.anchorTime - b.anchorTime);
+    annotationsRef.current = updatedAnnotations;
+    setAnnotations(updatedAnnotations);
+    if (meetingId) {
+      await indexedDBService.saveAnnotation(meetingId, {
+        ...annotation,
+        meetingId,
+      } as StoredAnnotation);
+    }
+  }, [currentMeetingId]);
+
+  const clearAnnotations = useCallback(() => {
+    annotationsRef.current = [];
+    setAnnotations([]);
   }, []);
 
   // Mark current meeting as saved in IndexedDB
@@ -514,7 +559,9 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
 
   const value: TranscriptContextType = {
     transcripts,
+    annotations,
     transcriptsRef,
+    annotationsRef,
     addTranscript,
     copyTranscript,
     flushBuffer,
@@ -524,6 +571,8 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
     clearTranscripts,
     currentMeetingId,
     markMeetingAsSaved,
+    addAnnotation,
+    clearAnnotations,
   };
 
   return (

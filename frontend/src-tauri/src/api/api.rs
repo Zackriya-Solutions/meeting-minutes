@@ -1,6 +1,7 @@
 use log::{debug as log_debug, error as log_error, info as log_info, warn as log_warn};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::path::PathBuf;
 use tauri::{AppHandle, Manager, Runtime};
 use tauri_plugin_store::StoreExt;
 
@@ -10,6 +11,7 @@ use crate::{
         repositories::{
             meeting::MeetingsRepository, organization::OrganizationRepository, setting::SettingsRepository,
             transcript::TranscriptsRepository,
+            annotation::AnnotationsRepository,
         },
     },
     state::AppState,
@@ -19,6 +21,21 @@ use crate::summary::llm_client::{generate_summary, LLMProvider};
 
 // Hardcoded server URL
 const APP_SERVER_URL: &str = "http://localhost:5167";
+
+fn annotation_directory<R: Runtime>(
+    app: &AppHandle<R>,
+    meeting_id: &str,
+    folder_path: Option<&str>,
+) -> Result<PathBuf, String> {
+    if let Some(folder_path) = folder_path {
+        return Ok(PathBuf::from(folder_path).join("annotations"));
+    }
+
+    app.path()
+        .app_data_dir()
+        .map(|path| path.join("meetings").join(meeting_id).join("annotations"))
+        .map_err(|e| format!("Failed to resolve annotation directory: {}", e))
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ApiResponse<T> {
@@ -148,6 +165,34 @@ pub struct MeetingTranscript {
     pub duration: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct TranscriptAnnotation {
+    pub id: String,
+    #[serde(rename = "type")]
+    pub annotation_type: String,
+    pub anchor_time: f64,
+    pub created_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub image_file: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct TranscriptAnnotationInput {
+    pub id: Option<String>,
+    #[serde(rename = "type")]
+    pub annotation_type: String,
+    pub anchor_time: f64,
+    pub created_at: Option<String>,
+    pub text: Option<String>,
+    pub image_file: Option<String>,
+    pub image_data: Option<Vec<u8>>,
+    pub image_mime: Option<String>,
 }
 
 /// Meeting metadata without transcripts (for pagination)
@@ -1038,6 +1083,55 @@ pub async fn api_get_meeting<R: Runtime>(
     }
 }
 
+#[tauri::command]
+pub async fn api_get_transcript_annotations<R: Runtime>(
+    _app: AppHandle<R>,
+    meeting_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<TranscriptAnnotation>, String> {
+    AnnotationsRepository::list(state.db_manager.pool(), &meeting_id)
+        .await
+        .map_err(|e| format!("Failed to retrieve transcript annotations: {}", e))
+}
+
+#[tauri::command]
+pub async fn api_add_transcript_annotation<R: Runtime>(
+    app: AppHandle<R>,
+    meeting_id: String,
+    annotation: TranscriptAnnotationInput,
+    state: tauri::State<'_, AppState>,
+) -> Result<TranscriptAnnotation, String> {
+    let meeting = MeetingsRepository::get_meeting_metadata(state.db_manager.pool(), &meeting_id)
+        .await
+        .map_err(|e| format!("Failed to retrieve meeting: {}", e))?
+        .ok_or_else(|| format!("Meeting not found: {}", meeting_id))?;
+    let directory = annotation_directory(&app, &meeting_id, meeting.folder_path.as_deref())?;
+
+    AnnotationsRepository::add(state.db_manager.pool(), &meeting_id, &annotation, &directory)
+        .await
+        .map_err(|e| format!("Failed to save transcript annotation: {}", e))
+}
+
+#[tauri::command]
+pub async fn api_get_annotation_image<R: Runtime>(
+    app: AppHandle<R>,
+    meeting_id: String,
+    image_file: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<u8>, String> {
+    if image_file.contains('/') || image_file.contains('\\') || image_file == "." || image_file == ".." {
+        return Err("Invalid annotation image filename".to_string());
+    }
+    let meeting = MeetingsRepository::get_meeting_metadata(state.db_manager.pool(), &meeting_id)
+        .await
+        .map_err(|e| format!("Failed to retrieve meeting: {}", e))?
+        .ok_or_else(|| format!("Meeting not found: {}", meeting_id))?;
+    let directory = annotation_directory(&app, &meeting_id, meeting.folder_path.as_deref())?;
+    tokio::fs::read(directory.join(image_file))
+        .await
+        .map_err(|e| format!("Failed to read annotation image: {}", e))
+}
+
 /// Get meeting metadata without transcripts (for pagination)
 #[tauri::command]
 pub async fn api_get_meeting_metadata<R: Runtime>(
@@ -1164,12 +1258,13 @@ pub async fn api_save_meeting_title<R: Runtime>(
 
 #[tauri::command]
 pub async fn api_save_transcript<R: Runtime>(
-    _app: AppHandle<R>,
+    app: AppHandle<R>,
     state: tauri::State<'_, AppState>,
     meeting_title: String,
     transcripts: Vec<serde_json::Value>,
     folder_path: Option<String>,
     auth_token: Option<String>,
+    annotations: Option<Vec<TranscriptAnnotationInput>>,
 ) -> Result<serde_json::Value, String> {
     log_info!(
         "api_save_transcript called for meeting: {}, transcripts: {}, folder_path: {:?}, auth_token: {}",
@@ -1207,6 +1302,16 @@ pub async fn api_save_transcript<R: Runtime>(
     }
 
     let pool = state.db_manager.pool();
+    let annotations = annotations.unwrap_or_default();
+    let annotation_dir = if let Some(folder_path) = folder_path.as_deref() {
+        PathBuf::from(folder_path).join("annotations")
+    } else {
+        annotation_directory(&app, "", None)?
+            .parent()
+            .and_then(|path| path.parent())
+            .map(PathBuf::from)
+            .ok_or_else(|| "Failed to resolve annotation directory".to_string())?
+    };
 
     // Now, call the repository with the correctly typed data.
     match TranscriptsRepository::save_transcript(
@@ -1214,6 +1319,8 @@ pub async fn api_save_transcript<R: Runtime>(
         &meeting_title,
         &transcripts_to_save,
         folder_path,
+        &annotations,
+        &annotation_dir,
     )
     .await
     {

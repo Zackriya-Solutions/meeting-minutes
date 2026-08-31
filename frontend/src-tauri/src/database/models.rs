@@ -40,6 +40,17 @@ pub struct Transcript {
 }
 
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
+pub struct TranscriptAnnotation {
+    pub id: String,
+    pub meeting_id: String,
+    pub annotation_type: String,
+    pub anchor_time: f64,
+    pub created_at: String,
+    pub text: Option<String>,
+    pub image_file: Option<String>,
+}
+
+#[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
 pub struct SummaryProcess {
     pub meeting_id: String,
     pub status: String,

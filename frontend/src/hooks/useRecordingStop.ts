@@ -53,6 +53,7 @@ export function useRecordingStop(
 
   const {
     transcriptsRef,
+    annotationsRef,
     flushBuffer,
     clearTranscripts,
     meetingTitle,
@@ -239,6 +240,7 @@ export function useRecordingStop(
 
         // Get fresh transcript state (ALL transcripts including late ones)
         const freshTranscripts = [...transcriptsRef.current];
+        const freshAnnotations = [...annotationsRef.current];
 
         // Get folder_path and meeting_name from recording-stopped event
         const folderPath = sessionStorage.getItem('last_recording_folder_path');
@@ -256,7 +258,8 @@ export function useRecordingStop(
           const responseData = await storageService.saveMeeting(
             savedMeetingName || meetingTitle || 'New Meeting',  // PREFER savedMeetingName (backend source)
             freshTranscripts,
-            folderPath
+            folderPath,
+            freshAnnotations
           );
 
           const meetingId = responseData.meeting_id;
@@ -425,6 +428,7 @@ export function useRecordingStop(
     setIsRecordingDisabled,
     setStatus,
     transcriptsRef,
+    annotationsRef,
     flushBuffer,
     clearTranscripts,
     meetingTitle,

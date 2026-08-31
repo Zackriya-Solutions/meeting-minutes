@@ -9,6 +9,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { LoaderIcon } from "lucide-react";
 import { useConfig } from "@/contexts/ConfigContext";
 import { usePaginatedTranscripts } from "@/hooks/usePaginatedTranscripts";
+import { useTranscriptAnnotations } from "@/hooks/useTranscriptAnnotations";
 
 interface MeetingDetailsResponse {
   id: string;
@@ -49,6 +50,7 @@ function MeetingDetailsContent() {
     refetch,
     error: transcriptError,
   } = usePaginatedTranscripts({ meetingId: meetingId || '' });
+  const { annotations, addAnnotation, getAnnotationImage } = useTranscriptAnnotations(meetingId);
 
   // Check if gemma3:1b model is available in Ollama
   const checkForGemmaModel = useCallback(async (): Promise<boolean> => {
@@ -381,6 +383,9 @@ function MeetingDetailsContent() {
     totalCount={totalCount}
     loadedCount={loadedCount}
     onLoadMore={loadMore}
+    annotations={annotations}
+    onAddAnnotation={addAnnotation}
+    getAnnotationImage={getAnnotationImage}
   />;
 }
 
