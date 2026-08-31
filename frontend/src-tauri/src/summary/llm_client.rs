@@ -470,9 +470,8 @@ pub(crate) async fn generate_summary(
 
     if !response.status().is_success() {
         let status = response.status();
-        let error_body = response
-            .text()
-            .await
+        let error_body = await_or_cancel(response.text(), cancellation_token)
+            .await?
             .unwrap_or_else(|_| "Unknown error".to_string());
         return Err(format!(
             "LLM API request failed with status {}: {}",
@@ -509,6 +508,43 @@ mod tests {
     use super::*;
     use serde_json::json;
     use std::{cell::Cell, task::Poll};
+    use tokio::{
+        io::{AsyncReadExt, AsyncWriteExt},
+        net::TcpListener,
+        sync::oneshot,
+        time::{timeout, Duration},
+    };
+
+    async fn read_http_request(stream: &mut tokio::net::TcpStream) -> Vec<u8> {
+        let mut request = Vec::new();
+        let mut buffer = [0_u8; 1024];
+
+        loop {
+            let bytes_read = stream.read(&mut buffer).await.unwrap();
+            assert_ne!(bytes_read, 0, "connection closed before completing request");
+            request.extend_from_slice(&buffer[..bytes_read]);
+
+            let Some(headers_end) = request
+                .windows(4)
+                .position(|window| window == b"\r\n\r\n")
+                .map(|position| position + 4)
+            else {
+                continue;
+            };
+            let content_length = std::str::from_utf8(&request[..headers_end])
+                .unwrap()
+                .lines()
+                .find_map(|line| {
+                    let (name, value) = line.split_once(':')?;
+                    name.eq_ignore_ascii_case("content-length")
+                        .then(|| value.trim().parse::<usize>().unwrap())
+                })
+                .expect("request should have Content-Length");
+            if request.len() >= headers_end + content_length {
+                return request;
+            }
+        }
+    }
 
     #[test]
     fn only_ollama_disables_reasoning_and_custom_sampling_is_preserved() {
@@ -594,6 +630,100 @@ mod tests {
 
         assert_eq!(result, Err("Summary generation was cancelled".to_string()));
         assert!(!polled.get());
+    }
+
+    #[tokio::test]
+    async fn cancellation_during_failed_legacy_ollama_retry_body_returns_promptly() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let (retry_headers_sent, mut retry_headers_ready) = oneshot::channel();
+        let (release_retry_body, retry_body_released) = oneshot::channel();
+
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let request = read_http_request(&mut stream).await;
+            let headers_end = request
+                .windows(4)
+                .position(|window| window == b"\r\n\r\n")
+                .map(|position| position + 4)
+                .unwrap();
+            let body: serde_json::Value = serde_json::from_slice(&request[headers_end..]).unwrap();
+            assert_eq!(body["reasoning_effort"], "none");
+
+            let rejection_body = br#"{"error":{"param":"reasoning_effort"}}"#;
+            let rejection_headers = format!(
+                "HTTP/1.1 400 Bad Request\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                rejection_body.len()
+            );
+            stream.write_all(rejection_headers.as_bytes()).await.unwrap();
+            stream.write_all(rejection_body).await.unwrap();
+            stream.flush().await.unwrap();
+            drop(stream);
+
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let request = read_http_request(&mut stream).await;
+            let headers_end = request
+                .windows(4)
+                .position(|window| window == b"\r\n\r\n")
+                .map(|position| position + 4)
+                .unwrap();
+            let body: serde_json::Value = serde_json::from_slice(&request[headers_end..]).unwrap();
+            assert!(body.get("reasoning_effort").is_none());
+
+            stream
+                .write_all(
+                    b"HTTP/1.1 500 Internal Server Error\r\nContent-Length: 4\r\nConnection: close\r\n\r\n",
+                )
+                .await
+                .unwrap();
+            stream.flush().await.unwrap();
+            let _ = retry_headers_sent.send(());
+            let _ = retry_body_released.await;
+            let _ = stream.write_all(b"fail").await;
+        });
+
+        let client = Client::new();
+        let cancellation_token = CancellationToken::new();
+        let endpoint = format!("http://{address}");
+        let generation = generate_summary(
+            &client,
+            &LLMProvider::Ollama,
+            "model",
+            "",
+            "system",
+            "user",
+            Some(&endpoint),
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(&cancellation_token),
+        );
+        tokio::pin!(generation);
+
+        tokio::select! {
+            biased;
+            result = &mut generation => panic!("generation ended before retry headers: {result:?}"),
+            _ = &mut retry_headers_ready => {}
+        }
+
+        cancellation_token.cancel();
+        let completion = timeout(Duration::from_secs(1), &mut generation).await;
+        let _ = release_retry_body.send(());
+        let released_completion = if completion.is_err() {
+            Some(timeout(Duration::from_secs(1), &mut generation).await)
+        } else {
+            None
+        };
+        server.await.unwrap();
+
+        let result = completion.unwrap_or_else(|_| {
+            released_completion
+                .expect("generation should be awaited after releasing the retry body")
+                .expect("generation should finish after releasing the retry body")
+        });
+        assert_eq!(result, Err("Summary generation was cancelled".to_string()));
     }
 
     #[test]
