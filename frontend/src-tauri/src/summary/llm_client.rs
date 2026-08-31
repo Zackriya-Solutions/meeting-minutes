@@ -481,10 +481,12 @@ pub(crate) async fn generate_summary(
 
     // Parse response based on provider
     if provider == &LLMProvider::Claude {
-        let chat_response = response
-            .json::<ClaudeChatResponse>()
-            .await
-            .map_err(|e| format!("Failed to parse LLM response: {}", e))?;
+        let chat_response = await_or_cancel(
+            response.json::<ClaudeChatResponse>(),
+            cancellation_token,
+        )
+        .await?
+        .map_err(|e| format!("Failed to parse LLM response: {}", e))?;
 
         info!("🐞 LLM Response received from Claude");
 
@@ -493,10 +495,12 @@ pub(crate) async fn generate_summary(
             .ok_or("No text content in LLM response")?;
         Ok(completion)
     } else {
-        let chat_response = response
-            .json::<ChatResponse>()
-            .await
-            .map_err(|e| format!("Failed to parse LLM response: {}", e))?;
+        let chat_response = await_or_cancel(
+            response.json::<ChatResponse>(),
+            cancellation_token,
+        )
+        .await?
+        .map_err(|e| format!("Failed to parse LLM response: {}", e))?;
 
         info!("🐞 LLM Response received from {}", provider_name(provider));
         chat_response.completion()
@@ -544,6 +548,15 @@ mod tests {
                 return request;
             }
         }
+    }
+
+    fn request_json(request: &[u8]) -> serde_json::Value {
+        let headers_end = request
+            .windows(4)
+            .position(|window| window == b"\r\n\r\n")
+            .map(|position| position + 4)
+            .expect("request should contain complete headers");
+        serde_json::from_slice(&request[headers_end..]).expect("request body should be valid JSON")
     }
 
     #[test]
@@ -642,12 +655,7 @@ mod tests {
         let server = tokio::spawn(async move {
             let (mut stream, _) = listener.accept().await.unwrap();
             let request = read_http_request(&mut stream).await;
-            let headers_end = request
-                .windows(4)
-                .position(|window| window == b"\r\n\r\n")
-                .map(|position| position + 4)
-                .unwrap();
-            let body: serde_json::Value = serde_json::from_slice(&request[headers_end..]).unwrap();
+            let body = request_json(&request);
             assert_eq!(body["reasoning_effort"], "none");
 
             let rejection_body = br#"{"error":{"param":"reasoning_effort"}}"#;
@@ -662,12 +670,7 @@ mod tests {
 
             let (mut stream, _) = listener.accept().await.unwrap();
             let request = read_http_request(&mut stream).await;
-            let headers_end = request
-                .windows(4)
-                .position(|window| window == b"\r\n\r\n")
-                .map(|position| position + 4)
-                .unwrap();
-            let body: serde_json::Value = serde_json::from_slice(&request[headers_end..]).unwrap();
+            let body = request_json(&request);
             assert!(body.get("reasoning_effort").is_none());
 
             stream
@@ -724,6 +727,159 @@ mod tests {
                 .expect("generation should finish after releasing the retry body")
         });
         assert_eq!(result, Err("Summary generation was cancelled".to_string()));
+    }
+
+    #[tokio::test]
+    async fn cancellation_during_successful_legacy_ollama_retry_body_returns_promptly() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let (retry_headers_sent, mut retry_headers_ready) = oneshot::channel();
+        let (release_retry_body, retry_body_released) = oneshot::channel();
+
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let request = read_http_request(&mut stream).await;
+            let body = request_json(&request);
+            assert_eq!(body["reasoning_effort"], "none");
+
+            let rejection_body = br#"{"error":{"param":"reasoning_effort"}}"#;
+            let rejection_headers = format!(
+                "HTTP/1.1 400 Bad Request\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                rejection_body.len()
+            );
+            stream.write_all(rejection_headers.as_bytes()).await.unwrap();
+            stream.write_all(rejection_body).await.unwrap();
+            stream.flush().await.unwrap();
+            drop(stream);
+
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let request = read_http_request(&mut stream).await;
+            let body = request_json(&request);
+            assert!(body.get("reasoning_effort").is_none());
+
+            let completion_body =
+                br#"{"choices":[{"message":{"content":"Meeting summary."}}]}"#;
+            let completion_headers = format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                completion_body.len()
+            );
+            stream.write_all(completion_headers.as_bytes()).await.unwrap();
+            stream.flush().await.unwrap();
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            let _ = retry_headers_sent.send(());
+            let _ = retry_body_released.await;
+            let _ = stream.write_all(completion_body).await;
+        });
+
+        let client = Client::new();
+        let cancellation_token = CancellationToken::new();
+        let endpoint = format!("http://{address}");
+        let generation = generate_summary(
+            &client,
+            &LLMProvider::Ollama,
+            "model",
+            "",
+            "system",
+            "user",
+            Some(&endpoint),
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(&cancellation_token),
+        );
+        tokio::pin!(generation);
+
+        tokio::select! {
+            biased;
+            result = &mut generation => panic!("generation ended before retry headers: {result:?}"),
+            _ = &mut retry_headers_ready => {}
+        }
+
+        cancellation_token.cancel();
+        let completion = timeout(Duration::from_secs(1), &mut generation).await;
+        let _ = release_retry_body.send(());
+        if completion.is_err() {
+            let _ = timeout(Duration::from_secs(1), &mut generation).await;
+        }
+        server.await.unwrap();
+
+        let result =
+            completion.expect("generation should observe cancellation before retry body release");
+        assert_eq!(result, Err("Summary generation was cancelled".to_string()));
+    }
+
+    #[tokio::test]
+    async fn legacy_ollama_retry_without_reasoning_effort_returns_completion() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let request = read_http_request(&mut stream).await;
+            let body = request_json(&request);
+            assert_eq!(body["reasoning_effort"], "none");
+
+            let rejection_body = br#"{"error":{"param":"reasoning_effort"}}"#;
+            let rejection_headers = format!(
+                "HTTP/1.1 400 Bad Request\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                rejection_body.len()
+            );
+            stream.write_all(rejection_headers.as_bytes()).await.unwrap();
+            stream.write_all(rejection_body).await.unwrap();
+            stream.flush().await.unwrap();
+            drop(stream);
+
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let request = read_http_request(&mut stream).await;
+            let body = request_json(&request);
+            assert!(body.get("reasoning_effort").is_none());
+
+            let completion_body =
+                br#"{"choices":[{"message":{"content":"Meeting summary."}}]}"#;
+            let completion_headers = format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                completion_body.len()
+            );
+            stream.write_all(completion_headers.as_bytes()).await.unwrap();
+            stream.write_all(completion_body).await.unwrap();
+            stream.flush().await.unwrap();
+        });
+
+        let client = Client::new();
+        let cancellation_token = CancellationToken::new();
+        let endpoint = format!("http://{address}");
+        let completion = timeout(
+            Duration::from_secs(1),
+            generate_summary(
+                &client,
+                &LLMProvider::Ollama,
+                "model",
+                "",
+                "system",
+                "user",
+                Some(&endpoint),
+                None,
+                None,
+                None,
+                None,
+                None,
+                Some(&cancellation_token),
+            ),
+        )
+        .await;
+        server.await.unwrap();
+
+        assert_eq!(
+            completion
+                .expect("generation should finish after the compatibility retry")
+                .unwrap(),
+            LlmCompletion {
+                content: "Meeting summary.".to_string(),
+                reasoning_stripped: false,
+            }
+        );
     }
 
     #[test]
