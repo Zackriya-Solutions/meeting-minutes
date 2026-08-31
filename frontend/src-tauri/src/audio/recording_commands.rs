@@ -299,6 +299,7 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
     // Set recording flag and reset speech detection flag
     info!("🔍 Setting IS_RECORDING to true and resetting SPEECH_DETECTED_EMITTED");
     IS_RECORDING.store(true, Ordering::SeqCst);
+    MIC_FALLBACK_FAILED_ATTEMPTS.store(0, Ordering::SeqCst); // fresh mic-recovery budget per session
     drop(engine_lifecycle_guard);
     reset_speech_detected_flag(); // Reset for new recording session
 
@@ -477,6 +478,7 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
     // Set recording flag and reset speech detection flag
     info!("🔍 Setting IS_RECORDING to true and resetting SPEECH_DETECTED_EMITTED");
     IS_RECORDING.store(true, Ordering::SeqCst);
+    MIC_FALLBACK_FAILED_ATTEMPTS.store(0, Ordering::SeqCst); // fresh mic-recovery budget per session
     drop(engine_lifecycle_guard);
     reset_speech_detected_flag(); // Reset for new recording session
 
@@ -1138,7 +1140,13 @@ pub async fn get_active_audio_output() -> Result<super::playback_monitor::AudioO
 // default" auto-swap has been removed.
 static MIC_SWAP_IN_PROGRESS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-/// Perform mic hot-swap using phased locking — never holds RECORDING_MANAGER during I/O.
+// Bounded retry budget for the disconnect fallback (P1 #2). Counts COMPLETED
+// failed attempts; MIC_SWAP_IN_PROGRESS still prevents overlapping swaps.
+static MIC_FALLBACK_FAILED_ATTEMPTS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+const MAX_MIC_FALLBACK_ATTEMPTS: u32 = 3;
+
+/// Perform mic hot-swap using phased locking — never holds RECORDING_MANAGER during I/O
+/// except the brief mic-stream stop in Phase 1.
 /// If CPAL hangs during stream creation, only this task blocks; stop flow stays unblocked.
 async fn perform_mic_hot_swap_task<R: Runtime>(new_device_name: String, app: AppHandle<R>) -> Result<(), String> {
     info!("[HOT_SWAP] Starting mic hot-swap to '{}'", new_device_name);
@@ -1318,6 +1326,14 @@ async fn trigger_mic_fallback_to_default<R: Runtime>(
         return;
     }
 
+    if MIC_FALLBACK_FAILED_ATTEMPTS.load(Ordering::SeqCst) >= MAX_MIC_FALLBACK_ATTEMPTS {
+        warn!(
+            "[MIC_FALLBACK] {} failed attempts reached — giving up on '{}' (terminal event already announced)",
+            MAX_MIC_FALLBACK_ATTEMPTS, disconnected_name
+        );
+        return;
+    }
+
     if MIC_SWAP_IN_PROGRESS
         .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
         .is_err()
@@ -1363,6 +1379,13 @@ async fn trigger_mic_fallback_to_default<R: Runtime>(
                     "device_name": disconnected_name,
                 }),
             );
+            let n = MIC_FALLBACK_FAILED_ATTEMPTS.fetch_add(1, Ordering::SeqCst) + 1;
+            if n == MAX_MIC_FALLBACK_ATTEMPTS {
+                let _ = app.emit(
+                    "mic-recovery-exhausted",
+                    serde_json::json!({ "device_name": disconnected_name }),
+                );
+            }
             return;
         }
     };
@@ -1387,6 +1410,13 @@ async fn trigger_mic_fallback_to_default<R: Runtime>(
                         "device_name": disconnected_name,
                     }),
                 );
+                let n = MIC_FALLBACK_FAILED_ATTEMPTS.fetch_add(1, Ordering::SeqCst) + 1;
+                if n == MAX_MIC_FALLBACK_ATTEMPTS {
+                    let _ = app.emit(
+                        "mic-recovery-exhausted",
+                        serde_json::json!({ "device_name": disconnected_name }),
+                    );
+                }
                 return;
             }
             Err(e) => {
@@ -1398,6 +1428,13 @@ async fn trigger_mic_fallback_to_default<R: Runtime>(
                         "device_name": disconnected_name,
                     }),
                 );
+                let n = MIC_FALLBACK_FAILED_ATTEMPTS.fetch_add(1, Ordering::SeqCst) + 1;
+                if n == MAX_MIC_FALLBACK_ATTEMPTS {
+                    let _ = app.emit(
+                        "mic-recovery-exhausted",
+                        serde_json::json!({ "device_name": disconnected_name }),
+                    );
+                }
                 return;
             }
         }
@@ -1460,9 +1497,17 @@ async fn trigger_mic_fallback_to_default<R: Runtime>(
                 "[MIC_FALLBACK] Fallback complete: now recording via '{}'",
                 fallback_name
             );
+            MIC_FALLBACK_FAILED_ATTEMPTS.store(0, Ordering::SeqCst);
         }
         Err(e) => {
             error!("[MIC_FALLBACK] Fallback swap failed: {}", e);
+            let n = MIC_FALLBACK_FAILED_ATTEMPTS.fetch_add(1, Ordering::SeqCst) + 1;
+            if n == MAX_MIC_FALLBACK_ATTEMPTS {
+                let _ = app.emit(
+                    "mic-recovery-exhausted",
+                    serde_json::json!({ "device_name": disconnected_name }),
+                );
+            }
         }
     }
 }

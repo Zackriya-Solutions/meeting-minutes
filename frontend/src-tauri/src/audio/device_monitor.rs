@@ -366,8 +366,11 @@ impl AudioDeviceMonitor {
                           monitored.name, monitored.consecutive_missing,
                           monitored.disconnect_threshold());
 
-                    // Only emit disconnect event once when threshold is reached
-                    if monitored.consecutive_missing == monitored.disconnect_threshold() {
+                    // Re-fire every `threshold` cycles while the device is still missing. A
+                    // successful hot-swap retargets us via the mailbox (resets the counter); a
+                    // FAILED swap leaves the dead device tracked, so this re-fire is what retries
+                    // it. Total attempts are bounded in trigger_mic_fallback_to_default. (P1 #2)
+                    if monitored.consecutive_missing % monitored.disconnect_threshold() == 0 {
                         warn!("❌ Device '{}' ({:?}) disconnected!",
                               monitored.name, monitored.device_type);
 

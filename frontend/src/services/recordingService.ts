@@ -228,6 +228,18 @@ export class RecordingService {
       callback(event.payload);
     });
   }
+
+  /**
+   * Listen for mic-recovery-exhausted event (mid-recording mic recovery gave up
+   * after repeated failures)
+   * @param callback - Function to call when mic recovery is exhausted
+   * @returns Promise that resolves to unlisten function
+   */
+  async onMicRecoveryExhausted(callback: (payload: { device_name: string }) => void): Promise<UnlistenFn> {
+    return listen<{ device_name: string }>('mic-recovery-exhausted', (event) => {
+      callback(event.payload);
+    });
+  }
 }
 
 // Export singleton instance
