@@ -25,7 +25,12 @@
         "tauri:build:coreml": "tauri build -- --features coreml",
         "tauri:build:openblas": "tauri build -- --features openblas",
         "tauri:build:hipblas": "tauri build -- --features hipblas",
-        "lint": "next lint"
+        "lint": "next lint",
+        "test": "pnpm run test:transcript-timeline && pnpm run test:transcript-recovery && pnpm run test:annotation-save-gate && pnpm run test:transcript-annotation-input",
+        "test:transcript-timeline": "node tests/lib/transcript-timeline.test.mjs",
+        "test:transcript-recovery": "node tests/lib/transcript-recovery.test.mjs",
+        "test:annotation-save-gate": "node tests/lib/annotation-save-gate.test.mjs",
+        "test:transcript-annotation-input": "node tests/lib/transcript-annotation-input.test.mjs"
     },
     "dependencies": {
         "@blocknote/core": "0.36.0",
@@ -57,6 +62,7 @@
         "@remirror/react": "^3.0.1",
         "@tanstack/react-virtual": "^3.13.13",
         "@tauri-apps/api": "^2.6.0",
+        "@tauri-apps/plugin-clipboard-manager": "^2.3.3",
         "@tauri-apps/plugin-fs": "^2.4.0",
         "@tauri-apps/plugin-notification": "~2.3.1",
         "@tauri-apps/plugin-os": "^2.3.2",

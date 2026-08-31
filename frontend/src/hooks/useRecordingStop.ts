@@ -53,10 +53,14 @@ export function useRecordingStop(
 
   const {
     transcriptsRef,
+    annotationsRef,
     flushBuffer,
     clearTranscripts,
     meetingTitle,
     markMeetingAsSaved,
+    beginAnnotationSave,
+    finishAnnotationSave,
+    waitForAnnotationWrites,
   } = useTranscripts();
 
   const {
@@ -128,6 +132,7 @@ export function useRecordingStop(
       return;
     }
     stopInProgressRef.current = true;
+    beginAnnotationSave();
 
     // Set status to STOPPING immediately
     setStatus(RecordingStatus.STOPPING);
@@ -238,7 +243,9 @@ export function useRecordingStop(
         setStatus(RecordingStatus.SAVING, 'Saving meeting to database...');
 
         // Get fresh transcript state (ALL transcripts including late ones)
+        await waitForAnnotationWrites();
         const freshTranscripts = [...transcriptsRef.current];
+        const freshAnnotations = [...annotationsRef.current];
 
         // Get folder_path and meeting_name from recording-stopped event
         const folderPath = sessionStorage.getItem('last_recording_folder_path');
@@ -256,7 +263,8 @@ export function useRecordingStop(
           const responseData = await storageService.saveMeeting(
             savedMeetingName || meetingTitle || 'New Meeting',  // PREFER savedMeetingName (backend source)
             freshTranscripts,
-            folderPath
+            folderPath,
+            freshAnnotations
           );
 
           const meetingId = responseData.meeting_id;
@@ -295,6 +303,7 @@ export function useRecordingStop(
 
           // Mark meeting as saved in IndexedDB (for recovery system)
           await markMeetingAsSaved();
+          finishAnnotationSave();
 
           // Clean up session storage
           sessionStorage.removeItem('last_recording_folder_path');
@@ -405,6 +414,7 @@ export function useRecordingStop(
         }
       } else {
         // No save needed, go back to IDLE
+        finishAnnotationSave();
         setStatus(RecordingStatus.IDLE);
       }
 
@@ -414,6 +424,7 @@ export function useRecordingStop(
     } catch (error) {
       console.error('Error in handleRecordingStop:', error);
       setStatus(RecordingStatus.ERROR, error instanceof Error ? error.message : 'Unknown error');
+      finishAnnotationSave();
       // isRecording already set to false at function start
       setIsRecordingDisabled(false);
     } finally {
@@ -425,10 +436,14 @@ export function useRecordingStop(
     setIsRecordingDisabled,
     setStatus,
     transcriptsRef,
+    annotationsRef,
     flushBuffer,
     clearTranscripts,
     meetingTitle,
     markMeetingAsSaved,
+    beginAnnotationSave,
+    finishAnnotationSave,
+    waitForAnnotationWrites,
     refetchMeetings,
     setCurrentMeeting,
     setMeetings,

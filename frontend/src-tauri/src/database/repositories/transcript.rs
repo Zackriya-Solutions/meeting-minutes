@@ -1,6 +1,8 @@
-use crate::api::{TranscriptSearchResult, TranscriptSegment};
+use crate::api::{TranscriptAnnotationInput, TranscriptSearchResult, TranscriptSegment};
+use super::annotation::{annotation_directory, AnnotationsRepository};
 use chrono::Utc;
 use sqlx::{Connection, Error as SqlxError, SqlitePool};
+use std::path::Path;
 use tracing::{error, info};
 use uuid::Uuid;
 
@@ -15,6 +17,8 @@ impl TranscriptsRepository {
         meeting_title: &str,
         transcripts: &[TranscriptSegment],
         folder_path: Option<String>,
+        annotations: &[TranscriptAnnotationInput],
+        app_data_dir: &Path,
     ) -> Result<String, SqlxError> {
         let meeting_id = format!("meeting-{}", Uuid::new_v4());
 
@@ -77,8 +81,28 @@ impl TranscriptsRepository {
             meeting_id
         );
 
-        // Commit the transaction
-        transaction.commit().await?;
+        // Keep the meeting, transcript rows, and annotation rows in one transaction.
+        let directory = annotation_directory(app_data_dir, &meeting_id, folder_path.as_deref())?;
+        let (_, files) = match AnnotationsRepository::save_in_transaction(
+            &mut transaction,
+            &meeting_id,
+            annotations,
+            &directory,
+        )
+        .await
+        {
+            Ok(result) => result,
+            Err(error) => {
+                let _ = transaction.rollback().await;
+                return Err(error);
+            }
+        };
+
+        if let Err(error) = transaction.commit().await {
+            files.rollback().await;
+            return Err(error);
+        }
+        files.commit().await;
 
         Ok(meeting_id)
     }
@@ -149,8 +173,10 @@ impl TranscriptsRepository {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::api::TranscriptAnnotationInput;
     use crate::database::models::Transcript;
     use sqlx::sqlite::SqlitePoolOptions;
+    use tempfile::tempdir;
 
     const SOURCE_MIGRATION_VERSION: i64 = 20260817000000;
 
@@ -188,7 +214,7 @@ mod tests {
             segment("seg-legacy", "segmento antigo", 2.0, None),
         ];
         let meeting_id =
-            TranscriptsRepository::save_transcript(&pool, "Reunião de teste", &segments, None)
+            TranscriptsRepository::save_transcript(&pool, "Reunião de teste", &segments, None, &[], std::path::Path::new("/tmp"))
                 .await
                 .expect("save_transcript must succeed");
 
@@ -264,5 +290,63 @@ mod tests {
             .expect("legacy row must still load after migration");
         assert_eq!(legacy.source, None, "pre-migration rows must load with NULL source");
         assert_eq!(legacy.transcript, "gravado antes da migração");
+    }
+
+    #[tokio::test]
+    async fn failed_annotation_batch_rolls_back_the_meeting_and_staged_images() {
+        let pool = in_memory_pool().await;
+        sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+        let app_data_dir = tempdir().unwrap();
+        let transcripts = vec![segment("seg-1", "hello", 0.0, None)];
+        let annotations = vec![
+            TranscriptAnnotationInput {
+                id: Some("annotation-image".to_string()),
+                annotation_type: "image".to_string(),
+                anchor_time: 1.0,
+                created_at: Some("2026-08-31T10:00:01Z".to_string()),
+                text: None,
+                image_file: None,
+                image_data: Some(vec![1, 2, 3]),
+                image_mime: Some("image/png".to_string()),
+            },
+            TranscriptAnnotationInput {
+                id: Some("annotation-invalid".to_string()),
+                annotation_type: "note".to_string(),
+                anchor_time: 2.0,
+                created_at: None,
+                text: Some("   ".to_string()),
+                image_file: None,
+                image_data: None,
+                image_mime: None,
+            },
+        ];
+
+        let result = TranscriptsRepository::save_transcript(
+            &pool,
+            "Atomic meeting",
+            &transcripts,
+            None,
+            &annotations,
+            app_data_dir.path(),
+        )
+        .await;
+
+        assert!(result.is_err());
+        let meeting_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM meetings")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let annotation_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM transcript_annotations")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(meeting_count, 0);
+        assert_eq!(annotation_count, 0);
+        if let Ok(meetings) = std::fs::read_dir(app_data_dir.path().join("meetings")) {
+            for meeting in meetings {
+                let meeting = meeting.unwrap();
+                assert!(!meeting.path().join("annotations").exists());
+            }
+        }
     }
 }

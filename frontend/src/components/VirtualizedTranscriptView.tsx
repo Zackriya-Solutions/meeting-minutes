@@ -2,13 +2,18 @@
 
 import { useCallback, useRef, useReducer, startTransition, useEffect, useState, memo } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
+import { invoke } from "@tauri-apps/api/core";
 import { useAutoScroll } from "@/hooks/useAutoScroll";
 import { useTranscriptStreaming } from "@/hooks/useTranscriptStreaming";
 import { ConfidenceIndicator } from "./ConfidenceIndicator";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 import { RecordingStatusBar } from "./RecordingStatusBar";
 import { motion, AnimatePresence } from "framer-motion";
-import { TranscriptSegmentData } from "@/types";
+import { NewTranscriptAnnotation, TranscriptAnnotation, TranscriptSegmentData } from "@/types";
+import { mergeTranscriptTimeline, TranscriptTimelineItem } from "@/lib/transcript-timeline";
+import { formatClipboardImageError, imageDataToDataUrl, readClipboardImageAnnotation, resolveTranscriptAnchor } from "@/lib/transcript-annotation-input";
+import { readImage } from "@tauri-apps/plugin-clipboard-manager";
+import { Bookmark, ImageIcon, StickyNote } from "lucide-react";
 
 export interface VirtualizedTranscriptViewProps {
     /** Transcript segments to display */
@@ -34,6 +39,10 @@ export interface VirtualizedTranscriptViewProps {
     totalCount?: number;
     loadedCount?: number;
     onLoadMore?: () => void;
+    /** Manual transcript annotations */
+    annotations?: TranscriptAnnotation[];
+    onAddAnnotation?: (annotation: NewTranscriptAnnotation) => Promise<void> | void;
+    getAnnotationImage?: (annotation: TranscriptAnnotation) => Promise<string | null>;
 }
 
 // Threshold for enabling virtualization (below this, use simple rendering)
@@ -72,6 +81,8 @@ const TranscriptSegment = memo(function TranscriptSegment({
     confidence,
     isStreaming,
     showConfidence,
+    isActive,
+    onSelectTimestamp,
 }: {
     id: string;
     timestamp: number;
@@ -80,6 +91,8 @@ const TranscriptSegment = memo(function TranscriptSegment({
     confidence?: number;
     isStreaming: boolean;
     showConfidence: boolean;
+    isActive: boolean;
+    onSelectTimestamp?: (timestamp: number) => void;
 }) {
     const displayText = cleanStopWords(text) || (text.trim() === '' ? '[Silence]' : text);
     const speakerLabel = source && source !== 'Audio' ? source : null;
@@ -88,7 +101,18 @@ const TranscriptSegment = memo(function TranscriptSegment({
         : 'bg-gray-100 text-gray-600';
 
     return (
-        <div id={`segment-${id}`} className="mb-3">
+        <div
+            id={`segment-${id}`}
+            className={`mb-3 cursor-pointer rounded-lg border-l-4 px-2 py-1 transition-colors ${isActive ? 'border-blue-500 bg-blue-50 shadow-sm' : 'border-transparent'}`}
+            aria-current={isActive ? 'true' : undefined}
+            onClick={() => onSelectTimestamp?.(timestamp)}
+        >
+            {isActive && (
+                <div className="mb-1 flex items-center gap-2 text-[11px] font-medium text-blue-700">
+                    <span className="h-2 w-2 rounded-full bg-blue-500" aria-hidden="true" />
+                    Insertion point — annotations attach here
+                </div>
+            )}
             <div className="flex items-start gap-2">
                 <Tooltip>
                     <TooltipTrigger>
@@ -121,6 +145,77 @@ const TranscriptSegment = memo(function TranscriptSegment({
     );
 });
 
+const AnnotationRow = memo(function AnnotationRow({
+    annotation,
+    getAnnotationImage,
+}: {
+    annotation: TranscriptAnnotation;
+    getAnnotationImage?: (annotation: TranscriptAnnotation) => Promise<string | null>;
+}) {
+    const [imageSrc, setImageSrc] = useState<string | null>(null);
+
+    useEffect(() => {
+        let active = true;
+        if (annotation.type === 'image' && annotation.imageData && annotation.imageData.length > 0) {
+            setImageSrc(imageDataToDataUrl(annotation.imageData, annotation.imageMime || 'image/png'));
+        } else if (annotation.type === 'image' && annotation.imageFile && getAnnotationImage) {
+            void getAnnotationImage(annotation).then(src => {
+                if (active) setImageSrc(src);
+            });
+        }
+        return () => {
+            active = false;
+        };
+    }, [annotation, getAnnotationImage]);
+
+    return (
+        <div className="mb-3 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2" onClick={(event) => event.stopPropagation()}>
+            <span className="mt-1 min-w-[50px] text-xs text-amber-600">{formatRecordingTime(annotation.anchorTime)}</span>
+            <div className="min-w-0 flex-1">
+                {annotation.type === 'bookmark' && <div className="flex items-center gap-1 text-sm font-medium text-amber-800"><Bookmark size={14} /> Marker</div>}
+                {annotation.type === 'note' && <div className="flex items-start gap-1 text-sm text-amber-900"><StickyNote size={14} className="mt-0.5 shrink-0" /><span className="whitespace-pre-wrap break-words">{annotation.text}</span></div>}
+                {annotation.type === 'image' && imageSrc && <img src={imageSrc} alt={annotation.text || 'Pasted screenshot'} className="max-h-56 max-w-full rounded border border-amber-200 object-contain" />}
+                {annotation.type === 'image' && !imageSrc && <div className="flex items-center gap-1 text-sm text-amber-700"><ImageIcon size={14} /> Loading screenshot…</div>}
+            </div>
+        </div>
+    );
+});
+
+function TimelineRow({
+    item,
+    streamingSegmentId,
+    getDisplayText,
+    showConfidence,
+    activeTimestamp,
+    onSelectTimestamp,
+    getAnnotationImage,
+}: {
+    item: TranscriptTimelineItem;
+    streamingSegmentId: string | null;
+    getDisplayText: (segment: TranscriptSegmentData) => string;
+    showConfidence: boolean;
+    activeTimestamp: number | null;
+    onSelectTimestamp?: (timestamp: number) => void;
+    getAnnotationImage?: (annotation: TranscriptAnnotation) => Promise<string | null>;
+}) {
+    if (item.kind === 'annotation') {
+        return <AnnotationRow annotation={item.annotation} getAnnotationImage={getAnnotationImage} />;
+    }
+    return (
+        <TranscriptSegment
+            id={item.segment.id}
+            timestamp={item.segment.timestamp}
+            text={getDisplayText(item.segment)}
+            source={item.segment.source}
+            confidence={item.segment.confidence}
+            isStreaming={streamingSegmentId === item.segment.id}
+            showConfidence={showConfidence}
+            isActive={activeTimestamp === item.segment.timestamp}
+            onSelectTimestamp={onSelectTimestamp}
+        />
+    );
+}
+
 export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps> = ({
     segments,
     isRecording = false,
@@ -135,18 +230,25 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
     totalCount = 0,
     loadedCount = 0,
     onLoadMore,
+    annotations = [],
+    onAddAnnotation,
+    getAnnotationImage,
 }) => {
     // Create scroll ref first - shared between virtualizer and auto-scroll hook
     const scrollRef = useRef<HTMLDivElement>(null);
     // Ref for infinite scroll trigger element
     const loadMoreTriggerRef = useRef<HTMLDivElement>(null);
+    const [activeTimestamp, setActiveTimestamp] = useState<number | null>(null);
+    const [noteInput, setNoteInput] = useState('');
+    const [pasteError, setPasteError] = useState<string | null>(null);
+    const timelineItems = mergeTranscriptTimeline(segments, annotations);
 
     // Force re-render without flushSync (avoids React warning)
     const [, rerender] = useReducer((x: number) => x + 1, 0);
 
     // Setup virtualizer for efficient rendering of large lists
     const virtualizer = useVirtualizer({
-        count: segments.length,
+        count: timelineItems.length,
         getScrollElement: () => scrollRef.current,
         estimateSize: () => 60, // Estimated height per segment
         overscan: 10, // Render extra items above/below viewport
@@ -160,7 +262,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
     // Custom hook for auto-scrolling (supports both virtualized and non-virtualized)
     useAutoScroll({
         scrollRef,
-        segments,
+        segments: timelineItems,
         isRecording,
         isPaused,
         virtualizer,
@@ -174,6 +276,75 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
         isRecording,
         enableStreaming
     );
+
+    const latestSegment = segments[segments.length - 1];
+    const { time: anchorTime, isDefault: anchorIsDefault, label: anchorLabel } = resolveTranscriptAnchor(activeTimestamp, latestSegment);
+    const canAddAnnotations = Boolean(onAddAnnotation) && !isStopping && !isProcessing;
+    const handleSelectTimestamp = useCallback((timestamp: number) => {
+        setActiveTimestamp(timestamp);
+        scrollRef.current?.focus();
+    }, []);
+    const addAnnotation = useCallback(async (input: NewTranscriptAnnotation) => {
+        if (isStopping || isProcessing) return;
+        await onAddAnnotation?.(input);
+    }, [isProcessing, isStopping, onAddAnnotation]);
+    const handlePaste = useCallback((event: React.ClipboardEvent<HTMLDivElement>) => {
+        const item = Array.from(event.clipboardData.items).find(entry => entry.type.startsWith('image/'));
+        if (!item || !canAddAnnotations) return;
+        const file = item.getAsFile();
+        if (!file) return;
+        event.preventDefault();
+        void file.arrayBuffer().then(buffer => addAnnotation({
+            type: 'image',
+            anchorTime,
+            imageData: Array.from(new Uint8Array(buffer)),
+            imageMime: item.type,
+        }));
+    }, [addAnnotation, anchorTime, canAddAnnotations]);
+    const handleClipboardImagePaste = useCallback(async () => {
+        if (!canAddAnnotations) return;
+        setPasteError(null);
+        try {
+            const annotation = await readClipboardImageAnnotation(
+                readImage,
+                anchorTime,
+                undefined,
+                async () => {
+                    const png = await invoke<number[] | null>('read_wayland_clipboard_image');
+                    return png ? new Uint8Array(png) : null;
+                },
+            );
+            if (annotation) {
+                await addAnnotation(annotation);
+            } else {
+                setPasteError('Nenhuma imagem no clipboard.');
+            }
+        } catch (err) {
+            setPasteError(formatClipboardImageError(err));
+        }
+    }, [addAnnotation, anchorTime, canAddAnnotations]);
+    const handleGlobalPaste = useCallback((event: KeyboardEvent) => {
+        if (!canAddAnnotations || event.key.toLowerCase() !== 'v' || (!event.ctrlKey && !event.metaKey)) return;
+        const target = event.target as HTMLElement | null;
+        if (target?.closest?.('input, textarea, [contenteditable="true"]')) return;
+        event.preventDefault();
+        void handleClipboardImagePaste();
+    }, [canAddAnnotations, handleClipboardImagePaste]);
+    const addBookmark = useCallback(() => {
+        void addAnnotation({ type: 'bookmark', anchorTime });
+    }, [addAnnotation, anchorTime]);
+    const addNote = useCallback(() => {
+        const text = noteInput.trim();
+        if (!text) return;
+        void addAnnotation({ type: 'note', anchorTime, text });
+        setNoteInput('');
+    }, [addAnnotation, anchorTime, noteInput]);
+
+    useEffect(() => {
+        if (!canAddAnnotations) return;
+        document.addEventListener('keydown', handleGlobalPaste);
+        return () => document.removeEventListener('keydown', handleGlobalPaste);
+    }, [canAddAnnotations, handleGlobalPaste]);
 
     // Infinite scroll: IntersectionObserver to trigger loading more
     useEffect(() => {
@@ -232,10 +403,10 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
     }, [onLoadMore, hasMore, isLoadingMore, isRecording]);
 
     // Use simple rendering for small lists, virtualization for large lists
-    const useVirtualization = segments.length >= VIRTUALIZATION_THRESHOLD;
+    const useVirtualization = timelineItems.length >= VIRTUALIZATION_THRESHOLD;
 
     return (
-        <div ref={scrollRef} className="flex flex-col h-full overflow-y-auto px-4 py-2">
+        <div ref={scrollRef} tabIndex={0} onPaste={handlePaste} className="flex flex-col h-full overflow-y-auto px-4 py-2 outline-none">
             {/* Recording Status Bar - Sticky at top, always visible when recording */}
             <AnimatePresence>
                 {isRecording && (
@@ -245,9 +416,22 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                 )}
             </AnimatePresence>
 
+            {canAddAnnotations && (
+                <div className="sticky top-0 z-10 mb-3 flex flex-wrap items-center gap-2 border-b border-gray-100 bg-white py-2">
+                    <button type="button" onClick={addBookmark} className="inline-flex items-center gap-1 rounded border border-gray-200 px-2 py-1 text-xs text-gray-700 hover:bg-gray-50" title="Add a marker at the selected transcript point"><Bookmark size={13} /> Marker</button>
+                    <button type="button" onClick={() => void handleClipboardImagePaste()} className="inline-flex items-center gap-1 rounded border border-gray-200 px-2 py-1 text-xs text-gray-700 hover:bg-gray-50" title="Paste an image from the system clipboard"><ImageIcon size={13} /> Colar imagem</button>
+                    <div className="flex min-w-[180px] flex-1 gap-1">
+                        <input value={noteInput} onChange={event => setNoteInput(event.target.value)} onPaste={event => event.stopPropagation()} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); addNote(); } if (event.key.toLowerCase() === 'v' && (event.ctrlKey || event.metaKey)) event.stopPropagation(); }} placeholder="Short note…" className="min-w-0 flex-1 rounded border border-gray-200 px-2 py-1 text-xs focus:border-blue-400 focus:outline-none" />
+                        <button type="button" onClick={addNote} disabled={!noteInput.trim()} className="inline-flex items-center gap-1 rounded border border-gray-200 px-2 py-1 text-xs text-gray-700 disabled:opacity-40"><StickyNote size={13} /> Add</button>
+                    </div>
+                    <span className="text-[11px] text-gray-500" aria-live="polite">{anchorLabel}{anchorIsDefault ? ' — click a line to choose another anchor' : ''}</span>
+                    {pasteError && <span role="alert" className="basis-full text-xs text-red-600">{pasteError}</span>}
+                </div>
+            )}
+
             {/* Content - add padding when recording to prevent overlap */}
             <div className={isRecording ? 'pt-2' : ''}>
-            {segments.length === 0 ? (
+            {timelineItems.length === 0 ? (
                 // Empty state
                 <motion.div
                     initial={{ opacity: 0 }}
@@ -284,12 +468,11 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                         }}
                     >
                         {virtualizer.getVirtualItems().map((virtualRow) => {
-                            const segment = segments[virtualRow.index];
-                            const isStreaming = streamingSegmentId === segment.id;
+                            const item = timelineItems[virtualRow.index];
 
                             return (
                                 <div
-                                    key={segment.id}
+                                    key={item.key}
                                     data-index={virtualRow.index}
                                     ref={virtualizer.measureElement}
                                     style={{
@@ -300,15 +483,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                         transform: `translateY(${virtualRow.start}px)`,
                                     }}
                                 >
-                                    <TranscriptSegment
-                                        id={segment.id}
-                                        timestamp={segment.timestamp}
-                                        text={getDisplayText(segment)}
-                                        source={segment.source}
-                                        confidence={segment.confidence}
-                                        isStreaming={isStreaming}
-                                        showConfidence={showConfidence}
-                                    />
+                                    <TimelineRow item={item} streamingSegmentId={streamingSegmentId} getDisplayText={getDisplayText} showConfidence={showConfidence} activeTimestamp={activeTimestamp} onSelectTimestamp={handleSelectTimestamp} getAnnotationImage={getAnnotationImage} />
                                 </div>
                             );
                         })}
@@ -347,25 +522,15 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                 // Simple rendering for small lists (better animations)
                 <>
                     <div className="space-y-1">
-                        {segments.map((segment) => {
-                            const isStreaming = streamingSegmentId === segment.id;
-
+                        {timelineItems.map((item) => {
                             return (
                                 <motion.div
-                                    key={segment.id}
+                                    key={item.key}
                                     initial={{ opacity: 0, y: 5 }}
                                     animate={{ opacity: 1, y: 0 }}
                                     transition={{ duration: 0.15 }}
                                 >
-                                    <TranscriptSegment
-                                        id={segment.id}
-                                        timestamp={segment.timestamp}
-                                        text={getDisplayText(segment)}
-                                        source={segment.source}
-                                        confidence={segment.confidence}
-                                        isStreaming={isStreaming}
-                                        showConfidence={showConfidence}
-                                    />
+                                    <TimelineRow item={item} streamingSegmentId={streamingSegmentId} getDisplayText={getDisplayText} showConfidence={showConfidence} activeTimestamp={activeTimestamp} onSelectTimestamp={handleSelectTimestamp} getAnnotationImage={getAnnotationImage} />
                                 </motion.div>
                             );
                         })}

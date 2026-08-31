@@ -6,12 +6,13 @@
  */
 
 import { invoke } from '@tauri-apps/api/core';
-import { Transcript } from '@/types';
+import { Transcript, TranscriptAnnotation } from '@/types';
 
 export interface SaveMeetingRequest {
   meetingTitle: string;
   transcripts: Transcript[];
   folderPath: string | null;
+  annotations?: TranscriptAnnotation[];
 }
 
 export interface SaveMeetingResponse {
@@ -39,12 +40,14 @@ export class StorageService {
   async saveMeeting(
     meetingTitle: string,
     transcripts: Transcript[],
-    folderPath: string | null
+    folderPath: string | null,
+    annotations: TranscriptAnnotation[] = []
   ): Promise<SaveMeetingResponse> {
     return invoke<SaveMeetingResponse>('api_save_transcript', {
       meetingTitle,
       transcripts,
       folderPath,
+      annotations,
     });
   }
 

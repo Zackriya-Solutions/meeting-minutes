@@ -1,6 +1,8 @@
 use log::{debug as log_debug, error as log_error, info as log_info, warn as log_warn};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+#[cfg(target_os = "linux")]
+use std::process::Command;
 use tauri::{AppHandle, Manager, Runtime};
 use tauri_plugin_store::StoreExt;
 
@@ -10,6 +12,7 @@ use crate::{
         repositories::{
             meeting::MeetingsRepository, organization::OrganizationRepository, setting::SettingsRepository,
             transcript::TranscriptsRepository,
+            annotation::{annotation_directory, AnnotationsRepository},
         },
     },
     state::AppState,
@@ -19,6 +22,19 @@ use crate::summary::llm_client::{generate_summary, LLMProvider};
 
 // Hardcoded server URL
 const APP_SERVER_URL: &str = "http://localhost:5167";
+
+fn annotation_directory_for_app<R: Runtime>(
+    app: &AppHandle<R>,
+    meeting_id: &str,
+    folder_path: Option<&str>,
+) -> Result<std::path::PathBuf, String> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to resolve app data directory: {}", e))?;
+    annotation_directory(&app_data_dir, meeting_id, folder_path)
+        .map_err(|e| format!("Failed to resolve annotation directory: {}", e))
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ApiResponse<T> {
@@ -148,6 +164,94 @@ pub struct MeetingTranscript {
     pub duration: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct TranscriptAnnotation {
+    pub id: String,
+    #[serde(rename = "type")]
+    pub annotation_type: String,
+    pub anchor_time: f64,
+    pub created_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub image_file: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct TranscriptAnnotationInput {
+    pub id: Option<String>,
+    #[serde(rename = "type")]
+    pub annotation_type: String,
+    pub anchor_time: f64,
+    pub created_at: Option<String>,
+    pub text: Option<String>,
+    pub image_file: Option<String>,
+    pub image_data: Option<Vec<u8>>,
+    pub image_mime: Option<String>,
+}
+
+/// Read a PNG image from the Wayland clipboard when the webview/native plugin cannot.
+#[tauri::command]
+pub fn read_wayland_clipboard_image() -> Result<Option<Vec<u8>>, String> {
+    #[cfg(not(target_os = "linux"))]
+    {
+        return Err("wl-paste is only available for Linux/Wayland clipboard fallback".to_string());
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        let types = Command::new("wl-paste")
+            .arg("--list-types")
+            .output()
+            .map_err(|error| {
+                if error.kind() == std::io::ErrorKind::NotFound {
+                    "wl-paste is not installed; install wl-clipboard to paste images on Linux/Wayland".to_string()
+                } else {
+                    format!("failed to run wl-paste --list-types: {}", error)
+                }
+            })?;
+
+        if !types.status.success() {
+            let detail = String::from_utf8_lossy(&types.stderr).trim().to_string();
+            return Err(if detail.is_empty() {
+                "wl-paste failed to list the Wayland clipboard types".to_string()
+            } else {
+                format!("wl-paste failed to list the Wayland clipboard types: {}", detail)
+            });
+        }
+
+        let image_type = String::from_utf8_lossy(&types.stdout)
+            .lines()
+            .map(str::trim)
+            .filter(|mime| mime.starts_with("image/"))
+            .min_by_key(|mime| if *mime == "image/png" { 0 } else { 1 })
+            .map(str::to_string);
+        let Some(image_type) = image_type else {
+            return Ok(None);
+        };
+
+        let image = Command::new("wl-paste")
+            .args(["--no-newline", "--type", image_type.as_str()])
+            .output()
+            .map_err(|error| format!("failed to read {} from Wayland clipboard: {}", image_type, error))?;
+        if !image.status.success() {
+            let detail = String::from_utf8_lossy(&image.stderr).trim().to_string();
+            return Err(if detail.is_empty() {
+                format!("wl-paste failed to read {} from the Wayland clipboard", image_type)
+            } else {
+                format!("wl-paste failed to read {} from the Wayland clipboard: {}", image_type, detail)
+            });
+        }
+
+        if image.stdout.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(image.stdout))
+    }
 }
 
 /// Meeting metadata without transcripts (for pagination)
@@ -972,7 +1076,7 @@ pub async fn api_delete_api_key<R: Runtime>(
 
 #[tauri::command]
 pub async fn api_delete_meeting<R: Runtime>(
-    _app: AppHandle<R>,
+    app: AppHandle<R>,
     state: tauri::State<'_, AppState>,
     meeting_id: String,
     auth_token: Option<String>,
@@ -984,9 +1088,22 @@ pub async fn api_delete_meeting<R: Runtime>(
     );
 
     let pool = state.db_manager.pool();
+    let meeting = MeetingsRepository::get_meeting_metadata(pool, &meeting_id)
+        .await
+        .map_err(|e| format!("Failed to retrieve meeting before deletion: {}", e))?
+        .ok_or_else(|| format!("Meeting not found or could not be deleted: {}", meeting_id))?;
+    let directory = annotation_directory_for_app(&app, &meeting_id, meeting.folder_path.as_deref())?;
 
     match MeetingsRepository::delete_meeting(pool, &meeting_id).await {
         Ok(true) => {
+            if let Err(error) = AnnotationsRepository::remove_directory(&directory).await {
+                log_warn!(
+                    "Meeting {} was deleted but annotation files could not be removed from {}: {}",
+                    meeting_id,
+                    directory.display(),
+                    error
+                );
+            }
             log_info!("Successfully deleted meeting {}", meeting_id);
             Ok(serde_json::json!({
                 "status": "success",
@@ -1036,6 +1153,55 @@ pub async fn api_get_meeting<R: Runtime>(
             Err(format!("Failed to retrieve meeting: {}", e))
         }
     }
+}
+
+#[tauri::command]
+pub async fn api_get_transcript_annotations<R: Runtime>(
+    _app: AppHandle<R>,
+    meeting_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<TranscriptAnnotation>, String> {
+    AnnotationsRepository::list(state.db_manager.pool(), &meeting_id)
+        .await
+        .map_err(|e| format!("Failed to retrieve transcript annotations: {}", e))
+}
+
+#[tauri::command]
+pub async fn api_add_transcript_annotation<R: Runtime>(
+    app: AppHandle<R>,
+    meeting_id: String,
+    annotation: TranscriptAnnotationInput,
+    state: tauri::State<'_, AppState>,
+) -> Result<TranscriptAnnotation, String> {
+    let meeting = MeetingsRepository::get_meeting_metadata(state.db_manager.pool(), &meeting_id)
+        .await
+        .map_err(|e| format!("Failed to retrieve meeting: {}", e))?
+        .ok_or_else(|| format!("Meeting not found: {}", meeting_id))?;
+    let directory = annotation_directory_for_app(&app, &meeting_id, meeting.folder_path.as_deref())?;
+
+    AnnotationsRepository::add(state.db_manager.pool(), &meeting_id, &annotation, &directory)
+        .await
+        .map_err(|e| format!("Failed to save transcript annotation: {}", e))
+}
+
+#[tauri::command]
+pub async fn api_get_annotation_image<R: Runtime>(
+    app: AppHandle<R>,
+    meeting_id: String,
+    image_file: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<u8>, String> {
+    if image_file.contains('/') || image_file.contains('\\') || image_file == "." || image_file == ".." {
+        return Err("Invalid annotation image filename".to_string());
+    }
+    let meeting = MeetingsRepository::get_meeting_metadata(state.db_manager.pool(), &meeting_id)
+        .await
+        .map_err(|e| format!("Failed to retrieve meeting: {}", e))?
+        .ok_or_else(|| format!("Meeting not found: {}", meeting_id))?;
+    let directory = annotation_directory_for_app(&app, &meeting_id, meeting.folder_path.as_deref())?;
+    tokio::fs::read(directory.join(image_file))
+        .await
+        .map_err(|e| format!("Failed to read annotation image: {}", e))
 }
 
 /// Get meeting metadata without transcripts (for pagination)
@@ -1164,12 +1330,13 @@ pub async fn api_save_meeting_title<R: Runtime>(
 
 #[tauri::command]
 pub async fn api_save_transcript<R: Runtime>(
-    _app: AppHandle<R>,
+    app: AppHandle<R>,
     state: tauri::State<'_, AppState>,
     meeting_title: String,
     transcripts: Vec<serde_json::Value>,
     folder_path: Option<String>,
     auth_token: Option<String>,
+    annotations: Option<Vec<TranscriptAnnotationInput>>,
 ) -> Result<serde_json::Value, String> {
     log_info!(
         "api_save_transcript called for meeting: {}, transcripts: {}, folder_path: {:?}, auth_token: {}",
@@ -1207,6 +1374,11 @@ pub async fn api_save_transcript<R: Runtime>(
     }
 
     let pool = state.db_manager.pool();
+    let annotations = annotations.unwrap_or_default();
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to resolve app data directory: {}", e))?;
 
     // Now, call the repository with the correctly typed data.
     match TranscriptsRepository::save_transcript(
@@ -1214,6 +1386,8 @@ pub async fn api_save_transcript<R: Runtime>(
         &meeting_title,
         &transcripts_to_save,
         folder_path,
+        &annotations,
+        &app_data_dir,
     )
     .await
     {

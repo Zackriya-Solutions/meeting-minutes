@@ -29,10 +29,21 @@ export interface StoredTranscript {
   [key: string]: any;         // Allow additional fields from TranscriptUpdate
 }
 
+export interface StoredAnnotation {
+  id: string;
+  meetingId: string;
+  type: 'bookmark' | 'note' | 'image';
+  anchorTime: number;
+  createdAt: string;
+  text?: string;
+  imageData?: number[];
+  imageMime?: string;
+}
+
 class IndexedDBService {
   private db: IDBDatabase | null = null;
   private readonly DB_NAME = 'MeetilyRecoveryDB';
-  private readonly DB_VERSION = 1;
+  private readonly DB_VERSION = 2;
   private initPromise: Promise<void> | null = null;
 
   /**
@@ -81,6 +92,11 @@ class IndexedDBService {
             });
             transcriptsStore.createIndex('meetingId', 'meetingId', { unique: false });
             transcriptsStore.createIndex('storedAt', 'storedAt', { unique: false });
+          }
+
+          if (!db.objectStoreNames.contains('annotations')) {
+            const annotationsStore = db.createObjectStore('annotations', { keyPath: 'id' });
+            annotationsStore.createIndex('meetingId', 'meetingId', { unique: false });
           }
         };
       } catch (error) {
@@ -203,12 +219,14 @@ class IndexedDBService {
     try {
       if (!this.db) await this.init();
 
-      const transaction = this.db!.transaction(['meetings', 'transcripts'], 'readwrite');
+      const transaction = this.db!.transaction(['meetings', 'transcripts', 'annotations'], 'readwrite');
       const meetingsStore = transaction.objectStore('meetings');
       const transcriptsStore = transaction.objectStore('transcripts');
+      const annotationsStore = transaction.objectStore('annotations');
 
       // Delete transcripts
       await this.deleteTranscriptsForMeetingInternal(transcriptsStore, meetingId);
+      await this.deleteAnnotationsForMeetingInternal(annotationsStore, meetingId);
 
       // Delete meeting
       await new Promise<void>((resolve, reject) => {
@@ -297,6 +315,50 @@ class IndexedDBService {
     }
   }
 
+  async saveAnnotation(meetingId: string, annotation: StoredAnnotation): Promise<void> {
+    try {
+      if (!this.db) await this.init();
+      const transaction = this.db!.transaction(['annotations', 'meetings'], 'readwrite');
+      const annotationsStore = transaction.objectStore('annotations');
+      const meetingsStore = transaction.objectStore('meetings');
+      await new Promise<void>((resolve, reject) => {
+        const request = annotationsStore.put({ ...annotation, meetingId });
+        request.onsuccess = () => resolve();
+        request.onerror = () => reject(request.error);
+      });
+      const meeting = await new Promise<MeetingMetadata | null>((resolve, reject) => {
+        const request = meetingsStore.get(meetingId);
+        request.onsuccess = () => resolve(request.result || null);
+        request.onerror = () => reject(request.error);
+      });
+      if (meeting) {
+        meeting.lastUpdated = Date.now();
+        await new Promise<void>((resolve, reject) => {
+          const request = meetingsStore.put(meeting);
+          request.onsuccess = () => resolve();
+          request.onerror = () => reject(request.error);
+        });
+      }
+    } catch (error) {
+      console.warn('Failed to save annotation to IndexedDB:', error);
+    }
+  }
+
+  async getAnnotations(meetingId: string): Promise<StoredAnnotation[]> {
+    try {
+      if (!this.db) await this.init();
+      const transaction = this.db!.transaction(['annotations'], 'readonly');
+      const request = transaction.objectStore('annotations').index('meetingId').getAll(meetingId);
+      return await new Promise((resolve, reject) => {
+        request.onsuccess = () => resolve(request.result as StoredAnnotation[]);
+        request.onerror = () => reject(request.error);
+      });
+    } catch (error) {
+      console.error('Failed to get annotations from IndexedDB:', error);
+      throw error;
+    }
+  }
+
   /**
    * Get transcript count for a meeting
    */
@@ -331,9 +393,10 @@ class IndexedDBService {
       if (!this.db) await this.init();
 
       const cutoffTime = Date.now() - (daysOld * 24 * 60 * 60 * 1000);
-      const transaction = this.db!.transaction(['meetings', 'transcripts'], 'readwrite');
+      const transaction = this.db!.transaction(['meetings', 'transcripts', 'annotations'], 'readwrite');
       const meetingsStore = transaction.objectStore('meetings');
       const transcriptsStore = transaction.objectStore('transcripts');
+      const annotationsStore = transaction.objectStore('annotations');
 
       // Get all meetings
       const allMeetings = await new Promise<MeetingMetadata[]>((resolve, reject) => {
@@ -348,6 +411,7 @@ class IndexedDBService {
         if (meeting.lastUpdated < cutoffTime) {
           // Delete transcripts
           await this.deleteTranscriptsForMeetingInternal(transcriptsStore, meeting.meetingId);
+          await this.deleteAnnotationsForMeetingInternal(annotationsStore, meeting.meetingId);
 
           // Delete meeting
           await new Promise<void>((resolve, reject) => {
@@ -378,9 +442,10 @@ class IndexedDBService {
       if (!this.db) await this.init();
 
       const cutoffTime = Date.now() - (hoursOld * 60 * 60 * 1000);
-      const transaction = this.db!.transaction(['meetings', 'transcripts'], 'readwrite');
+      const transaction = this.db!.transaction(['meetings', 'transcripts', 'annotations'], 'readwrite');
       const meetingsStore = transaction.objectStore('meetings');
       const transcriptsStore = transaction.objectStore('transcripts');
+      const annotationsStore = transaction.objectStore('annotations');
 
       // Get all meetings and filter for saved ones
       const allMeetings = await new Promise<MeetingMetadata[]>((resolve, reject) => {
@@ -398,6 +463,7 @@ class IndexedDBService {
         if (meeting.lastUpdated < cutoffTime) {
           // Delete transcripts
           await this.deleteTranscriptsForMeetingInternal(transcriptsStore, meeting.meetingId);
+          await this.deleteAnnotationsForMeetingInternal(annotationsStore, meeting.meetingId);
 
           // Delete meeting
           await new Promise<void>((resolve, reject) => {
@@ -440,6 +506,26 @@ class IndexedDBService {
         }
       };
 
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  private async deleteAnnotationsForMeetingInternal(
+    annotationsStore: IDBObjectStore,
+    meetingId: string
+  ): Promise<void> {
+    const index = annotationsStore.index('meetingId');
+    return new Promise((resolve, reject) => {
+      const request = index.openCursor(IDBKeyRange.only(meetingId));
+      request.onsuccess = (event) => {
+        const cursor = (event.target as IDBRequest<IDBCursorWithValue>).result;
+        if (cursor) {
+          cursor.delete();
+          cursor.continue();
+        } else {
+          resolve();
+        }
+      };
       request.onerror = () => reject(request.error);
     });
   }

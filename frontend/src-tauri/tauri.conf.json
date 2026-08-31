@@ -60,6 +60,7 @@
                         "core:menu:default",
                         "core:tray:default",
                         "core:window:allow-set-title",
+                        "clipboard-manager:allow-read-image",
                         "store:default",
                         "notification:default",
                         "notification:allow-is-permission-granted",

@@ -10,6 +10,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { indexedDBService, MeetingMetadata, StoredTranscript } from '@/services/indexedDBService';
 import { storageService } from '@/services/storageService';
 import { applyPinnedSummaryLanguageToMeeting } from '@/lib/summary-language-preferences';
+import { formatStoredAnnotations } from '@/lib/transcript-recovery';
 import { toast } from 'sonner';
 
 interface AudioRecoveryStatus {
@@ -122,6 +123,10 @@ export function useTranscriptRecovery(): UseTranscriptRecoveryReturn {
         throw new Error('No transcripts found for this meeting');
       }
 
+      // Carry annotations over with the transcript. They remain attached to the
+      // unsaved IndexedDB recovery record until both payloads are persisted.
+      const storedAnnotations = await indexedDBService.getAnnotations(meetingId);
+
       // 3. Check for folder path
       let folderPath = metadata.folderPath;
 
@@ -175,12 +180,14 @@ export function useTranscriptRecovery(): UseTranscriptRecoveryReturn {
         audio_end_time: (t as any).audio_end_time,
         duration: (t as any).duration,
       }));
+      const formattedAnnotations = formatStoredAnnotations(storedAnnotations);
 
       // 6. Save to backend database using existing save utilities
       const saveResponse = await storageService.saveMeeting(
         metadata.title,
         formattedTranscripts,
-        folderPath ?? null
+        folderPath ?? null,
+        formattedAnnotations
       );
 
       const savedMeetingId = saveResponse.meeting_id;

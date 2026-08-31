@@ -274,6 +274,12 @@ async fn delete_meeting_with_transaction(
         .execute(&mut *transaction)
         .await?;
 
+    // Delete explicitly for databases where SQLite foreign-key enforcement is disabled.
+    sqlx::query("DELETE FROM transcript_annotations WHERE meeting_id = ?")
+        .bind(meeting_id)
+        .execute(&mut *transaction)
+        .await?;
+
     // 4. Delete tag assignments, then prune tags no meeting references anymore
     sqlx::query("DELETE FROM meeting_tags WHERE meeting_id = ?")
         .bind(meeting_id)
@@ -335,5 +341,32 @@ mod tests {
                 .len(),
             1
         );
+    }
+
+    #[tokio::test]
+    async fn deleting_a_meeting_removes_annotation_rows() {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+        sqlx::query("INSERT INTO meetings (id, title, created_at, updated_at) VALUES ('meeting-1', 'Planning', '2026-08-18T10:00:00Z', '2026-08-18T10:00:00Z')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO transcript_annotations (id, meeting_id, annotation_type, anchor_time, created_at) VALUES ('annotation-1', 'meeting-1', 'bookmark', 1.0, '2026-08-18T10:00:01Z')")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        assert!(MeetingsRepository::delete_meeting(&pool, "meeting-1")
+            .await
+            .unwrap());
+        let remaining: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM transcript_annotations")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(remaining, 0);
     }
 }

@@ -1,7 +1,6 @@
 "use client";
 
-import { Transcript, TranscriptSegmentData } from '@/types';
-import { TranscriptView } from '@/components/TranscriptView';
+import { NewTranscriptAnnotation, Transcript, TranscriptAnnotation, TranscriptSegmentData } from '@/types';
 import { VirtualizedTranscriptView } from '@/components/VirtualizedTranscriptView';
 import { TranscriptButtonGroup } from './TranscriptButtonGroup';
 import { useMemo } from 'react';
@@ -28,6 +27,9 @@ interface TranscriptPanelProps {
   meetingId?: string;
   meetingFolderPath?: string | null;
   onRefetchTranscripts?: () => Promise<void>;
+  annotations?: TranscriptAnnotation[];
+  onAddAnnotation?: (annotation: NewTranscriptAnnotation) => Promise<void> | void;
+  getAnnotationImage?: (annotation: TranscriptAnnotation) => Promise<string | null>;
 }
 
 export function TranscriptPanel({
@@ -48,6 +50,9 @@ export function TranscriptPanel({
   meetingId,
   meetingFolderPath,
   onRefetchTranscripts,
+  annotations = [],
+  onAddAnnotation,
+  getAnnotationImage,
 }: TranscriptPanelProps) {
   // Convert transcripts to segments if pagination is not used but we want virtualization
   const convertedSegments = useMemo(() => {
@@ -95,6 +100,9 @@ export function TranscriptPanel({
           totalCount={totalCount}
           loadedCount={loadedCount}
           onLoadMore={onLoadMore}
+          annotations={annotations}
+          onAddAnnotation={onAddAnnotation}
+          getAnnotationImage={getAnnotationImage}
         />
       </div>
 

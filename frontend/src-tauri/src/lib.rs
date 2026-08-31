@@ -421,6 +421,7 @@ pub fn run() {
     }
 
     builder
+        .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_dialog::init())
@@ -669,6 +670,10 @@ pub fn run() {
             api::api_get_transcript_api_key,
             api::api_delete_meeting,
             api::api_get_meeting,
+            api::api_get_transcript_annotations,
+            api::api_add_transcript_annotation,
+            api::read_wayland_clipboard_image,
+            api::api_get_annotation_image,
             api::api_get_meeting_metadata,
             api::api_get_meeting_transcripts,
             api::api_save_meeting_title,
