@@ -26,11 +26,12 @@
         "tauri:build:openblas": "tauri build -- --features openblas",
         "tauri:build:hipblas": "tauri build -- --features hipblas",
         "lint": "next lint",
-        "test": "pnpm run test:transcript-timeline && pnpm run test:transcript-recovery && pnpm run test:annotation-save-gate && pnpm run test:transcript-annotation-input",
+        "test": "pnpm run test:transcript-timeline && pnpm run test:transcript-recovery && pnpm run test:annotation-save-gate && pnpm run test:transcript-annotation-input && pnpm run test:meeting-export",
         "test:transcript-timeline": "node tests/lib/transcript-timeline.test.mjs",
         "test:transcript-recovery": "node tests/lib/transcript-recovery.test.mjs",
         "test:annotation-save-gate": "node tests/lib/annotation-save-gate.test.mjs",
-        "test:transcript-annotation-input": "node tests/lib/transcript-annotation-input.test.mjs"
+        "test:transcript-annotation-input": "node tests/lib/transcript-annotation-input.test.mjs",
+        "test:meeting-export": "node tests/lib/meeting-export.test.mjs"
     },
     "dependencies": {
         "@blocknote/core": "0.36.0",
@@ -63,6 +64,7 @@
         "@tanstack/react-virtual": "^3.13.13",
         "@tauri-apps/api": "^2.6.0",
         "@tauri-apps/plugin-clipboard-manager": "^2.3.3",
+        "@tauri-apps/plugin-dialog": "^2.3.0",
         "@tauri-apps/plugin-fs": "^2.4.0",
         "@tauri-apps/plugin-notification": "~2.3.1",
         "@tauri-apps/plugin-os": "^2.3.2",
@@ -78,6 +80,7 @@
         "cmdk": "^1.1.1",
         "date-fns": "^4.1.0",
         "framer-motion": "^11.15.0",
+        "jspdf": "^3.0.4",
         "lodash": "^4.17.21",
         "lucide-react": "^0.469.0",
         "next": "^14.2.25",

@@ -3,10 +3,16 @@
 import { useState, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { ButtonGroup } from '@/components/ui/button-group';
-import { Copy, FolderOpen, RefreshCw } from 'lucide-react';
+import { Copy, Download, FolderOpen, RefreshCw } from 'lucide-react';
 import Analytics from '@/lib/analytics';
 import { RetranscribeDialog } from './RetranscribeDialog';
 import { useConfig } from '@/contexts/ConfigContext';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 
 
 interface TranscriptButtonGroupProps {
@@ -16,6 +22,10 @@ interface TranscriptButtonGroupProps {
   meetingId?: string;
   meetingFolderPath?: string | null;
   onRefetchTranscripts?: () => Promise<void>;
+  onExportMarkdown: () => void;
+  onExportPdf: () => void;
+  onCopyMarkdown: () => void;
+  isExporting?: boolean;
 }
 
 
@@ -26,6 +36,10 @@ export function TranscriptButtonGroup({
   meetingId,
   meetingFolderPath,
   onRefetchTranscripts,
+  onExportMarkdown,
+  onExportPdf,
+  onCopyMarkdown,
+  isExporting = false,
 }: TranscriptButtonGroupProps) {
   const { betaFeatures } = useConfig();
   const [showRetranscribeDialog, setShowRetranscribeDialog] = useState(false);
@@ -53,6 +67,34 @@ export function TranscriptButtonGroup({
           <Copy />
           <span className="hidden lg:inline">Copy</span>
         </Button>
+
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={transcriptCount === 0 || isExporting}
+              title={transcriptCount === 0 ? 'No transcript available' : 'Export meeting'}
+            >
+              <Download />
+              <span className="hidden lg:inline">Export</span>
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start">
+            <DropdownMenuItem onSelect={onExportMarkdown}>
+              <Download />
+              Export as Markdown
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={onExportPdf}>
+              <Download />
+              Export as PDF
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={onCopyMarkdown}>
+              <Copy />
+              Copy as Markdown
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
 
         <Button
           size="sm"

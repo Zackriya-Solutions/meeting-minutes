@@ -30,6 +30,10 @@ interface TranscriptPanelProps {
   annotations?: TranscriptAnnotation[];
   onAddAnnotation?: (annotation: NewTranscriptAnnotation) => Promise<void> | void;
   getAnnotationImage?: (annotation: TranscriptAnnotation) => Promise<string | null>;
+  onExportMarkdown: () => void;
+  onExportPdf: () => void;
+  onCopyMarkdown: () => void;
+  isExporting?: boolean;
 }
 
 export function TranscriptPanel({
@@ -53,6 +57,10 @@ export function TranscriptPanel({
   annotations = [],
   onAddAnnotation,
   getAnnotationImage,
+  onExportMarkdown,
+  onExportPdf,
+  onCopyMarkdown,
+  isExporting,
 }: TranscriptPanelProps) {
   // Convert transcripts to segments if pagination is not used but we want virtualization
   const convertedSegments = useMemo(() => {
@@ -81,6 +89,10 @@ export function TranscriptPanel({
           meetingId={meetingId}
           meetingFolderPath={meetingFolderPath}
           onRefetchTranscripts={onRefetchTranscripts}
+          onExportMarkdown={onExportMarkdown}
+          onExportPdf={onExportPdf}
+          onCopyMarkdown={onCopyMarkdown}
+          isExporting={isExporting}
         />
       </div>
 

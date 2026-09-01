@@ -18,6 +18,7 @@ import { useCopyOperations } from '@/hooks/meeting-details/useCopyOperations';
 import { useMeetingOperations } from '@/hooks/meeting-details/useMeetingOperations';
 import { useConfig } from '@/contexts/ConfigContext';
 import { NewTranscriptAnnotation, TranscriptAnnotation } from '@/types';
+import { useMeetingExport } from '@/hooks/meeting-details/useMeetingExport';
 
 export default function PageContent({
   meeting,
@@ -137,6 +138,15 @@ export default function PageContent({
     blockNoteSummaryRef: meetingData.blockNoteSummaryRef,
   });
 
+  const meetingExport = useMeetingExport({
+    meeting,
+    meetingTitle: meetingData.meetingTitle,
+    aiSummary: meetingData.aiSummary,
+    summaryRef: meetingData.blockNoteSummaryRef,
+    annotations,
+    getAnnotationImage,
+  });
+
   const meetingOperations = useMeetingOperations({
     meeting,
   });
@@ -201,6 +211,10 @@ export default function PageContent({
           annotations={annotations}
           onAddAnnotation={onAddAnnotation}
           getAnnotationImage={getAnnotationImage}
+          onExportMarkdown={meetingExport.exportMarkdown}
+          onExportPdf={meetingExport.exportPdf}
+          onCopyMarkdown={meetingExport.copyAsMarkdown}
+          isExporting={meetingExport.isExporting}
         />
         <SummaryPanel
           meeting={meeting}
