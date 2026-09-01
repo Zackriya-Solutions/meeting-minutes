@@ -45,9 +45,10 @@ impl ContinuousVadProcessor {
         config.negative_speech_threshold = 0.35;  // Silero default - allows natural pauses
 
         // Use the caller's redemption_time uncapped, so long continuous speech stays
-        // in one segment. Callers pass 2000ms (see `pipeline.rs`, `import.rs` and
-        // `retranscription.rs`); shorter values fragment natural speech at every
-        // mid-sentence breath.
+        // in one segment. The batch paths (`import.rs`, `retranscription.rs`) pass
+        // 2000ms; the live path (`pipeline.rs`) passes 500ms because it must keep
+        // emitting transcript segments during continuous audio. Values well below
+        // that fragment natural speech at every mid-sentence breath.
         config.redemption_time = Duration::from_millis(redemption_time_ms as u64);
         config.pre_speech_pad = Duration::from_millis(300);   // Pre-speech padding for context
         config.post_speech_pad = Duration::from_millis(400);  // Increased: more context at end

@@ -16,11 +16,15 @@ use super::vad::{ContinuousVadProcessor};
 /// How long a silence must last before the VAD closes a speech segment, and
 /// therefore how long the audio clips handed to the ASR engine are.
 ///
-/// Kept equal to `import.rs::VAD_REDEMPTION_TIME_MS` and
-/// `retranscription.rs::VAD_REDEMPTION_TIME_MS` so that live recording and
-/// offline re-transcription of the same audio segment identically. Raising this
-/// trades live-transcript latency for longer, more accurate ASR requests.
-const VAD_REDEMPTION_TIME_MS: u32 = 2000;
+/// Live-path policy: 500ms (matches the established Meetily Pro live policy).
+/// The batch paths (`import.rs` / `retranscription.rs`) use 2000ms instead —
+/// they have no latency requirement, so they optimize purely for ASR request
+/// length. The live path cannot: with continuous audio (e.g. a podcast played
+/// as system audio) a 2000ms redemption keeps one VAD segment open
+/// indefinitely, withholds live transcript emission, and overruns the
+/// accumulated-speech-buffer warning threshold. Bounded live segmentation
+/// during continuous speech is tracked separately in #756.
+const VAD_REDEMPTION_TIME_MS: u32 = 500;
 
 /// Ring buffer for synchronized audio mixing
 /// Accumulates samples from mic and system streams until we have aligned windows
@@ -743,13 +747,14 @@ impl AudioPipeline {
         // was trained on web subtitles, so short clips come back as memorised
         // boilerplate ("subscribe to the channel", "thank you") instead of speech.
         // Measured on a real recording, 47% of segment boundaries sat in the
-        // 0.42-0.75s range that a longer redemption simply bridges.
+        // 0.42-0.75s range that a longer redemption bridges.
         //
-        // 2000ms matches what the offline paths already use (see
-        // `import.rs::VAD_REDEMPTION_TIME_MS` and
-        // `retranscription.rs::VAD_REDEMPTION_TIME_MS`), so live and batch
-        // transcription now segment identically. It costs up to ~1.6s of extra
-        // live-transcript latency at the end of each utterance.
+        // 500ms is the live-path policy (see the constant's doc comment). The
+        // batch value (2000ms, `import.rs`/`retranscription.rs`) was tried here
+        // first, but under continuous system audio it kept a VAD segment open
+        // indefinitely and withheld live transcript emission, so live and batch
+        // deliberately diverge. Bounded live segments under continuous speech
+        // are tracked in #756.
         let vad_processor = match ContinuousVadProcessor::new(sample_rate, VAD_REDEMPTION_TIME_MS) {
             Ok(processor) => {
                 info!(
@@ -1103,5 +1108,17 @@ impl AudioPipelineManager {
 impl Default for AudioPipelineManager {
     fn default() -> Self {
         Self::new()
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_live_vad_redemption_matches_pro_policy() {
+        // Live path uses 500ms (Meetily Pro live policy) so transcript
+        // emission stays bounded under continuous audio; the batch paths
+        // (import.rs / retranscription.rs) use 2000ms. See #679 and #756.
+        assert_eq!(VAD_REDEMPTION_TIME_MS, 500);
     }
 }
