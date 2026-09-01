@@ -2,6 +2,90 @@
 @tailwind components;
 @tailwind utilities;
 
+@keyframes dictation-wave {
+  0%, 100% { transform: scaleY(0.32); opacity: 0.48; }
+  50% { transform: scaleY(1); opacity: 1; }
+}
+
+.dictation-floater {
+  --pulse-color: #5577ff;
+  width: 344px;
+  min-height: 64px;
+  margin: 7px auto;
+  padding: 10px 11px 10px 15px;
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr) 36px;
+  align-items: center;
+  gap: 11px;
+  overflow: hidden;
+  color: #f7f8fa;
+  background: rgba(17, 21, 29, 0.96);
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  border-radius: 20px;
+  box-shadow: 0 14px 42px rgba(5, 9, 18, 0.3), inset 0 1px rgba(255, 255, 255, 0.08);
+  font-family: var(--font-source-sans-3), "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+.dictation-listening { --pulse-color: #ff6b5f; }
+.dictation-completed { --pulse-color: #50d8a0; }
+.dictation-failed { --pulse-color: #ffb454; }
+
+.dictation-signal {
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--pulse-color) 15%, transparent);
+}
+
+.dictation-signal i {
+  width: 3px;
+  height: 22px;
+  border-radius: 999px;
+  background: var(--pulse-color);
+  animation: dictation-wave 850ms ease-in-out infinite;
+}
+
+.dictation-signal i:nth-child(2),
+.dictation-signal i:nth-child(4) { animation-delay: -240ms; }
+.dictation-signal i:nth-child(3) { animation-delay: -430ms; }
+
+.dictation-copy { min-width: 0; }
+.dictation-label {
+  font-size: 14px;
+  font-weight: 650;
+  line-height: 1.15;
+  letter-spacing: 0.01em;
+}
+.dictation-detail {
+  margin-top: 3px;
+  overflow: hidden;
+  color: #aeb7c7;
+  font-size: 11px;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dictation-mark {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 10px;
+  color: #dce3ff;
+  background: rgba(255, 255, 255, 0.06);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dictation-signal i { animation: none; }
+}
+
 @keyframes vibrate {
   0% {
     transform: translate(0);

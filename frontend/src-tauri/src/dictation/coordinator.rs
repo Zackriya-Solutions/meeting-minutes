@@ -52,6 +52,26 @@ pub fn start_coordinator(app: AppHandle) {
     });
 }
 
+pub fn position_overlay(app: &AppHandle) {
+    let Some(overlay) = app.get_webview_window("dictation-overlay") else {
+        log::error!("dictation_overlay_missing code=internal");
+        return;
+    };
+    let (Ok(Some(monitor)), Ok(window_size)) = (overlay.current_monitor(), overlay.outer_size())
+    else {
+        log::warn!("dictation_overlay_position_failed code=target_lost");
+        return;
+    };
+    let work_area = monitor.work_area();
+    let x =
+        work_area.position.x + (work_area.size.width.saturating_sub(window_size.width) / 2) as i32;
+    let y =
+        work_area.position.y + work_area.size.height.saturating_sub(window_size.height) as i32 - 42;
+    if let Err(error) = overlay.set_position(tauri::PhysicalPosition::new(x, y)) {
+        log::warn!("dictation_overlay_position_failed code=target_lost error={error}");
+    }
+}
+
 async fn finish_dictation(app: &AppHandle, capture: ActiveCapture) {
     let ActiveCapture {
         mut session,
@@ -239,6 +259,31 @@ fn emit_phase(app: &AppHandle, phase: DictationPhase, message: Option<String>) {
         "dictation-state",
         serde_json::json!({ "phase": phase, "message": message }),
     );
+    let Some(overlay) = app.get_webview_window("dictation-overlay") else {
+        return;
+    };
+    match phase {
+        DictationPhase::Idle | DictationPhase::Cancelled => {
+            let _ = overlay.hide();
+        }
+        DictationPhase::Completed => {
+            let _ = overlay.show();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_millis(900)).await;
+                let _ = overlay.hide();
+            });
+        }
+        DictationPhase::Failed => {
+            let _ = overlay.show();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                let _ = overlay.hide();
+            });
+        }
+        _ => {
+            let _ = overlay.show();
+        }
+    }
 }
 
 fn log_failure(session: &DictationSession) {

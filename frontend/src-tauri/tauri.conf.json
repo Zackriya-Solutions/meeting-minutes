@@ -19,6 +19,22 @@
                 "fullscreen": false,
                 "theme": "Light",
                 "decorations": true
+            },
+            {
+                "label": "dictation-overlay",
+                "title": "PulseTalk dictation",
+                "url": "/dictation-overlay",
+                "width": 360,
+                "height": 78,
+                "resizable": false,
+                "fullscreen": false,
+                "decorations": false,
+                "transparent": true,
+                "alwaysOnTop": true,
+                "visible": false,
+                "skipTaskbar": true,
+                "focus": false,
+                "shadow": false
             }
         ],
         "macOSPrivateApi": true,
@@ -40,7 +56,8 @@
                     "identifier": "main",
                     "description": "Main window capability with file system and media access",
                     "windows": [
-                        "main"
+                        "main",
+                        "dictation-overlay"
                     ],
                     "permissions": [
                         "fs:default",

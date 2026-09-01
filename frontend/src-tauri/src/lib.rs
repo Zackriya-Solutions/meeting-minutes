@@ -574,6 +574,7 @@ pub fn run() {
             .expect("Failed to initialize database");
 
             dictation::start_coordinator(_app.handle().clone());
+            dictation::position_overlay(_app.handle());
 
             // Initialize bundled templates directory for dynamic template discovery
             log::info!("Initializing bundled templates directory...");
@@ -606,6 +607,8 @@ pub fn run() {
             get_transcription_status,
             read_audio_file,
             save_transcript,
+            dictation::commands::dictation_list_history,
+            dictation::commands::dictation_copy_history,
             analytics::commands::init_analytics,
             analytics::commands::disable_analytics,
             analytics::commands::track_event,

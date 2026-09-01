@@ -1,6 +1,43 @@
 use super::{DictationFailureCode, DictationPhase, DictationSession};
 use sqlx::SqlitePool;
 
+#[derive(Debug, Clone, serde::Serialize, sqlx::FromRow)]
+#[serde(rename_all = "camelCase")]
+pub struct DictationHistoryItem {
+    pub id: String,
+    pub phase: String,
+    pub final_text: Option<String>,
+    pub failure_code: Option<String>,
+    pub failure_message: Option<String>,
+    pub retryable: bool,
+    pub started_at: chrono::DateTime<chrono::Utc>,
+}
+
+pub async fn list_history(
+    pool: &SqlitePool,
+    limit: i64,
+) -> Result<Vec<DictationHistoryItem>, sqlx::Error> {
+    sqlx::query_as::<_, DictationHistoryItem>(
+        r#"
+        SELECT id, phase, final_text, failure_code, failure_message, retryable, started_at
+        FROM dictation_sessions
+        ORDER BY started_at DESC
+        LIMIT ?
+        "#,
+    )
+    .bind(limit.clamp(1, 200))
+    .fetch_all(pool)
+    .await
+}
+
+pub async fn text_by_id(pool: &SqlitePool, id: &str) -> Result<Option<String>, sqlx::Error> {
+    sqlx::query_scalar("SELECT final_text FROM dictation_sessions WHERE id = ?")
+        .bind(id)
+        .fetch_optional(pool)
+        .await
+        .map(Option::flatten)
+}
+
 pub async fn save_session(
     pool: &SqlitePool,
     session: &DictationSession,
