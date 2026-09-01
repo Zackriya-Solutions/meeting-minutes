@@ -1,7 +1,7 @@
 "use client"
 
 import { invoke } from "@tauri-apps/api/core"
-import { AudioLines, ClipboardCheck, History, LockKeyhole, Mic2, PictureInPicture2, Sparkles } from "lucide-react"
+import { AudioLines, ClipboardCheck, FolderOpen, History, LockKeyhole, Mic2, PictureInPicture2, Sparkles } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { useEffect, useState } from "react"
 import { Switch } from '@/components/ui/switch'
@@ -17,6 +17,8 @@ export function DictationSettings() {
   const [status, setStatus] = useState<ShortcutStatus | null>(null)
   const [overlayEnabled, setOverlayEnabled] = useState<boolean | null>(null)
   const [savingOverlay, setSavingOverlay] = useState(false)
+  const [openingDiagnostics, setOpeningDiagnostics] = useState(false)
+  const [diagnosticsError, setDiagnosticsError] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -40,6 +42,18 @@ export function DictationSettings() {
       setError(`Could not update the floating overlay: ${String(cause)}`)
     } finally {
       setSavingOverlay(false)
+    }
+  }
+
+  const openDiagnostics = async () => {
+    setOpeningDiagnostics(true)
+    setDiagnosticsError(null)
+    try {
+      await invoke('open_diagnostics_folder')
+    } catch (cause) {
+      setDiagnosticsError(`Could not open diagnostics: ${String(cause)}`)
+    } finally {
+      setOpeningDiagnostics(false)
     }
   }
 
@@ -119,6 +133,20 @@ export function DictationSettings() {
           >
             Open dictation history
           </button>
+        </section>
+        <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+          <FolderOpen className="h-5 w-5 text-indigo-600" />
+          <h3 className="mt-3 font-semibold text-gray-900">Diagnostics</h3>
+          <p className="mt-1 text-sm leading-6 text-gray-600">Open the privacy-filtered support logs. PulseTalk keeps one active 1 MB file and four rotated archives.</p>
+          <button
+            onClick={openDiagnostics}
+            disabled={openingDiagnostics}
+            aria-busy={openingDiagnostics}
+            className="mt-4 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-800 transition hover:bg-gray-50 disabled:cursor-wait disabled:opacity-60"
+          >
+            {openingDiagnostics ? 'Opening…' : 'Open diagnostics folder'}
+          </button>
+          {diagnosticsError && <p className="mt-3 text-sm text-red-600" role="alert">{diagnosticsError}</p>}
         </section>
       </div>
     </div>
