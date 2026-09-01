@@ -1,8 +1,8 @@
 import React from "react";
-import Image from "next/image";
 import { Dialog, DialogContent, DialogTitle, DialogTrigger } from "./ui/dialog";
 import { VisuallyHidden } from "./ui/visually-hidden";
 import { About } from "./About";
+import { PulseTalkMark } from "./PulseTalkMark";
 
 interface LogoProps {
     isCollapsed: boolean;
@@ -14,12 +14,13 @@ const Logo = React.forwardRef<HTMLButtonElement, LogoProps>(({ isCollapsed }, re
       {isCollapsed ? (
         <DialogTrigger asChild>
           <button ref={ref} className="flex items-center justify-start mb-2 cursor-pointer bg-transparent border-none p-0 hover:opacity-80 transition-opacity">
-            <Image src="/logo-collapsed.png" alt="Logo" width={40} height={32} />
+            <PulseTalkMark className="h-9 w-9 text-[#526de8]" />
           </button>
         </DialogTrigger>
       ) : (
         <DialogTrigger asChild>
-          <span className="text-lg text-center border rounded-full bg-blue-50 border-white font-semibold text-gray-700 mb-2 block items-center cursor-pointer hover:opacity-80 transition-opacity">
+          <span className="mb-3 flex cursor-pointer items-center gap-2 rounded-xl border border-[#dfe4ef] bg-white px-3 py-2 text-left text-lg font-semibold text-[#1f2933] transition-opacity hover:opacity-80">
+            <PulseTalkMark className="h-8 w-8 text-[#526de8]" />
             <span>PulseTalk</span>
           </span>
         </DialogTrigger>

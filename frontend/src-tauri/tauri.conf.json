@@ -107,9 +107,9 @@
         ],
         "createUpdaterArtifacts": true,
         "icon": [
-            "icons/icon.png",
-            "icons/app_icon.icns",
-            "icons/app_icon.ico"
+            "icons/pulsetalk-icon.png",
+            "icons/pulsetalk-icon.icns",
+            "icons/pulsetalk-icon.ico"
         ],
         "resources": [
             "templates/*.json"
