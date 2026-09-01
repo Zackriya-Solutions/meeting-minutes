@@ -60,8 +60,8 @@ pub async fn save_session(
         r#"
         INSERT INTO dictation_sessions (
             id, phase, raw_text, final_text, failure_code, failure_message,
-            retryable, started_at, updated_at, completed_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            retryable, target_process, started_at, updated_at, completed_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
             phase = excluded.phase,
             raw_text = excluded.raw_text,
@@ -69,6 +69,7 @@ pub async fn save_session(
             failure_code = excluded.failure_code,
             failure_message = excluded.failure_message,
             retryable = excluded.retryable,
+            target_process = excluded.target_process,
             updated_at = excluded.updated_at,
             completed_at = excluded.completed_at
         "#,
@@ -80,6 +81,7 @@ pub async fn save_session(
     .bind(failure_code)
     .bind(failure_message)
     .bind(retryable)
+    .bind(session.target_process.as_deref())
     .bind(session.started_at)
     .bind(session.updated_at)
     .bind(session.phase.is_terminal().then_some(session.updated_at))

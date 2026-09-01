@@ -25,4 +25,4 @@ pub use session::{
 };
 pub use short_audio::{ShortAudioCapture, ShortAudioError};
 #[cfg(target_os = "windows")]
-pub use windows_delivery::{WindowsClipboard, WindowsPaste};
+pub use windows_delivery::{WindowsClipboard, WindowsPaste, WindowsTarget};

@@ -13,6 +13,8 @@ struct ActiveCapture {
     session: DictationSession,
     stop: mpsc::Sender<()>,
     worker: JoinHandle<Result<Vec<f32>, super::ShortAudioError>>,
+    #[cfg(target_os = "windows")]
+    target: Result<super::WindowsTarget, String>,
 }
 
 pub fn start_coordinator(app: AppHandle) {
@@ -22,7 +24,18 @@ pub fn start_coordinator(app: AppHandle) {
         while let Ok(event) = activations.recv().await {
             match event {
                 ActivationEvent::Started if active.is_none() => {
-                    let session = DictationSession::begin(Utc::now());
+                    let mut session = DictationSession::begin(Utc::now());
+                    #[cfg(target_os = "windows")]
+                    let target = super::WindowsTarget::capture().map_err(|error| {
+                        log::warn!(
+                            "dictation_target_capture_failed code=target_lost error={error}"
+                        );
+                        error.to_string()
+                    });
+                    #[cfg(target_os = "windows")]
+                    if let Ok(target) = target.as_ref() {
+                        session.record_target_process(target.process_label());
+                    }
                     let (stop, stop_receiver) = mpsc::channel();
                     let worker = std::thread::spawn(move || {
                         let capture = ShortAudioCapture::start()?;
@@ -36,6 +49,8 @@ pub fn start_coordinator(app: AppHandle) {
                         session,
                         stop,
                         worker,
+                        #[cfg(target_os = "windows")]
+                        target,
                     });
                 }
                 ActivationEvent::Stopped => {
@@ -77,6 +92,8 @@ async fn finish_dictation(app: &AppHandle, capture: ActiveCapture) {
         mut session,
         stop,
         worker,
+        #[cfg(target_os = "windows")]
+        target,
     } = capture;
     if let Err(error) = session.transition(DictationPhase::Transcribing, Utc::now()) {
         log::error!("dictation_transition_failed code=internal error={error}");
@@ -161,13 +178,15 @@ async fn finish_dictation(app: &AppHandle, capture: ActiveCapture) {
     let delivery = {
         let text = session.final_text.clone().unwrap_or_default();
         tauri::async_runtime::spawn_blocking(move || {
+            let target = target.map_err(|error| format!("TargetLost: {error}"))?;
             let mut clipboard = super::WindowsClipboard;
-            let mut paste = super::WindowsPaste::default();
+            let mut paste = super::WindowsPaste::for_target(target);
             super::deliver_text(&mut clipboard, &mut paste, &text)
+                .map_err(|error| error.to_string())
         })
         .await
         .map_err(|error| error.to_string())
-        .and_then(|result| result.map_err(|error| error.to_string()))
+        .and_then(|result| result)
     };
 
     #[cfg(not(target_os = "windows"))]
@@ -181,14 +200,16 @@ async fn finish_dictation(app: &AppHandle, capture: ActiveCapture) {
             log::info!("dictation_completed session_id={}", session.id);
         }
         Err(error) => {
-            fail_and_persist(
-                app,
-                &mut session,
-                DictationFailureCode::DeliveryFailed,
-                error,
-                true,
-            )
-            .await;
+            let code = if error.contains("ElevatedTarget") {
+                DictationFailureCode::ElevatedTarget
+            } else if error.contains("SecureTarget") {
+                DictationFailureCode::SecureTarget
+            } else if error.contains("ForegroundTarget") || error.starts_with("TargetLost:") {
+                DictationFailureCode::TargetLost
+            } else {
+                DictationFailureCode::DeliveryFailed
+            };
+            fail_and_persist(app, &mut session, code, error, true).await;
         }
     }
 }

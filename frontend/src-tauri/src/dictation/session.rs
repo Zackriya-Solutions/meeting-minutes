@@ -74,6 +74,7 @@ pub struct DictationSession {
     pub updated_at: DateTime<Utc>,
     pub raw_text: Option<String>,
     pub final_text: Option<String>,
+    pub target_process: Option<String>,
     pub failure: Option<DictationFailure>,
 }
 
@@ -86,6 +87,7 @@ impl DictationSession {
             updated_at: now,
             raw_text: None,
             final_text: None,
+            target_process: None,
             failure: None,
         }
     }
@@ -109,6 +111,10 @@ impl DictationSession {
 
     pub fn record_transcript(&mut self, text: String) {
         self.raw_text = Some(text);
+    }
+
+    pub fn record_target_process(&mut self, target_process: String) {
+        self.target_process = Some(target_process);
     }
 
     pub fn record_cleaned_text(&mut self, text: String) {
