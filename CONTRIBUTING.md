@@ -1,6 +1,6 @@
-# Contributing to Meeting Minutes Updates
+# Contributing to PulseTalk
 
-Thank you for your interest in contributing to Meetily! This document provides guidelines and instructions for contributing to this project.
+Thank you for contributing to PulseTalk. This document covers the local development workflow. See [Keeping PulseTalk up to date](docs/UPSTREAM_SYNC.md) for the fork and upstream sync process.
 
 ## Development Workflow
 
@@ -12,25 +12,24 @@ Thank you for your interest in contributing to Meetily! This document provides g
 
 ### Getting Started
 
-1. Fork the repository
-2. Clone your fork:
+1. Clone the PulseTalk repository:
    ```bash
-   git clone https://github.com/YOUR_USERNAME/meeting-minutes.git
+   git clone https://github.com/Qblaauw/PulseTalk.git
    ```
-3. Add the original repository as upstream:
+2. Add the original Meetily repository as upstream if it is not already configured:
    ```bash
-   git remote add upstream https://github.com/Zackriya-Solutions/meeting-minutes.git
+   git remote add upstream https://github.com/Zackriya-Solutions/meetily.git
    ```
-4. Create a new branch from `devtest`:
+3. Create a new branch from the current PulseTalk `main` branch:
    ```bash
-   git checkout devtest
-   git pull upstream devtest
-   git checkout -b feature/your-feature-name
+   git switch main
+   git pull --ff-only origin main
+   git switch -c feature/your-feature-name
    ```
 
 ### Development Process
 
-1. Always start your work from the `devtest` branch
+1. Always start your work from the current PulseTalk `main` branch
 2. Create a new branch for each feature/fix
 3. Make your changes
 4. Write or update tests as needed
@@ -52,7 +51,7 @@ Before starting work on a new feature or bug fix:
 
 ### Pull Request Process
 
-1. Create a PR from your feature branch to `devtest`
+1. Create a PR from your feature branch to PulseTalk `main`
 2. Link the PR to the related issue using the issue number (e.g., "Fixes #123")
 3. Fill out the PR template completely
 4. Ensure CI checks pass
@@ -138,7 +137,7 @@ Types:
 
 1. PRs require at least one review
 2. Address all review comments
-3. Keep the PR up to date with `devtest`
+3. Keep the PR up to date with PulseTalk `main`
 4. Squash commits if requested
 
 ## Getting Help
@@ -149,4 +148,4 @@ Types:
 
 ## License
 
-By contributing, you agree that your contributions will be licensed under the project's MIT License. 
+By contributing, you agree that your contributions will be licensed under the project's MIT License.
