@@ -41,6 +41,7 @@ pub mod audio;
 pub mod config;
 pub mod console_utils;
 pub mod database;
+mod diagnostics;
 pub mod dictation;
 pub mod notifications;
 pub mod ollama;
@@ -396,7 +397,8 @@ pub fn run() {
                 tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
                 tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir {
                     file_name: Some("PulseTalk".to_string()),
-                }),
+                })
+                .filter(diagnostics::should_persist),
             ])
             .level(log::LevelFilter::Info)
             .max_file_size(1_000_000)
@@ -422,7 +424,11 @@ pub fn run() {
                         ShortcutState::Pressed => dictation::ActivationEvent::Started,
                         ShortcutState::Released => dictation::ActivationEvent::Stopped,
                     };
-                    log::info!("dictation_activation_received state={:?}", event);
+                    log::info!(
+                        target: "pulsetalk::dictation",
+                        "dictation_activation_received state={:?}",
+                        event
+                    );
                     shortcut_bus.publish(event);
                 })
                 .build(),
@@ -458,7 +464,7 @@ pub fn run() {
         .manage(audio::init_system_audio_state())
         .manage(summary::summary_engine::ModelManagerState(Arc::new(tokio::sync::Mutex::new(None))))
         .setup(|_app| {
-            log::info!("Application setup complete");
+            log::info!(target: "pulsetalk::lifecycle", "Application setup complete");
 
             #[cfg(any(target_os = "macos", windows, target_os = "linux"))]
             {
@@ -492,6 +498,7 @@ pub fn run() {
                                 .state::<dictation::DictationShortcutStatusState>()
                                 .registered(label);
                             log::info!(
+                                target: "pulsetalk::dictation",
                                 "dictation_shortcut_registered shortcut={}",
                                 label
                             );
@@ -499,6 +506,7 @@ pub fn run() {
                             break;
                         }
                         Err(error) => log::warn!(
+                            target: "pulsetalk::dictation",
                             "dictation_shortcut_registration_failed code=shortcut_unavailable shortcut={} error={}",
                             label,
                             error
@@ -510,6 +518,7 @@ pub fn run() {
                         .state::<dictation::DictationShortcutStatusState>()
                         .unavailable();
                     log::error!(
+                        target: "pulsetalk::dictation",
                         "dictation_activation_disabled code=shortcut_unavailable candidate_count={}",
                         shortcut_candidates.len()
                     );

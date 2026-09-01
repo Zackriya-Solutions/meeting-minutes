@@ -15,7 +15,7 @@ Updated: 2026-09-01
 - The acceptance desktop exposes two 2560×1440 monitors at x=0 and x=2560. Focused-control rectangle and monitor-boundary tests pass; spoken activation on a text field on each display remains in the manual matrix.
 - Dictation history loads on entry, polls every five seconds only while visible, refreshes when the window becomes visible again, and prevents overlapping requests. No manual refresh is required.
 - The inherited meeting transcript listener retries three times, disposes listeners that finish setup after unmount, and logs `meeting_transcript_listener_setup_failed` with attempt and retry state. Exhausted retries use a non-blocking toast; they no longer open a modal alert or disable dictation.
-- Release diagnostics now persist to `%LOCALAPPDATA%\com.meetily.ai\logs\PulseTalk.log` instead of disappearing with the Windows GUI process. The active file is limited to 1 MB and four rotated archives are retained. A packaged-release launch created an 8.8 KB log containing `Application setup complete` and `dictation_shortcut_registered shortcut=Ctrl+Shift+Space`.
+- Release diagnostics now persist to `%LOCALAPPDATA%\com.meetily.ai\logs\PulseTalk.log` instead of disappearing with the Windows GUI process. The active file is limited to 1 MB and four rotated archives are retained. The file target accepts only explicit PulseTalk lifecycle and dictation records; inherited meeting, profile, notification, summary, and HTTP modules remain available on development stdout but are excluded from the support log. A packaged-release launch appended exactly 185 bytes: `Application setup complete` and `dictation_shortcut_registered shortcut=Ctrl+Shift+Space`.
 - Dictation now enters the `cleaning` phase after local transcription. The offline cleanup removes English hesitation fillers and repairs whitespace and punctuation spacing within a 150 ms budget; explicit non-English selections retain their words.
 - Cleanup timeout, failure, or empty output returns the exact raw transcript. Stable `dictation_cleanup_raw_fallback` logs record the session ID and reason without recording spoken text.
 - A live hold/release capture reached the configured local Parakeet model, saved history before delivery, and pasted a transcript successfully.
@@ -65,5 +65,5 @@ For each target:
 ## Current local package
 
 - Installer: `target/release/bundle/nsis/PulseTalk_0.4.0_x64-setup.exe`
-- Size: `43,578,391 bytes`
-- SHA-256: `901F29162B7D65DF5DDBDCA729EA4FFD91D3AF6B72096D629EB34F65C7A1ACAC`
+- Size: `43,572,152 bytes`
+- SHA-256: `BFCD5662D7787B010566AC6EE57257F99E2DFAC9B0508B4D3E5DBBD6FE9D7EE3`

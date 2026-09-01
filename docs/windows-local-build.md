@@ -22,6 +22,6 @@ Release diagnostics are written to:
 %LOCALAPPDATA%\com.meetily.ai\logs\PulseTalk.log
 ```
 
-The active log is capped at 1 MB and PulseTalk retains four rotated archives. Dictation failures use stable codes such as `audio_capture_failed`, `target_lost`, `delivery_failed`, and `persistence_failed` so a failed session can be matched to its history entry without logging spoken text.
+The active log is capped at 1 MB and PulseTalk retains four rotated archives. Only explicit PulseTalk lifecycle and dictation targets are written to disk; inherited meeting, profile, notification, summary, and HTTP logs are excluded. Dictation failures use stable codes such as `audio_capture_failed`, `target_lost`, `delivery_failed`, and `persistence_failed` so a failed session can be matched to its history entry without storing spoken text, credentials, profile details, or HTTP bodies in the support log.
 
 The application identifier remains `com.meetily.ai` deliberately. That preserves existing Meetily application data, downloaded transcription models, and database migrations while PulseTalk changes remain isolated on the feature branch for future upstream merges.

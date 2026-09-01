@@ -214,8 +214,7 @@ async fn get_auth_token<R: Runtime>(app: &AppHandle<R>) -> Option<String> {
     match store.get("authToken") {
         Some(token) => {
             if let Some(token_str) = token.as_str() {
-                let truncated = token_str.chars().take(20).collect::<String>();
-                log_info!("Found auth token: {}", truncated);
+                log_info!("Auth token found");
                 Some(token_str.to_string())
             } else {
                 log_warn!("Auth token is not a string");
@@ -294,9 +293,12 @@ async fn make_api_request<R: Runtime, T: for<'de> Deserialize<'de>>(
             .text()
             .await
             .unwrap_or_else(|_| "Unknown error".to_string());
-        let error_msg = format!("HTTP {}: {}", status, error_text);
-        log_error!("{}", error_msg);
-        return Err(error_msg);
+        log_error!(
+            "HTTP request failed status={} response_chars={}",
+            status,
+            error_text.chars().count()
+        );
+        return Err(format!("HTTP request failed with status {}", status));
     }
 
     let response_text = response.text().await.map_err(|e| {
@@ -305,9 +307,10 @@ async fn make_api_request<R: Runtime, T: for<'de> Deserialize<'de>>(
         error_msg
     })?;
 
-    // Safely truncate response for logging, respecting UTF-8 character boundaries
-    let truncated = response_text.chars().take(200).collect::<String>();
-    log_info!("Response body: {}", truncated);
+    log_info!(
+        "Response received chars={}",
+        response_text.chars().count()
+    );
 
     serde_json::from_str(&response_text).map_err(|e| {
         let error_msg = format!("Failed to parse JSON: {}", e);
@@ -394,8 +397,7 @@ pub async fn api_get_profile<R: Runtime>(
     auth_token: Option<String>,
 ) -> Result<Profile, String> {
     log_info!(
-        "api_get_profile called for email: {}, auth_token: {}",
-        email,
+        "api_get_profile called with auth_token: {}",
         auth_token.is_some()
     );
 
@@ -414,8 +416,7 @@ pub async fn api_save_profile<R: Runtime>(
     auth_token: Option<String>,
 ) -> Result<serde_json::Value, String> {
     log_info!(
-        "api_save_profile called for email: {}, auth_token: {}",
-        email,
+        "api_save_profile called with auth_token: {}",
         auth_token.is_some()
     );
 
@@ -443,8 +444,7 @@ pub async fn api_update_profile<R: Runtime>(
     auth_token: Option<String>,
 ) -> Result<serde_json::Value, String> {
     log_info!(
-        "api_update_profile called for email: {}, auth_token: {}",
-        email,
+        "api_update_profile called with auth_token: {}",
         auth_token.is_some()
     );
 
@@ -1178,9 +1178,10 @@ pub async fn api_save_custom_openai_config<R: Runtime>(
     top_p: Option<f32>,
 ) -> Result<serde_json::Value, String> {
     log_info!(
-        "api_save_custom_openai_config called: endpoint='{}', model='{}'",
-        &endpoint,
-        &model
+        "api_save_custom_openai_config called endpoint_chars={} model_chars={} api_key_present={}",
+        endpoint.chars().count(),
+        model.chars().count(),
+        api_key.as_ref().is_some_and(|key| !key.trim().is_empty())
     );
 
     // Validate required fields
@@ -1226,7 +1227,7 @@ pub async fn api_save_custom_openai_config<R: Runtime>(
 
     match SettingsRepository::save_custom_openai_config(pool, &config).await {
         Ok(()) => {
-            log_info!("✅ Successfully saved custom OpenAI config for endpoint: {}", config.endpoint);
+            log_info!("✅ Successfully saved custom OpenAI config");
             Ok(serde_json::json!({
                 "status": "success",
                 "message": "Custom OpenAI configuration saved successfully"
@@ -1251,9 +1252,8 @@ pub async fn api_get_custom_openai_config<R: Runtime>(
 
     match SettingsRepository::get_custom_openai_config(pool).await {
         Ok(config) => {
-            if let Some(ref c) = config {
-                log_info!("✅ Found custom OpenAI config: endpoint='{}', model='{}'",
-                    c.endpoint, c.model);
+            if config.is_some() {
+                log_info!("✅ Found custom OpenAI config");
             } else {
                 log_info!("No custom OpenAI config found");
             }
@@ -1276,9 +1276,10 @@ pub async fn api_test_custom_openai_connection<R: Runtime>(
     model: String,
 ) -> Result<serde_json::Value, String> {
     log_info!(
-        "api_test_custom_openai_connection called: endpoint='{}', model='{}'",
-        &endpoint,
-        &model
+        "api_test_custom_openai_connection called endpoint_chars={} model_chars={} api_key_present={}",
+        endpoint.chars().count(),
+        model.chars().count(),
+        api_key.as_ref().is_some_and(|key| !key.trim().is_empty())
     );
 
     // Validate endpoint URL format
@@ -1354,7 +1355,10 @@ pub async fn api_test_custom_openai_connection<R: Runtime>(
                         }
 
                         // Response was 200 but doesn't match OpenAI format
-                        log_warn!("⚠️ Endpoint returned 200 but response doesn't match OpenAI format: {}", response_text);
+                        log_warn!(
+                            "⚠️ Endpoint returned 200 but response doesn't match OpenAI format response_chars={}",
+                            response_text.chars().count()
+                        );
                         Err("Endpoint is reachable but doesn't appear to be OpenAI-compatible. Response is missing 'choices' array or 'message.content' / 'message.reasoning_content' field.".to_string())
                     }
                     Err(e) => {
@@ -1363,7 +1367,11 @@ pub async fn api_test_custom_openai_connection<R: Runtime>(
                     }
                 }
             } else {
-                log_warn!("⚠️ Custom OpenAI connection test failed with status {}: {}", status, response_text);
+                log_warn!(
+                    "⚠️ Custom OpenAI connection test failed status={} response_chars={}",
+                    status,
+                    response_text.chars().count()
+                );
                 Err(format!("Connection failed with status {}: {}", status, response_text))
             }
         }
