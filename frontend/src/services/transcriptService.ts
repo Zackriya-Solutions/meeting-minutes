@@ -66,6 +66,12 @@ export class TranscriptService {
     });
   }
 
+  async onTranslationError(callback: (error: string) => void): Promise<UnlistenFn> {
+    return listen<string>('translation-error', (event) => {
+      callback(event.payload);
+    });
+  }
+
   /**
    * Listen for transcription-complete event
    * @param callback - Function to call when transcription processing is complete

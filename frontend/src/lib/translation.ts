@@ -10,7 +10,7 @@ export interface TranslationSettings {
 }
 
 export const DEFAULT_TARGET_LANGUAGE = 'pt-BR';
-export const DEFAULT_LIBRETRANSLATE_ENDPOINT = 'http://otaviolab:5000';
+export const DEFAULT_LIBRETRANSLATE_ENDPOINT = '';
 export const DEFAULT_OLLAMA_ENDPOINT = 'http://localhost:11434';
 export const DEFAULT_OLLAMA_MODEL = 'aya-expanse:latest';
 

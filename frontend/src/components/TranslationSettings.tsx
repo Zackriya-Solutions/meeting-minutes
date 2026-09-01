@@ -51,7 +51,7 @@ export function TranslationSettings() {
             value={draft.libretranslateEndpoint}
             onChange={event => setDraft({ ...draft, libretranslateEndpoint: event.target.value })}
             className="mt-1 block h-10 w-full rounded-md border border-gray-300 px-3"
-            placeholder="http://otaviolab:5000"
+            placeholder="http://localhost:5000"
           />
         </label>
         <label className="text-sm text-gray-700">

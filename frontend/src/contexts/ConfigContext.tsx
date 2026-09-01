@@ -4,6 +4,7 @@ import React, { createContext, useContext, useState, useEffect, useCallback, use
 import { TranscriptModelProps } from '@/components/TranscriptSettings';
 import { SelectedDevices } from '@/components/DeviceSelection';
 import { configService, ModelConfig } from '@/services/configService';
+import { recordingService } from '@/services/recordingService';
 import { invoke } from '@tauri-apps/api/core';
 import Analytics from '@/lib/analytics';
 import { BetaFeatures, BetaFeatureKey, loadBetaFeatures, saveBetaFeatures } from '@/types/betaFeatures';
@@ -231,8 +232,36 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     invoke<TranslationSettings>('api_get_translation_settings')
       .then(settings => {
         setTranslationSettingsState(settings);
+        setTranslationEnabledState(settings.enabled);
       })
       .catch(error => console.error('[ConfigContext] Failed to load translation settings:', error));
+  }, []);
+
+  // Refresh the persisted live-translation state for every new recording.
+  // ConfigProvider outlives recording sessions, so the session start event is
+  // the authoritative boundary for resetting the switch.
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let disposed = false;
+    recordingService.onRecordingStarted(async () => {
+      try {
+        const settings = await invoke<TranslationSettings>('api_get_translation_settings');
+        setTranslationSettingsState(settings);
+        setTranslationEnabledState(settings.enabled);
+      } catch (error) {
+        console.error('[ConfigContext] Failed to refresh translation settings:', error);
+      }
+    }).then(listener => {
+      if (disposed) {
+        listener();
+      } else {
+        unlisten = listener;
+      }
+    }).catch(error => console.error('[ConfigContext] Failed to listen for recording start:', error));
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
   }, []);
 
   // Sync language preference to Rust on mount (fixes startup desync bug)
@@ -497,12 +526,16 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
   const setTranslationSettings = useCallback(async (settings: TranslationSettings) => {
     await invoke('api_save_translation_settings', { settings });
     setTranslationSettingsState(settings);
+    setTranslationEnabledState(settings.enabled);
   }, []);
 
   const setTranslationEnabled = useCallback(async (enabled: boolean) => {
+    const next = { ...translationSettings, enabled };
+    await invoke('api_save_translation_settings', { settings: next });
     await invoke('set_translation_enabled', { enabled });
+    setTranslationSettingsState(next);
     setTranslationEnabledState(enabled);
-  }, []);
+  }, [translationSettings]);
 
   const setTranslationTarget = useCallback(async (targetLanguage: string) => {
     const next = { ...translationSettings, targetLanguage };

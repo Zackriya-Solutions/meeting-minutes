@@ -200,6 +200,7 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let unlistenFn: (() => void) | undefined;
     let unlistenTranslationFn: (() => void) | undefined;
+    let unlistenTranslationErrorFn: (() => void) | undefined;
     let transcriptCounter = 0;
     let transcriptBuffer = new Map<number, Transcript>();
     let lastProcessedSequence = 0;
@@ -373,6 +374,9 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
               .catch(err => console.warn('IndexedDB translation update failed:', err));
           }
         });
+        unlistenTranslationErrorFn = await transcriptService.onTranslationError((error) => {
+          toast.error('Live translation unavailable', { description: error });
+        });
         console.log('✅ MAIN transcript listener setup complete');
       } catch (error) {
         console.error('❌ Failed to setup MAIN transcript listener:', error);
@@ -394,6 +398,7 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
         console.log('🧹 CLEANUP: MAIN transcript listener cleaned up');
       }
       unlistenTranslationFn?.();
+      unlistenTranslationErrorFn?.();
     };
   }, [currentMeetingId]); // Add currentMeetingId dependency
 

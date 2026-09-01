@@ -12,6 +12,7 @@ import { usePermissionCheck } from '@/hooks/usePermissionCheck';
 import { ModalType } from '@/hooks/useModalState';
 import { useIsLinux } from '@/hooks/usePlatform';
 import { useMemo } from 'react';
+import { toast } from 'sonner';
 
 /**
  * TranscriptPanel Component
@@ -105,6 +106,7 @@ export function TranscriptPanel({
                   checked={translationEnabled}
                   onCheckedChange={checked => {
                     setTranslationEnabled(checked).catch(error => {
+                      toast.error('Could not change live translation', { description: String(error) });
                       console.error('Failed to toggle live translation:', error);
                     });
                   }}

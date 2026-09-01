@@ -1005,12 +1005,11 @@ pub async fn api_save_translation_settings<R: Runtime>(
     state: tauri::State<'_, AppState>,
     settings: TranslationSettings,
 ) -> Result<(), String> {
-    if settings.libretranslate_endpoint.trim().is_empty()
-        || settings.ollama_endpoint.trim().is_empty()
+    if settings.ollama_endpoint.trim().is_empty()
         || settings.ollama_model.trim().is_empty()
         || settings.target_language.trim().is_empty()
     {
-        return Err("Translation endpoints, model, and target language are required".to_string());
+        return Err("Ollama endpoint, model, and target language are required".to_string());
     }
     translation::save_settings(state.db_manager.pool(), &settings)
         .await

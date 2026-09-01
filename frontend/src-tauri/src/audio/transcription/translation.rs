@@ -10,7 +10,7 @@ use tokio::sync::{mpsc, RwLock};
 use tokio::task::JoinHandle;
 
 pub const DEFAULT_TARGET_LANGUAGE: &str = "pt-BR";
-pub const DEFAULT_LIBRETRANSLATE_ENDPOINT: &str = "http://otaviolab:5000";
+pub const DEFAULT_LIBRETRANSLATE_ENDPOINT: &str = "";
 pub const DEFAULT_OLLAMA_ENDPOINT: &str = "http://localhost:11434";
 pub const DEFAULT_OLLAMA_MODEL: &str = "aya-expanse:latest";
 const TRANSLATION_QUEUE_CAPACITY: usize = 32;
@@ -75,17 +75,17 @@ struct TranslationSettingsRow {
     translation_target_language: String,
     #[sqlx(rename = "translationLibreTranslateEndpoint")]
     translation_libretranslate_endpoint: String,
+    #[sqlx(rename = "translationOllamaEndpoint")]
+    translation_ollama_endpoint: String,
     #[sqlx(rename = "translationOllamaModel")]
     translation_ollama_model: String,
-    #[sqlx(rename = "ollamaEndpoint")]
-    ollama_endpoint: Option<String>,
 }
 
 pub async fn load_settings(pool: &SqlitePool) -> Result<TranslationSettings> {
     let row = sqlx::query_as::<_, TranslationSettingsRow>(
         "SELECT translationEnabled, translationEngine, translationTargetLanguage,
-                translationLibreTranslateEndpoint, translationOllamaModel, ollamaEndpoint
-         FROM settings LIMIT 1",
+                translationLibreTranslateEndpoint, translationOllamaEndpoint, translationOllamaModel
+         FROM translation_settings LIMIT 1",
     )
     .fetch_optional(pool)
     .await?;
@@ -107,10 +107,11 @@ pub async fn load_settings(pool: &SqlitePool) -> Result<TranslationSettings> {
         } else {
             row.translation_libretranslate_endpoint
         },
-        ollama_endpoint: row
-            .ollama_endpoint
-            .filter(|endpoint| !endpoint.trim().is_empty())
-            .unwrap_or_else(|| DEFAULT_OLLAMA_ENDPOINT.to_string()),
+        ollama_endpoint: if row.translation_ollama_endpoint.trim().is_empty() {
+            DEFAULT_OLLAMA_ENDPOINT.to_string()
+        } else {
+            row.translation_ollama_endpoint
+        },
         ollama_model: if row.translation_ollama_model.trim().is_empty() {
             DEFAULT_OLLAMA_MODEL.to_string()
         } else {
@@ -125,24 +126,23 @@ pub async fn save_settings(pool: &SqlitePool, settings: &TranslationSettings) ->
         .unwrap_or("ollama")
         .to_string();
     sqlx::query(
-        "INSERT INTO settings
-            (id, provider, model, whisperModel, ollamaEndpoint, translationEnabled,
-             translationEngine, translationTargetLanguage, translationLibreTranslateEndpoint,
-             translationOllamaModel)
-         VALUES ('1', 'ollama', 'llama3.2:latest', 'large-v3', ?, ?, ?, ?, ?, ?)
+        "INSERT INTO translation_settings
+            (id, translationEnabled, translationEngine, translationTargetLanguage,
+             translationLibreTranslateEndpoint, translationOllamaEndpoint, translationOllamaModel)
+         VALUES ('1', ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
-             ollamaEndpoint = excluded.ollamaEndpoint,
              translationEnabled = excluded.translationEnabled,
              translationEngine = excluded.translationEngine,
              translationTargetLanguage = excluded.translationTargetLanguage,
              translationLibreTranslateEndpoint = excluded.translationLibreTranslateEndpoint,
+             translationOllamaEndpoint = excluded.translationOllamaEndpoint,
              translationOllamaModel = excluded.translationOllamaModel",
     )
-    .bind(&settings.ollama_endpoint)
     .bind(if settings.enabled { 1_i64 } else { 0_i64 })
     .bind(engine)
     .bind(&settings.target_language)
     .bind(&settings.libretranslate_endpoint)
+    .bind(&settings.ollama_endpoint)
     .bind(&settings.ollama_model)
     .execute(pool)
     .await?;
@@ -380,7 +380,13 @@ impl TranslationSession {
     async fn from_settings<R: Runtime>(app: &AppHandle<R>) -> Result<Arc<Self>> {
         let settings =
             load_settings(app.state::<crate::state::AppState>().db_manager.pool()).await?;
-        let adapter = match settings.engine {
+        let engine = settings.engine.clone();
+        if matches!(engine, TranslationEngineKind::Libretranslate)
+            && settings.libretranslate_endpoint.trim().is_empty()
+        {
+            return Err(anyhow!("LibreTranslate endpoint is not configured"));
+        }
+        let adapter = match engine {
             TranslationEngineKind::Libretranslate => TranslationAdapter::Libretranslate {
                 endpoint: settings.libretranslate_endpoint,
             },
@@ -395,7 +401,7 @@ impl TranslationSession {
             .take_receiver()
             .ok_or_else(|| anyhow!("translation queue receiver already taken"))?;
         let session = Arc::new(Self {
-            enabled: std::sync::atomic::AtomicBool::new(false),
+            enabled: std::sync::atomic::AtomicBool::new(settings.enabled),
             target_language: RwLock::new(settings.target_language),
             queue,
             adapter,
@@ -436,11 +442,21 @@ impl TranslationSession {
         self.queue.route(self.is_enabled(), true, job)
     }
 
-    async fn close_and_wait(&self) {
+    async fn close_and_wait(&self, timeout_duration: Duration) {
         self.queue.close();
         let handle = self.worker.lock().ok().and_then(|mut worker| worker.take());
-        if let Some(handle) = handle {
-            let _ = handle.await;
+        if let Some(mut handle) = handle {
+            if tokio::time::timeout(timeout_duration, &mut handle)
+                .await
+                .is_err()
+            {
+                warn!(
+                    "Translation drain exceeded {:?}; aborting pending work",
+                    timeout_duration
+                );
+                handle.abort();
+                let _ = handle.await;
+            }
         }
     }
 }
@@ -546,7 +562,7 @@ pub async fn finish_active_session() {
         .ok()
         .and_then(|mut guard| guard.take());
     if let Some(session) = session {
-        session.close_and_wait().await;
+        session.close_and_wait(Duration::from_secs(15)).await;
     }
 }
 
@@ -615,6 +631,60 @@ mod tests {
             parse_libretranslate_response(&json!({"translatedText": "Olá mundo"})).unwrap(),
             "Olá mundo"
         );
+    }
+
+    #[tokio::test]
+    async fn translation_settings_round_trip_keeps_summary_ollama_endpoint_isolated() {
+        let pool = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+        sqlx::query(
+            "INSERT INTO settings (id, provider, model, whisperModel, ollamaEndpoint)
+             VALUES ('1', 'ollama', 'summary-model', 'large-v3', 'http://summary:11434')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let settings = TranslationSettings {
+            enabled: true,
+            engine: TranslationEngineKind::Ollama,
+            target_language: "pt-BR".to_string(),
+            libretranslate_endpoint: String::new(),
+            ollama_endpoint: "http://translation:11434".to_string(),
+            ollama_model: "aya-expanse:latest".to_string(),
+        };
+        save_settings(&pool, &settings).await.unwrap();
+
+        let summary_endpoint: String =
+            sqlx::query_scalar("SELECT ollamaEndpoint FROM settings WHERE id = '1'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(summary_endpoint, "http://summary:11434");
+        let loaded = load_settings(&pool).await.unwrap();
+        assert!(loaded.enabled);
+        assert_eq!(loaded.ollama_endpoint, "http://translation:11434");
+        assert_eq!(loaded.ollama_model, "aya-expanse:latest");
+    }
+
+    #[tokio::test]
+    async fn saving_translation_settings_does_not_create_summary_defaults() {
+        let pool = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+        save_settings(&pool, &TranslationSettings::default())
+            .await
+            .unwrap();
+
+        let summary_rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM settings")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let translation_rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM translation_settings")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(summary_rows, 0);
+        assert_eq!(translation_rows, 1);
     }
 
     async fn mock_json_endpoint(
