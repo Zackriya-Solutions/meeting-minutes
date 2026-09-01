@@ -3,6 +3,15 @@ use std::fmt;
 use std::ptr;
 use std::thread;
 use std::time::Duration;
+use windows::Win32::Foundation::RPC_E_CHANGED_MODE;
+use windows::Win32::System::Com::{
+    CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED,
+};
+use windows::Win32::UI::Accessibility::{
+    CUIAutomation, IUIAutomation, IUIAutomationElement, IUIAutomationTextPattern,
+    TextPatternRangeEndpoint_End, TextPatternRangeEndpoint_Start, TextUnit_Character,
+    UIA_TextPatternId,
+};
 use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, GlobalFree, HANDLE, RECT};
 use windows_sys::Win32::Graphics::Gdi::{DeleteEnhMetaFile, DeleteMetaFile, DeleteObject};
 use windows_sys::Win32::Security::{
@@ -25,9 +34,12 @@ use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
     SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, VK_CONTROL, VK_V,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    GetForegroundWindow, GetGUIThreadInfo, GetWindowRect, GetWindowThreadProcessId, IsWindow,
-    GUITHREADINFO,
+    GetClassNameW, GetForegroundWindow, GetGUIThreadInfo, GetWindowRect, GetWindowThreadProcessId,
+    IsWindow, SendMessageTimeoutW, GUITHREADINFO, SMTO_ABORTIFHUNG,
 };
+
+const EM_GETSEL: u32 = 0x00B0;
+const EM_SETSEL: u32 = 0x00B1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WindowsDeliveryError {
@@ -154,12 +166,13 @@ impl fmt::Display for WindowsDeliveryError {
 
 impl std::error::Error for WindowsDeliveryError {}
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct WindowsTarget {
     hwnd: usize,
     process_id: u32,
     thread_id: u32,
     focused_hwnd: Option<usize>,
+    text_selection: Option<TextSelectionBookmark>,
 }
 
 impl WindowsTarget {
@@ -174,11 +187,28 @@ impl WindowsTarget {
             return Err(WindowsDeliveryError::last("GetWindowThreadProcessId"));
         }
         ensure_target_integrity(process_id)?;
+        let focused_hwnd = focused_control(thread_id);
+        let text_selection = match TextSelectionBookmark::capture(process_id, focused_hwnd) {
+            Ok(selection) => selection,
+            Err(error) => {
+                log::warn!(
+                    "dictation_selection_capture_unavailable code=selection_capture_unavailable error={error}"
+                );
+                None
+            }
+        };
+        if let Some(selection) = text_selection.as_ref() {
+            log::info!(
+                "dictation_selection_captured selected=true method={}",
+                selection.method()
+            );
+        }
         Ok(Self {
             hwnd: hwnd as usize,
             process_id,
             thread_id,
-            focused_hwnd: focused_control(thread_id),
+            focused_hwnd,
+            text_selection,
         })
     }
 
@@ -203,6 +233,300 @@ impl WindowsTarget {
             self.hwnd,
         )?;
         validate_focused_control(self.focused_hwnd, focused_control(self.thread_id))
+    }
+
+    fn restore_text_selection(&self) -> Result<(), WindowsDeliveryError> {
+        let Some(selection) = self.text_selection.as_ref() else {
+            return Ok(());
+        };
+        selection.restore().map_err(|error| {
+            log::warn!(
+                "dictation_selection_restore_failed code=selection_restore_failed error={error}"
+            );
+            WindowsDeliveryError::target("SelectionRestoreFailed")
+        })?;
+        log::info!(
+            "dictation_selection_restored selected=true method={}",
+            selection.method()
+        );
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct TextElementIdentity {
+    process_id: i32,
+    control_type: i32,
+    automation_id: String,
+    class_name: String,
+    bounds: (i32, i32, i32, i32),
+}
+
+impl TextElementIdentity {
+    fn capture(element: &IUIAutomationElement) -> Result<Self, String> {
+        let bounds = unsafe { element.CurrentBoundingRectangle() }
+            .map_err(|error| format!("CurrentBoundingRectangle: {error}"))?;
+        Ok(Self {
+            process_id: unsafe { element.CurrentProcessId() }
+                .map_err(|error| format!("CurrentProcessId: {error}"))?,
+            control_type: unsafe { element.CurrentControlType() }
+                .map_err(|error| format!("CurrentControlType: {error}"))?
+                .0,
+            automation_id: unsafe { element.CurrentAutomationId() }
+                .map_err(|error| format!("CurrentAutomationId: {error}"))?
+                .to_string(),
+            class_name: unsafe { element.CurrentClassName() }
+                .map_err(|error| format!("CurrentClassName: {error}"))?
+                .to_string(),
+            bounds: (bounds.left, bounds.top, bounds.right, bounds.bottom),
+        })
+    }
+
+    fn matches(&self, current: &Self) -> bool {
+        self.process_id == current.process_id
+            && self.control_type == current.control_type
+            && self.automation_id == current.automation_id
+            && self.class_name == current.class_name
+            && self.bounds == current.bounds
+    }
+}
+
+#[derive(Debug, Clone)]
+enum TextSelectionBookmark {
+    NativeEdit { hwnd: usize, start: u32, end: u32 },
+    UiAutomation(UiAutomationSelectionBookmark),
+}
+
+impl TextSelectionBookmark {
+    fn capture(
+        target_process_id: u32,
+        focused_hwnd: Option<usize>,
+    ) -> Result<Option<Self>, String> {
+        if let Some(selection) = focused_hwnd.and_then(Self::capture_native_edit) {
+            return Ok(Some(selection));
+        }
+        UiAutomationSelectionBookmark::capture(target_process_id)
+            .map(|selection| selection.map(Self::UiAutomation))
+    }
+
+    fn capture_native_edit(hwnd: usize) -> Option<Self> {
+        let hwnd_pointer = hwnd as *mut std::ffi::c_void;
+        let mut class_name = [0_u16; 128];
+        let copied = unsafe {
+            GetClassNameW(
+                hwnd_pointer,
+                class_name.as_mut_ptr(),
+                class_name.len() as i32,
+            )
+        };
+        if copied <= 0 {
+            return None;
+        }
+        let class_name = String::from_utf16_lossy(&class_name[..copied as usize]).to_lowercase();
+        if !class_name.contains("edit") {
+            return None;
+        }
+
+        let mut start = 0_u32;
+        let mut end = 0_u32;
+        let mut message_result = 0_usize;
+        let delivered = unsafe {
+            SendMessageTimeoutW(
+                hwnd_pointer,
+                EM_GETSEL,
+                (&mut start as *mut u32) as usize,
+                (&mut end as *mut u32) as isize,
+                SMTO_ABORTIFHUNG,
+                100,
+                &mut message_result,
+            )
+        };
+        if delivered == 0 || end <= start {
+            None
+        } else {
+            Some(Self::NativeEdit { hwnd, start, end })
+        }
+    }
+
+    fn restore(&self) -> Result<(), String> {
+        match self {
+            Self::NativeEdit { hwnd, start, end } => {
+                let mut message_result = 0_usize;
+                let delivered = unsafe {
+                    SendMessageTimeoutW(
+                        *hwnd as *mut std::ffi::c_void,
+                        EM_SETSEL,
+                        *start as usize,
+                        *end as isize,
+                        SMTO_ABORTIFHUNG,
+                        100,
+                        &mut message_result,
+                    )
+                };
+                if delivered == 0 {
+                    Err("NativeSelectionRestoreTimedOut".to_string())
+                } else {
+                    Ok(())
+                }
+            }
+            Self::UiAutomation(selection) => selection.restore(),
+        }
+    }
+
+    fn method(&self) -> &'static str {
+        match self {
+            Self::NativeEdit { .. } => "native_edit",
+            Self::UiAutomation(_) => "ui_automation",
+        }
+    }
+
+    #[cfg(test)]
+    fn start_and_length(&self) -> (i32, i32) {
+        match self {
+            Self::NativeEdit { start, end, .. } => (*start as i32, (*end - *start) as i32),
+            Self::UiAutomation(selection) => (selection.start, selection.length),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct UiAutomationSelectionBookmark {
+    element: TextElementIdentity,
+    start: i32,
+    length: i32,
+}
+
+impl UiAutomationSelectionBookmark {
+    fn capture(target_process_id: u32) -> Result<Option<Self>, String> {
+        with_text_pattern(target_process_id, |element, pattern| {
+            let ranges = unsafe { pattern.GetSelection() }
+                .map_err(|error| format!("GetSelection: {error}"))?;
+            if unsafe { ranges.Length() }.map_err(|error| format!("SelectionLength: {error}"))? < 1
+            {
+                return Ok(None);
+            }
+            let selected = unsafe { ranges.GetElement(0) }
+                .map_err(|error| format!("GetSelectionRange: {error}"))?;
+            // Read only BSTR lengths, then immediately drop the buffers. The
+            // selected text itself is never copied into a Rust string, logged,
+            // or persisted.
+            let selected_text = unsafe { selected.GetText(-1) }
+                .map_err(|error| format!("GetSelectedTextLength: {error}"))?;
+            let length = i32::try_from(selected_text.len())
+                .map_err(|_| "SelectedTextTooLong".to_string())?;
+            if length == 0 {
+                return Ok(None);
+            }
+            let prefix = unsafe { pattern.DocumentRange() }
+                .map_err(|error| format!("SelectionDocumentRange: {error}"))?;
+            unsafe {
+                prefix
+                    .MoveEndpointByRange(
+                        TextPatternRangeEndpoint_End,
+                        &selected,
+                        TextPatternRangeEndpoint_Start,
+                    )
+                    .map_err(|error| format!("MeasureSelectionStart: {error}"))?;
+            }
+            let prefix_text = unsafe { prefix.GetText(-1) }
+                .map_err(|error| format!("GetSelectionPrefixLength: {error}"))?;
+            let start = i32::try_from(prefix_text.len())
+                .map_err(|_| "SelectionStartOutOfRange".to_string())?;
+            Ok(Some(Self {
+                element: TextElementIdentity::capture(element)?,
+                start,
+                length,
+            }))
+        })
+    }
+
+    fn restore(&self) -> Result<(), String> {
+        with_text_pattern(self.element.process_id as u32, |element, pattern| {
+            let current = TextElementIdentity::capture(element)?;
+            if !self.element.matches(&current) {
+                return Err("FocusedTextElementChanged".to_string());
+            }
+            let range = unsafe { pattern.DocumentRange() }
+                .map_err(|error| format!("DocumentRange: {error}"))?;
+            unsafe {
+                range
+                    .MoveEndpointByRange(
+                        TextPatternRangeEndpoint_End,
+                        &range,
+                        TextPatternRangeEndpoint_Start,
+                    )
+                    .map_err(|error| format!("CollapseSelectionRange: {error}"))?;
+            }
+            let moved = unsafe { range.Move(TextUnit_Character, self.start) }
+                .map_err(|error| format!("MoveSelectionStart: {error}"))?;
+            if moved != self.start {
+                return Err("SelectionStartOutOfRange".to_string());
+            }
+            let expanded = unsafe {
+                range.MoveEndpointByUnit(
+                    TextPatternRangeEndpoint_End,
+                    TextUnit_Character,
+                    self.length,
+                )
+            }
+            .map_err(|error| format!("MoveSelectionEnd: {error}"))?;
+            if expanded != self.length {
+                return Err("SelectionEndOutOfRange".to_string());
+            }
+            unsafe { range.Select() }.map_err(|error| format!("Select: {error}"))?;
+            Ok(Some(()))
+        })?
+        .ok_or_else(|| "FocusedTextPatternUnavailable".to_string())
+    }
+}
+
+fn with_text_pattern<T>(
+    target_process_id: u32,
+    operation: impl FnOnce(&IUIAutomationElement, &IUIAutomationTextPattern) -> Result<T, String>,
+) -> Result<T, String> {
+    COM_INITIALIZED.with(|initialized| initialized.ensure())?;
+    let automation: IUIAutomation = unsafe {
+        CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER)
+            .map_err(|error| format!("CoCreateInstance: {error}"))?
+    };
+    let element = unsafe { automation.GetFocusedElement() }
+        .map_err(|error| format!("GetFocusedElement: {error}"))?;
+    let process_id = unsafe { element.CurrentProcessId() }
+        .map_err(|error| format!("CurrentProcessId: {error}"))?;
+    if process_id <= 0 || process_id as u32 != target_process_id {
+        return Err("FocusedTextProcessChanged".to_string());
+    }
+    let pattern =
+        unsafe { element.GetCurrentPatternAs::<IUIAutomationTextPattern>(UIA_TextPatternId) }
+            .map_err(|error| format!("GetTextPattern: {error}"))?;
+    operation(&element, &pattern)
+}
+
+thread_local! {
+    static COM_INITIALIZED: ComInitialization = ComInitialization::initialize();
+}
+
+struct ComInitialization(windows::core::HRESULT);
+
+impl ComInitialization {
+    fn initialize() -> Self {
+        Self(unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) })
+    }
+
+    fn ensure(&self) -> Result<(), String> {
+        if self.0.is_ok() || self.0 == RPC_E_CHANGED_MODE {
+            Ok(())
+        } else {
+            Err(format!("CoInitializeEx: {}", self.0))
+        }
+    }
+}
+
+impl Drop for ComInitialization {
+    fn drop(&mut self) {
+        if self.0.is_ok() {
+            unsafe { CoUninitialize() };
+        }
     }
 }
 
@@ -438,8 +762,9 @@ impl PastePort for WindowsPaste {
     type Error = WindowsDeliveryError;
 
     fn paste_at_caret(&mut self) -> Result<(), Self::Error> {
-        if let Some(target) = self.target {
+        if let Some(target) = self.target.as_ref() {
             target.validate_foreground()?;
+            target.restore_text_selection()?;
         }
         let mut inputs = [
             keyboard_input(VK_CONTROL, 0),
@@ -705,6 +1030,11 @@ mod tests {
             let wide: Vec<u16> = text.encode_utf16().chain(std::iter::once(0)).collect();
             assert_ne!(unsafe { SetWindowTextW(hwnd, wide.as_ptr()) }, 0);
             self.activate();
+            self.set_selection(start, end);
+        }
+
+        fn set_selection(&self, start: usize, end: usize) {
+            let hwnd = self.edit_hwnd as *mut std::ffi::c_void;
             unsafe { SendMessageW(hwnd, EM_SETSEL, start, end as isize) };
             let mut actual_start = 0_u32;
             let mut actual_end = 0_u32;
@@ -818,6 +1148,15 @@ mod tests {
 
         window.set_text_and_selection("keep replace tail", 5, 12);
         let target = WindowsTarget::capture().expect("recapture native edit target");
+        let selection = target
+            .text_selection
+            .as_ref()
+            .expect("capture selected native edit text");
+        assert_eq!(selection.start_and_length(), (5, 7));
+        // Simulate a browser or overlay collapsing the visual selection while
+        // speech is being transcribed. Delivery must restore the captured
+        // range before it sends Ctrl+V.
+        window.set_selection(12, 12);
         let receipt = deliver_text(
             &mut WindowsClipboard,
             &mut WindowsPaste::for_target(target),
@@ -933,6 +1272,26 @@ mod tests {
         assert!(validate_focused_control(Some(51), Some(51)).is_ok());
         assert!(validate_focused_control(None, Some(52)).is_ok());
         assert!(validate_focused_control(None, None).is_ok());
+    }
+
+    #[test]
+    fn text_element_identity_requires_the_same_control_bounds() {
+        let captured = TextElementIdentity {
+            process_id: 4,
+            control_type: 50004,
+            automation_id: String::new(),
+            class_name: "Chrome_RenderWidgetHostHWND".into(),
+            bounds: (100, 200, 700, 250),
+        };
+        let mut other_field = captured.clone();
+        other_field.bounds = (100, 300, 700, 350);
+        assert!(!captured.matches(&other_field));
+
+        let mut stable_id = captured.clone();
+        stable_id.automation_id = "searchbox".into();
+        let mut moved_stable_id = stable_id.clone();
+        moved_stable_id.bounds = (120, 220, 720, 270);
+        assert!(!stable_id.matches(&moved_stable_id));
     }
 
     #[test]

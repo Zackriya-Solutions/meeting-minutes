@@ -3662,6 +3662,7 @@ dependencies = [
  "whatlang",
  "which 6.0.3",
  "whisper-rs",
+ "windows 0.61.3",
  "windows-sys 0.61.2",
  "xz2",
  "zip 2.4.2",
