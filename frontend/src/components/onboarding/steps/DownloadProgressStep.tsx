@@ -474,7 +474,7 @@ export function DownloadProgressStep() {
   return (
     <OnboardingContainer
       title="Getting things ready"
-      description="You can start using Meetily after downloading the Transcription Engine."
+      description="You can start using PulseTalk after downloading the transcription engine."
       step={3}
       totalSteps={isMac ? 4 : 3}
     >
