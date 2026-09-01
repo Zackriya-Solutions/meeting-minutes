@@ -760,6 +760,41 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "pastes into the current foreground app and temporarily owns the Windows clipboard"]
+    fn delivers_test_text_to_current_foreground_app() {
+        let delay_ms = std::env::var("PULSETALK_DELIVERY_TEST_DELAY_MS")
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .unwrap_or(5_000);
+        let text = std::env::var("PULSETALK_DELIVERY_TEST_TEXT")
+            .unwrap_or_else(|_| "PulseTalk acceptance text".to_string());
+        thread::sleep(Duration::from_millis(delay_ms));
+
+        let original = WindowsClipboardSnapshot::capture().expect("snapshot original clipboard");
+        let mut original_guard = RestoreClipboard(Some(original));
+        let format = unsafe { RegisterClipboardFormatW(w!("PulseTalk.ForegroundDeliveryTest")) };
+        assert_ne!(format, 0);
+        let expected_clipboard = b"foreground delivery clipboard payload";
+        write_custom_format(format, expected_clipboard);
+
+        let target = WindowsTarget::capture().expect("capture foreground app target");
+        let target_process = target.process_label();
+        let receipt = deliver_text(
+            &mut WindowsClipboard,
+            &mut WindowsPaste::for_target(target),
+            &text,
+        )
+        .expect("deliver into foreground app");
+        assert!(receipt.pasted && receipt.clipboard_restored);
+        assert_eq!(read_custom_format(format), expected_clipboard);
+        println!("delivered_to={target_process}");
+
+        if let Some(original) = original_guard.0.take() {
+            original.restore().expect("restore original clipboard");
+        }
+    }
+
+    #[test]
     fn refuses_to_paste_after_the_target_closes() {
         let error = validate_window_identity(false, 41, 41).unwrap_err();
         assert_eq!(error.operation(), "ForegroundTargetClosed");
