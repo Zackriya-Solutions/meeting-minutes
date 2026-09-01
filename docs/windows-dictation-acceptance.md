@@ -11,6 +11,8 @@ Updated: 2026-09-01
 - Settings reports the shortcut actually acquired at runtime. On the acceptance machine it is `Ctrl+Shift+Space`.
 - General keeps the compact system-wide shortcut status, while the Dictation settings tab groups activation, transcription, delivery safety, and recovery-history controls.
 - Dictation settings includes a persisted floating-overlay switch. When enabled, a compact microphone stays above other windows, expands on hover to show the acquired shortcut, and remains expanded through listening, transcription, cleanup, delivery, and the brief completion or failure result. Each activation first moves it to the monitor containing the focused text control; the mouse pointer is used only when Windows cannot expose a focused control. Negative desktop coordinates support displays placed left of or above the primary monitor.
+- The packaged Tauri overlay is verified on the acceptance machine as an always-on-top 58×52 window. A native hover probe measured 58×52 → 300×94 → 58×52 and confirmed the foreground window handle did not change, so expansion does not steal the text target.
+- The acceptance desktop exposes two 2560×1440 monitors at x=0 and x=2560. Focused-control rectangle and monitor-boundary tests pass; spoken activation on a text field on each display remains in the manual matrix.
 - Dictation history loads on entry, polls every five seconds only while visible, refreshes when the window becomes visible again, and prevents overlapping requests. No manual refresh is required.
 - The inherited meeting transcript listener retries three times, disposes listeners that finish setup after unmount, and logs `meeting_transcript_listener_setup_failed` with attempt and retry state. Exhausted retries use a non-blocking toast; they no longer open a modal alert or disable dictation.
 - Dictation now enters the `cleaning` phase after local transcription. The offline cleanup removes English hesitation fillers and repairs whitespace and punctuation spacing within a 150 ms budget; explicit non-English selections retain their words.
@@ -51,6 +53,7 @@ For each target:
 4. Select existing text, dictate again, and confirm the selection is replaced.
 5. Paste the clipboard somewhere suitable and confirm its original rich content remains intact.
 6. Move focus to another window during transcription and confirm PulseTalk saves the transcript to history instead of pasting into the new target.
+7. Repeat from a text field on the second monitor while the mouse is on the first; confirm the expanded overlay follows the text field, then test cursor fallback with no focused control.
 
 ## Known release limitations
 
@@ -61,5 +64,5 @@ For each target:
 ## Current local package
 
 - Installer: `target/release/bundle/nsis/PulseTalk_0.4.0_x64-setup.exe`
-- Size: `43,526,159 bytes`
-- SHA-256: `9672FD910BE33476066119DCD1485485FDC6596A34A06C10BC49DAF85627F58F`
+- Size: `43,554,717 bytes`
+- SHA-256: `88FCB815ABA90BD93215E01D4ED2FB2609AD62B1D1267A7B550065178F148122`
