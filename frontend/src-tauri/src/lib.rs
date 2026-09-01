@@ -394,6 +394,29 @@ pub fn run() {
     let mut builder = tauri::Builder::default();
 
     #[cfg(any(target_os = "macos", windows, target_os = "linux"))]
+    let activation_bus = dictation::ActivationBus::new();
+
+    #[cfg(any(target_os = "macos", windows, target_os = "linux"))]
+    {
+        let shortcut_bus = activation_bus.clone();
+        builder = builder.plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(move |_app, _shortcut, event| {
+                    use tauri_plugin_global_shortcut::ShortcutState;
+
+                    let event = match event.state() {
+                        ShortcutState::Pressed => dictation::ActivationEvent::Started,
+                        ShortcutState::Released => dictation::ActivationEvent::Stopped,
+                    };
+                    log::info!("dictation_activation_received state={:?}", event);
+                    shortcut_bus.publish(event);
+                })
+                .build(),
+        );
+        builder = builder.manage(activation_bus);
+    }
+
+    #[cfg(any(target_os = "macos", windows, target_os = "linux"))]
     {
         builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
             log_info!(
@@ -420,6 +443,56 @@ pub fn run() {
         .manage(summary::summary_engine::ModelManagerState(Arc::new(tokio::sync::Mutex::new(None))))
         .setup(|_app| {
             log::info!("Application setup complete");
+
+            #[cfg(any(target_os = "macos", windows, target_os = "linux"))]
+            {
+                use tauri_plugin_global_shortcut::{
+                    Code, GlobalShortcutExt, Modifiers, Shortcut,
+                };
+
+                let shortcut_candidates = [
+                    (
+                        "Ctrl+Shift+Space",
+                        Modifiers::CONTROL | Modifiers::SHIFT,
+                        Code::Space,
+                    ),
+                    (
+                        "Ctrl+Alt+D",
+                        Modifiers::CONTROL | Modifiers::ALT,
+                        Code::KeyD,
+                    ),
+                    (
+                        "Ctrl+Shift+F10",
+                        Modifiers::CONTROL | Modifiers::SHIFT,
+                        Code::F10,
+                    ),
+                ];
+                let mut registered = false;
+                for (label, modifiers, code) in shortcut_candidates {
+                    let shortcut = Shortcut::new(Some(modifiers), code);
+                    match _app.global_shortcut().register(shortcut) {
+                        Ok(()) => {
+                            log::info!(
+                                "dictation_shortcut_registered shortcut={}",
+                                label
+                            );
+                            registered = true;
+                            break;
+                        }
+                        Err(error) => log::warn!(
+                            "dictation_shortcut_registration_failed code=shortcut_unavailable shortcut={} error={}",
+                            label,
+                            error
+                        ),
+                    }
+                }
+                if !registered {
+                    log::error!(
+                        "dictation_activation_disabled code=shortcut_unavailable candidate_count={}",
+                        shortcut_candidates.len()
+                    );
+                }
+            }
 
             // Initialize system tray
             if let Err(e) = tray::create_tray(_app.handle()) {
@@ -499,6 +572,8 @@ pub fn run() {
                 database::setup::initialize_database_on_startup(&_app.handle()).await
             })
             .expect("Failed to initialize database");
+
+            dictation::start_coordinator(_app.handle().clone());
 
             // Initialize bundled templates directory for dynamic template discovery
             log::info!("Initializing bundled templates directory...");
