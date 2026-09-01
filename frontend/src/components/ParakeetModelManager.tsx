@@ -30,6 +30,7 @@ export function ParakeetModelManager({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [initialized, setInitialized] = useState(false);
+  const [listenersReady, setListenersReady] = useState(false);
   const [downloadingModels, setDownloadingModels] = useState<Set<string>>(new Set());
   const [cancellingModels, setCancellingModels] = useState<Set<string>>(new Set());
 
@@ -39,6 +40,7 @@ export function ParakeetModelManager({
 
   // Progress throttle map to prevent rapid updates
   const progressThrottleRef = useRef<Map<string, { progress: number; timestamp: number }>>(new Map());
+  const latestStatusByModelRef = useRef<Map<string, ModelStatus>>(new Map());
   const clearCancellingModel = (modelName: string) => {
     setCancellingModels(prev => {
       const next = new Set(prev);
@@ -49,14 +51,17 @@ export function ParakeetModelManager({
 
   // Initialize and load models
   useEffect(() => {
-    if (initialized) return;
+    if (initialized || !listenersReady) return;
 
     const initializeModels = async () => {
       try {
         setLoading(true);
         await ParakeetAPI.init();
         const modelList = await ParakeetAPI.getAvailableModels();
-        setModels(modelList);
+        setModels(modelList.map(model => ({
+          ...model,
+          status: latestStatusByModelRef.current.get(model.name) ?? model.status
+        })));
 
         setInitialized(true);
       } catch (err) {
@@ -72,149 +77,176 @@ export function ParakeetModelManager({
     };
 
     initializeModels();
-  }, [initialized, selectedModel, onModelSelect]);
+  }, [initialized, listenersReady, selectedModel, onModelSelect]);
 
   // Set up event listeners for download progress
   useEffect(() => {
-    let unlistenProgress: (() => void) | null = null;
-    let unlistenComplete: (() => void) | null = null;
-    let unlistenError: (() => void) | null = null;
+    let disposed = false;
+    let registeredUnlisteners: Array<() => void> = [];
 
     const setupListeners = async () => {
       console.log('[ParakeetModelManager] Setting up event listeners...');
 
-      // Download progress with throttling
-      unlistenProgress = await listen<ParakeetDownloadProgressEvent>(
-        'parakeet-model-download-progress',
-        (event) => {
-          const { modelName, progress, status } = event.payload;
-          if (status === 'cancelled') {
-            progressThrottleRef.current.delete(modelName);
+      const registrations = await Promise.allSettled([
+        listen<ParakeetDownloadProgressEvent>(
+          'parakeet-model-download-progress',
+          (event) => {
+            const { modelName, progress, status } = event.payload;
+            if (status === 'cancelled') {
+              latestStatusByModelRef.current.set(modelName, 'Missing');
+              progressThrottleRef.current.delete(modelName);
+              clearCancellingModel(modelName);
+              setDownloadingModels(prev => {
+                const next = new Set(prev);
+                next.delete(modelName);
+                return next;
+              });
+              setModels(prevModels =>
+                prevModels.map(model =>
+                  model.name === modelName
+                    ? { ...model, status: 'Missing' as ModelStatus }
+                    : model
+                )
+              );
+              toast.info(`${getModelDisplayName(modelName)} download cancelled`, {
+                duration: 3000
+              });
+              return;
+            }
+
+            const modelStatus: ModelStatus = status === 'completed'
+              ? 'Available'
+              : { Downloading: { progress } };
+            latestStatusByModelRef.current.set(modelName, modelStatus);
+
+            const now = Date.now();
+            const throttleData = progressThrottleRef.current.get(modelName);
+            const shouldUpdate = !throttleData ||
+              now - throttleData.timestamp > 300 ||
+              Math.abs(progress - throttleData.progress) >= 5;
+
+            if (shouldUpdate) {
+              console.log(`[ParakeetModelManager] Progress update for ${modelName}: ${progress}%`);
+              progressThrottleRef.current.set(modelName, { progress, timestamp: now });
+              setModels(prevModels =>
+                prevModels.map(model =>
+                  model.name === modelName
+                    ? { ...model, status: modelStatus }
+                    : model
+                )
+              );
+            }
+          }
+        ),
+        listen<{ modelName: string }>(
+          'parakeet-model-download-complete',
+          (event) => {
+            const { modelName } = event.payload;
+            const displayInfo = getModelDisplayInfo(modelName);
+            const displayName = displayInfo?.friendlyName || modelName;
+            latestStatusByModelRef.current.set(modelName, 'Available');
             clearCancellingModel(modelName);
+
+            setModels(prevModels =>
+              prevModels.map(model =>
+                model.name === modelName
+                  ? { ...model, status: 'Available' as ModelStatus }
+                  : model
+              )
+            );
+
             setDownloadingModels(prev => {
-              const next = new Set(prev);
-              next.delete(modelName);
-              return next;
+              const newSet = new Set(prev);
+              newSet.delete(modelName);
+              return newSet;
             });
+
+            // Clean up throttle data
+            progressThrottleRef.current.delete(modelName);
+
+            toast.success(`${displayInfo?.icon || '✓'} ${displayName} ready!`, {
+              description: 'Model downloaded and ready to use',
+              duration: 4000
+            });
+
+            // Auto-select after download using stable refs
+            if (onModelSelectRef.current) {
+              onModelSelectRef.current(modelName);
+              if (autoSaveRef.current) {
+                saveModelSelection(modelName);
+              }
+            }
+          }
+        ),
+        listen<{ modelName: string; error: string }>(
+          'parakeet-model-download-error',
+          (event) => {
+            const { modelName, error } = event.payload;
+            const displayInfo = getModelDisplayInfo(modelName);
+            const displayName = displayInfo?.friendlyName || modelName;
+            latestStatusByModelRef.current.set(modelName, { Error: error });
+            clearCancellingModel(modelName);
+
             setModels(prevModels =>
               prevModels.map(model =>
                 model.name === modelName
-                  ? { ...model, status: 'Missing' as ModelStatus }
+                  ? { ...model, status: { Error: error } as ModelStatus }
                   : model
               )
             );
-            toast.info(`${getModelDisplayName(modelName)} download cancelled`, {
-              duration: 3000
+
+            setDownloadingModels(prev => {
+              const newSet = new Set(prev);
+              newSet.delete(modelName);
+              return newSet;
             });
-            return;
-          }
 
-          const now = Date.now();
-          const throttleData = progressThrottleRef.current.get(modelName);
-          const shouldUpdate = !throttleData ||
-            now - throttleData.timestamp > 300 ||
-            Math.abs(progress - throttleData.progress) >= 5;
+            // Clean up throttle data
+            progressThrottleRef.current.delete(modelName);
 
-          if (shouldUpdate) {
-            console.log(`[ParakeetModelManager] Progress update for ${modelName}: ${progress}%`);
-            progressThrottleRef.current.set(modelName, { progress, timestamp: now });
-            setModels(prevModels =>
-              prevModels.map(model =>
-                model.name === modelName
-                  ? { ...model, status: { Downloading: { progress } } as ModelStatus }
-                  : model
-              )
-            );
+            toast.error(`Failed to download ${displayName}`, {
+              description: error,
+              duration: 6000,
+              action: {
+                label: 'Retry',
+                onClick: () => downloadModel(modelName)
+              }
+            });
           }
-        }
+        )
+      ]);
+
+      const unlisteners = registrations.flatMap(result =>
+        result.status === 'fulfilled' ? [result.value] : []
+      );
+      const failedRegistration = registrations.find(
+        (result): result is PromiseRejectedResult => result.status === 'rejected'
       );
 
-      // Download complete
-      unlistenComplete = await listen<{ modelName: string }>(
-        'parakeet-model-download-complete',
-        (event) => {
-          const { modelName } = event.payload;
-          const displayInfo = getModelDisplayInfo(modelName);
-          const displayName = displayInfo?.friendlyName || modelName;
-          clearCancellingModel(modelName);
-
-          setModels(prevModels =>
-            prevModels.map(model =>
-              model.name === modelName
-                ? { ...model, status: 'Available' as ModelStatus }
-                : model
-            )
-          );
-
-          setDownloadingModels(prev => {
-            const newSet = new Set(prev);
-            newSet.delete(modelName);
-            return newSet;
-          });
-
-          // Clean up throttle data
-          progressThrottleRef.current.delete(modelName);
-
-          toast.success(`${displayInfo?.icon || '✓'} ${displayName} ready!`, {
-            description: 'Model downloaded and ready to use',
-            duration: 4000
-          });
-
-          // Auto-select after download using stable refs
-          if (onModelSelectRef.current) {
-            onModelSelectRef.current(modelName);
-            if (autoSaveRef.current) {
-              saveModelSelection(modelName);
-            }
-          }
+      if (disposed || failedRegistration) {
+        unlisteners.forEach(unlisten => unlisten());
+        if (!disposed && failedRegistration) {
+          const message = failedRegistration.reason instanceof Error
+            ? failedRegistration.reason.message
+            : typeof failedRegistration.reason === 'string'
+              ? failedRegistration.reason
+              : 'Failed to listen for Parakeet model updates';
+          setError(message);
+          setLoading(false);
         }
-      );
+        return;
+      }
 
-      // Download error
-      unlistenError = await listen<{ modelName: string; error: string }>(
-        'parakeet-model-download-error',
-        (event) => {
-          const { modelName, error } = event.payload;
-          const displayInfo = getModelDisplayInfo(modelName);
-          const displayName = displayInfo?.friendlyName || modelName;
-          clearCancellingModel(modelName);
-
-          setModels(prevModels =>
-            prevModels.map(model =>
-              model.name === modelName
-                ? { ...model, status: { Error: error } as ModelStatus }
-                : model
-            )
-          );
-
-          setDownloadingModels(prev => {
-            const newSet = new Set(prev);
-            newSet.delete(modelName);
-            return newSet;
-          });
-
-          // Clean up throttle data
-          progressThrottleRef.current.delete(modelName);
-
-          toast.error(`Failed to download ${displayName}`, {
-            description: error,
-            duration: 6000,
-            action: {
-              label: 'Retry',
-              onClick: () => downloadModel(modelName)
-            }
-          });
-        }
-      );
+      registeredUnlisteners = unlisteners;
+      setListenersReady(true);
     };
 
     setupListeners();
 
     return () => {
       console.log('[ParakeetModelManager] Cleaning up event listeners...');
-      if (unlistenProgress) unlistenProgress();
-      if (unlistenComplete) unlistenComplete();
-      if (unlistenError) unlistenError();
+      disposed = true;
+      registeredUnlisteners.forEach(unlisten => unlisten());
     };
   }, []); // Empty dependency array - listeners use refs for stable callbacks
 

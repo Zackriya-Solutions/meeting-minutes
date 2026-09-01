@@ -149,6 +149,12 @@ struct ActiveDownload {
     completion: watch::Sender<bool>,
 }
 
+#[derive(Default)]
+struct ActiveDownloadState {
+    downloads: HashMap<String, Arc<ActiveDownload>>,
+    revision: u64,
+}
+
 #[derive(Debug, thiserror::Error)]
 #[error("Download cancelled by user")]
 pub(crate) struct DownloadCancelled;
@@ -170,6 +176,8 @@ const CANCEL_DOWNLOAD_CLEANUP_TIMEOUT: Duration = Duration::from_secs(5);
 struct DownloadStateTestHook {
     finalization_ready: tokio::sync::Notify,
     continue_finalization: tokio::sync::Notify,
+    discovery_scanned: tokio::sync::Notify,
+    continue_discovery: tokio::sync::Notify,
 }
 
 enum ContentRange {
@@ -250,7 +258,7 @@ pub struct ParakeetEngine {
     current_model: Arc<RwLock<Option<ParakeetModel>>>,
     current_model_name: Arc<RwLock<Option<String>>>,
     pub(crate) available_models: Arc<RwLock<HashMap<String, ModelInfo>>>,
-    active_downloads: Arc<Mutex<HashMap<String, Arc<ActiveDownload>>>>,
+    active_downloads: Arc<Mutex<ActiveDownloadState>>,
     #[cfg(test)]
     download_state_test_hook: Mutex<Option<Arc<DownloadStateTestHook>>>,
 }
@@ -291,7 +299,7 @@ impl ParakeetEngine {
             current_model: Arc::new(RwLock::new(None)),
             current_model_name: Arc::new(RwLock::new(None)),
             available_models: Arc::new(RwLock::new(HashMap::new())),
-            active_downloads: Arc::new(Mutex::new(HashMap::new())),
+            active_downloads: Arc::new(Mutex::new(ActiveDownloadState::default())),
             #[cfg(test)]
             download_state_test_hook: Mutex::new(None),
         })
@@ -304,52 +312,84 @@ impl ParakeetEngine {
 
     /// Discover available Parakeet models.
     pub async fn discover_models(&self) -> Result<Vec<ModelInfo>> {
-        let mut models = Vec::with_capacity(PARAKEET_MODEL_SPECS.len());
+        self.discover_models_from_specs(PARAKEET_MODEL_SPECS).await
+    }
 
-        for spec in PARAKEET_MODEL_SPECS {
-            let model_path = self.models_dir.join(spec.name);
-            let is_downloading = self.active_downloads.lock().await.contains_key(spec.name);
-            let status = if is_downloading {
-                ModelStatus::Downloading { progress: 0 }
-            } else if model_path.exists() {
-                match Self::validate_model_directory(&model_path, spec.artifacts) {
-                    Ok(()) => ModelStatus::Available,
-                    Err(error) => {
-                        let file_size = spec
-                            .artifacts
-                            .iter()
-                            .filter_map(|artifact| std::fs::metadata(model_path.join(artifact.filename)).ok())
-                            .map(|metadata| metadata.len())
-                            .sum();
-                        log::warn!("Model directory {} appears corrupted: {}", spec.name, error);
-                        ModelStatus::Corrupted {
-                            file_size,
-                            expected_min_size: spec.exact_bytes(),
+    async fn discover_models_from_specs(&self, specs: &[ModelSpec]) -> Result<Vec<ModelInfo>> {
+        loop {
+            let revision = self.active_downloads.lock().await.revision;
+            let mut models = Vec::with_capacity(specs.len());
+            let mut validation_errors = Vec::new();
+
+            for spec in specs {
+                let model_path = self.models_dir.join(spec.name);
+                let status = if model_path.exists() {
+                    match Self::validate_model_directory(&model_path, spec.artifacts) {
+                        Ok(()) => ModelStatus::Available,
+                        Err(error) => {
+                            let file_size = spec
+                                .artifacts
+                                .iter()
+                                .filter_map(|artifact| {
+                                    std::fs::metadata(model_path.join(artifact.filename)).ok()
+                                })
+                                .map(|metadata| metadata.len())
+                                .sum();
+                            validation_errors.push((spec.name, error));
+                            ModelStatus::Corrupted {
+                                file_size,
+                                expected_min_size: spec.exact_bytes(),
+                            }
                         }
                     }
-                }
-            } else {
-                ModelStatus::Missing
-            };
+                } else {
+                    ModelStatus::Missing
+                };
 
-            models.push(ModelInfo {
-                name: spec.name.to_string(),
-                path: model_path,
-                size_mb: spec.size_mb,
-                quantization: spec.quantization,
-                speed: spec.speed.to_string(),
-                status,
-                description: spec.description.to_string(),
+                models.push(ModelInfo {
+                    name: spec.name.to_string(),
+                    path: model_path,
+                    size_mb: spec.size_mb,
+                    quantization: spec.quantization,
+                    speed: spec.speed.to_string(),
+                    status,
+                    description: spec.description.to_string(),
+                });
+            }
+
+            #[cfg(test)]
+            if let Some(hook) = self.test_hook().await {
+                hook.discovery_scanned.notify_one();
+                hook.continue_discovery.notified().await;
+            }
+
+            let active_downloads = self.active_downloads.lock().await;
+            if active_downloads.revision != revision {
+                continue;
+            }
+
+            validation_errors.retain(|(model_name, _)| {
+                !active_downloads.downloads.contains_key(*model_name)
             });
-        }
+            for model in &mut models {
+                if active_downloads.downloads.contains_key(&model.name) {
+                    model.status = ModelStatus::Downloading { progress: 0 };
+                }
+            }
 
-        let mut available_models = self.available_models.write().await;
-        available_models.clear();
-        for model in &models {
-            available_models.insert(model.name.clone(), model.clone());
-        }
+            let mut available_models = self.available_models.write().await;
+            available_models.clear();
+            for model in &models {
+                available_models.insert(model.name.clone(), model.clone());
+            }
+            drop(available_models);
+            drop(active_downloads);
 
-        Ok(models)
+            for (model_name, error) in validation_errors {
+                log::warn!("Model directory {} appears corrupted: {}", model_name, error);
+            }
+            return Ok(models);
+        }
     }
 
     fn validate_model_directory(model_dir: &Path, artifacts: &[ArtifactSpec]) -> Result<()> {
@@ -564,7 +604,7 @@ impl ParakeetEngine {
 
     async fn reserve_active_download(&self, model_name: &str) -> Result<Arc<ActiveDownload>> {
         let mut active_downloads = self.active_downloads.lock().await;
-        if active_downloads.contains_key(model_name) {
+        if active_downloads.downloads.contains_key(model_name) {
             return Err(anyhow!("Download already in progress for model: {}", model_name));
         }
 
@@ -573,7 +613,10 @@ impl ParakeetEngine {
             cancellation: CancellationToken::new(),
             completion,
         });
-        active_downloads.insert(model_name.to_string(), Arc::clone(&active_download));
+        active_downloads
+            .downloads
+            .insert(model_name.to_string(), Arc::clone(&active_download));
+        active_downloads.revision = active_downloads.revision.wrapping_add(1);
         Ok(active_download)
     }
 
@@ -1058,7 +1101,7 @@ impl ParakeetEngine {
 
         let mut active_downloads = self.active_downloads.lock().await;
         let owner_matches = matches!(
-            active_downloads.get(model_name),
+            active_downloads.downloads.get(model_name),
             Some(owner) if Arc::ptr_eq(owner, active_download)
         );
         if !owner_matches {
@@ -1073,7 +1116,7 @@ impl ParakeetEngine {
                 .err()
                 .is_some_and(is_download_cancelled);
         let mut models = self.available_models.write().await;
-        active_downloads.remove(model_name);
+        active_downloads.downloads.remove(model_name);
         if let Some(model) = models.get_mut(model_name) {
             if cancellation_won || result.is_err() {
                 model.status = ModelStatus::Missing;
@@ -1082,6 +1125,7 @@ impl ParakeetEngine {
                 model.path = model_dir.to_path_buf();
             }
         }
+        active_downloads.revision = active_downloads.revision.wrapping_add(1);
         drop(models);
         drop(active_downloads);
         active_download.completion.send_replace(true);
@@ -1110,7 +1154,7 @@ impl ParakeetEngine {
     ) -> Result<CancelDownloadOutcome> {
         let active_download = {
             let active_downloads = self.active_downloads.lock().await;
-            let Some(active_download) = active_downloads.get(model_name).cloned() else {
+            let Some(active_download) = active_downloads.downloads.get(model_name).cloned() else {
                 return Ok(CancelDownloadOutcome::Cancelled);
             };
             active_download.cancellation.cancel();
@@ -1149,6 +1193,15 @@ mod tests {
         ArtifactSpec { filename: "nemo.bin", exact_bytes: 2 },
         ArtifactSpec { filename: "vocab.txt", exact_bytes: 1 },
     ];
+    const SMALL_MODEL_SPECS: &[ModelSpec] = &[ModelSpec {
+        name: TEST_MODEL_NAME,
+        size_mb: 1,
+        quantization: QuantizationType::Int8,
+        speed: "test",
+        description: "test model",
+        source_base_url: "",
+        artifacts: SMALL_ARTIFACTS,
+    }];
 
     struct ExpectedResponse {
         filename: &'static str,
@@ -1335,7 +1388,7 @@ mod tests {
         assert!(error.to_string().contains("403"));
         assert_eq!(fs::read(model_dir.join("encoder.bin")).await.unwrap(), b"ABCD");
         assert_eq!(fs::read(model_dir.join("decoder.bin")).await.unwrap(), b"X");
-        assert!(!engine.active_downloads.lock().await.contains_key(TEST_MODEL_NAME));
+        assert!(!engine.active_downloads.lock().await.downloads.contains_key(TEST_MODEL_NAME));
 
         let (base_url, server) = serve_requests(vec![
             response(
@@ -1364,7 +1417,7 @@ mod tests {
         assert_eq!(fs::read(model_dir.join("encoder.bin")).await.unwrap(), b"ABCD");
         assert_eq!(fs::read(model_dir.join("decoder.bin")).await.unwrap(), b"XYZ");
         assert!(matches!(test_model_status(&engine).await, ModelStatus::Available));
-        assert!(!engine.active_downloads.lock().await.contains_key(TEST_MODEL_NAME));
+        assert!(!engine.active_downloads.lock().await.downloads.contains_key(TEST_MODEL_NAME));
     }
 
     #[tokio::test]
@@ -1649,7 +1702,7 @@ mod tests {
             server.await.expect("join invalid-response server");
             assert_eq!(fs::read(model_dir.join("complete.bin")).await.unwrap(), b"C");
             assert!(!matches!(test_model_status(&engine).await, ModelStatus::Available));
-            assert!(!engine.active_downloads.lock().await.contains_key(TEST_MODEL_NAME));
+            assert!(!engine.active_downloads.lock().await.downloads.contains_key(TEST_MODEL_NAME));
         }
     }
 
@@ -1687,7 +1740,7 @@ mod tests {
             .expect_err("cancelled owner must finish as cancellation");
         assert!(is_download_cancelled(&error));
         assert_eq!(fs::read(model_dir.join("encoder.bin")).await.unwrap(), b"AB");
-        assert!(!engine.active_downloads.lock().await.contains_key(TEST_MODEL_NAME));
+        assert!(!engine.active_downloads.lock().await.downloads.contains_key(TEST_MODEL_NAME));
         assert!(engine.reserve_active_download(TEST_MODEL_NAME).await.is_ok());
     }
 
@@ -1701,6 +1754,8 @@ mod tests {
         let hook = Arc::new(DownloadStateTestHook {
             finalization_ready: tokio::sync::Notify::new(),
             continue_finalization: tokio::sync::Notify::new(),
+            discovery_scanned: tokio::sync::Notify::new(),
+            continue_discovery: tokio::sync::Notify::new(),
         });
         *engine.download_state_test_hook.lock().await = Some(Arc::clone(&hook));
         let events = Arc::new(SegQueue::new());
@@ -1742,6 +1797,83 @@ mod tests {
         assert!(is_download_cancelled(&error));
         assert!(std::iter::from_fn(|| events.pop()).all(|progress| progress.percent < 100));
         assert!(matches!(test_model_status(&engine).await, ModelStatus::Missing));
-        assert!(!engine.active_downloads.lock().await.contains_key(TEST_MODEL_NAME));
+        assert!(!engine.active_downloads.lock().await.downloads.contains_key(TEST_MODEL_NAME));
+    }
+
+    #[tokio::test]
+    async fn discovery_retries_when_download_finalizes_after_disk_scan() {
+        let (_temp_dir, engine, model_dir) = test_engine().await;
+        let hook = Arc::new(DownloadStateTestHook {
+            finalization_ready: tokio::sync::Notify::new(),
+            continue_finalization: tokio::sync::Notify::new(),
+            discovery_scanned: tokio::sync::Notify::new(),
+            continue_discovery: tokio::sync::Notify::new(),
+        });
+        *engine.download_state_test_hook.lock().await = Some(Arc::clone(&hook));
+
+        let discovery_engine = Arc::clone(&engine);
+        let discovery = tokio::spawn(async move {
+            discovery_engine
+                .discover_models_from_specs(SMALL_MODEL_SPECS)
+                .await
+        });
+        tokio::time::timeout(Duration::from_secs(1), hook.discovery_scanned.notified())
+            .await
+            .expect("discovery must finish its first disk scan");
+
+        fs::create_dir_all(&model_dir).await.expect("create model directory");
+        for artifact in SMALL_ARTIFACTS {
+            fs::write(
+                model_dir.join(artifact.filename),
+                vec![0; artifact.exact_bytes as usize],
+            )
+            .await
+            .expect("seed exact artifact");
+        }
+
+        let owner = engine
+            .reserve_active_download(TEST_MODEL_NAME)
+            .await
+            .expect("reserve download owner");
+        let finalization_engine = Arc::clone(&engine);
+        let finalization_dir = model_dir.clone();
+        let finalization_owner = Arc::clone(&owner);
+        let finalization = tokio::spawn(async move {
+            finalization_engine
+                .finish_download(
+                    TEST_MODEL_NAME,
+                    &finalization_dir,
+                    SMALL_ARTIFACTS,
+                    &finalization_owner,
+                    Ok(DownloadProgress::new(10, 10, 0.0)),
+                    None,
+                )
+                .await
+        });
+        tokio::time::timeout(Duration::from_secs(1), hook.finalization_ready.notified())
+            .await
+            .expect("finalization must reach its commit barrier");
+        hook.continue_finalization.notify_one();
+        tokio::time::timeout(Duration::from_secs(1), finalization)
+            .await
+            .expect("finalization must complete")
+            .expect("join finalization task")
+            .expect("successful download must finalize");
+
+        *engine.download_state_test_hook.lock().await = None;
+        hook.continue_discovery.notify_one();
+        let discovered = tokio::time::timeout(Duration::from_secs(1), discovery)
+            .await
+            .expect("discovery must complete")
+            .expect("join discovery task")
+            .expect("discovery must succeed");
+
+        let discovered_model = discovered
+            .iter()
+            .find(|model| model.name == TEST_MODEL_NAME)
+            .expect("test model must be discovered");
+        assert!(matches!(discovered_model.status, ModelStatus::Available));
+        assert!(matches!(test_model_status(&engine).await, ModelStatus::Available));
+        assert!(!engine.active_downloads.lock().await.downloads.contains_key(TEST_MODEL_NAME));
     }
 }
