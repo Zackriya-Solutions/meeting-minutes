@@ -37,6 +37,19 @@ pub use super::transcription::TranscriptUpdate;
 // Simple recording state tracking
 static IS_RECORDING: AtomicBool = AtomicBool::new(false);
 
+/// True for the whole `stop_recording` tail (manager taken -> `recording-stopped`
+/// emitted). `IS_RECORDING` must stay true through the tail — the frontend polls
+/// it to keep the stop UI up — so the mic-disconnect fallback checks this flag
+/// too, otherwise a fallback queued before Stop retries against a taken manager
+/// and surfaces a spurious "Microphone fallback failed" toast.
+static IS_RECORDING_STOPPING: AtomicBool = AtomicBool::new(false);
+
+/// Recording is live and not being torn down — the only state in which the
+/// mic-disconnect fallback should run or report.
+fn recording_live() -> bool {
+    IS_RECORDING.load(Ordering::SeqCst) && !IS_RECORDING_STOPPING.load(Ordering::SeqCst)
+}
+
 // Global recording manager and transcription task to keep them alive during recording
 static RECORDING_MANAGER: Mutex<Option<RecordingManager>> = Mutex::new(None);
 static TRANSCRIPTION_TASK: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
@@ -142,6 +155,40 @@ fn resolve_mic_or_default<R: Runtime>(
     }
 }
 
+/// System-audio analog of `resolve_mic_or_default`: `Some(name)` -> parse it,
+/// falling back to the default output if unparseable; `None` ("Default System
+/// Audio" in the UI) -> default output. Returns `None` only when no output
+/// device exists — system audio is optional, mic-only recording proceeds.
+///
+/// ponytail: no cpal enumeration check (unlike the mic helper) — Linux system
+/// devices are Pulse/ALSA monitor *inputs* tagged Output, so output_devices()
+/// would false-negative them. stream.rs still hard-fails on a missing device.
+fn resolve_system_or_default(requested_name: Option<&str>) -> Option<Arc<super::AudioDevice>> {
+    if let Some(name) = requested_name {
+        match parse_audio_device(name) {
+            Ok(device) => {
+                info!("✅ Using requested system audio: '{}'", device.name);
+                return Some(Arc::new(device));
+            }
+            Err(e) => warn!(
+                "⚠️ Requested system audio '{}' not available: {} — falling back to system default",
+                name, e
+            ),
+        }
+    }
+
+    match default_output_device() {
+        Ok(device) => {
+            info!("✅ Using default system audio: '{}'", device.name);
+            Some(Arc::new(device))
+        }
+        Err(e) => {
+            warn!("⚠️ No system audio available: {} — recording will continue with microphone only", e);
+            None
+        }
+    }
+}
+
 // ============================================================================
 // RECORDING COMMANDS
 // ============================================================================
@@ -214,49 +261,7 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
 
     let microphone_device = resolve_mic_or_default(&app, preferred_mic_name.as_deref());
 
-    // ============================================================================
-    // SYSTEM AUDIO DEVICE RESOLUTION: Preference → Default → None (optional)
-    // ============================================================================
-    let system_device = match preferred_system_name {
-        Some(pref_name) => {
-            info!("🔊 Attempting to use preferred system audio: '{}'", pref_name);
-            match parse_audio_device(&pref_name) {
-                Ok(device) => {
-                    info!("✅ Using preferred system audio: '{}'", device.name);
-                    Some(Arc::new(device))
-                }
-                Err(e) => {
-                    warn!("⚠️ Preferred system audio '{}' not available: {}", pref_name, e);
-                    warn!("   Falling back to system default...");
-                    match default_output_device() {
-                        Ok(device) => {
-                            info!("✅ Using default system audio: '{}'", device.name);
-                            Some(Arc::new(device))
-                        }
-                        Err(default_err) => {
-                            warn!("⚠️ No system audio available (preferred and default both failed): {}", default_err);
-                            warn!("   Recording will continue with microphone only");
-                            None // System audio is optional
-                        }
-                    }
-                }
-            }
-        }
-        None => {
-            info!("🔊 No system audio preference set, using system default");
-            match default_output_device() {
-                Ok(device) => {
-                    info!("✅ Using default system audio: '{}'", device.name);
-                    Some(Arc::new(device))
-                }
-                Err(e) => {
-                    warn!("⚠️ No default system audio available: {}", e);
-                    warn!("   Recording will continue with microphone only");
-                    None // System audio is optional
-                }
-            }
-        }
-    };
+    let system_device = resolve_system_or_default(preferred_system_name.as_deref());
 
     // Always ensure a meeting name is set so incremental saver initializes
     let effective_meeting_name = meeting_name.clone().unwrap_or_else(|| {
@@ -412,13 +417,7 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
 
     let mic_device = resolve_mic_or_default(&app, mic_device_name.as_deref());
 
-    let system_device = if let Some(ref name) = system_device_name {
-        Some(Arc::new(parse_audio_device(name).map_err(|e| {
-            format!("Invalid system device '{}': {}", name, e)
-        })?))
-    } else {
-        None
-    };
+    let system_device = resolve_system_or_default(system_device_name.as_deref());
 
     // Async-first approach for custom devices - no more blocking operations!
     info!("🚀 Starting async recording initialization with custom devices");
@@ -571,6 +570,12 @@ pub async fn stop_recording<R: Runtime>(
         global_manager.take()
     };
 
+    // Mark the stop tail as in progress so a mic-disconnect fallback that was
+    // queued before Stop short-circuits instead of retrying against the taken
+    // manager. IS_RECORDING itself stays true until the tail completes — the
+    // frontend polls it to keep the stop UI up.
+    IS_RECORDING_STOPPING.store(true, Ordering::SeqCst);
+
     let stop_result = if let Some(mut manager) = manager_for_cleanup {
         // Use FORCE FLUSH to immediately process all accumulated audio - eliminates 30s delay!
         info!("🚀 Using FORCE FLUSH to eliminate pipeline accumulation delays");
@@ -591,6 +596,7 @@ pub async fn stop_recording<R: Runtime>(
         }
         Err(e) => {
             error!("❌ Failed to stop audio streams: {}", e);
+            IS_RECORDING_STOPPING.store(false, Ordering::SeqCst);
             return Err(format!("Failed to stop audio streams: {}", e));
         }
     }
@@ -910,6 +916,7 @@ pub async fn stop_recording<R: Runtime>(
     // Set recording flag to false
     info!("🔍 Setting IS_RECORDING to false");
     IS_RECORDING.store(false, Ordering::SeqCst);
+    IS_RECORDING_STOPPING.store(false, Ordering::SeqCst);
 
     // Step 4.5: Prepare metadata for frontend (NO database save)
     // NOTE: We do NOT save to database here. The frontend will save after all transcripts are displayed.
@@ -1173,10 +1180,12 @@ async fn perform_mic_hot_swap_task<R: Runtime>(new_device_name: String, app: App
                 }
                 Err(e) => {
                     error!("[HOT_SWAP] Mic swap failed after retry: {}", e);
-                    let _ = app.emit("mic-swap-failed", serde_json::json!({
-                        "error": e,
-                        "device_name": new_device_name
-                    }));
+                    if recording_live() {
+                        let _ = app.emit("mic-swap-failed", serde_json::json!({
+                            "error": e,
+                            "device_name": new_device_name
+                        }));
+                    }
                     Err(e)
                 }
             }
@@ -1266,7 +1275,7 @@ fn spawn_device_event_processor<R: Runtime>(
 
         while let Some(event) = receiver.recv().await {
             // Skip if recording has stopped
-            if !IS_RECORDING.load(Ordering::SeqCst) {
+            if !recording_live() {
                 info!("[DEVICE_EVENTS] Recording stopped — ignoring event: {:?}", event);
                 continue;
             }
@@ -1318,7 +1327,7 @@ async fn trigger_mic_fallback_to_default<R: Runtime>(
     app: AppHandle<R>,
     disconnected_name: String,
 ) {
-    if !IS_RECORDING.load(Ordering::SeqCst) {
+    if !recording_live() {
         info!(
             "[MIC_FALLBACK] Not recording — skipping fallback for '{}'",
             disconnected_name
@@ -1488,6 +1497,13 @@ async fn trigger_mic_fallback_to_default<R: Runtime>(
         }
     }
 
+    // Stop may have started during the sleeps above — bail before touching
+    // the (possibly already taken) manager.
+    if !recording_live() {
+        info!("[MIC_FALLBACK] Recording stopping — aborting fallback for '{}'", disconnected_name);
+        return;
+    }
+
     // perform_mic_hot_swap_task performs its own retry-once logic on failure
     // and emits the mic-device-switched / mic-swap-failed events, so we can
     // just delegate here. It does NOT touch MIC_SWAP_IN_PROGRESS internally.
@@ -1502,7 +1518,7 @@ async fn trigger_mic_fallback_to_default<R: Runtime>(
         Err(e) => {
             error!("[MIC_FALLBACK] Fallback swap failed: {}", e);
             let n = MIC_FALLBACK_FAILED_ATTEMPTS.fetch_add(1, Ordering::SeqCst) + 1;
-            if n == MAX_MIC_FALLBACK_ATTEMPTS {
+            if n == MAX_MIC_FALLBACK_ATTEMPTS && recording_live() {
                 let _ = app.emit(
                     "mic-recovery-exhausted",
                     serde_json::json!({ "device_name": disconnected_name }),
