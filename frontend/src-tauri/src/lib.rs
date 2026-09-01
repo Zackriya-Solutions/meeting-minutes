@@ -389,9 +389,21 @@ pub fn get_language_preference_internal() -> Option<String> {
 }
 
 pub fn run() {
-    log::set_max_level(log::LevelFilter::Info);
-
-    let mut builder = tauri::Builder::default();
+    let mut builder = tauri::Builder::default().plugin(
+        tauri_plugin_log::Builder::new()
+            .clear_targets()
+            .targets([
+                tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
+                tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir {
+                    file_name: Some("PulseTalk".to_string()),
+                }),
+            ])
+            .level(log::LevelFilter::Info)
+            .max_file_size(1_000_000)
+            .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepSome(4))
+            .timezone_strategy(tauri_plugin_log::TimezoneStrategy::UseLocal)
+            .build(),
+    );
 
     #[cfg(any(target_os = "macos", windows, target_os = "linux"))]
     let activation_bus = dictation::ActivationBus::new();
