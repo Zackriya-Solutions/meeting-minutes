@@ -189,6 +189,7 @@ whisper-rs = { version = "0.13.2", features = ["raw-api"] }
 futures-channel = "0.3.31"
 windows-sys = { version = "0.61.2", features = [
     "Win32_Foundation",
+    "Win32_Graphics_Gdi",
     "Win32_System_DataExchange",
     "Win32_System_Memory",
     "Win32_System_Ole",

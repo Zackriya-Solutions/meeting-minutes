@@ -3,15 +3,17 @@ use std::fmt;
 use std::ptr;
 use std::thread;
 use std::time::Duration;
-use windows_sys::Win32::Foundation::{GetLastError, GlobalFree};
+use windows_sys::Win32::Foundation::{GetLastError, GlobalFree, HANDLE};
+use windows_sys::Win32::Graphics::Gdi::{DeleteEnhMetaFile, DeleteMetaFile, DeleteObject};
 use windows_sys::Win32::System::DataExchange::{
-    CloseClipboard, EmptyClipboard, GetClipboardData, IsClipboardFormatAvailable, OpenClipboard,
-    SetClipboardData,
+    CloseClipboard, EmptyClipboard, EnumClipboardFormats, GetClipboardData, OpenClipboard,
+    SetClipboardData, METAFILEPICT,
 };
-use windows_sys::Win32::System::Memory::{
-    GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock, GMEM_MOVEABLE,
+use windows_sys::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE};
+use windows_sys::Win32::System::Ole::{
+    OleDuplicateData, CF_BITMAP, CF_DSPBITMAP, CF_DSPENHMETAFILE, CF_DSPMETAFILEPICT,
+    CF_ENHMETAFILE, CF_METAFILEPICT, CF_PALETTE, CF_UNICODETEXT,
 };
-use windows_sys::Win32::System::Ole::CF_UNICODETEXT;
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
     SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, VK_CONTROL, VK_V,
 };
@@ -29,6 +31,95 @@ impl WindowsDeliveryError {
             // SAFETY: GetLastError has no preconditions.
             code: unsafe { GetLastError() },
         }
+    }
+}
+
+struct OwnedClipboardFormat {
+    format: u32,
+    handle: HANDLE,
+}
+
+impl Drop for OwnedClipboardFormat {
+    fn drop(&mut self) {
+        if self.handle.is_null() {
+            return;
+        }
+
+        // These are the non-HGLOBAL formats documented for SetClipboardData.
+        // All other handles returned by OleDuplicateData use global memory.
+        unsafe {
+            match self.format as u16 {
+                CF_BITMAP | CF_DSPBITMAP | CF_PALETTE => {
+                    DeleteObject(self.handle);
+                }
+                CF_ENHMETAFILE | CF_DSPENHMETAFILE => {
+                    DeleteEnhMetaFile(self.handle);
+                }
+                CF_METAFILEPICT | CF_DSPMETAFILEPICT => {
+                    let picture = GlobalLock(self.handle) as *const METAFILEPICT;
+                    if !picture.is_null() {
+                        DeleteMetaFile((*picture).hMF);
+                        GlobalUnlock(self.handle);
+                    }
+                    GlobalFree(self.handle);
+                }
+                _ => {
+                    GlobalFree(self.handle);
+                }
+            }
+        }
+        self.handle = ptr::null_mut();
+    }
+}
+
+/// Owns independent copies of every advertised clipboard format, including
+/// rich text, HTML, images, and application-specific formats.
+pub struct WindowsClipboardSnapshot {
+    formats: Vec<OwnedClipboardFormat>,
+}
+
+impl WindowsClipboardSnapshot {
+    fn capture() -> Result<Self, WindowsDeliveryError> {
+        let _guard = ClipboardGuard::open()?;
+        let mut formats = Vec::new();
+        let mut format = 0;
+        loop {
+            // SAFETY: Clipboard is open and the prior format came from this API.
+            format = unsafe { EnumClipboardFormats(format) };
+            if format == 0 {
+                break;
+            }
+            // Materialize delayed data while its source is still available,
+            // then make a snapshot owned by PulseTalk.
+            let source = unsafe { GetClipboardData(format) };
+            if source.is_null() {
+                return Err(WindowsDeliveryError::last("GetClipboardData"));
+            }
+            let duplicate = unsafe { OleDuplicateData(source, format as u16, GMEM_MOVEABLE) };
+            if duplicate.is_null() {
+                return Err(WindowsDeliveryError::last("OleDuplicateData"));
+            }
+            formats.push(OwnedClipboardFormat {
+                format,
+                handle: duplicate,
+            });
+        }
+        Ok(Self { formats })
+    }
+
+    fn restore(mut self) -> Result<(), WindowsDeliveryError> {
+        let _guard = ClipboardGuard::open()?;
+        if unsafe { EmptyClipboard() } == 0 {
+            return Err(WindowsDeliveryError::last("EmptyClipboard"));
+        }
+        for entry in &mut self.formats {
+            if unsafe { SetClipboardData(entry.format, entry.handle) }.is_null() {
+                return Err(WindowsDeliveryError::last("SetClipboardData"));
+            }
+            // SetClipboardData transferred ownership to Windows.
+            entry.handle = ptr::null_mut();
+        }
+        Ok(())
     }
 }
 
@@ -72,35 +163,6 @@ impl Drop for ClipboardGuard {
 pub struct WindowsClipboard;
 
 impl WindowsClipboard {
-    fn read_text() -> Result<Option<String>, WindowsDeliveryError> {
-        let _guard = ClipboardGuard::open()?;
-        // SAFETY: Clipboard is open on this thread.
-        if unsafe { IsClipboardFormatAvailable(CF_UNICODETEXT as u32) } == 0 {
-            return Ok(None);
-        }
-        // SAFETY: CF_UNICODETEXT remains owned by the clipboard; we only read.
-        let handle = unsafe { GetClipboardData(CF_UNICODETEXT as u32) };
-        if handle.is_null() {
-            return Err(WindowsDeliveryError::last("GetClipboardData"));
-        }
-        // SAFETY: GlobalLock accepts the movable global-memory clipboard handle.
-        let pointer = unsafe { GlobalLock(handle) } as *const u16;
-        if pointer.is_null() {
-            return Err(WindowsDeliveryError::last("GlobalLock"));
-        }
-        let units = unsafe { GlobalSize(handle) } / std::mem::size_of::<u16>();
-        // SAFETY: GlobalSize bounds this allocation; CF_UNICODETEXT is UTF-16.
-        let slice = unsafe { std::slice::from_raw_parts(pointer, units) };
-        let end = slice
-            .iter()
-            .position(|unit| *unit == 0)
-            .unwrap_or(slice.len());
-        let text = String::from_utf16_lossy(&slice[..end]);
-        // SAFETY: Balances the successful GlobalLock above.
-        unsafe { GlobalUnlock(handle) };
-        Ok(Some(text))
-    }
-
     fn write_text(text: Option<&str>) -> Result<(), WindowsDeliveryError> {
         let _guard = ClipboardGuard::open()?;
         // SAFETY: Clipboard is open on this thread.
@@ -139,11 +201,11 @@ impl WindowsClipboard {
 }
 
 impl ClipboardPort for WindowsClipboard {
-    type Snapshot = Option<String>;
+    type Snapshot = WindowsClipboardSnapshot;
     type Error = WindowsDeliveryError;
 
     fn snapshot(&mut self) -> Result<Self::Snapshot, Self::Error> {
-        Self::read_text()
+        WindowsClipboardSnapshot::capture()
     }
 
     fn set_text(&mut self, text: &str) -> Result<(), Self::Error> {
@@ -151,7 +213,7 @@ impl ClipboardPort for WindowsClipboard {
     }
 
     fn restore(&mut self, snapshot: Self::Snapshot) -> Result<(), Self::Error> {
-        Self::write_text(snapshot.as_deref())
+        snapshot.restore()
     }
 }
 
@@ -207,5 +269,76 @@ fn keyboard_input(key: u16, flags: u32) -> INPUT {
                 dwExtraInfo: 0,
             },
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use windows_sys::core::w;
+    use windows_sys::Win32::System::DataExchange::{
+        GetClipboardData, IsClipboardFormatAvailable, RegisterClipboardFormatW,
+    };
+    use windows_sys::Win32::System::Memory::GlobalSize;
+
+    struct RestoreClipboard(Option<WindowsClipboardSnapshot>);
+
+    impl Drop for RestoreClipboard {
+        fn drop(&mut self) {
+            if let Some(snapshot) = self.0.take() {
+                let _ = snapshot.restore();
+            }
+        }
+    }
+
+    fn write_custom_format(format: u32, bytes: &[u8]) {
+        let _guard = ClipboardGuard::open().expect("open clipboard");
+        assert_ne!(unsafe { EmptyClipboard() }, 0);
+        let handle = unsafe { GlobalAlloc(GMEM_MOVEABLE, bytes.len()) };
+        assert!(!handle.is_null());
+        let destination = unsafe { GlobalLock(handle) } as *mut u8;
+        assert!(!destination.is_null());
+        unsafe {
+            ptr::copy_nonoverlapping(bytes.as_ptr(), destination, bytes.len());
+            GlobalUnlock(handle);
+        }
+        if unsafe { SetClipboardData(format, handle) }.is_null() {
+            unsafe { GlobalFree(handle) };
+            panic!("set custom clipboard format");
+        }
+    }
+
+    fn read_custom_format(format: u32) -> Vec<u8> {
+        let _guard = ClipboardGuard::open().expect("open clipboard");
+        assert_ne!(unsafe { IsClipboardFormatAvailable(format) }, 0);
+        let handle = unsafe { GetClipboardData(format) };
+        assert!(!handle.is_null());
+        let size = unsafe { GlobalSize(handle) };
+        let source = unsafe { GlobalLock(handle) } as *const u8;
+        assert!(!source.is_null());
+        let bytes = unsafe { std::slice::from_raw_parts(source, size) }.to_vec();
+        unsafe { GlobalUnlock(handle) };
+        bytes
+    }
+
+    #[test]
+    #[ignore = "temporarily owns the real Windows clipboard"]
+    fn restores_non_text_clipboard_formats() {
+        let original = WindowsClipboardSnapshot::capture().expect("snapshot original clipboard");
+        let mut original_guard = RestoreClipboard(Some(original));
+        let format = unsafe { RegisterClipboardFormatW(w!("PulseTalk.RichClipboardTest")) };
+        assert_ne!(format, 0);
+        let expected = b"application-specific clipboard data";
+        write_custom_format(format, expected);
+
+        let snapshot = WindowsClipboardSnapshot::capture().expect("snapshot custom clipboard");
+        WindowsClipboard::write_text(Some("temporary dictation text")).expect("stage text");
+        snapshot.restore().expect("restore custom clipboard");
+
+        assert_eq!(read_custom_format(format), expected);
+
+        if let Some(original) = original_guard.0.take() {
+            original.restore().expect("restore original clipboard");
+        }
     }
 }
