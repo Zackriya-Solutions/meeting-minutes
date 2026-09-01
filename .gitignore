@@ -76,5 +76,6 @@ experiments/
 .cursor/
 target/
 .worktrees/
+.tooling/
 
 frontend/src-tauri/binaries/
