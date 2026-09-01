@@ -3,7 +3,7 @@ use std::fmt;
 use std::ptr;
 use std::thread;
 use std::time::Duration;
-use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, GlobalFree, HANDLE};
+use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, GlobalFree, HANDLE, RECT};
 use windows_sys::Win32::Graphics::Gdi::{DeleteEnhMetaFile, DeleteMetaFile, DeleteObject};
 use windows_sys::Win32::Security::{
     GetSidSubAuthority, GetSidSubAuthorityCount, GetTokenInformation, TokenIntegrityLevel,
@@ -25,7 +25,8 @@ use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
     SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, VK_CONTROL, VK_V,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    GetForegroundWindow, GetGUIThreadInfo, GetWindowThreadProcessId, IsWindow, GUITHREADINFO,
+    GetForegroundWindow, GetGUIThreadInfo, GetWindowRect, GetWindowThreadProcessId, IsWindow,
+    GUITHREADINFO,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -185,6 +186,15 @@ impl WindowsTarget {
         format!("pid:{}", self.process_id)
     }
 
+    pub fn focused_control_anchor(&self) -> Option<(f64, f64)> {
+        let hwnd = self.focused_hwnd? as *mut std::ffi::c_void;
+        let mut rect = RECT::default();
+        if unsafe { GetWindowRect(hwnd, &mut rect) } == 0 {
+            return None;
+        }
+        Some(rectangle_center(rect))
+    }
+
     fn validate_foreground(&self) -> Result<(), WindowsDeliveryError> {
         let hwnd = self.hwnd as *mut std::ffi::c_void;
         validate_window_identity(
@@ -206,6 +216,13 @@ fn focused_control(thread_id: u32) -> Option<usize> {
     } else {
         Some(info.hwndFocus as usize)
     }
+}
+
+fn rectangle_center(rect: RECT) -> (f64, f64) {
+    (
+        (rect.left as f64 + rect.right as f64) / 2.0,
+        (rect.top as f64 + rect.bottom as f64) / 2.0,
+    )
 }
 
 struct OwnedHandle(HANDLE);
@@ -916,6 +933,19 @@ mod tests {
         assert!(validate_focused_control(Some(51), Some(51)).is_ok());
         assert!(validate_focused_control(None, Some(52)).is_ok());
         assert!(validate_focused_control(None, None).is_ok());
+    }
+
+    #[test]
+    fn focused_control_anchor_uses_the_center_of_its_screen_rectangle() {
+        assert_eq!(
+            rectangle_center(RECT {
+                left: -1200,
+                top: 80,
+                right: -400,
+                bottom: 680,
+            }),
+            (-800.0, 380.0)
+        );
     }
 
     #[test]

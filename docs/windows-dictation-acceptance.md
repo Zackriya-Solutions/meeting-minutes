@@ -10,7 +10,7 @@ Updated: 2026-09-01
 - The production home uses the selected Hub 1 voice-workspace layout with real shortcut status, dictation history, daily word totals, and Meetily meetings. The PulseTalk speech-pulse mark now appears in the title bar, sidebar, and bundle icons.
 - Settings reports the shortcut actually acquired at runtime. On the acceptance machine it is `Ctrl+Shift+Space`.
 - General keeps the compact system-wide shortcut status, while the Dictation settings tab groups activation, transcription, delivery safety, and recovery-history controls.
-- Dictation settings includes a persisted floating-overlay switch. When enabled, a compact microphone stays above other windows, expands on hover to show the acquired shortcut, and remains expanded through listening, transcription, cleanup, delivery, and the brief completion or failure result.
+- Dictation settings includes a persisted floating-overlay switch. When enabled, a compact microphone stays above other windows, expands on hover to show the acquired shortcut, and remains expanded through listening, transcription, cleanup, delivery, and the brief completion or failure result. Each activation first moves it to the monitor containing the focused text control; the mouse pointer is used only when Windows cannot expose a focused control. Negative desktop coordinates support displays placed left of or above the primary monitor.
 - Dictation history loads on entry, polls every five seconds only while visible, refreshes when the window becomes visible again, and prevents overlapping requests. No manual refresh is required.
 - The inherited meeting transcript listener retries three times, disposes listeners that finish setup after unmount, and logs `meeting_transcript_listener_setup_failed` with attempt and retry state. Exhausted retries use a non-blocking toast; they no longer open a modal alert or disable dictation.
 - Dictation now enters the `cleaning` phase after local transcription. The offline cleanup removes English hesitation fillers and repairs whitespace and punctuation spacing within a 150 ms budget; explicit non-English selections retain their words.
@@ -18,7 +18,7 @@ Updated: 2026-09-01
 - A live hold/release capture reached the configured local Parakeet model, saved history before delivery, and pasted a transcript successfully.
 - Four successful sessions at 17:42–17:43 are stored with target `pid:47640`; the current Windows process table identifies that PID as T3 Code. This verifies repeated system-wide paste into an Electron editor.
 - A deliberately short capture is classified as `audio_capture_failed` and remains visible in history.
-- The core dictation suite passes 29 tests; four interactive Windows tests are ignored by default because they temporarily take foreground focus or own the clipboard.
+- The core dictation suite passes 31 tests; four interactive Windows tests are ignored by default because they temporarily take foreground focus or own the clipboard.
 - The native Windows delivery test passes when run explicitly. It uses a real top-level window and child edit control to prove both caret insertion and selected-text replacement through the production delivery path.
 - A separate two-field native Windows test passes explicitly and proves that moving focus to another edit control in the same top-level window refuses the paste and restores the rich clipboard payload.
 - The native delivery and real-clipboard tests prove an application-specific non-text clipboard format survives staging and restoration.

@@ -1,5 +1,5 @@
 use std::sync::RwLock;
-use tauri::{AppHandle, Manager, PhysicalPosition, PhysicalSize, WebviewWindow};
+use tauri::{AppHandle, Manager, Monitor, PhysicalPosition, PhysicalSize, WebviewWindow};
 use tauri_plugin_store::StoreExt;
 
 const PREFERENCE_STORE: &str = "preferences.json";
@@ -83,6 +83,19 @@ pub fn set_expanded(app: &AppHandle, expanded: bool) -> Result<(), String> {
     resize_and_position(app, expanded)
 }
 
+pub fn prepare_for_activation(app: &AppHandle, focused_control_anchor: Option<(f64, f64)>) {
+    if !app.state::<DictationOverlayState>().enabled() {
+        return;
+    }
+    if let Err(error) = move_expanded_overlay_to_target_monitor(app, focused_control_anchor) {
+        log::warn!("dictation_overlay_target_monitor_failed error={error}");
+        if let Err(fallback_error) = resize_and_position(app, true) {
+            log::warn!("dictation_overlay_activation_fallback_failed error={fallback_error}");
+        }
+    }
+    show_if_enabled(app);
+}
+
 pub fn show_if_enabled(app: &AppHandle) {
     let Some(overlay) = app.get_webview_window("dictation-overlay") else {
         log::error!("dictation_overlay_missing code=internal");
@@ -99,14 +112,59 @@ pub fn show_if_enabled(app: &AppHandle) {
 
 fn resize_and_position(app: &AppHandle, expanded: bool) -> Result<(), String> {
     let overlay = overlay_window(app)?;
+    let monitor = overlay
+        .current_monitor()
+        .map_err(|error| format!("Could not read overlay monitor: {error}"))?
+        .ok_or_else(|| "No monitor is available for the dictation overlay.".to_string())?;
+    resize_and_position_on_monitor(&overlay, &monitor, expanded)
+}
+
+fn move_expanded_overlay_to_target_monitor(
+    app: &AppHandle,
+    focused_control_anchor: Option<(f64, f64)>,
+) -> Result<(), String> {
+    let (anchor_x, anchor_y, source) = match focused_control_anchor {
+        Some((x, y)) => (x, y, "focused_control"),
+        None => {
+            let cursor = app
+                .cursor_position()
+                .map_err(|error| format!("Could not read cursor position: {error}"))?;
+            (cursor.x, cursor.y, "cursor_fallback")
+        }
+    };
+    let monitor = app
+        .available_monitors()
+        .map_err(|error| format!("Could not enumerate monitors: {error}"))?
+        .into_iter()
+        .find(|monitor| {
+            let position = monitor.position();
+            let size = monitor.size();
+            rectangle_contains_cursor(
+                position.x,
+                position.y,
+                size.width,
+                size.height,
+                anchor_x,
+                anchor_y,
+            )
+        })
+        .ok_or_else(|| "The dictation target is not inside an available monitor.".to_string())?;
+    let overlay = overlay_window(app)?;
+    log::info!("dictation_overlay_monitor_selected source={source}");
+    resize_and_position_on_monitor(&overlay, &monitor, true)
+}
+
+fn resize_and_position_on_monitor(
+    overlay: &WebviewWindow,
+    monitor: &Monitor,
+    expanded: bool,
+) -> Result<(), String> {
     let logical_size = if expanded {
         EXPANDED_SIZE
     } else {
         COMPACT_SIZE
     };
-    let scale = overlay
-        .scale_factor()
-        .map_err(|error| format!("Could not read overlay scale: {error}"))?;
+    let scale = monitor.scale_factor();
     let size = PhysicalSize::new(
         (logical_size.0 as f64 * scale).round() as u32,
         (logical_size.1 as f64 * scale).round() as u32,
@@ -114,14 +172,14 @@ fn resize_and_position(app: &AppHandle, expanded: bool) -> Result<(), String> {
     overlay
         .set_size(size)
         .map_err(|error| format!("Could not resize dictation overlay: {error}"))?;
-    position_for_size(&overlay, size)
+    position_for_monitor(overlay, monitor, size)
 }
 
-fn position_for_size(overlay: &WebviewWindow, size: PhysicalSize<u32>) -> Result<(), String> {
-    let monitor = overlay
-        .current_monitor()
-        .map_err(|error| format!("Could not read overlay monitor: {error}"))?
-        .ok_or_else(|| "No monitor is available for the dictation overlay.".to_string())?;
+fn position_for_monitor(
+    overlay: &WebviewWindow,
+    monitor: &Monitor,
+    size: PhysicalSize<u32>,
+) -> Result<(), String> {
     let work_area = monitor.work_area();
     let scale = monitor.scale_factor();
     let bottom_margin = (BOTTOM_MARGIN as f64 * scale).round() as i32;
@@ -131,6 +189,20 @@ fn position_for_size(overlay: &WebviewWindow, size: PhysicalSize<u32>) -> Result
     overlay
         .set_position(PhysicalPosition::new(x, y))
         .map_err(|error| format!("Could not position dictation overlay: {error}"))
+}
+
+fn rectangle_contains_cursor(
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
+    cursor_x: f64,
+    cursor_y: f64,
+) -> bool {
+    cursor_x >= x as f64
+        && cursor_x < x as f64 + width as f64
+        && cursor_y >= y as f64
+        && cursor_y < y as f64 + height as f64
 }
 
 fn overlay_window(app: &AppHandle) -> Result<WebviewWindow, String> {
@@ -147,5 +219,18 @@ mod tests {
         assert_eq!(COMPACT_SIZE, (58, 52));
         assert!(EXPANDED_SIZE.0 > COMPACT_SIZE.0);
         assert!(EXPANDED_SIZE.1 > COMPACT_SIZE.1);
+    }
+
+    #[test]
+    fn cursor_monitor_selection_supports_negative_desktop_coordinates() {
+        assert!(rectangle_contains_cursor(
+            -1920, -180, 1920, 1080, -640.0, 400.0
+        ));
+        assert!(!rectangle_contains_cursor(
+            -1920, -180, 1920, 1080, 0.0, 400.0
+        ));
+        assert!(!rectangle_contains_cursor(
+            -1920, -180, 1920, 1080, -640.0, 900.0
+        ));
     }
 }

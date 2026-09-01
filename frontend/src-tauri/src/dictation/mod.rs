@@ -26,7 +26,8 @@ pub use cleanup::{cleanup_transcript, CleanupFallbackReason, CleanupResult};
 pub use coordinator::start_coordinator;
 pub use delivery::{deliver_text, ClipboardPort, DeliveryError, DeliveryReceipt, PastePort};
 pub use overlay::{
-    initialize_overlay, set_enabled as set_overlay_enabled, set_expanded as set_overlay_expanded,
+    initialize_overlay, prepare_for_activation as prepare_overlay_for_activation,
+    set_enabled as set_overlay_enabled, set_expanded as set_overlay_expanded,
     show_if_enabled as show_overlay_if_enabled, DictationOverlayState,
 };
 pub use session::{
