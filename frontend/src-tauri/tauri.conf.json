@@ -1,8 +1,8 @@
 {
     "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-    "productName": "meetily",
+    "productName": "pulse talq",
     "version": "0.4.0",
-    "identifier": "com.meetily.ai",
+    "identifier": "com.pulsetalq.app",
     "build": {
         "frontendDist": "../out",
         "devUrl": "http://localhost:3118",
@@ -12,7 +12,7 @@
     "app": {
         "windows": [
             {
-                "title": "meetily",
+                "title": "pulse talq",
                 "width": 1100,
                 "height": 700,
                 "resizable": true,

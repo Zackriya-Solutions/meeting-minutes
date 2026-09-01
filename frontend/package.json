@@ -1,5 +1,5 @@
 {
-    "name": "meetily",
+    "name": "pulse-talq",
     "version": "0.4.0",
     "private": true,
     "main": "electron/main.js",

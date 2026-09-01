@@ -182,10 +182,10 @@ export class Analytics {
     } catch (error) {
       console.error('Failed to get persistent user ID:', error);
       // Fallback to session storage
-      let userId = sessionStorage.getItem('meetily_user_id');
+      let userId = sessionStorage.getItem('pulse_talq_user_id');
       if (!userId) {
         userId = `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-        sessionStorage.setItem('meetily_user_id', userId);
+        sessionStorage.setItem('pulse_talq_user_id', userId);
         sessionStorage.setItem('is_first_launch', 'true');
       }
       return userId;

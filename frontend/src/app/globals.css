@@ -2,6 +2,53 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --pt-bg: #f7f6f2;
+  --pt-surface: #ffffff;
+  --pt-surface-alt: #efede8;
+  --pt-surface-hover: #fff0ec;
+  --pt-surface-dark: #18191b;
+  --pt-sidebar: #0b0b0c;
+  --pt-border: #d2cfca;
+  --pt-border-strong: #b7b3ad;
+  --pt-text: #0b0b0c;
+  --pt-text-secondary: #414042;
+  --pt-text-tertiary: #6f6d6d;
+  --pt-text-inverse: #f7f6f2;
+  --pt-text-inverse-muted: #b9b8b4;
+  --pt-accent: #ff3b1f;
+  --pt-accent-hover: #e92f16;
+  --pt-accent-active: #c92510;
+  --pt-accent-soft: #ffb39f;
+  --pt-accent-wash: #fff0ec;
+  --pt-font-ui: var(--font-archivo), "Segoe UI", sans-serif;
+  --pt-font-reading: var(--font-newsreader), Georgia, serif;
+}
+
+.pulse-talq-mark {
+  display: inline-flex;
+  align-items: baseline;
+  border: 0;
+  background: transparent;
+  color: var(--pt-text-inverse);
+  padding: 4px 2px;
+  font-family: var(--pt-font-ui);
+  font-size: 22px;
+  font-weight: 500;
+  letter-spacing: -0.06em;
+  cursor: pointer;
+  transition: opacity 180ms ease, transform 180ms ease;
+}
+
+.pulse-talq-mark strong { color: var(--pt-accent); font-weight: 500; }
+.pulse-talq-mark:hover { opacity: .78; transform: translateY(-1px); }
+.pulse-talq-mark:focus-visible { outline: 2px solid var(--pt-accent); outline-offset: 3px; }
+.pulse-talq-mark--compact { justify-content: center; width: 40px; height: 40px; color: var(--pt-accent); font-size: 24px; }
+
+.pt-reading { font-family: var(--pt-font-reading); }
+.pt-label { font-size: 10px; font-weight: 600; line-height: 1.3; letter-spacing: .14em; text-transform: uppercase; }
+.pt-focus-ring:focus-visible { outline: 2px solid var(--pt-accent); outline-offset: 2px; }
+
 @keyframes vibrate {
   0% {
     transform: translate(0);
@@ -140,7 +187,9 @@
 
   /* html, */
   body {
-    @apply bg-background text-foreground;
+    background: var(--pt-bg);
+    color: var(--pt-text);
+    font-family: var(--pt-font-ui);
     overflow: hidden;
     height: 100%;
   }
@@ -210,5 +259,14 @@
   /* Disable scrolling on any BlockNote wrapper elements */
   [data-node-type] {
     overflow: visible !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

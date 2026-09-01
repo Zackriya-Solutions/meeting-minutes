@@ -43,8 +43,12 @@ export function OnboardingContainer({
   };
 
   return (
-    <div className="fixed inset-0 bg-gray-50 flex items-center justify-center z-50 overflow-hidden">
-      <div className={cn('w-full max-w-2xl h-full max-h-screen flex flex-col px-6 py-6', className)}>
+    <div className="fixed inset-0 bg-[var(--pt-bg)] flex items-center justify-center z-50 overflow-hidden">
+      <div className={cn('relative w-full max-w-3xl h-full max-h-screen flex flex-col px-8 py-7', className)}>
+        <div className="flex items-center justify-between mb-10">
+          <div className="text-[22px] font-medium tracking-[-.06em]">pulse <span className="text-[var(--pt-accent)]">talq</span></div>
+          <span className="pt-label text-[var(--pt-text-tertiary)]">Local by design</span>
+        </div>
         {/* Progress Indicator with Navigation - Fixed */}
         {step && !hideProgress && (
           <div className="mb-2 relative flex-shrink-0">
@@ -85,17 +89,17 @@ export function OnboardingContainer({
         )}
 
         {/* Header - Fixed */}
-        <div className="mb-4 text-center space-y-3 flex-shrink-0">
-          <h1 className="text-4xl font-semibold text-gray-900 animate-fade-in-up">{title}</h1>
+        <div className="mb-7 text-left space-y-3 flex-shrink-0">
+          <h1 className="text-[40px] leading-none font-medium tracking-[-.055em] text-[var(--pt-text)] animate-fade-in-up">{title}</h1>
           {description && (
-            <p className="text-base text-gray-600 max-w-md mx-auto animate-fade-in-up delay-75">
+            <p className="pt-reading text-[19px] leading-relaxed text-[var(--pt-text-secondary)] max-w-xl animate-fade-in-up delay-75">
               {description}
             </p>
           )}
         </div>
 
         {/* Content - Scrollable */}
-        <div className="flex-1 overflow-y-auto pr-2">
+        <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar">
           <div className="space-y-6">{children}</div>
         </div>
       </div>

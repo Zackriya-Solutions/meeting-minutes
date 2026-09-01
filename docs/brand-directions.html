@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>pulse talq brand directions</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600&family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:wght@400;500&family=Karla:wght@400;500;600&family=Newsreader:opsz,wght@6..72,400;6..72,500&display=swap" rel="stylesheet">
+  <style>
+    *{box-sizing:border-box} body{margin:0;background:#e9e9e7;color:#171717;font-family:Arial,sans-serif} button,input{font:inherit}
+    .chrome{position:sticky;top:0;z-index:20;display:grid;grid-template-columns:repeat(3,minmax(360px,1fr));gap:1px;background:#b9b9b5;border-bottom:1px solid #aaa}
+    .chrome div{background:#f5f5f2;padding:12px 22px;font-size:11px;font-weight:700;letter-spacing:.11em;text-transform:uppercase}.chrome span{color:#6c6c68;margin-right:8px}
+    .directions{display:grid;grid-template-columns:repeat(3,minmax(360px,1fr));gap:1px;background:#b9b9b5;min-width:1080px}
+    .direction{min-height:100vh;padding:30px 24px 42px;overflow:hidden}.section{margin-top:34px}.label{font-size:10px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;opacity:.58;margin-bottom:12px}
+    .swatches{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.swatch{font-size:10px}.chip{height:42px;margin-bottom:6px;border:1px solid rgba(0,0,0,.12)}.hex{opacity:.57;margin-top:2px}
+    .components{display:flex;gap:8px;flex-wrap:wrap}.btn{border:0;padding:11px 15px;cursor:pointer}.field{width:100%;padding:12px 14px;margin-top:10px;outline:none}.domain-card{margin-top:10px;padding:16px}.card-top{display:flex;align-items:center;justify-content:space-between;gap:12px}.micro{font-size:11px;opacity:.62}.live{display:inline-flex;align-items:center;gap:7px;font-size:11px;font-weight:600}.dot{width:7px;height:7px;border-radius:50%}
+    .notes{margin-top:28px;padding-top:16px;border-top:1px solid currentColor;font-size:12px;line-height:1.55}.notes strong{display:inline-block;width:38px}
+
+    .dir-a{--ink:#101820;--paper:#f8fafb;--blue:#156cff;--ice:#dcecff;--slate:#586675;--line:#c8d0d7;background:var(--paper);color:var(--ink);font-family:Archivo,sans-serif}
+    .dir-a .concept{border-bottom:1px solid var(--line);padding-bottom:25px}.dir-a h1{font-size:15px;margin:0 0 8px;font-weight:600}.dir-a .desc{font-size:12px;line-height:1.5;color:var(--slate)}
+    .dir-a .wordmark{font-size:43px;font-weight:500;letter-spacing:-.065em;padding:48px 0 34px;position:relative}.dir-a .wordmark:after{content:"";position:absolute;left:2px;bottom:24px;width:74px;height:2px;background:var(--blue);box-shadow:82px 0 0 #a7c9ff,164px 0 0 #dcecff}
+    .dir-a .type-display{font-size:37px;line-height:.98;letter-spacing:-.055em;font-weight:500;max-width:300px}.dir-a .type-body{font-family:Newsreader,serif;font-size:17px;line-height:1.45;margin-top:18px;color:#34414d}
+    .dir-a .chip{border-radius:2px}.dir-a .btn{border-radius:3px;font-weight:500}.dir-a .primary{background:var(--ink);color:white}.dir-a .secondary{background:transparent;color:var(--ink);border:1px solid var(--line)}.dir-a .field{border:1px solid var(--line);border-radius:3px;background:white}.dir-a .field:focus{border-color:var(--blue)}
+    .dir-a .domain-card{border:1px solid var(--line);border-radius:3px;background:white}.dir-a .dot{background:var(--blue)}.dir-a .signal{height:62px;margin-top:16px;display:flex;align-items:center;gap:4px;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}.dir-a .signal i{display:block;width:2px;background:var(--blue)}
+
+    .dir-b{--black:#0b0b0c;--coal:#18191b;--red:#ff3b1f;--peach:#ffb39f;--fog:#9da0a5;--white:#f7f6f2;background:var(--black);color:var(--white);font-family:"Barlow Condensed",sans-serif}
+    .dir-b .concept{padding:14px 0 22px;border-top:6px solid var(--red)}.dir-b h1{font-size:21px;letter-spacing:.03em;text-transform:uppercase;margin:0 0 5px}.dir-b .desc{font-family:Karla,sans-serif;font-size:12px;line-height:1.45;color:var(--fog)}
+    .dir-b .wordmark{font-size:52px;font-weight:700;text-transform:uppercase;letter-spacing:-.045em;padding:34px 0 24px}.dir-b .wordmark span{color:var(--red)}
+    .dir-b .type-display{font-size:48px;line-height:.85;text-transform:uppercase;font-weight:700;letter-spacing:-.025em}.dir-b .type-body{font-family:Karla,sans-serif;font-size:15px;line-height:1.5;color:#c7c8ca;margin-top:20px}
+    .dir-b .chip{border-color:#37383b}.dir-b .swatch{font-family:Karla,sans-serif}.dir-b .btn{text-transform:uppercase;letter-spacing:.08em;font-weight:700;border-radius:0}.dir-b .primary{background:var(--red);color:var(--black)}.dir-b .secondary{background:transparent;color:var(--white);border:1px solid #595b5f}.dir-b .field{font-family:Karla,sans-serif;background:var(--coal);color:white;border:0;border-left:3px solid var(--red);border-radius:0}.dir-b .domain-card{background:var(--coal);border:1px solid #303236;border-radius:0}.dir-b .dot{background:var(--red);box-shadow:0 0 12px var(--red)}
+    .dir-b .readout{margin-top:16px;display:grid;grid-template-columns:64px 1fr;gap:12px;align-items:center}.dir-b .timer{font-size:29px;color:var(--red)}.dir-b .transcript{font-family:Karla,sans-serif;font-size:12px;color:#d6d6d7;line-height:1.45;border-left:1px solid #45474b;padding-left:12px}.dir-b .notes{border-color:#3b3c3f;font-family:Karla,sans-serif}
+
+    .dir-c{--black:#0b0b0c;--coal:#18191b;--red:#ff3b1f;--peach:#ffb39f;--fog:#9da0a5;--white:#f7f6f2;background:var(--white);color:var(--black);font-family:Archivo,sans-serif}
+    .dir-c .concept{border-bottom:1px solid #cbc9c4;padding-bottom:25px}.dir-c h1{font-size:15px;font-weight:600;margin:0 0 8px}.dir-c .desc{font-size:12px;line-height:1.5;color:#626164}
+    .dir-c .wordmark{font-size:43px;font-weight:500;letter-spacing:-.065em;padding:48px 0 34px;position:relative}.dir-c .wordmark span{color:var(--red)}.dir-c .wordmark:after{content:"";position:absolute;left:2px;bottom:24px;width:74px;height:2px;background:var(--red);box-shadow:82px 0 0 var(--peach),164px 0 0 #dedbd5}
+    .dir-c .type-display{font-size:37px;line-height:.98;letter-spacing:-.055em;font-weight:500;max-width:320px}.dir-c .type-body{font-family:Newsreader,serif;font-size:17px;line-height:1.45;margin-top:18px;max-width:320px;color:#414042}
+    .dir-c .chip{border-radius:2px}.dir-c .btn{font-weight:500;border-radius:3px}.dir-c .primary{background:var(--black);color:white;box-shadow:0 8px 18px rgba(11,11,12,.14)}.dir-c .secondary{background:transparent;color:var(--black);border:1px solid #c4c1bc}.dir-c .field{background:white;border:1px solid #c4c1bc;border-radius:3px}.dir-c .field:focus{border-color:var(--red);box-shadow:0 0 0 3px rgba(255,59,31,.1)}.dir-c .domain-card{background:white;border:1px solid #d2cfca;border-radius:3px;box-shadow:0 12px 26px rgba(11,11,12,.09)}.dir-c .dot{background:var(--red);box-shadow:0 0 0 3px rgba(255,59,31,.12)}
+    .dir-c .relay{margin:22px 4px 6px;position:relative;height:134px}.dir-c .note{position:absolute;width:88%;padding:12px 14px;background:white;border:1px solid #d2cfca;border-radius:3px;font-size:12px;box-shadow:0 10px 24px rgba(11,11,12,.09)}.dir-c .note:nth-child(1){top:0;left:0;z-index:3;border-left:2px solid var(--red)}.dir-c .note:nth-child(2){top:38px;left:7%;z-index:2;background:#fff0ec;border-color:#efc3b8}.dir-c .note:nth-child(3){top:76px;left:12%;z-index:1;background:var(--coal);color:white;border-color:var(--coal)}
+    @media(max-width:999px){body{overflow-x:hidden}.chrome{display:none}.directions{display:block;min-width:0}.direction{min-height:auto}.direction+.direction{border-top:8px solid #b9b9b5}.swatches{grid-template-columns:repeat(6,1fr)}}
+    @media(max-width:600px){.swatches{grid-template-columns:repeat(3,1fr)}.direction{padding:26px 20px}}
+  </style>
+</head>
+<body>
+  <header class="chrome"><div><span>A</span>Quiet Velocity</div><div><span>B</span>Redline</div><div><span>C</span>Deep Focus</div></header>
+  <main class="directions">
+    <article class="direction dir-a">
+      <header class="concept"><h1>A · Quiet Velocity</h1><div class="desc">Private speed, expressed with restraint and exactness.</div></header>
+      <div class="wordmark">pulse talq</div>
+      <section class="section"><div class="label">Color</div><div class="swatches">
+        <div class="swatch"><div class="chip" style="background:#101820"></div>Deep Ink<div class="hex">#101820</div></div><div class="swatch"><div class="chip" style="background:#156cff"></div>Pulse Blue<div class="hex">#156CFF</div></div><div class="swatch"><div class="chip" style="background:#dcecff"></div>Signal Ice<div class="hex">#DCECFF</div></div><div class="swatch"><div class="chip" style="background:#586675"></div>Slate<div class="hex">#586675</div></div><div class="swatch"><div class="chip" style="background:#c8d0d7"></div>Fine Line<div class="hex">#C8D0D7</div></div><div class="swatch"><div class="chip" style="background:#f8fafb"></div>Cool Paper<div class="hex">#F8FAFB</div></div>
+      </div></section>
+      <section class="section"><div class="label">Type · Archivo + Newsreader</div><div class="type-display">Your thought, already written.</div><div class="type-body">Speak in any desktop app. pulse talq turns your voice into text locally, while your words stay on your machine.</div><div class="micro">Display 37 / 500 · Body 17 / 400</div></section>
+      <section class="section"><div class="label">Components</div><div class="components"><button class="btn primary">Start dictating</button><button class="btn secondary">Open projects</button></div><input class="field" value="Capture a thought…" aria-label="Capture a thought"><div class="domain-card"><div class="card-top"><strong>Product review</strong><span class="live"><i class="dot"></i>Listening</span></div><p class="micro">Words appear in the active app. Audio stays local.</p></div></section>
+      <section class="section"><div class="label">In use · live signal</div><div class="signal" aria-label="Audio waveform"> <i style="height:12px"></i><i style="height:28px"></i><i style="height:46px"></i><i style="height:22px"></i><i style="height:38px"></i><i style="height:16px"></i><i style="height:32px"></i><i style="height:8px"></i></div><p class="micro">00:18 · 74 words captured · private on this device</p></section>
+      <footer class="notes"><div><strong>Safe</strong>Clear, premium, and immediately trustworthy.</div><div><strong>Risk</strong>The near-silent palette asks the signal line to carry the brand. It makes speed feel controlled instead of loud.</div></footer>
+    </article>
+
+    <article class="direction dir-b">
+      <header class="concept"><h1>B · Redline</h1><div class="desc">A private transcription engine that looks ready before you finish speaking.</div></header>
+      <div class="wordmark">pulse <span>talq</span></div>
+      <section class="section"><div class="label">Color</div><div class="swatches">
+        <div class="swatch"><div class="chip" style="background:#0b0b0c"></div>Blackout<div class="hex">#0B0B0C</div></div><div class="swatch"><div class="chip" style="background:#ff3b1f"></div>Hot Signal<div class="hex">#FF3B1F</div></div><div class="swatch"><div class="chip" style="background:#ffb39f"></div>Afterglow<div class="hex">#FFB39F</div></div><div class="swatch"><div class="chip" style="background:#18191b"></div>Coal<div class="hex">#18191B</div></div><div class="swatch"><div class="chip" style="background:#9da0a5"></div>Machine Fog<div class="hex">#9DA0A5</div></div><div class="swatch"><div class="chip" style="background:#f7f6f2"></div>Readout<div class="hex">#F7F6F2</div></div>
+      </div></section>
+      <section class="section"><div class="label">Type · Barlow Condensed + Karla</div><div class="type-display">Thought moves fast.<br>Keep up.</div><div class="type-body">Dictate feedback, record the room, and route every transcript into the project where it belongs.</div><div class="micro">Display 48 / 700 · Body 15 / 400</div></section>
+      <section class="section"><div class="label">Components</div><div class="components"><button class="btn primary">Go live</button><button class="btn secondary">View sessions</button></div><input class="field" value="Search every word" aria-label="Search every word"><div class="domain-card"><div class="card-top"><strong>ROADMAP REVIEW</strong><span class="live"><i class="dot"></i>LOCAL</span></div><p class="micro">28 min · 3 speakers · 4 decisions detected</p></div></section>
+      <section class="section"><div class="label">In use · live readout</div><div class="readout"><div class="timer">02:14</div><div class="transcript">“Move privacy controls into onboarding, then test the faster capture flow.”</div></div></section>
+      <footer class="notes"><div><strong>Safe</strong>Dark mode and a live readout make speed instantly legible.</div><div><strong>Risk</strong>Condensed headline type feels closer to broadcast graphics than productivity software. It gives pulse talq urgency.</div></footer>
+    </article>
+
+    <article class="direction dir-c">
+      <header class="concept"><h1>C · Deep Focus</h1><div class="desc">Quiet precision, charged with a faster and more decisive signal.</div></header>
+      <div class="wordmark">pulse <span>talq</span></div>
+      <section class="section"><div class="label">Color</div><div class="swatches">
+        <div class="swatch"><div class="chip" style="background:#0b0b0c"></div>Blackout<div class="hex">#0B0B0C</div></div><div class="swatch"><div class="chip" style="background:#ff3b1f"></div>Hot Signal<div class="hex">#FF3B1F</div></div><div class="swatch"><div class="chip" style="background:#ffb39f"></div>Afterglow<div class="hex">#FFB39F</div></div><div class="swatch"><div class="chip" style="background:#18191b"></div>Coal<div class="hex">#18191B</div></div><div class="swatch"><div class="chip" style="background:#9da0a5"></div>Machine Fog<div class="hex">#9DA0A5</div></div><div class="swatch"><div class="chip" style="background:#f7f6f2"></div>Readout<div class="hex">#F7F6F2</div></div>
+      </div></section>
+      <section class="section"><div class="label">Type · Archivo + Newsreader</div><div class="type-display">Give every thought somewhere to go.</div><div class="type-body">pulse talq captures your voice locally and brings meetings, feedback, and decisions into the project where they can keep working.</div><div class="micro">Display 37 / 500 · Body 17 / 400</div></section>
+      <section class="section"><div class="label">Components</div><div class="components"><button class="btn primary">Begin capture</button><button class="btn secondary">Open workspace</button></div><input class="field" value="Search projects and transcripts" aria-label="Search projects and transcripts"><div class="domain-card"><div class="card-top"><strong>Launch planning</strong><span class="live"><i class="dot"></i>Private</span></div><p class="micro">12 transcripts · 4 meetings · updated moments ago</p></div></section>
+      <section class="section"><div class="label">In use · contextual layers</div><div class="relay"><div class="note">Product review · 4 decisions captured</div><div class="note">Customer feedback · linked to onboarding</div><div class="note">Project context · ready for the next session</div></div></section>
+      <footer class="notes"><div><strong>Safe</strong>Restrained spacing and readable type keep the product composed.</div><div><strong>Risk</strong>A hot red signal in a quiet interface creates tension. It makes speed visible without turning the whole product loud.</div></footer>
+    </article>
+  </main>
+</body>
+</html>

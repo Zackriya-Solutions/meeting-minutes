@@ -291,7 +291,7 @@ fn convert_to_wav_with_ffmpeg(
     // Create temp file in the same directory as the input to avoid cross-device issues
     let parent_dir = input_path.parent().unwrap_or_else(|| Path::new("."));
     let temp_file = tempfile::Builder::new()
-        .prefix(".meetily_decode_")
+        .prefix(".pulse_talq_decode_")
         .suffix(".wav")
         .tempfile_in(parent_dir)
         .map_err(|e| anyhow!("Failed to create temporary WAV file: {}", e))?;

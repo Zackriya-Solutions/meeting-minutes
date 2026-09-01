@@ -4,6 +4,7 @@
 
 # dependencies
 /node_modules
+/.pnpm-store/
 **/models
 /.pnp
 .pnp.*

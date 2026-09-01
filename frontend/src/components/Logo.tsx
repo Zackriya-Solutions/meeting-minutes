@@ -1,5 +1,4 @@
 import React from "react";
-import Image from "next/image";
 import { Dialog, DialogContent, DialogTitle, DialogTrigger } from "./ui/dialog";
 import { VisuallyHidden } from "./ui/visually-hidden";
 import { About } from "./About";
@@ -13,20 +12,20 @@ const Logo = React.forwardRef<HTMLButtonElement, LogoProps>(({ isCollapsed }, re
     <Dialog aria-describedby={undefined}>
       {isCollapsed ? (
         <DialogTrigger asChild>
-          <button ref={ref} className="flex items-center justify-start mb-2 cursor-pointer bg-transparent border-none p-0 hover:opacity-80 transition-opacity">
-            <Image src="/logo-collapsed.png" alt="Logo" width={40} height={32} />
+          <button ref={ref} className="pulse-talq-mark pulse-talq-mark--compact" aria-label="About pulse talq">
+            <span>p</span>
           </button>
         </DialogTrigger>
       ) : (
         <DialogTrigger asChild>
-          <span className="text-lg text-center border rounded-full bg-blue-50 border-white font-semibold text-gray-700 mb-2 block items-center cursor-pointer hover:opacity-80 transition-opacity">
-            <span>Meetily</span>
-          </span>
+          <button ref={ref} className="pulse-talq-mark" aria-label="About pulse talq">
+            <span>pulse </span><strong>talq</strong>
+          </button>
         </DialogTrigger>
       )}
       <DialogContent>
         <VisuallyHidden>
-          <DialogTitle>About Meetily</DialogTitle>
+          <DialogTitle>About pulse talq</DialogTitle>
         </VisuallyHidden>
         <About />
       </DialogContent>
