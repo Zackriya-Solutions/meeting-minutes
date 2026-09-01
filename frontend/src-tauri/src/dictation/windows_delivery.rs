@@ -25,7 +25,7 @@ use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
     SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, VK_CONTROL, VK_V,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    GetForegroundWindow, GetWindowThreadProcessId, IsWindow,
+    GetForegroundWindow, GetGUIThreadInfo, GetWindowThreadProcessId, IsWindow, GUITHREADINFO,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -157,6 +157,8 @@ impl std::error::Error for WindowsDeliveryError {}
 pub struct WindowsTarget {
     hwnd: usize,
     process_id: u32,
+    thread_id: u32,
+    focused_hwnd: Option<usize>,
 }
 
 impl WindowsTarget {
@@ -166,14 +168,16 @@ impl WindowsTarget {
             return Err(WindowsDeliveryError::target("SecureTargetUnavailable"));
         }
         let mut process_id = 0;
-        unsafe { GetWindowThreadProcessId(hwnd, &mut process_id) };
-        if process_id == 0 {
+        let thread_id = unsafe { GetWindowThreadProcessId(hwnd, &mut process_id) };
+        if thread_id == 0 || process_id == 0 {
             return Err(WindowsDeliveryError::last("GetWindowThreadProcessId"));
         }
         ensure_target_integrity(process_id)?;
         Ok(Self {
             hwnd: hwnd as usize,
             process_id,
+            thread_id,
+            focused_hwnd: focused_control(thread_id),
         })
     }
 
@@ -187,7 +191,20 @@ impl WindowsTarget {
             unsafe { IsWindow(hwnd) } != 0,
             unsafe { GetForegroundWindow() } as usize,
             self.hwnd,
-        )
+        )?;
+        validate_focused_control(self.focused_hwnd, focused_control(self.thread_id))
+    }
+}
+
+fn focused_control(thread_id: u32) -> Option<usize> {
+    // SAFETY: A zeroed GUITHREADINFO is valid once cbSize is populated, and
+    // GetGUIThreadInfo writes the remaining fields before they are inspected.
+    let mut info = unsafe { std::mem::zeroed::<GUITHREADINFO>() };
+    info.cbSize = std::mem::size_of::<GUITHREADINFO>() as u32;
+    if unsafe { GetGUIThreadInfo(thread_id, &mut info) } == 0 || info.hwndFocus.is_null() {
+        None
+    } else {
+        Some(info.hwndFocus as usize)
     }
 }
 
@@ -279,6 +296,16 @@ fn validate_window_identity(
     }
     if foreground != expected {
         return Err(WindowsDeliveryError::target("ForegroundTargetChanged"));
+    }
+    Ok(())
+}
+
+fn validate_focused_control(
+    expected: Option<usize>,
+    current: Option<usize>,
+) -> Result<(), WindowsDeliveryError> {
+    if expected.is_some() && current != expected {
+        return Err(WindowsDeliveryError::target("FocusedControlChanged"));
     }
     Ok(())
 }
@@ -438,8 +465,7 @@ fn keyboard_input(key: u16, flags: u32) -> INPUT {
 mod tests {
     use super::*;
     use crate::dictation::deliver_text;
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::sync::{mpsc, Arc};
+    use std::sync::mpsc;
     use windows_sys::core::w;
     use windows_sys::Win32::Graphics::Gdi::UpdateWindow;
     use windows_sys::Win32::System::DataExchange::{
@@ -474,15 +500,12 @@ mod tests {
         window_hwnd: usize,
         edit_hwnd: usize,
         thread_id: u32,
-        focused_hwnd: Arc<AtomicUsize>,
         join: Option<thread::JoinHandle<()>>,
     }
 
     impl NativeEditWindow {
         fn open() -> Self {
             let (sender, receiver) = mpsc::sync_channel(1);
-            let focused_hwnd = Arc::new(AtomicUsize::new(0));
-            let focused_hwnd_for_thread = Arc::clone(&focused_hwnd);
             let join = thread::spawn(move || {
                 let window_hwnd = unsafe {
                     CreateWindowExW(
@@ -538,11 +561,6 @@ mod tests {
                             SetForegroundWindow(window_hwnd);
                             SetActiveWindow(window_hwnd);
                             SetFocus(edit_hwnd);
-                            focused_hwnd_for_thread.store(
-                                windows_sys::Win32::UI::Input::KeyboardAndMouse::GetFocus()
-                                    as usize,
-                                Ordering::SeqCst,
-                            );
                         }
                         continue;
                     }
@@ -558,7 +576,6 @@ mod tests {
                 window_hwnd,
                 edit_hwnd,
                 thread_id,
-                focused_hwnd,
                 join: Some(join),
             }
         }
@@ -566,22 +583,24 @@ mod tests {
         fn activate(&self) {
             let window_hwnd = self.window_hwnd as *mut std::ffi::c_void;
             let edit_hwnd = self.edit_hwnd as *mut std::ffi::c_void;
+            let foreground = unsafe { GetForegroundWindow() };
             // Windows normally blocks background processes from stealing focus.
             // A synthetic Alt tap is the documented foreground hand-off used by
             // UI automation before SetForegroundWindow.
-            let mut foreground_handoff = [
-                keyboard_input(0x12, 0),
-                keyboard_input(0x12, KEYEVENTF_KEYUP),
-            ];
-            unsafe {
-                SendInput(
-                    foreground_handoff.len() as u32,
-                    foreground_handoff.as_mut_ptr(),
-                    std::mem::size_of::<INPUT>() as i32,
-                );
+            if foreground != window_hwnd {
+                let mut foreground_handoff = [
+                    keyboard_input(0x12, 0),
+                    keyboard_input(0x12, KEYEVENTF_KEYUP),
+                ];
+                unsafe {
+                    SendInput(
+                        foreground_handoff.len() as u32,
+                        foreground_handoff.as_mut_ptr(),
+                        std::mem::size_of::<INPUT>() as i32,
+                    );
+                }
             }
             let current_thread = unsafe { GetCurrentThreadId() };
-            let foreground = unsafe { GetForegroundWindow() };
             let mut foreground_process = 0;
             let foreground_thread = if foreground.is_null() {
                 0
@@ -607,12 +626,11 @@ mod tests {
                 if foreground_thread != 0 && foreground_thread != current_thread {
                     AttachThreadInput(current_thread, foreground_thread, 0);
                 }
-                self.focused_hwnd.store(0, Ordering::SeqCst);
                 PostThreadMessageW(self.thread_id, WM_APP_ACTIVATE_EDIT, 0, 0);
             }
             for _ in 0..50 {
                 if unsafe { GetForegroundWindow() } as usize == self.window_hwnd
-                    && self.focused_hwnd.load(Ordering::SeqCst) == self.edit_hwnd
+                    && focused_control(self.thread_id) == Some(self.edit_hwnd)
                 {
                     return;
                 }
@@ -622,7 +640,7 @@ mod tests {
                 "native edit window did not become foreground and focused: expected={} foreground={} focus={}",
                 self.window_hwnd,
                 unsafe { GetForegroundWindow() } as usize,
-                self.focused_hwnd.load(Ordering::SeqCst)
+                focused_control(self.thread_id).unwrap_or_default()
             );
         }
 
@@ -809,6 +827,25 @@ mod tests {
     #[test]
     fn accepts_the_original_foreground_window() {
         assert!(validate_window_identity(true, 41, 41).is_ok());
+    }
+
+    #[test]
+    fn refuses_to_paste_after_focus_moves_within_the_original_window() {
+        let error = validate_focused_control(Some(51), Some(52)).unwrap_err();
+        assert_eq!(error.operation(), "FocusedControlChanged");
+    }
+
+    #[test]
+    fn refuses_to_paste_when_captured_focus_can_no_longer_be_read() {
+        let error = validate_focused_control(Some(51), None).unwrap_err();
+        assert_eq!(error.operation(), "FocusedControlChanged");
+    }
+
+    #[test]
+    fn accepts_the_original_focused_control_or_an_untracked_focus() {
+        assert!(validate_focused_control(Some(51), Some(51)).is_ok());
+        assert!(validate_focused_control(None, Some(52)).is_ok());
+        assert!(validate_focused_control(None, None).is_ok());
     }
 
     #[test]

@@ -218,7 +218,10 @@ async fn finish_dictation(app: &AppHandle, capture: ActiveCapture) {
                 DictationFailureCode::ElevatedTarget
             } else if error.contains("SecureTarget") {
                 DictationFailureCode::SecureTarget
-            } else if error.contains("ForegroundTarget") || error.starts_with("TargetLost:") {
+            } else if error.contains("ForegroundTarget")
+                || error.contains("FocusedControl")
+                || error.starts_with("TargetLost:")
+            {
                 DictationFailureCode::TargetLost
             } else {
                 DictationFailureCode::DeliveryFailed
