@@ -152,8 +152,22 @@ async fn finish_dictation(app: &AppHandle, capture: ActiveCapture) {
         }
     };
 
-    session.record_transcript(transcript);
-    session.use_raw_fallback();
+    session.record_transcript(transcript.clone());
+    if let Err(error) = session.transition(DictationPhase::Cleaning, Utc::now()) {
+        log::error!("dictation_transition_failed code=internal error={error}");
+        return;
+    }
+    emit_phase(app, session.phase, None);
+
+    let cleanup =
+        super::cleanup_transcript(transcript, crate::get_language_preference_internal()).await;
+    if let Some(reason) = cleanup.fallback_reason {
+        log::warn!(
+            "dictation_cleanup_raw_fallback session_id={} reason={reason:?}",
+            session.id
+        );
+    }
+    session.record_cleaned_text(cleanup.text);
     if let Err(error) = session.transition(DictationPhase::Delivering, Utc::now()) {
         log::error!("dictation_transition_failed code=internal error={error}");
         return;

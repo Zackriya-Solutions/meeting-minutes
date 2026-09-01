@@ -12,10 +12,12 @@ Updated: 2026-09-01
 - General keeps the compact system-wide shortcut status, while the Dictation settings tab groups activation, transcription, delivery safety, and recovery-history controls.
 - Dictation history loads on entry, polls every five seconds only while visible, refreshes when the window becomes visible again, and prevents overlapping requests. No manual refresh is required.
 - The inherited meeting transcript listener retries three times, disposes listeners that finish setup after unmount, and logs `meeting_transcript_listener_setup_failed` with attempt and retry state. Exhausted retries use a non-blocking toast; they no longer open a modal alert or disable dictation.
+- Dictation now enters the `cleaning` phase after local transcription. The offline cleanup removes English hesitation fillers and repairs whitespace and punctuation spacing within a 150 ms budget; explicit non-English selections retain their words.
+- Cleanup timeout, failure, or empty output returns the exact raw transcript. Stable `dictation_cleanup_raw_fallback` logs record the session ID and reason without recording spoken text.
 - A live hold/release capture reached the configured local Parakeet model, saved history before delivery, and pasted a transcript successfully.
 - Four successful sessions at 17:42–17:43 are stored with target `pid:47640`; the current Windows process table identifies that PID as T3 Code. This verifies repeated system-wide paste into an Electron editor.
 - A deliberately short capture is classified as `audio_capture_failed` and remains visible in history.
-- The core dictation suite passes 20 tests; three interactive Windows tests are ignored by default because they temporarily take foreground focus or own the clipboard.
+- The core dictation suite passes 25 tests; three interactive Windows tests are ignored by default because they temporarily take foreground focus or own the clipboard.
 - The native Windows delivery test passes when run explicitly. It uses a real top-level window and child edit control to prove both caret insertion and selected-text replacement through the production delivery path.
 - The native delivery and real-clipboard tests prove an application-specific non-text clipboard format survives staging and restoration.
 - Two explicit Chrome runs used the production target, clipboard, and `SendInput` adapters. They inserted at the address-field caret and replaced its selected text; the captured target PID resolved to `chrome.exe`, and the application-specific clipboard format survived both runs.
@@ -53,9 +55,8 @@ For each target:
 - The local installer is unsigned, so Windows can show a SmartScreen warning. Official distribution still requires signing credentials.
 - The current package is CPU-only. The build detects the NVIDIA GPU, but CUDA packaging has not been enabled or accepted yet.
 - PulseTalk tries three built-in shortcut choices when another application owns the preferred chord. Settings shows the winner, but custom shortcut editing is not implemented yet.
-- Dictation currently returns the raw local transcript. A dedicated local cleanup pass with timeout and raw fallback is still pending.
 
 ## Current local package
 
 - Installer: `target/release/bundle/nsis/PulseTalk_0.4.0_x64-setup.exe`
-- SHA-256: `69ABF21AFE0B21261A8B72EBC7000578C93760660A17B545C25B485A2A9F619C`
+- SHA-256: `3F9DF38E8E99B6BC4D6218D28AF9039DDE3086CB04BC53CFE3690A3E6162745F`

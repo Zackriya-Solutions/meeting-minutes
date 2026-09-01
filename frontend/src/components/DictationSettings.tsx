@@ -1,7 +1,7 @@
 "use client"
 
 import { invoke } from "@tauri-apps/api/core"
-import { AudioLines, ClipboardCheck, History, LockKeyhole, Mic2 } from "lucide-react"
+import { AudioLines, ClipboardCheck, History, LockKeyhole, Mic2, Sparkles } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { useEffect, useState } from "react"
 
@@ -53,6 +53,11 @@ export function DictationSettings() {
           icon={Mic2}
           title="Local transcription"
           description="Uses the transcription provider and model selected in the Transcription tab. Audio stays on this machine when a local model is selected."
+        />
+        <SettingCard
+          icon={Sparkles}
+          title="Local cleanup"
+          description="Repairs spacing and removes English hesitation fillers locally. If cleanup exceeds 150 ms or returns an error, PulseTalk pastes the exact raw transcript."
         />
         <SettingCard
           icon={ClipboardCheck}

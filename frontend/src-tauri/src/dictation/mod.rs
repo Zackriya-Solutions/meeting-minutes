@@ -6,6 +6,7 @@
 
 mod activation;
 mod activation_bus;
+mod cleanup;
 pub mod commands;
 mod coordinator;
 mod delivery;
@@ -20,6 +21,7 @@ pub use activation::{
     ShortcutTracker,
 };
 pub use activation_bus::ActivationBus;
+pub use cleanup::{cleanup_transcript, CleanupFallbackReason, CleanupResult};
 pub use coordinator::{position_overlay, start_coordinator};
 pub use delivery::{deliver_text, ClipboardPort, DeliveryError, DeliveryReceipt, PastePort};
 pub use session::{
