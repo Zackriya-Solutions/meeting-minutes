@@ -5,12 +5,14 @@ export interface TranslationSettings {
   engine: 'libretranslate' | 'ollama';
   targetLanguage: string;
   libretranslateEndpoint: string;
+  libretranslateApiKey: string;
   ollamaEndpoint: string;
   ollamaModel: string;
 }
 
 export const DEFAULT_TARGET_LANGUAGE = 'pt-BR';
 export const DEFAULT_LIBRETRANSLATE_ENDPOINT = '';
+export const DEFAULT_LIBRETRANSLATE_API_KEY = '';
 export const DEFAULT_OLLAMA_ENDPOINT = 'http://localhost:11434';
 export const DEFAULT_OLLAMA_MODEL = 'aya-expanse:latest';
 

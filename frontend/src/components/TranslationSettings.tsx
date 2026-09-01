@@ -55,6 +55,17 @@ export function TranslationSettings() {
           />
         </label>
         <label className="text-sm text-gray-700">
+          LibreTranslate API key
+          <input
+            type="password"
+            value={draft.libretranslateApiKey}
+            onChange={event => setDraft({ ...draft, libretranslateApiKey: event.target.value })}
+            className="mt-1 block h-10 w-full rounded-md border border-gray-300 px-3"
+            placeholder="Optional"
+            autoComplete="off"
+          />
+        </label>
+        <label className="text-sm text-gray-700">
           Ollama endpoint
           <input
             value={draft.ollamaEndpoint}

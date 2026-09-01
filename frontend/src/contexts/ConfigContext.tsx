@@ -8,7 +8,7 @@ import { recordingService } from '@/services/recordingService';
 import { invoke } from '@tauri-apps/api/core';
 import Analytics from '@/lib/analytics';
 import { BetaFeatures, BetaFeatureKey, loadBetaFeatures, saveBetaFeatures } from '@/types/betaFeatures';
-import { DEFAULT_LIBRETRANSLATE_ENDPOINT, DEFAULT_OLLAMA_ENDPOINT, DEFAULT_OLLAMA_MODEL, DEFAULT_TARGET_LANGUAGE, TranslationSettings } from '@/lib/translation';
+import { DEFAULT_LIBRETRANSLATE_API_KEY, DEFAULT_LIBRETRANSLATE_ENDPOINT, DEFAULT_OLLAMA_ENDPOINT, DEFAULT_OLLAMA_MODEL, DEFAULT_TARGET_LANGUAGE, TranslationSettings } from '@/lib/translation';
 
 export interface OllamaModel {
   name: string;
@@ -124,6 +124,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     engine: 'ollama',
     targetLanguage: DEFAULT_TARGET_LANGUAGE,
     libretranslateEndpoint: DEFAULT_LIBRETRANSLATE_ENDPOINT,
+    libretranslateApiKey: DEFAULT_LIBRETRANSLATE_API_KEY,
     ollamaEndpoint: DEFAULT_OLLAMA_ENDPOINT,
     ollamaModel: DEFAULT_OLLAMA_MODEL,
   });

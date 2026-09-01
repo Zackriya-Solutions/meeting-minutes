@@ -11,6 +11,7 @@ use tokio::task::JoinHandle;
 
 pub const DEFAULT_TARGET_LANGUAGE: &str = "pt-BR";
 pub const DEFAULT_LIBRETRANSLATE_ENDPOINT: &str = "";
+pub const DEFAULT_LIBRETRANSLATE_API_KEY: &str = "";
 pub const DEFAULT_OLLAMA_ENDPOINT: &str = "http://localhost:11434";
 pub const DEFAULT_OLLAMA_MODEL: &str = "aya-expanse:latest";
 const TRANSLATION_QUEUE_CAPACITY: usize = 32;
@@ -48,6 +49,7 @@ pub struct TranslationSettings {
     pub engine: TranslationEngineKind,
     pub target_language: String,
     pub libretranslate_endpoint: String,
+    pub libretranslate_api_key: String,
     pub ollama_endpoint: String,
     pub ollama_model: String,
 }
@@ -59,6 +61,7 @@ impl Default for TranslationSettings {
             engine: TranslationEngineKind::default(),
             target_language: DEFAULT_TARGET_LANGUAGE.to_string(),
             libretranslate_endpoint: DEFAULT_LIBRETRANSLATE_ENDPOINT.to_string(),
+            libretranslate_api_key: DEFAULT_LIBRETRANSLATE_API_KEY.to_string(),
             ollama_endpoint: DEFAULT_OLLAMA_ENDPOINT.to_string(),
             ollama_model: DEFAULT_OLLAMA_MODEL.to_string(),
         }
@@ -75,6 +78,8 @@ struct TranslationSettingsRow {
     translation_target_language: String,
     #[sqlx(rename = "translationLibreTranslateEndpoint")]
     translation_libretranslate_endpoint: String,
+    #[sqlx(rename = "translationLibreTranslateApiKey")]
+    translation_libretranslate_api_key: String,
     #[sqlx(rename = "translationOllamaEndpoint")]
     translation_ollama_endpoint: String,
     #[sqlx(rename = "translationOllamaModel")]
@@ -84,7 +89,8 @@ struct TranslationSettingsRow {
 pub async fn load_settings(pool: &SqlitePool) -> Result<TranslationSettings> {
     let row = sqlx::query_as::<_, TranslationSettingsRow>(
         "SELECT translationEnabled, translationEngine, translationTargetLanguage,
-                translationLibreTranslateEndpoint, translationOllamaEndpoint, translationOllamaModel
+                translationLibreTranslateEndpoint, translationLibreTranslateApiKey,
+                translationOllamaEndpoint, translationOllamaModel
          FROM translation_settings LIMIT 1",
     )
     .fetch_optional(pool)
@@ -107,6 +113,7 @@ pub async fn load_settings(pool: &SqlitePool) -> Result<TranslationSettings> {
         } else {
             row.translation_libretranslate_endpoint
         },
+        libretranslate_api_key: row.translation_libretranslate_api_key,
         ollama_endpoint: if row.translation_ollama_endpoint.trim().is_empty() {
             DEFAULT_OLLAMA_ENDPOINT.to_string()
         } else {
@@ -128,13 +135,15 @@ pub async fn save_settings(pool: &SqlitePool, settings: &TranslationSettings) ->
     sqlx::query(
         "INSERT INTO translation_settings
             (id, translationEnabled, translationEngine, translationTargetLanguage,
-             translationLibreTranslateEndpoint, translationOllamaEndpoint, translationOllamaModel)
-         VALUES ('1', ?, ?, ?, ?, ?, ?)
+             translationLibreTranslateEndpoint, translationLibreTranslateApiKey,
+             translationOllamaEndpoint, translationOllamaModel)
+         VALUES ('1', ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
              translationEnabled = excluded.translationEnabled,
              translationEngine = excluded.translationEngine,
              translationTargetLanguage = excluded.translationTargetLanguage,
              translationLibreTranslateEndpoint = excluded.translationLibreTranslateEndpoint,
+             translationLibreTranslateApiKey = excluded.translationLibreTranslateApiKey,
              translationOllamaEndpoint = excluded.translationOllamaEndpoint,
              translationOllamaModel = excluded.translationOllamaModel",
     )
@@ -142,6 +151,7 @@ pub async fn save_settings(pool: &SqlitePool, settings: &TranslationSettings) ->
     .bind(engine)
     .bind(&settings.target_language)
     .bind(&settings.libretranslate_endpoint)
+    .bind(&settings.libretranslate_api_key)
     .bind(&settings.ollama_endpoint)
     .bind(&settings.ollama_model)
     .execute(pool)
@@ -283,15 +293,19 @@ pub struct LibreTranslateRequest {
     pub source: String,
     pub target: String,
     pub format: String,
+    pub alternatives: u32,
+    pub api_key: String,
 }
 
 impl LibreTranslateRequest {
-    pub fn new(text: &str, source: &str, target: &str, format: &str) -> Self {
+    pub fn new(text: &str, target: &str, api_key: &str) -> Self {
         Self {
             q: text.to_string(),
-            source: source.to_string(),
+            source: "auto".to_string(),
             target: target.to_string(),
-            format: format.to_string(),
+            format: "text".to_string(),
+            alternatives: 3,
+            api_key: api_key.to_string(),
         }
     }
 }
@@ -312,7 +326,7 @@ fn libretranslate_language_code(language: &str) -> &str {
 
 #[derive(Clone)]
 enum TranslationAdapter {
-    Libretranslate { endpoint: String },
+    Libretranslate { endpoint: String, api_key: String },
     Ollama { endpoint: String, model: String },
 }
 
@@ -324,12 +338,11 @@ impl TranslationAdapter {
         target_language: &str,
     ) -> Result<String> {
         match self {
-            Self::Libretranslate { endpoint } => {
+            Self::Libretranslate { endpoint, api_key } => {
                 let request = LibreTranslateRequest::new(
                     text,
-                    "en",
                     libretranslate_language_code(target_language),
-                    "text",
+                    api_key,
                 );
                 let response = client
                     .post(format!("{}/translate", endpoint.trim_end_matches('/')))
@@ -389,6 +402,7 @@ impl TranslationSession {
         let adapter = match engine {
             TranslationEngineKind::Libretranslate => TranslationAdapter::Libretranslate {
                 endpoint: settings.libretranslate_endpoint,
+                api_key: settings.libretranslate_api_key,
             },
             TranslationEngineKind::Ollama => TranslationAdapter::Ollama {
                 endpoint: settings.ollama_endpoint,
@@ -622,10 +636,17 @@ mod tests {
 
     #[test]
     fn libretranslate_adapter_uses_translate_contract_and_extracts_translated_text() {
-        let request = LibreTranslateRequest::new("Hello world", "en", "pt", "text");
+        let request = LibreTranslateRequest::new("Hello world", "pt", "secret");
         assert_eq!(
             serde_json::to_value(&request).unwrap(),
-            json!({"q": "Hello world", "source": "en", "target": "pt", "format": "text"})
+            json!({
+                "q": "Hello world",
+                "source": "auto",
+                "target": "pt",
+                "format": "text",
+                "alternatives": 3,
+                "api_key": "secret"
+            })
         );
         assert_eq!(
             parse_libretranslate_response(&json!({"translatedText": "Olá mundo"})).unwrap(),
@@ -650,6 +671,7 @@ mod tests {
             engine: TranslationEngineKind::Ollama,
             target_language: "pt-BR".to_string(),
             libretranslate_endpoint: String::new(),
+            libretranslate_api_key: "secret".to_string(),
             ollama_endpoint: "http://translation:11434".to_string(),
             ollama_model: "aya-expanse:latest".to_string(),
         };
@@ -746,6 +768,7 @@ mod tests {
         let client = Client::new();
         let adapter = TranslationAdapter::Libretranslate {
             endpoint: endpoint.clone(),
+            api_key: "secret".to_string(),
         };
         let translated = adapter
             .translate(&client, "Hello world", "pt-BR")
@@ -753,8 +776,10 @@ mod tests {
             .unwrap();
         let request = server.await.unwrap();
         assert!(request.contains("POST /translate"));
-        assert!(request.contains("\"source\":\"en\""));
+        assert!(request.contains("\"source\":\"auto\""));
         assert!(request.contains("\"target\":\"pt\""));
+        assert!(request.contains("\"alternatives\":3"));
+        assert!(request.contains("\"api_key\":\"secret\""));
         assert_eq!(translated, "Olá mundo");
 
         let (endpoint, server) =

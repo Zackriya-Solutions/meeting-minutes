@@ -119,6 +119,9 @@ pub struct Setting {
     #[sqlx(rename = "translationLibreTranslateEndpoint")]
     #[serde(rename = "translationLibreTranslateEndpoint")]
     pub translation_libretranslate_endpoint: String,
+    #[sqlx(rename = "translationLibreTranslateApiKey")]
+    #[serde(rename = "translationLibreTranslateApiKey")]
+    pub translation_libretranslate_api_key: String,
     #[sqlx(rename = "translationOllamaModel")]
     #[serde(rename = "translationOllamaModel")]
     pub translation_ollama_model: String,
