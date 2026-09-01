@@ -1,8 +1,8 @@
 'use client'
 
 import { invoke } from '@tauri-apps/api/core'
-import { Check, Clipboard, Mic2, RefreshCw } from 'lucide-react'
-import { useCallback, useEffect, useState } from 'react'
+import { Check, Clipboard, Mic2 } from 'lucide-react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 type DictationHistoryItem = {
   id: string
@@ -22,26 +22,49 @@ export default function DictationHistoryPage() {
   const [error, setError] = useState<string | null>(null)
   const [copiedId, setCopiedId] = useState<string | null>(null)
   const [shortcutStatus, setShortcutStatus] = useState<ShortcutStatus | null>(null)
+  const requestInFlight = useRef(false)
+  const mounted = useRef(true)
 
-  const load = useCallback(async () => {
-    setLoading(true)
-    setError(null)
+  const load = useCallback(async (showLoading = false) => {
+    if (requestInFlight.current) return
+
+    requestInFlight.current = true
+    if (showLoading) setLoading(true)
     try {
       const [history, status] = await Promise.all([
         invoke<DictationHistoryItem[]>('dictation_list_history', { limit: 100 }),
         invoke<ShortcutStatus>('dictation_get_shortcut_status'),
       ])
+      if (!mounted.current) return
       setItems(history)
       setShortcutStatus(status)
+      setError(null)
     } catch (cause) {
-      setError(String(cause))
+      if (mounted.current) setError(String(cause))
     } finally {
-      setLoading(false)
+      requestInFlight.current = false
+      if (mounted.current) setLoading(false)
     }
   }, [])
 
   useEffect(() => {
-    load()
+    mounted.current = true
+    void load(true)
+
+    const poll = window.setInterval(() => {
+      if (document.visibilityState === 'visible') void load()
+    }, 5000)
+
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === 'visible') void load()
+    }
+    document.addEventListener('visibilitychange', refreshWhenVisible)
+
+    return () => {
+      mounted.current = false
+      window.clearInterval(poll)
+      document.removeEventListener('visibilitychange', refreshWhenVisible)
+    }
   }, [load])
 
   const copy = async (id: string) => {
@@ -56,7 +79,7 @@ export default function DictationHistoryPage() {
 
   return (
     <div className="min-h-screen bg-[#f5f6f8] px-8 py-7 text-[#151923]">
-      <header className="mx-auto flex max-w-4xl items-end justify-between border-b border-[#dfe2e8] pb-5">
+      <header className="mx-auto max-w-4xl border-b border-[#dfe2e8] pb-5">
         <div>
           <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-[#697386]">
             <Mic2 className="h-4 w-4 text-[#5577ff]" />
@@ -68,13 +91,6 @@ export default function DictationHistoryPage() {
             {shortcutStatus?.enabled ? `Hold ${shortcutStatus.shortcut} to dictate anywhere.` : shortcutStatus?.message}
           </p>
         </div>
-        <button
-          onClick={load}
-          className="inline-flex items-center gap-2 rounded-xl border border-[#d7dbe3] bg-white px-3.5 py-2 text-sm font-medium shadow-sm transition hover:border-[#b9c3d7]"
-        >
-          <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-          Refresh
-        </button>
       </header>
 
       <main className="mx-auto mt-5 max-w-4xl space-y-2.5">
