@@ -7,10 +7,12 @@ Updated: 2026-09-01
 - The production frontend builds, including `/dictation-overlay` and `/dictation-history`.
 - The unsigned local NSIS build completes successfully through `pnpm tauri:build:windows-local`.
 - The packaged release opens as PulseTalk and retains the existing Meetily database and downloaded model profile.
+- The production home uses the selected Hub 1 voice-workspace layout with real shortcut status, dictation history, daily word totals, and Meetily meetings. The PulseTalk speech-pulse mark now appears in the title bar, sidebar, and bundle icons.
 - Settings reports the shortcut actually acquired at runtime. On the acceptance machine it is `Ctrl+Shift+Space`.
 - General keeps the compact system-wide shortcut status, while the Dictation settings tab groups activation, transcription, delivery safety, and recovery-history controls.
 - Dictation history loads on entry, polls every five seconds only while visible, refreshes when the window becomes visible again, and prevents overlapping requests. No manual refresh is required.
 - A live hold/release capture reached the configured local Parakeet model, saved history before delivery, and pasted a transcript successfully.
+- Four successful sessions at 17:42–17:43 are stored with target `pid:47640`; the current Windows process table identifies that PID as T3 Code. This verifies repeated system-wide paste into an Electron editor.
 - A deliberately short capture is classified as `audio_capture_failed` and remains visible in history.
 - The core dictation suite passes 20 tests; one real-clipboard test is ignored by default because it temporarily owns the Windows clipboard.
 - The real-clipboard test passes when run explicitly and proves an application-specific non-text clipboard format survives staging and restoration.
@@ -28,6 +30,7 @@ These checks require a person to speak while holding the shortcut. They must be 
 | Microsoft Word or Outlook | — | — | — | — | Pending |
 | Visual Studio Code | — | — | — | — | Pending |
 | Windows Terminal | — | — | — | — | Pending |
+| T3 Code editor | Pass | — | — | Pass | Verified from four completed sessions and captured target PID |
 
 For each target:
 
@@ -44,3 +47,8 @@ For each target:
 - The current package is CPU-only. The build detects the NVIDIA GPU, but CUDA packaging has not been enabled or accepted yet.
 - PulseTalk tries three built-in shortcut choices when another application owns the preferred chord. Settings shows the winner, but custom shortcut editing is not implemented yet.
 - Dictation currently returns the raw local transcript. A dedicated local cleanup pass with timeout and raw fallback is still pending.
+
+## Current local package
+
+- Installer: `target/release/bundle/nsis/PulseTalk_0.4.0_x64-setup.exe`
+- SHA-256: `530438AA838CBF3F0A11145CEC3A140DE86C99B64D9107C3C7FBC8EACF3735A7`
