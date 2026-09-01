@@ -180,6 +180,7 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
   // Main transcript buffering logic with sequence_id ordering
   useEffect(() => {
     let unlistenFn: (() => void) | undefined;
+    let disposed = false;
     let transcriptCounter = 0;
     let transcriptBuffer = new Map<number, Transcript>();
     let lastProcessedSequence = 0;
@@ -283,77 +284,102 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
     finalFlushRef.current = () => processBufferedTranscripts(true);
 
     const setupListener = async () => {
-      try {
-        console.log('🔥 Setting up MAIN transcript listener during component initialization...');
-        unlistenFn = await transcriptService.onTranscriptUpdate((update) => {
-          const now = Date.now();
-          console.log('🎯 MAIN LISTENER: Received transcript update:', {
-            sequence_id: update.sequence_id,
-            text: update.text.substring(0, 50) + '...',
-            timestamp: update.timestamp,
-            is_partial: update.is_partial,
-            received_at: new Date(now).toISOString(),
-            buffer_size_before: transcriptBuffer.size
+      const maxAttempts = 3;
+
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+          const listener = await transcriptService.onTranscriptUpdate((update) => {
+            const now = Date.now();
+            console.log('🎯 MAIN LISTENER: Received transcript update:', {
+              sequence_id: update.sequence_id,
+              text: update.text.substring(0, 50) + '...',
+              timestamp: update.timestamp,
+              is_partial: update.is_partial,
+              received_at: new Date(now).toISOString(),
+              buffer_size_before: transcriptBuffer.size
+            });
+
+            // Check for duplicate sequence_id before processing
+            if (transcriptBuffer.has(update.sequence_id)) {
+              console.log('🚫 MAIN LISTENER: Duplicate sequence_id, skipping buffer:', update.sequence_id);
+              return;
+            }
+
+            // Create transcript for buffer with NEW timestamp fields
+            const newTranscript: Transcript = {
+              id: `${Date.now()}-${transcriptCounter++}`,
+              text: update.text,
+              timestamp: update.timestamp,
+              sequence_id: update.sequence_id,
+              chunk_start_time: update.chunk_start_time,
+              is_partial: update.is_partial,
+              confidence: update.confidence,
+              // NEW: Recording-relative timestamps for playback sync
+              audio_start_time: update.audio_start_time,
+              audio_end_time: update.audio_end_time,
+              duration: update.duration,
+            };
+
+            // Add to buffer
+            transcriptBuffer.set(update.sequence_id, newTranscript);
+            console.log(`✅ MAIN LISTENER: Buffered transcript with sequence_id ${update.sequence_id}. Buffer size: ${transcriptBuffer.size}, Last processed: ${lastProcessedSequence}`);
+
+            // Save to IndexedDB (non-blocking)
+            if (currentMeetingId) {
+              indexedDBService.saveTranscript(currentMeetingId, update)
+                .catch(err => console.warn('IndexedDB save failed:', err));
+            }
+
+            // Clear any existing timer and set a new one
+            if (processingTimer) {
+              clearTimeout(processingTimer);
+            }
+
+            // Process buffer with minimal delay for immediate UI updates (serial workers = sequential order)
+            processingTimer = setTimeout(processBufferedTranscripts, 10);
           });
 
-          // Check for duplicate sequence_id before processing
-          if (transcriptBuffer.has(update.sequence_id)) {
-            console.log('🚫 MAIN LISTENER: Duplicate sequence_id, skipping buffer:', update.sequence_id);
+          if (disposed) {
+            listener();
             return;
           }
 
-          // Create transcript for buffer with NEW timestamp fields
-          const newTranscript: Transcript = {
-            id: `${Date.now()}-${transcriptCounter++}`,
-            text: update.text,
-            timestamp: update.timestamp,
-            sequence_id: update.sequence_id,
-            chunk_start_time: update.chunk_start_time,
-            is_partial: update.is_partial,
-            confidence: update.confidence,
-            // NEW: Recording-relative timestamps for playback sync
-            audio_start_time: update.audio_start_time,
-            audio_end_time: update.audio_end_time,
-            duration: update.duration,
-          };
+          unlistenFn = listener;
+          console.info('meeting_transcript_listener_ready', { attempt });
+          return;
+        } catch (error) {
+          const detail = error instanceof Error
+            ? `${error.name}: ${error.message}`
+            : String(error);
+          const retrying = !disposed && attempt < maxAttempts;
+          console.error('meeting_transcript_listener_setup_failed', {
+            attempt,
+            maxAttempts,
+            retrying,
+            error: detail,
+          });
 
-          // Add to buffer
-          transcriptBuffer.set(update.sequence_id, newTranscript);
-          console.log(`✅ MAIN LISTENER: Buffered transcript with sequence_id ${update.sequence_id}. Buffer size: ${transcriptBuffer.size}, Last processed: ${lastProcessedSequence}`);
+          if (!retrying) break;
+          await new Promise(resolve => window.setTimeout(resolve, attempt * 250));
+        }
+      }
 
-          // Save to IndexedDB (non-blocking)
-          if (currentMeetingId) {
-            indexedDBService.saveTranscript(currentMeetingId, update)
-              .catch(err => console.warn('IndexedDB save failed:', err));
-          }
-
-          // Clear any existing timer and set a new one
-          if (processingTimer) {
-            clearTimeout(processingTimer);
-          }
-
-          // Process buffer with minimal delay for immediate UI updates (serial workers = sequential order)
-          processingTimer = setTimeout(processBufferedTranscripts, 10);
+      if (!disposed) {
+        toast.error('Meeting transcript listener unavailable', {
+          description: 'Dictation is still available. Restart PulseTalk before recording a meeting.',
         });
-        console.log('✅ MAIN transcript listener setup complete');
-      } catch (error) {
-        console.error('❌ Failed to setup MAIN transcript listener:', error);
-        alert('Failed to setup transcript listener. Check console for details.');
       }
     };
 
-    setupListener();
-    console.log('Started enhanced listener setup');
+    void setupListener();
 
     return () => {
-      console.log('🧹 CLEANUP: Cleaning up MAIN transcript listener...');
+      disposed = true;
       if (processingTimer) {
         clearTimeout(processingTimer);
-        console.log('🧹 CLEANUP: Cleared processing timer');
       }
       if (unlistenFn) {
         unlistenFn();
-        console.log('🧹 CLEANUP: MAIN transcript listener cleaned up');
       }
     };
   }, [currentMeetingId]); // Add currentMeetingId dependency

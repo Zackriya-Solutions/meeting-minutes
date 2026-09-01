@@ -11,12 +11,14 @@ Updated: 2026-09-01
 - Settings reports the shortcut actually acquired at runtime. On the acceptance machine it is `Ctrl+Shift+Space`.
 - General keeps the compact system-wide shortcut status, while the Dictation settings tab groups activation, transcription, delivery safety, and recovery-history controls.
 - Dictation history loads on entry, polls every five seconds only while visible, refreshes when the window becomes visible again, and prevents overlapping requests. No manual refresh is required.
+- The inherited meeting transcript listener retries three times, disposes listeners that finish setup after unmount, and logs `meeting_transcript_listener_setup_failed` with attempt and retry state. Exhausted retries use a non-blocking toast; they no longer open a modal alert or disable dictation.
 - A live hold/release capture reached the configured local Parakeet model, saved history before delivery, and pasted a transcript successfully.
 - Four successful sessions at 17:42–17:43 are stored with target `pid:47640`; the current Windows process table identifies that PID as T3 Code. This verifies repeated system-wide paste into an Electron editor.
 - A deliberately short capture is classified as `audio_capture_failed` and remains visible in history.
-- The core dictation suite passes 20 tests; two interactive Windows tests are ignored by default because they temporarily take foreground focus or own the clipboard.
+- The core dictation suite passes 20 tests; three interactive Windows tests are ignored by default because they temporarily take foreground focus or own the clipboard.
 - The native Windows delivery test passes when run explicitly. It uses a real top-level window and child edit control to prove both caret insertion and selected-text replacement through the production delivery path.
 - The native delivery and real-clipboard tests prove an application-specific non-text clipboard format survives staging and restoration.
+- Two explicit Chrome runs used the production target, clipboard, and `SendInput` adapters. They inserted at the address-field caret and replaced its selected text; the captured target PID resolved to `chrome.exe`, and the application-specific clipboard format survived both runs.
 - Delivery is bound to the foreground window captured at key-down. Tests cover target closure, focus changes, and higher-integrity targets.
 - History stores only the target process ID (`pid:<number>`), not window titles or document content.
 - A dry-run merge against the current `origin/main` reports no conflict. PulseTalk changes remain isolated in focused modules and commits.
@@ -34,6 +36,8 @@ These checks require a person to speak while holding the shortcut. They must be 
 | T3 Code editor | Pass | — | — | Pass | Verified from four completed sessions and captured target PID |
 
 The automated native Windows edit-control check separately passes caret insertion, selection replacement, and rich clipboard preservation. Overlay behavior is not part of that fixture.
+
+The Chrome delivery adapter is verified independently of speech capture. Chrome remains pending in the manual matrix until a person completes the same checks by speaking through the packaged app.
 
 For each target:
 
@@ -54,4 +58,4 @@ For each target:
 ## Current local package
 
 - Installer: `target/release/bundle/nsis/PulseTalk_0.4.0_x64-setup.exe`
-- SHA-256: `530438AA838CBF3F0A11145CEC3A140DE86C99B64D9107C3C7FBC8EACF3735A7`
+- SHA-256: `69ABF21AFE0B21261A8B72EBC7000578C93760660A17B545C25B485A2A9F619C`
