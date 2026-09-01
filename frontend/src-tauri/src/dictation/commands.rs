@@ -3,6 +3,13 @@ use crate::state::AppState;
 use tauri::{AppHandle, Manager};
 
 #[tauri::command]
+pub fn dictation_get_shortcut_status(
+    status: tauri::State<'_, super::DictationShortcutStatusState>,
+) -> super::DictationShortcutStatus {
+    status.get()
+}
+
+#[tauri::command]
 pub async fn dictation_list_history(
     app: AppHandle,
     limit: Option<i64>,

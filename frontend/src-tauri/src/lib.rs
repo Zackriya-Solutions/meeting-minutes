@@ -395,6 +395,8 @@ pub fn run() {
 
     #[cfg(any(target_os = "macos", windows, target_os = "linux"))]
     let activation_bus = dictation::ActivationBus::new();
+    #[cfg(any(target_os = "macos", windows, target_os = "linux"))]
+    let shortcut_status = dictation::DictationShortcutStatusState::new();
 
     #[cfg(any(target_os = "macos", windows, target_os = "linux"))]
     {
@@ -414,6 +416,7 @@ pub fn run() {
                 .build(),
         );
         builder = builder.manage(activation_bus);
+        builder = builder.manage(shortcut_status);
     }
 
     #[cfg(any(target_os = "macos", windows, target_os = "linux"))]
@@ -472,6 +475,9 @@ pub fn run() {
                     let shortcut = Shortcut::new(Some(modifiers), code);
                     match _app.global_shortcut().register(shortcut) {
                         Ok(()) => {
+                            _app
+                                .state::<dictation::DictationShortcutStatusState>()
+                                .registered(label);
                             log::info!(
                                 "dictation_shortcut_registered shortcut={}",
                                 label
@@ -487,6 +493,9 @@ pub fn run() {
                     }
                 }
                 if !registered {
+                    _app
+                        .state::<dictation::DictationShortcutStatusState>()
+                        .unavailable();
                     log::error!(
                         "dictation_activation_disabled code=shortcut_unavailable candidate_count={}",
                         shortcut_candidates.len()
@@ -609,6 +618,7 @@ pub fn run() {
             save_transcript,
             dictation::commands::dictation_list_history,
             dictation::commands::dictation_copy_history,
+            dictation::commands::dictation_get_shortcut_status,
             analytics::commands::init_analytics,
             analytics::commands::disable_analytics,
             analytics::commands::track_event,

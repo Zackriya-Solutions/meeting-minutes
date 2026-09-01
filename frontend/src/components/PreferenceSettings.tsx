@@ -2,13 +2,14 @@
 
 import { useEffect, useState, useRef } from "react"
 import { Switch } from "./ui/switch"
-import { FolderOpen } from "lucide-react"
+import { FolderOpen, Mic2 } from "lucide-react"
 import { invoke } from "@tauri-apps/api/core"
 import Analytics from "@/lib/analytics"
 import AnalyticsConsentSwitch from "./AnalyticsConsentSwitch"
 import { useConfig, NotificationSettings } from "@/contexts/ConfigContext"
 
 export function PreferenceSettings() {
+  const [dictationShortcut, setDictationShortcut] = useState<{ enabled: boolean; shortcut?: string | null; message?: string | null } | null>(null);
   const {
     notificationSettings,
     storageLocations,
@@ -28,6 +29,12 @@ export function PreferenceSettings() {
     // Reset tracking ref on mount (every tab visit)
     hasTrackedViewRef.current = false;
   }, [loadPreferences]);
+
+  useEffect(() => {
+    invoke<{ enabled: boolean; shortcut?: string | null; message?: string | null }>('dictation_get_shortcut_status')
+      .then(setDictationShortcut)
+      .catch(error => console.error('Failed to load dictation shortcut status:', error));
+  }, []);
 
   // Track preferences viewed analytics on every tab visit (once per mount)
   useEffect(() => {
@@ -148,6 +155,30 @@ export function PreferenceSettings() {
 
   return (
     <div className="space-y-6">
+      <div className="bg-white rounded-lg border border-gray-200 p-6 shadow-sm">
+        <div className="flex items-start gap-4">
+          <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-indigo-50 text-indigo-600">
+            <Mic2 className="h-5 w-5" />
+          </div>
+          <div className="flex-1">
+            <div className="flex items-center gap-2">
+              <h3 className="text-lg font-semibold text-gray-900">System-wide voice dictation</h3>
+              <span className={`h-2 w-2 rounded-full ${dictationShortcut?.enabled ? 'bg-emerald-400' : 'bg-amber-400'}`} />
+            </div>
+            {dictationShortcut?.enabled ? (
+              <>
+                <p className="mt-1 text-sm text-gray-600">Hold the shortcut while speaking, then release to paste at the original cursor.</p>
+                <kbd className="mt-3 inline-flex rounded-lg border border-gray-300 bg-gray-50 px-3 py-1.5 text-sm font-semibold text-gray-800 shadow-sm">
+                  {dictationShortcut.shortcut}
+                </kbd>
+              </>
+            ) : (
+              <p className="mt-1 text-sm text-amber-700">{dictationShortcut?.message ?? 'Checking shortcut availability…'}</p>
+            )}
+          </div>
+        </div>
+      </div>
+
       {/* Notifications Section */}
       <div className="bg-white rounded-lg border border-gray-200 p-6 shadow-sm">
         <div className="flex items-center justify-between">

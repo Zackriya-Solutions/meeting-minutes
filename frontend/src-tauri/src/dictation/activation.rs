@@ -1,5 +1,66 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
+use std::sync::RwLock;
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DictationShortcutStatus {
+    pub enabled: bool,
+    pub shortcut: Option<String>,
+    pub message: Option<String>,
+}
+
+pub struct DictationShortcutStatusState(RwLock<DictationShortcutStatus>);
+
+impl DictationShortcutStatusState {
+    pub fn new() -> Self {
+        Self(RwLock::new(DictationShortcutStatus {
+            enabled: false,
+            shortcut: None,
+            message: Some("PulseTalk is registering a hold-to-talk shortcut.".into()),
+        }))
+    }
+
+    pub fn registered(&self, shortcut: &str) {
+        if let Ok(mut status) = self.0.write() {
+            *status = DictationShortcutStatus {
+                enabled: true,
+                shortcut: Some(shortcut.to_owned()),
+                message: None,
+            };
+        }
+    }
+
+    pub fn unavailable(&self) {
+        if let Ok(mut status) = self.0.write() {
+            *status = DictationShortcutStatus {
+                enabled: false,
+                shortcut: None,
+                message: Some(
+                    "All PulseTalk shortcut choices are currently used by other applications."
+                        .into(),
+                ),
+            };
+        }
+    }
+
+    pub fn get(&self) -> DictationShortcutStatus {
+        self.0
+            .read()
+            .map(|status| status.clone())
+            .unwrap_or(DictationShortcutStatus {
+                enabled: false,
+                shortcut: None,
+                message: Some("Shortcut status is temporarily unavailable.".into()),
+            })
+    }
+}
+
+impl Default for DictationShortcutStatusState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct KeyCode(pub u16);

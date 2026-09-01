@@ -14,17 +14,25 @@ type DictationHistoryItem = {
   startedAt: string
 }
 
+type ShortcutStatus = { enabled: boolean; shortcut?: string | null; message?: string | null }
+
 export default function DictationHistoryPage() {
   const [items, setItems] = useState<DictationHistoryItem[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [copiedId, setCopiedId] = useState<string | null>(null)
+  const [shortcutStatus, setShortcutStatus] = useState<ShortcutStatus | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
-      setItems(await invoke<DictationHistoryItem[]>('dictation_list_history', { limit: 100 }))
+      const [history, status] = await Promise.all([
+        invoke<DictationHistoryItem[]>('dictation_list_history', { limit: 100 }),
+        invoke<ShortcutStatus>('dictation_get_shortcut_status'),
+      ])
+      setItems(history)
+      setShortcutStatus(status)
     } catch (cause) {
       setError(String(cause))
     } finally {
@@ -56,6 +64,9 @@ export default function DictationHistoryPage() {
           </div>
           <h1 className="text-3xl font-semibold tracking-[-0.035em]">Dictation history</h1>
           <p className="mt-1.5 text-sm text-[#697386]">Every transcript is saved before PulseTalk tries to paste it.</p>
+          <p className={`mt-2 text-xs font-medium ${shortcutStatus?.enabled ? 'text-emerald-700' : 'text-amber-700'}`}>
+            {shortcutStatus?.enabled ? `Hold ${shortcutStatus.shortcut} to dictate anywhere.` : shortcutStatus?.message}
+          </p>
         </div>
         <button
           onClick={load}
@@ -74,7 +85,7 @@ export default function DictationHistoryPage() {
           <div className="rounded-2xl border border-dashed border-[#ccd1dc] bg-white px-6 py-14 text-center">
             <AudioEmpty />
             <p className="mt-4 font-medium">No dictations yet</p>
-            <p className="mt-1 text-sm text-[#697386]">Hold Ctrl + Shift + Space anywhere, speak, then release.</p>
+            <p className="mt-1 text-sm text-[#697386]">{shortcutStatus?.enabled ? `Hold ${shortcutStatus.shortcut} anywhere, speak, then release.` : 'Resolve the shortcut warning above, then try again.'}</p>
           </div>
         )}
         {items.map(item => (

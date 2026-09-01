@@ -15,7 +15,10 @@ mod short_audio;
 #[cfg(target_os = "windows")]
 mod windows_delivery;
 
-pub use activation::{ActivationEvent, HoldShortcut, KeyCode, ShortcutTracker};
+pub use activation::{
+    ActivationEvent, DictationShortcutStatus, DictationShortcutStatusState, HoldShortcut, KeyCode,
+    ShortcutTracker,
+};
 pub use activation_bus::ActivationBus;
 pub use coordinator::{position_overlay, start_coordinator};
 pub use delivery::{deliver_text, ClipboardPort, DeliveryError, DeliveryReceipt, PastePort};
