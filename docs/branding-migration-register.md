@@ -54,6 +54,7 @@ These changes affect what users see in the app and what the operating system cal
 |---|---|---|---|
 | P0 | `frontend/package.json` | Package name `meetily` | Change package/app slug after deciding the npm and build naming convention. |
 | P0 | `frontend/src-tauri/tauri.conf.json` | `productName: meetily`, identifier `com.meetily.ai`, window title `meetily`, updater endpoint on Zackriya GitHub | Replace display name, bundle identifier, window title, and updater endpoint. Treat identifier and updater changes as release/migration work, not a text-only rename. |
+| P0 | Windows installation surfaces generated from `frontend/src-tauri/tauri.conf.json` | The app is currently installed and discoverable as `Meetily`/`meetily`, including the Start menu, Settings > Installed apps, window title, shortcuts, and likely executable/package labels | Verify every Windows-facing label after rebuilding. Rename these surfaces to PulseTalk, and document the migration behavior for existing Meetily installations. |
 | P0 | `frontend/src/app/metadata.ts` | Page title `Meetily` | Change title and description to PulseTalk copy. |
 | P0 | `frontend/src/app/metadata.tsx` | Duplicate page title `Meetily` | Change title and description, then decide whether this duplicate metadata file should be removed or consolidated. |
 | P0 | `frontend/src/components/About.tsx` | Visible About copy: `What makes Meetily different`, `Chat with the Zackriya team`, `Built by Zackriya Solutions` | Replace with the approved PulseTalk copy. The supplied example appears to correspond directly to this component. Update privacy-policy destination and any product version copy at the same time. |
@@ -107,6 +108,7 @@ Update this cluster as one release change. A partial rename can publish artifact
 | P0 | `.github/workflows/build-linux.yml` | `MEETILY_RSA_PUBLIC_KEY`, `meetily-linux-*` artifacts | Update secret and artifact naming. |
 | P0 | `.github/workflows/build-windows.yml` | `MEETILY_RSA_PUBLIC_KEY`, `meetily-windows-*` artifacts | Update secret and artifact naming. |
 | P0 | `.github/workflows/build-test.yml` | `meetily-test` artifact prefix | Update test artifact naming. |
+| P0 | Windows installer artifacts produced by the Tauri NSIS/MSI bundle | Installer display name, Start menu shortcut, uninstall entry, installer filename, and executable/package labels may still use `Meetily` even when the release file is generically named `x64-setup.exe` | Verify the generated NSIS and MSI packages on Windows, then rename all user-facing installer surfaces to PulseTalk. |
 | P1 | `scripts/generate-update-manifest-github.js` | Zackriya repository, release/download URLs, release instructions | Replace repository and artifact URL construction; verify manifest schema and signatures. |
 | P1 | `scripts/test-update-locally.js` | Meetily test-server label and Zackriya updater endpoint | Update test labels and endpoint examples. |
 | P1 | `frontend/src/lib/analytics.ts`, `frontend/src-tauri/src/analytics/` | Analytics event identity/version context where applicable | Verify product/application identifiers sent to analytics and update consent documentation. |
