@@ -437,11 +437,28 @@ fn keyboard_input(key: u16, flags: u32) -> INPUT {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::dictation::deliver_text;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{mpsc, Arc};
     use windows_sys::core::w;
+    use windows_sys::Win32::Graphics::Gdi::UpdateWindow;
     use windows_sys::Win32::System::DataExchange::{
         GetClipboardData, IsClipboardFormatAvailable, RegisterClipboardFormatW,
     };
     use windows_sys::Win32::System::Memory::GlobalSize;
+    use windows_sys::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{SetActiveWindow, SetFocus};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        BringWindowToTop, CreateWindowExW, DispatchMessageW, GetMessageW, GetWindowTextLengthW,
+        GetWindowTextW, PostMessageW, PostThreadMessageW, SendMessageW, SetForegroundWindow,
+        SetWindowTextW, ShowWindow, SwitchToThisWindow, TranslateMessage, MSG, SW_SHOW, WM_CLOSE,
+        WM_QUIT, WS_BORDER, WS_CHILD, WS_OVERLAPPEDWINDOW, WS_TABSTOP, WS_VISIBLE,
+    };
+
+    const EM_SETSEL: u32 = 0x00B1;
+    const EM_GETSEL: u32 = 0x00B0;
+    const ES_MULTILINE: u32 = 0x0004;
+    const WM_APP_ACTIVATE_EDIT: u32 = 0x8001;
 
     struct RestoreClipboard(Option<WindowsClipboardSnapshot>);
 
@@ -449,6 +466,204 @@ mod tests {
         fn drop(&mut self) {
             if let Some(snapshot) = self.0.take() {
                 let _ = snapshot.restore();
+            }
+        }
+    }
+
+    struct NativeEditWindow {
+        window_hwnd: usize,
+        edit_hwnd: usize,
+        thread_id: u32,
+        focused_hwnd: Arc<AtomicUsize>,
+        join: Option<thread::JoinHandle<()>>,
+    }
+
+    impl NativeEditWindow {
+        fn open() -> Self {
+            let (sender, receiver) = mpsc::sync_channel(1);
+            let focused_hwnd = Arc::new(AtomicUsize::new(0));
+            let focused_hwnd_for_thread = Arc::clone(&focused_hwnd);
+            let join = thread::spawn(move || {
+                let window_hwnd = unsafe {
+                    CreateWindowExW(
+                        0,
+                        w!("STATIC"),
+                        w!("PulseTalk delivery acceptance"),
+                        WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+                        120,
+                        120,
+                        720,
+                        280,
+                        ptr::null_mut(),
+                        ptr::null_mut(),
+                        ptr::null_mut(),
+                        ptr::null(),
+                    )
+                };
+                assert!(!window_hwnd.is_null(), "create native test window");
+                let edit_hwnd = unsafe {
+                    CreateWindowExW(
+                        0,
+                        w!("EDIT"),
+                        w!(""),
+                        WS_CHILD | WS_VISIBLE | WS_BORDER | WS_TABSTOP | ES_MULTILINE,
+                        24,
+                        24,
+                        648,
+                        180,
+                        window_hwnd,
+                        ptr::null_mut(),
+                        ptr::null_mut(),
+                        ptr::null(),
+                    )
+                };
+                assert!(!edit_hwnd.is_null(), "create native child edit control");
+                unsafe {
+                    ShowWindow(window_hwnd, SW_SHOW);
+                    ShowWindow(edit_hwnd, SW_SHOW);
+                    UpdateWindow(window_hwnd);
+                }
+                sender
+                    .send((window_hwnd as usize, edit_hwnd as usize, unsafe {
+                        GetCurrentThreadId()
+                    }))
+                    .expect("publish native edit window");
+
+                let mut message: MSG = unsafe { std::mem::zeroed() };
+                while unsafe { GetMessageW(&mut message, ptr::null_mut(), 0, 0) } > 0 {
+                    if message.message == WM_APP_ACTIVATE_EDIT {
+                        unsafe {
+                            ShowWindow(window_hwnd, SW_SHOW);
+                            BringWindowToTop(window_hwnd);
+                            SetForegroundWindow(window_hwnd);
+                            SetActiveWindow(window_hwnd);
+                            SetFocus(edit_hwnd);
+                            focused_hwnd_for_thread.store(
+                                windows_sys::Win32::UI::Input::KeyboardAndMouse::GetFocus()
+                                    as usize,
+                                Ordering::SeqCst,
+                            );
+                        }
+                        continue;
+                    }
+                    unsafe {
+                        TranslateMessage(&message);
+                        DispatchMessageW(&message);
+                    }
+                }
+            });
+            let (window_hwnd, edit_hwnd, thread_id) =
+                receiver.recv().expect("receive native edit window");
+            Self {
+                window_hwnd,
+                edit_hwnd,
+                thread_id,
+                focused_hwnd,
+                join: Some(join),
+            }
+        }
+
+        fn activate(&self) {
+            let window_hwnd = self.window_hwnd as *mut std::ffi::c_void;
+            let edit_hwnd = self.edit_hwnd as *mut std::ffi::c_void;
+            // Windows normally blocks background processes from stealing focus.
+            // A synthetic Alt tap is the documented foreground hand-off used by
+            // UI automation before SetForegroundWindow.
+            let mut foreground_handoff = [
+                keyboard_input(0x12, 0),
+                keyboard_input(0x12, KEYEVENTF_KEYUP),
+            ];
+            unsafe {
+                SendInput(
+                    foreground_handoff.len() as u32,
+                    foreground_handoff.as_mut_ptr(),
+                    std::mem::size_of::<INPUT>() as i32,
+                );
+            }
+            let current_thread = unsafe { GetCurrentThreadId() };
+            let foreground = unsafe { GetForegroundWindow() };
+            let mut foreground_process = 0;
+            let foreground_thread = if foreground.is_null() {
+                0
+            } else {
+                unsafe { GetWindowThreadProcessId(foreground, &mut foreground_process) }
+            };
+            unsafe {
+                if foreground_thread != 0 && foreground_thread != current_thread {
+                    AttachThreadInput(current_thread, foreground_thread, 1);
+                }
+                if self.thread_id != current_thread {
+                    AttachThreadInput(current_thread, self.thread_id, 1);
+                }
+                ShowWindow(window_hwnd, SW_SHOW);
+                BringWindowToTop(window_hwnd);
+                SetActiveWindow(window_hwnd);
+                SetForegroundWindow(window_hwnd);
+                SwitchToThisWindow(window_hwnd, 1);
+                SetFocus(edit_hwnd);
+                if self.thread_id != current_thread {
+                    AttachThreadInput(current_thread, self.thread_id, 0);
+                }
+                if foreground_thread != 0 && foreground_thread != current_thread {
+                    AttachThreadInput(current_thread, foreground_thread, 0);
+                }
+                self.focused_hwnd.store(0, Ordering::SeqCst);
+                PostThreadMessageW(self.thread_id, WM_APP_ACTIVATE_EDIT, 0, 0);
+            }
+            for _ in 0..50 {
+                if unsafe { GetForegroundWindow() } as usize == self.window_hwnd
+                    && self.focused_hwnd.load(Ordering::SeqCst) == self.edit_hwnd
+                {
+                    return;
+                }
+                thread::sleep(Duration::from_millis(20));
+            }
+            panic!(
+                "native edit window did not become foreground and focused: expected={} foreground={} focus={}",
+                self.window_hwnd,
+                unsafe { GetForegroundWindow() } as usize,
+                self.focused_hwnd.load(Ordering::SeqCst)
+            );
+        }
+
+        fn set_text_and_selection(&self, text: &str, start: usize, end: usize) {
+            let hwnd = self.edit_hwnd as *mut std::ffi::c_void;
+            let wide: Vec<u16> = text.encode_utf16().chain(std::iter::once(0)).collect();
+            assert_ne!(unsafe { SetWindowTextW(hwnd, wide.as_ptr()) }, 0);
+            self.activate();
+            unsafe { SendMessageW(hwnd, EM_SETSEL, start, end as isize) };
+            let mut actual_start = 0_u32;
+            let mut actual_end = 0_u32;
+            unsafe {
+                SendMessageW(
+                    hwnd,
+                    EM_GETSEL,
+                    (&mut actual_start as *mut u32) as usize,
+                    (&mut actual_end as *mut u32) as isize,
+                )
+            };
+            assert_eq!((actual_start as usize, actual_end as usize), (start, end));
+        }
+
+        fn text(&self) -> String {
+            let hwnd = self.edit_hwnd as *mut std::ffi::c_void;
+            let length = unsafe { GetWindowTextLengthW(hwnd) };
+            assert!(length >= 0);
+            let mut buffer = vec![0_u16; length as usize + 1];
+            let copied = unsafe { GetWindowTextW(hwnd, buffer.as_mut_ptr(), buffer.len() as i32) };
+            String::from_utf16_lossy(&buffer[..copied as usize])
+        }
+    }
+
+    impl Drop for NativeEditWindow {
+        fn drop(&mut self) {
+            let hwnd = self.window_hwnd as *mut std::ffi::c_void;
+            unsafe {
+                PostMessageW(hwnd, WM_CLOSE, 0, 0);
+                PostThreadMessageW(self.thread_id, WM_QUIT, 0, 0);
+            }
+            if let Some(join) = self.join.take() {
+                let _ = join.join();
             }
         }
     }
@@ -498,6 +713,46 @@ mod tests {
         snapshot.restore().expect("restore custom clipboard");
 
         assert_eq!(read_custom_format(format), expected);
+
+        if let Some(original) = original_guard.0.take() {
+            original.restore().expect("restore original clipboard");
+        }
+    }
+
+    #[test]
+    #[ignore = "opens a real Windows edit control and temporarily owns foreground and clipboard"]
+    fn delivers_to_real_edit_caret_and_selection_without_losing_rich_clipboard() {
+        let original = WindowsClipboardSnapshot::capture().expect("snapshot original clipboard");
+        let mut original_guard = RestoreClipboard(Some(original));
+        let format = unsafe { RegisterClipboardFormatW(w!("PulseTalk.LiveDeliveryTest")) };
+        assert_ne!(format, 0);
+        let expected_clipboard = b"rich application clipboard payload";
+        write_custom_format(format, expected_clipboard);
+
+        let window = NativeEditWindow::open();
+        window.set_text_and_selection("alpha omega", 6, 6);
+        let target = WindowsTarget::capture().expect("capture native edit target");
+        let receipt = deliver_text(
+            &mut WindowsClipboard,
+            &mut WindowsPaste::for_target(target),
+            "dictated ",
+        )
+        .expect("insert at native edit caret");
+        assert!(receipt.pasted && receipt.clipboard_restored);
+        assert_eq!(window.text(), "alpha dictated omega");
+        assert_eq!(read_custom_format(format), expected_clipboard);
+
+        window.set_text_and_selection("keep replace tail", 5, 12);
+        let target = WindowsTarget::capture().expect("recapture native edit target");
+        let receipt = deliver_text(
+            &mut WindowsClipboard,
+            &mut WindowsPaste::for_target(target),
+            "dictated",
+        )
+        .expect("replace native edit selection");
+        assert!(receipt.pasted && receipt.clipboard_restored);
+        assert_eq!(window.text(), "keep dictated tail");
+        assert_eq!(read_custom_format(format), expected_clipboard);
 
         if let Some(original) = original_guard.0.take() {
             original.restore().expect("restore original clipboard");

@@ -14,8 +14,9 @@ Updated: 2026-09-01
 - A live hold/release capture reached the configured local Parakeet model, saved history before delivery, and pasted a transcript successfully.
 - Four successful sessions at 17:42–17:43 are stored with target `pid:47640`; the current Windows process table identifies that PID as T3 Code. This verifies repeated system-wide paste into an Electron editor.
 - A deliberately short capture is classified as `audio_capture_failed` and remains visible in history.
-- The core dictation suite passes 20 tests; one real-clipboard test is ignored by default because it temporarily owns the Windows clipboard.
-- The real-clipboard test passes when run explicitly and proves an application-specific non-text clipboard format survives staging and restoration.
+- The core dictation suite passes 20 tests; two interactive Windows tests are ignored by default because they temporarily take foreground focus or own the clipboard.
+- The native Windows delivery test passes when run explicitly. It uses a real top-level window and child edit control to prove both caret insertion and selected-text replacement through the production delivery path.
+- The native delivery and real-clipboard tests prove an application-specific non-text clipboard format survives staging and restoration.
 - Delivery is bound to the foreground window captured at key-down. Tests cover target closure, focus changes, and higher-integrity targets.
 - History stores only the target process ID (`pid:<number>`), not window titles or document content.
 - A dry-run merge against the current `origin/main` reports no conflict. PulseTalk changes remain isolated in focused modules and commits.
@@ -31,6 +32,8 @@ These checks require a person to speak while holding the shortcut. They must be 
 | Visual Studio Code | — | — | — | — | Pending |
 | Windows Terminal | — | — | — | — | Pending |
 | T3 Code editor | Pass | — | — | Pass | Verified from four completed sessions and captured target PID |
+
+The automated native Windows edit-control check separately passes caret insertion, selection replacement, and rich clipboard preservation. Overlay behavior is not part of that fixture.
 
 For each target:
 
