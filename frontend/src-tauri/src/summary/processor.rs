@@ -15,6 +15,9 @@ static THINKING_TAG_REGEX: Lazy<Regex> = Lazy::new(|| {
 const ENGLISH_BASE_SUMMARY_INSTRUCTION: &str =
     "**Write the summary/report in English regardless of transcript language; non-English prose is invalid.**";
 
+const NO_EM_DASH_INSTRUCTION: &str =
+    "Never use an em dash (U+2014) anywhere in the output; use a comma, full stop, or spaced hyphen instead.";
+
 fn resolve_cached_english<'a>(
     cached: Option<&'a str>,
     summary_language: Option<&str>,
@@ -161,6 +164,7 @@ fn build_final_report_system_prompt(
 5. If a section has no relevant info, write "None noted in this section."
 6. Output **only** the completed Markdown report.
 7. If unsure about something, omit it.
+8. {NO_EM_DASH_INSTRUCTION}
 
 **SECTION-SPECIFIC INSTRUCTIONS:**
 {section_instructions}
@@ -272,12 +276,18 @@ pub fn clean_llm_markdown_output(markdown: &str) -> String {
         if trimmed.starts_with(prefix) && trimmed.ends_with(SUFFIX) {
             // Extract content between the fences
             let content = &trimmed[prefix.len()..trimmed.len() - SUFFIX.len()];
-            return content.trim().to_string();
+            return replace_em_dashes(content.trim());
         }
     }
 
     // If no fences found, return the trimmed string
-    trimmed.to_string()
+    replace_em_dashes(trimmed)
+}
+
+/// Small local models ignore the no-em-dash prompt instruction, so enforce it
+/// deterministically on every summary/translation/normalization output.
+fn replace_em_dashes(text: &str) -> String {
+    text.replace(" \u{2014} ", " - ").replace('\u{2014}', " - ")
 }
 
 /// Extracts meeting name from the first heading in markdown
@@ -385,7 +395,8 @@ pub async fn generate_meeting_summary(
             info!("Split transcript into {} chunks", num_chunks);
 
             let mut chunk_summaries = Vec::new();
-            let system_prompt_chunk = "You are an expert meeting summarizer.";
+            let system_prompt_chunk =
+                format!("You are an expert meeting summarizer. {NO_EM_DASH_INSTRUCTION}");
 
             for (i, chunk) in chunks.iter().enumerate() {
                 // Check for cancellation before processing each chunk
@@ -404,7 +415,7 @@ pub async fn generate_meeting_summary(
                     provider,
                     model_name,
                     api_key,
-                    system_prompt_chunk,
+                    &system_prompt_chunk,
                     &user_prompt_chunk,
                     ollama_endpoint,
                     custom_openai_endpoint,
@@ -450,14 +461,16 @@ pub async fn generate_meeting_summary(
                     chunk_summaries.len()
                 );
                 let combined_text = chunk_summaries.join("\n---\n");
-                let system_prompt_combine = "You are an expert at synthesizing meeting summaries.";
+                let system_prompt_combine = format!(
+                    "You are an expert at synthesizing meeting summaries. {NO_EM_DASH_INSTRUCTION}"
+                );
                 let user_prompt_combine = build_combine_summary_user_prompt(&combined_text);
                 generate_summary(
                     client,
                     provider,
                     model_name,
                     api_key,
-                    system_prompt_combine,
+                    &system_prompt_combine,
                     &user_prompt_combine,
                     ollama_endpoint,
                     custom_openai_endpoint,
