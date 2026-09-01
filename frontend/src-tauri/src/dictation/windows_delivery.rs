@@ -499,6 +499,7 @@ mod tests {
     struct NativeEditWindow {
         window_hwnd: usize,
         edit_hwnd: usize,
+        alternate_edit_hwnd: usize,
         thread_id: u32,
         join: Option<thread::JoinHandle<()>>,
     }
@@ -533,7 +534,7 @@ mod tests {
                         24,
                         24,
                         648,
-                        180,
+                        84,
                         window_hwnd,
                         ptr::null_mut(),
                         ptr::null_mut(),
@@ -541,26 +542,55 @@ mod tests {
                     )
                 };
                 assert!(!edit_hwnd.is_null(), "create native child edit control");
+                let alternate_edit_hwnd = unsafe {
+                    CreateWindowExW(
+                        0,
+                        w!("EDIT"),
+                        w!("alternate field"),
+                        WS_CHILD | WS_VISIBLE | WS_BORDER | WS_TABSTOP | ES_MULTILINE,
+                        24,
+                        124,
+                        648,
+                        84,
+                        window_hwnd,
+                        ptr::null_mut(),
+                        ptr::null_mut(),
+                        ptr::null(),
+                    )
+                };
+                assert!(
+                    !alternate_edit_hwnd.is_null(),
+                    "create alternate native child edit control"
+                );
                 unsafe {
                     ShowWindow(window_hwnd, SW_SHOW);
                     ShowWindow(edit_hwnd, SW_SHOW);
+                    ShowWindow(alternate_edit_hwnd, SW_SHOW);
                     UpdateWindow(window_hwnd);
                 }
                 sender
-                    .send((window_hwnd as usize, edit_hwnd as usize, unsafe {
-                        GetCurrentThreadId()
-                    }))
+                    .send((
+                        window_hwnd as usize,
+                        edit_hwnd as usize,
+                        alternate_edit_hwnd as usize,
+                        unsafe { GetCurrentThreadId() },
+                    ))
                     .expect("publish native edit window");
 
                 let mut message: MSG = unsafe { std::mem::zeroed() };
                 while unsafe { GetMessageW(&mut message, ptr::null_mut(), 0, 0) } > 0 {
                     if message.message == WM_APP_ACTIVATE_EDIT {
+                        let control_hwnd = if message.wParam == 0 {
+                            edit_hwnd
+                        } else {
+                            message.wParam as *mut std::ffi::c_void
+                        };
                         unsafe {
                             ShowWindow(window_hwnd, SW_SHOW);
                             BringWindowToTop(window_hwnd);
                             SetForegroundWindow(window_hwnd);
                             SetActiveWindow(window_hwnd);
-                            SetFocus(edit_hwnd);
+                            SetFocus(control_hwnd);
                         }
                         continue;
                     }
@@ -570,19 +600,28 @@ mod tests {
                     }
                 }
             });
-            let (window_hwnd, edit_hwnd, thread_id) =
+            let (window_hwnd, edit_hwnd, alternate_edit_hwnd, thread_id) =
                 receiver.recv().expect("receive native edit window");
             Self {
                 window_hwnd,
                 edit_hwnd,
+                alternate_edit_hwnd,
                 thread_id,
                 join: Some(join),
             }
         }
 
         fn activate(&self) {
+            self.activate_control(self.edit_hwnd);
+        }
+
+        fn activate_alternate(&self) {
+            self.activate_control(self.alternate_edit_hwnd);
+        }
+
+        fn activate_control(&self, control_hwnd: usize) {
             let window_hwnd = self.window_hwnd as *mut std::ffi::c_void;
-            let edit_hwnd = self.edit_hwnd as *mut std::ffi::c_void;
+            let control_hwnd_pointer = control_hwnd as *mut std::ffi::c_void;
             let foreground = unsafe { GetForegroundWindow() };
             // Windows normally blocks background processes from stealing focus.
             // A synthetic Alt tap is the documented foreground hand-off used by
@@ -619,18 +658,18 @@ mod tests {
                 SetActiveWindow(window_hwnd);
                 SetForegroundWindow(window_hwnd);
                 SwitchToThisWindow(window_hwnd, 1);
-                SetFocus(edit_hwnd);
+                SetFocus(control_hwnd_pointer);
                 if self.thread_id != current_thread {
                     AttachThreadInput(current_thread, self.thread_id, 0);
                 }
                 if foreground_thread != 0 && foreground_thread != current_thread {
                     AttachThreadInput(current_thread, foreground_thread, 0);
                 }
-                PostThreadMessageW(self.thread_id, WM_APP_ACTIVATE_EDIT, 0, 0);
+                PostThreadMessageW(self.thread_id, WM_APP_ACTIVATE_EDIT, control_hwnd, 0);
             }
             for _ in 0..50 {
                 if unsafe { GetForegroundWindow() } as usize == self.window_hwnd
-                    && focused_control(self.thread_id) == Some(self.edit_hwnd)
+                    && focused_control(self.thread_id) == Some(control_hwnd)
                 {
                     return;
                 }
@@ -638,7 +677,7 @@ mod tests {
             }
             panic!(
                 "native edit window did not become foreground and focused: expected={} foreground={} focus={}",
-                self.window_hwnd,
+                control_hwnd,
                 unsafe { GetForegroundWindow() } as usize,
                 focused_control(self.thread_id).unwrap_or_default()
             );
@@ -770,6 +809,37 @@ mod tests {
         .expect("replace native edit selection");
         assert!(receipt.pasted && receipt.clipboard_restored);
         assert_eq!(window.text(), "keep dictated tail");
+        assert_eq!(read_custom_format(format), expected_clipboard);
+
+        if let Some(original) = original_guard.0.take() {
+            original.restore().expect("restore original clipboard");
+        }
+    }
+
+    #[test]
+    #[ignore = "opens a real Windows window with two edit controls and temporarily owns foreground and clipboard"]
+    fn refuses_native_delivery_after_focus_moves_to_another_control() {
+        let original = WindowsClipboardSnapshot::capture().expect("snapshot original clipboard");
+        let mut original_guard = RestoreClipboard(Some(original));
+        let format = unsafe { RegisterClipboardFormatW(w!("PulseTalk.FocusSafetyTest")) };
+        assert_ne!(format, 0);
+        let expected_clipboard = b"focus safety clipboard payload";
+        write_custom_format(format, expected_clipboard);
+
+        let window = NativeEditWindow::open();
+        window.set_text_and_selection("original field", 8, 8);
+        let target = WindowsTarget::capture().expect("capture first native edit target");
+        window.activate_alternate();
+
+        let error = deliver_text(
+            &mut WindowsClipboard,
+            &mut WindowsPaste::for_target(target),
+            "must not paste",
+        )
+        .expect_err("delivery must fail after focus moves within the window");
+
+        assert!(error.to_string().contains("FocusedControlChanged"));
+        assert_eq!(window.text(), "original field");
         assert_eq!(read_custom_format(format), expected_clipboard);
 
         if let Some(original) = original_guard.0.take() {

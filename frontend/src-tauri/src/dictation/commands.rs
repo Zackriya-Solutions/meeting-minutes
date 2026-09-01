@@ -10,6 +10,23 @@ pub fn dictation_get_shortcut_status(
 }
 
 #[tauri::command]
+pub fn dictation_get_overlay_enabled(
+    state: tauri::State<'_, super::DictationOverlayState>,
+) -> bool {
+    state.enabled()
+}
+
+#[tauri::command]
+pub fn dictation_set_overlay_enabled(app: AppHandle, enabled: bool) -> Result<(), String> {
+    super::set_overlay_enabled(&app, enabled)
+}
+
+#[tauri::command]
+pub fn dictation_set_overlay_expanded(app: AppHandle, expanded: bool) -> Result<(), String> {
+    super::set_overlay_expanded(&app, expanded)
+}
+
+#[tauri::command]
 pub async fn dictation_list_history(
     app: AppHandle,
     limit: Option<i64>,

@@ -1,9 +1,10 @@
 "use client"
 
 import { invoke } from "@tauri-apps/api/core"
-import { AudioLines, ClipboardCheck, History, LockKeyhole, Mic2, Sparkles } from "lucide-react"
+import { AudioLines, ClipboardCheck, History, LockKeyhole, Mic2, PictureInPicture2, Sparkles } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { useEffect, useState } from "react"
+import { Switch } from '@/components/ui/switch'
 
 type ShortcutStatus = {
   enabled: boolean
@@ -14,13 +15,33 @@ type ShortcutStatus = {
 export function DictationSettings() {
   const router = useRouter()
   const [status, setStatus] = useState<ShortcutStatus | null>(null)
+  const [overlayEnabled, setOverlayEnabled] = useState<boolean | null>(null)
+  const [savingOverlay, setSavingOverlay] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     invoke<ShortcutStatus>('dictation_get_shortcut_status')
       .then(setStatus)
       .catch(cause => setError(String(cause)))
+    invoke<boolean>('dictation_get_overlay_enabled')
+      .then(setOverlayEnabled)
+      .catch(cause => setError(String(cause)))
   }, [])
+
+  const toggleOverlay = async (enabled: boolean) => {
+    const previous = overlayEnabled
+    setOverlayEnabled(enabled)
+    setSavingOverlay(true)
+    setError(null)
+    try {
+      await invoke('dictation_set_overlay_enabled', { enabled })
+    } catch (cause) {
+      setOverlayEnabled(previous)
+      setError(`Could not update the floating overlay: ${String(cause)}`)
+    } finally {
+      setSavingOverlay(false)
+    }
+  }
 
   return (
     <div className="space-y-6 pt-6">
@@ -45,6 +66,25 @@ export function DictationSettings() {
             {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
             <p className="mt-3 text-xs text-gray-500">If the preferred shortcut is occupied, PulseTalk tries Ctrl+Alt+D and then Ctrl+Shift+F10. The active choice is always shown here and under General.</p>
           </div>
+        </div>
+      </section>
+
+      <section className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
+        <div className="flex items-start gap-4">
+          <div className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-indigo-50 text-indigo-600">
+            <PictureInPicture2 className="h-5 w-5" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <label htmlFor="dictation-overlay-toggle" className="font-semibold text-gray-900">Floating dictation overlay</label>
+            <p className="mt-1 text-sm leading-6 text-gray-600">Keep a small microphone above other windows. Hover over it to reveal the active shortcut; it expands automatically while PulseTalk listens and pastes.</p>
+          </div>
+          <Switch
+            id="dictation-overlay-toggle"
+            checked={overlayEnabled ?? true}
+            disabled={overlayEnabled === null || savingOverlay}
+            onCheckedChange={toggleOverlay}
+            aria-label="Show floating dictation overlay"
+          />
         </div>
       </section>
 

@@ -417,6 +417,7 @@ pub fn run() {
         );
         builder = builder.manage(activation_bus);
         builder = builder.manage(shortcut_status);
+        builder = builder.manage(dictation::DictationOverlayState::new());
     }
 
     #[cfg(any(target_os = "macos", windows, target_os = "linux"))]
@@ -583,7 +584,7 @@ pub fn run() {
             .expect("Failed to initialize database");
 
             dictation::start_coordinator(_app.handle().clone());
-            dictation::position_overlay(_app.handle());
+            dictation::initialize_overlay(_app.handle());
 
             // Initialize bundled templates directory for dynamic template discovery
             log::info!("Initializing bundled templates directory...");
@@ -619,6 +620,9 @@ pub fn run() {
             dictation::commands::dictation_list_history,
             dictation::commands::dictation_copy_history,
             dictation::commands::dictation_get_shortcut_status,
+            dictation::commands::dictation_get_overlay_enabled,
+            dictation::commands::dictation_set_overlay_enabled,
+            dictation::commands::dictation_set_overlay_expanded,
             analytics::commands::init_analytics,
             analytics::commands::disable_analytics,
             analytics::commands::track_event,
