@@ -28,6 +28,10 @@ pub struct TranscriptSegment {
     pub sequence_id: u64,
     #[serde(default = "default_transcript_source")]
     pub source: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub translation: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub translation_target_language: Option<String>,
 }
 
 /// Meeting metadata structure
@@ -124,6 +128,25 @@ impl RecordingSaver {
         }
     }
 
+    pub fn update_transcript_translation(
+        &self,
+        sequence_id: u64,
+        translation: Option<String>,
+        target_language: String,
+    ) {
+        if let Ok(mut segments) = self.transcript_segments.lock() {
+            if let Some(existing) = segments.iter_mut().find(|segment| segment.sequence_id == sequence_id) {
+                existing.translation = translation;
+                existing.translation_target_language = Some(target_language);
+            }
+        }
+        if let Some(folder) = &self.meeting_folder {
+            if let Err(error) = self.write_transcripts_json(folder) {
+                warn!("Failed to write incremental translation update: {}", error);
+            }
+        }
+    }
+
     /// Legacy method for backward compatibility - converts text to basic segment
     pub fn add_transcript_chunk(&self, text: String) {
         let segment = TranscriptSegment {
@@ -136,6 +159,8 @@ impl RecordingSaver {
             confidence: 1.0,
             sequence_id: 0,
             source: "Audio".to_string(),
+            translation: None,
+            translation_target_language: None,
         };
         self.add_transcript_segment(segment);
     }
@@ -524,6 +549,8 @@ mod tests {
             confidence: 0.9,
             sequence_id: 1,
             source: "Você".to_string(),
+            translation: None,
+            translation_target_language: None,
         };
         let json = serde_json::to_string(&segment).expect("serialize");
         let reloaded: TranscriptSegment = serde_json::from_str(&json).expect("deserialize");

@@ -22,6 +22,7 @@ pub struct AudioChunk {
     pub timestamp: f64,
     pub chunk_id: u64,
     pub device_type: DeviceType,
+    pub is_final: bool,
 }
 
 /// Processed audio chunk (post-VAD) for recording

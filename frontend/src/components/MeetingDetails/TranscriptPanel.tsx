@@ -67,6 +67,10 @@ export function TranscriptPanel({
       text: t.text,
       source: t.source,
       confidence: t.confidence,
+      translation: t.translation,
+      translationTargetLanguage: t.translation_target_language,
+      translationStatus: t.translation_status ?? (t.translation ? 'ready' : undefined),
+      translationError: t.translation_error,
     }));
   }, [transcripts, usePagination, segments]);
 

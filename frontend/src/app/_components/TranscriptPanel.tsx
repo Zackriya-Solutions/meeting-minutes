@@ -2,7 +2,9 @@ import { VirtualizedTranscriptView } from '@/components/VirtualizedTranscriptVie
 import { PermissionWarning } from '@/components/PermissionWarning';
 import { Button } from '@/components/ui/button';
 import { ButtonGroup } from '@/components/ui/button-group';
-import { Copy, GlobeIcon } from 'lucide-react';
+import { Copy, GlobeIcon, Languages } from 'lucide-react';
+import { Switch } from '@/components/ui/switch';
+import { TRANSLATION_LANGUAGE_OPTIONS } from '@/lib/summary-languages';
 import { useTranscripts } from '@/contexts/TranscriptContext';
 import { useConfig } from '@/contexts/ConfigContext';
 import { useRecordingState } from '@/contexts/RecordingStateContext';
@@ -32,7 +34,13 @@ export function TranscriptPanel({
 }: TranscriptPanelProps) {
   // Contexts
   const { transcripts, annotations, addAnnotation, transcriptContainerRef, copyTranscript } = useTranscripts();
-  const { transcriptModelConfig } = useConfig();
+  const {
+    transcriptModelConfig,
+    translationSettings,
+    translationEnabled,
+    setTranslationEnabled,
+    setTranslationTarget,
+  } = useConfig();
   const { isRecording, isPaused } = useRecordingState();
   const { checkPermissions, isChecking, hasSystemAudio, hasMicrophone } = usePermissionCheck();
   const isLinux = useIsLinux();
@@ -46,6 +54,10 @@ export function TranscriptPanel({
       text: t.text,
       source: t.source,
       confidence: t.confidence,
+      translation: t.translation,
+      translationTargetLanguage: t.translation_target_language,
+      translationStatus: t.translation_status ?? (t.translation ? 'ready' : undefined),
+      translationError: t.translation_error,
     })),
     [transcripts]
   );
@@ -85,6 +97,32 @@ export function TranscriptPanel({
                   </Button>
                 }
               </ButtonGroup>
+              <div className="flex items-center gap-2 text-xs text-gray-600">
+                <Languages className="h-4 w-4" aria-hidden="true" />
+                <label htmlFor="live-translation-toggle">Translate</label>
+                <Switch
+                  id="live-translation-toggle"
+                  checked={translationEnabled}
+                  onCheckedChange={checked => {
+                    setTranslationEnabled(checked).catch(error => {
+                      console.error('Failed to toggle live translation:', error);
+                    });
+                  }}
+                  disabled={!isRecording || isStopping || isProcessingStop}
+                  aria-label="Toggle live translation"
+                />
+                <select
+                  value={translationSettings.targetLanguage}
+                  onChange={event => setTranslationTarget(event.target.value).catch(error => console.error('Failed to change translation target:', error))}
+                  disabled={!translationEnabled || !isRecording || isStopping || isProcessingStop}
+                  className="h-8 rounded-md border border-gray-200 bg-white px-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+                  aria-label="Translation target language"
+                >
+                  {TRANSLATION_LANGUAGE_OPTIONS.map(language => (
+                    <option key={language.code} value={language.code}>{language.label}</option>
+                  ))}
+                </select>
+              </div>
             </div>
           </div>
         </div>

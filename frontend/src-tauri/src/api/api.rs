@@ -19,6 +19,7 @@ use crate::{
     summary::CustomOpenAIConfig,
 };
 use crate::summary::llm_client::{generate_summary, LLMProvider};
+use crate::audio::transcription::translation::{self, TranslationSettings};
 
 // Hardcoded server URL
 const APP_SERVER_URL: &str = "http://localhost:5167";
@@ -164,6 +165,10 @@ pub struct MeetingTranscript {
     pub duration: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub translation: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub translation_target_language: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -321,6 +326,10 @@ pub struct TranscriptSegment {
     pub duration: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub translation: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub translation_target_language: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -981,6 +990,34 @@ pub async fn api_get_transcript_config<R: Runtime>(
 }
 
 #[tauri::command]
+pub async fn api_get_translation_settings<R: Runtime>(
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+) -> Result<TranslationSettings, String> {
+    translation::load_settings(state.db_manager.pool())
+        .await
+        .map_err(|error| format!("Failed to load translation settings: {}", error))
+}
+
+#[tauri::command]
+pub async fn api_save_translation_settings<R: Runtime>(
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    settings: TranslationSettings,
+) -> Result<(), String> {
+    if settings.libretranslate_endpoint.trim().is_empty()
+        || settings.ollama_endpoint.trim().is_empty()
+        || settings.ollama_model.trim().is_empty()
+        || settings.target_language.trim().is_empty()
+    {
+        return Err("Translation endpoints, model, and target language are required".to_string());
+    }
+    translation::save_settings(state.db_manager.pool(), &settings)
+        .await
+        .map_err(|error| format!("Failed to save translation settings: {}", error))
+}
+
+#[tauri::command]
 pub async fn api_save_transcript_config<R: Runtime>(
     _app: AppHandle<R>,
     state: tauri::State<'_, AppState>,
@@ -1280,6 +1317,8 @@ pub async fn api_get_meeting_transcripts<R: Runtime>(
                     audio_end_time: t.audio_end_time,
                     duration: t.duration,
                     source: t.source,
+                    translation: t.translation,
+                    translation_target_language: t.translation_target_language,
                 })
                 .collect::<Vec<_>>();
 

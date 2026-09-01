@@ -8,6 +8,7 @@ import { transcriptService } from '@/services/transcriptService';
 import { recordingService } from '@/services/recordingService';
 import { indexedDBService, StoredAnnotation } from '@/services/indexedDBService';
 import { AnnotationSaveGate } from '@/lib/annotation-save-gate';
+import { mergeTranslationUpdate, TranslationUpdate } from '@/lib/translation';
 
 interface TranscriptContextType {
   transcripts: Transcript[];
@@ -198,6 +199,7 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
   // Main transcript buffering logic with sequence_id ordering
   useEffect(() => {
     let unlistenFn: (() => void) | undefined;
+    let unlistenTranslationFn: (() => void) | undefined;
     let transcriptCounter = 0;
     let transcriptBuffer = new Map<number, Transcript>();
     let lastProcessedSequence = 0;
@@ -354,6 +356,23 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
           // Process buffer with minimal delay for immediate UI updates (serial workers = sequential order)
           processingTimer = setTimeout(processBufferedTranscripts, 10);
         });
+        unlistenTranslationFn = await transcriptService.onTranslationUpdate((update: TranslationUpdate) => {
+          setTranscripts(prev => mergeTranslationUpdate(prev, update));
+          const buffered = transcriptBuffer.get(update.sequence_id);
+          if (buffered) {
+            buffered.translation = update.translation ?? undefined;
+            buffered.translation_target_language = update.target_language;
+            buffered.translation_status = update.status;
+            buffered.translation_error = update.error;
+            transcriptBuffer.set(update.sequence_id, buffered);
+            if (processingTimer) clearTimeout(processingTimer);
+            processingTimer = setTimeout(processBufferedTranscripts, 10);
+          }
+          if (currentMeetingId) {
+            indexedDBService.updateTranscriptTranslation(currentMeetingId, update)
+              .catch(err => console.warn('IndexedDB translation update failed:', err));
+          }
+        });
         console.log('✅ MAIN transcript listener setup complete');
       } catch (error) {
         console.error('❌ Failed to setup MAIN transcript listener:', error);
@@ -374,6 +393,7 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
         unlistenFn();
         console.log('🧹 CLEANUP: MAIN transcript listener cleaned up');
       }
+      unlistenTranslationFn?.();
     };
   }, [currentMeetingId]); // Add currentMeetingId dependency
 
@@ -410,6 +430,9 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
             audio_start_time: segment.audio_start_time,
             audio_end_time: segment.audio_end_time,
             duration: segment.duration,
+            translation: segment.translation,
+            translation_target_language: segment.translation_target_language,
+            translation_status: segment.translation ? 'ready' : undefined,
           }));
 
           setTranscripts(formattedTranscripts);
@@ -493,7 +516,12 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
     };
 
     const fullTranscript = transcripts
-      .map(t => `${formatTime(t.audio_start_time)} ${t.text}`)
+      .map(t => {
+        const translation = t.translation && t.translation_target_language
+          ? `\n  Translation (${t.translation_target_language}): ${t.translation}`
+          : '';
+        return `${formatTime(t.audio_start_time)} ${t.text}${translation}`;
+      })
       .join('\n');
     navigator.clipboard.writeText(fullTranscript);
 

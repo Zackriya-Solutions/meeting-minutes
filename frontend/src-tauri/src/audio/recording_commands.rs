@@ -8,7 +8,7 @@ use log::{error, info, warn};
 use serde::{Deserialize, Serialize};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
-    Arc, Mutex,
+    Arc, LazyLock, Mutex,
 };
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 use tokio::task::JoinHandle;
@@ -45,6 +45,28 @@ static TRANSCRIPTION_TASK: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
 
 // Listener ID for proper cleanup - prevents microphone from staying active after recording stops
 static TRANSCRIPT_LISTENER_ID: Mutex<Option<tauri::EventId>> = Mutex::new(None);
+static TRANSLATION_LISTENER_ID: Mutex<Option<tauri::EventId>> = Mutex::new(None);
+static PENDING_TRANSLATION_UPDATES: LazyLock<Mutex<Vec<super::transcription::translation::TranslationUpdate>>> =
+    LazyLock::new(|| Mutex::new(Vec::new()));
+
+fn persist_translation_update(update: super::transcription::translation::TranslationUpdate) {
+    if let Ok(manager_guard) = RECORDING_MANAGER.lock() {
+        if let Some(manager) = manager_guard.as_ref() {
+            manager.update_transcript_translation(
+                update.sequence_id,
+                update.translation,
+                update.target_language,
+            );
+            return;
+        }
+    }
+
+    // stop_recording temporarily owns the manager while the transcription
+    // task drains. Keep updates until the manager is available for final save.
+    if let Ok(mut pending) = PENDING_TRANSLATION_UPDATES.lock() {
+        pending.push(update);
+    }
+}
 
 // ============================================================================
 // PUBLIC TYPES
@@ -282,6 +304,9 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
     // Store listener ID for cleanup during stop_recording to ensure microphone is released
     {
         use tauri::Listener;
+        if let Ok(mut pending) = PENDING_TRANSLATION_UPDATES.lock() {
+            pending.clear();
+        }
         let listener_id = app.listen("transcript-update", move |event: tauri::Event| {
             // Parse the transcript update from the event payload
             if let Ok(update) = serde_json::from_str::<TranscriptUpdate>(event.payload()) {
@@ -300,6 +325,8 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
                     } else {
                         update.source.clone()
                     },
+                    translation: None,
+                    translation_target_language: None,
                 };
 
                 // Save to recording manager
@@ -313,6 +340,13 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
         let mut global_listener = TRANSCRIPT_LISTENER_ID.lock().unwrap();
         *global_listener = Some(listener_id);
         info!("✅ Transcript-update event listener registered for history persistence");
+
+        let translation_listener_id = app.listen("translation-update", move |event: tauri::Event| {
+            if let Ok(update) = serde_json::from_str::<super::transcription::translation::TranslationUpdate>(event.payload()) {
+                persist_translation_update(update);
+            }
+        });
+        *TRANSLATION_LISTENER_ID.lock().unwrap() = Some(translation_listener_id);
     }
 
     // Emit success event
@@ -467,6 +501,9 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
     // Store listener ID for cleanup during stop_recording to ensure microphone is released
     {
         use tauri::Listener;
+        if let Ok(mut pending) = PENDING_TRANSLATION_UPDATES.lock() {
+            pending.clear();
+        }
         let listener_id = app.listen("transcript-update", move |event: tauri::Event| {
             // Parse the transcript update from the event payload
             if let Ok(update) = serde_json::from_str::<TranscriptUpdate>(event.payload()) {
@@ -485,6 +522,8 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
                     } else {
                         update.source.clone()
                     },
+                    translation: None,
+                    translation_target_language: None,
                 };
 
                 // Save to recording manager
@@ -498,6 +537,13 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
         let mut global_listener = TRANSCRIPT_LISTENER_ID.lock().unwrap();
         *global_listener = Some(listener_id);
         info!("✅ Transcript-update event listener registered for history persistence");
+
+        let translation_listener_id = app.listen("translation-update", move |event: tauri::Event| {
+            if let Ok(update) = serde_json::from_str::<super::transcription::translation::TranslationUpdate>(event.payload()) {
+                persist_translation_update(update);
+            }
+        });
+        *TRANSLATION_LISTENER_ID.lock().unwrap() = Some(translation_listener_id);
     }
 
     // Emit success event
@@ -647,6 +693,28 @@ pub async fn stop_recording<R: Runtime>(
         progress_task.abort();
     } else {
         info!("ℹ️ No transcription task found to wait for");
+    }
+
+    // Translation updates emitted while the manager was owned by this stop
+    // operation were buffered by the listener. Apply them before the folder
+    // saver writes its final transcripts.json.
+    if let Some(manager) = manager_for_cleanup.as_ref() {
+        if let Ok(mut pending) = PENDING_TRANSLATION_UPDATES.lock() {
+            for update in pending.drain(..) {
+                manager.update_transcript_translation(
+                    update.sequence_id,
+                    update.translation,
+                    update.target_language,
+                );
+            }
+        }
+    }
+    {
+        use tauri::Listener;
+        if let Some(listener_id) = TRANSLATION_LISTENER_ID.lock().unwrap().take() {
+            app.unlisten(listener_id);
+            info!("✅ Translation-update listener removed");
+        }
     }
 
     // Step 3: Now safely unload Whisper model after ALL chunks are processed

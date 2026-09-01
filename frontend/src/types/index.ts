@@ -17,6 +17,10 @@ export interface Transcript {
   audio_start_time?: number; // Seconds from recording start (e.g., 125.3)
   audio_end_time?: number;   // Seconds from recording start (e.g., 128.6)
   duration?: number;          // Segment duration in seconds (e.g., 3.3)
+  translation?: string;
+  translation_target_language?: string;
+  translation_status?: 'pending' | 'ready' | 'error' | 'disabled';
+  translation_error?: string;
 }
 
 export interface TranscriptUpdate {
@@ -111,6 +115,10 @@ export interface TranscriptSegmentData {
   text: string;
   source?: string;
   confidence?: number;
+  translation?: string;
+  translationTargetLanguage?: string;
+  translationStatus?: 'pending' | 'ready' | 'error' | 'disabled';
+  translationError?: string;
 }
 
 export type AnnotationType = 'bookmark' | 'note' | 'image';

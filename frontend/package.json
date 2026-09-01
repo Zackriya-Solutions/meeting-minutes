@@ -26,11 +26,12 @@
         "tauri:build:openblas": "tauri build -- --features openblas",
         "tauri:build:hipblas": "tauri build -- --features hipblas",
         "lint": "next lint",
-        "test": "pnpm run test:transcript-timeline && pnpm run test:transcript-recovery && pnpm run test:annotation-save-gate && pnpm run test:transcript-annotation-input",
+        "test": "pnpm run test:transcript-timeline && pnpm run test:transcript-recovery && pnpm run test:annotation-save-gate && pnpm run test:transcript-annotation-input && pnpm run test:translation-merge",
         "test:transcript-timeline": "node tests/lib/transcript-timeline.test.mjs",
         "test:transcript-recovery": "node tests/lib/transcript-recovery.test.mjs",
         "test:annotation-save-gate": "node tests/lib/annotation-save-gate.test.mjs",
-        "test:transcript-annotation-input": "node tests/lib/transcript-annotation-input.test.mjs"
+        "test:transcript-annotation-input": "node tests/lib/transcript-annotation-input.test.mjs",
+        "test:translation-merge": "node tests/lib/translation-merge.test.mjs"
     },
     "dependencies": {
         "@blocknote/core": "0.36.0",

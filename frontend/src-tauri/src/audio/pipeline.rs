@@ -617,6 +617,7 @@ impl AudioCapture {
             timestamp,
             chunk_id,
             device_type: self.device_type.clone(),
+            is_final: false,
         };
 
         // NOTE: Raw audio is NOT sent to recording saver to prevent echo
@@ -872,6 +873,7 @@ impl AudioPipeline {
                                     timestamp: chunk.timestamp,
                                     chunk_id: self.chunk_id_counter,
                                     device_type: DeviceType::Microphone,  // Mixed audio
+                                    is_final: false,
                                 };
                                 let _ = sender.send(recording_chunk);
                             }
@@ -955,6 +957,9 @@ impl AudioPipeline {
                 timestamp: segment.start_timestamp_ms / 1000.0,
                 chunk_id: self.chunk_id_counter,
                 device_type: device_type.clone(),
+                // A VAD segment is emitted after speech termination (or an
+                // explicit flush), so it is final for translation purposes.
+                is_final: true,
             };
 
             if let Err(e) = self.transcription_sender.send(transcription_chunk) {
@@ -1066,6 +1071,7 @@ impl AudioPipelineManager {
                 timestamp: 0.0,
                 chunk_id: u64::MAX, // Special ID to indicate flush
                 device_type: super::recording_state::DeviceType::Microphone,
+                is_final: false,
             };
 
             if let Err(e) = sender.send(flush_chunk) {
@@ -1086,6 +1092,7 @@ impl AudioPipelineManager {
                         timestamp: 0.0,
                         chunk_id: u64::MAX - (i as u64),
                         device_type: super::recording_state::DeviceType::Microphone,
+                        is_final: false,
                     };
                     let _ = sender.send(additional_flush);
                 }
@@ -1178,6 +1185,7 @@ mod tests {
                     timestamp: i as f64 * 0.6,
                     chunk_id: i as u64,
                     device_type: DeviceType::Microphone,
+                    is_final: false,
                 })
                 .unwrap();
             input_tx
@@ -1187,6 +1195,7 @@ mod tests {
                     timestamp: i as f64 * 0.6,
                     chunk_id: i as u64,
                     device_type: DeviceType::System,
+                    is_final: false,
                 })
                 .unwrap();
         }

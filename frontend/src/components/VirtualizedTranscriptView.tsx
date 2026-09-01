@@ -79,6 +79,10 @@ const TranscriptSegment = memo(function TranscriptSegment({
     text,
     source,
     confidence,
+    translation,
+    translationTargetLanguage,
+    translationStatus,
+    translationError,
     isStreaming,
     showConfidence,
     isActive,
@@ -89,6 +93,10 @@ const TranscriptSegment = memo(function TranscriptSegment({
     text: string;
     source?: string;
     confidence?: number;
+    translation?: string;
+    translationTargetLanguage?: string;
+    translationStatus?: 'pending' | 'ready' | 'error' | 'disabled';
+    translationError?: string;
     isStreaming: boolean;
     showConfidence: boolean;
     isActive: boolean;
@@ -138,6 +146,20 @@ const TranscriptSegment = memo(function TranscriptSegment({
                         </div>
                     ) : (
                         <p className="text-base text-gray-800 leading-relaxed">{displayText}</p>
+                    )}
+                    {translationStatus === 'pending' && (
+                        <p className="mt-1 text-sm italic text-gray-400">Translating...</p>
+                    )}
+                    {translationStatus === 'ready' && translation && (
+                        <p className="mt-1 border-l-2 border-gray-200 pl-2 text-sm leading-relaxed text-gray-500">
+                            <span className="mr-1 text-[10px] font-medium uppercase text-gray-400">{translationTargetLanguage}</span>
+                            {translation}
+                        </p>
+                    )}
+                    {translationStatus === 'error' && (
+                        <p className="mt-1 text-sm text-red-500" role="status">
+                            Translation unavailable{translationError ? `: ${translationError}` : ''}
+                        </p>
                     )}
                 </div>
             </div>
@@ -208,6 +230,10 @@ function TimelineRow({
             text={getDisplayText(item.segment)}
             source={item.segment.source}
             confidence={item.segment.confidence}
+            translation={item.segment.translation}
+            translationTargetLanguage={item.segment.translationTargetLanguage}
+            translationStatus={item.segment.translationStatus}
+            translationError={item.segment.translationError}
             isStreaming={streamingSegmentId === item.segment.id}
             showConfidence={showConfidence}
             isActive={activeTimestamp === item.segment.timestamp}
@@ -250,7 +276,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
     const virtualizer = useVirtualizer({
         count: timelineItems.length,
         getScrollElement: () => scrollRef.current,
-        estimateSize: () => 60, // Estimated height per segment
+        estimateSize: () => 90, // Original plus optional translation/status line
         overscan: 10, // Render extra items above/below viewport
         onChange: () => {
             startTransition(() => {

@@ -7,6 +7,7 @@ pub mod whisper_provider;
 pub mod parakeet_provider;
 pub mod engine;
 pub mod worker;
+pub mod translation;
 
 // Re-export commonly used types
 pub use provider::{TranscriptionError, TranscriptionProvider, TranscriptResult};

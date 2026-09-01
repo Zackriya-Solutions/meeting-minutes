@@ -51,8 +51,8 @@ impl TranscriptsRepository {
         for segment in transcripts {
             let transcript_id = format!("transcript-{}", Uuid::new_v4());
             let result = sqlx::query(
-                "INSERT INTO transcripts (id, meeting_id, transcript, timestamp, audio_start_time, audio_end_time, duration, source)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+                "INSERT INTO transcripts (id, meeting_id, transcript, timestamp, audio_start_time, audio_end_time, duration, source, translation, translation_target_language)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
             )
             .bind(&transcript_id)
             .bind(&meeting_id)
@@ -62,6 +62,8 @@ impl TranscriptsRepository {
             .bind(segment.audio_end_time)
             .bind(segment.duration)
             .bind(&segment.source)
+            .bind(&segment.translation)
+            .bind(&segment.translation_target_language)
             .execute(&mut *transaction)
             .await;
 
@@ -179,6 +181,7 @@ mod tests {
     use tempfile::tempdir;
 
     const SOURCE_MIGRATION_VERSION: i64 = 20260817000000;
+    const TRANSLATION_MIGRATION_VERSION: i64 = 20260831110000;
 
     async fn in_memory_pool() -> SqlitePool {
         SqlitePoolOptions::new()
@@ -197,22 +200,26 @@ mod tests {
             audio_end_time: Some(start + 1.0),
             duration: Some(1.0),
             source: source.map(|s| s.to_string()),
+            translation: None,
+            translation_target_language: None,
         }
     }
 
     #[tokio::test]
-    async fn migrated_db_persists_and_reloads_channel_sources() {
+    async fn migrated_db_persists_and_reloads_channel_sources_and_translations() {
         let pool = in_memory_pool().await;
         sqlx::migrate!("./migrations")
             .run(&pool)
             .await
             .expect("migrations must apply to a fresh database");
 
-        let segments = vec![
+        let mut segments = vec![
             segment("seg-mic", "fala do microfone", 0.0, Some("Você")),
             segment("seg-sys", "fala do sistema", 1.0, Some("Outros")),
             segment("seg-legacy", "segmento antigo", 2.0, None),
         ];
+        segments[0].translation = Some("tradução da fala".to_string());
+        segments[0].translation_target_language = Some("pt-BR".to_string());
         let meeting_id =
             TranscriptsRepository::save_transcript(&pool, "Reunião de teste", &segments, None, &[], std::path::Path::new("/tmp"))
                 .await
@@ -225,6 +232,9 @@ mod tests {
         .fetch_all(&pool)
         .await
         .expect("reload transcripts");
+
+        assert_eq!(rows[0].translation.as_deref(), Some("tradução da fala"));
+        assert_eq!(rows[0].translation_target_language.as_deref(), Some("pt-BR"));
 
         let sources: Vec<Option<String>> = rows.into_iter().map(|t| t.source).collect();
         assert_eq!(
@@ -282,6 +292,18 @@ mod tests {
             .execute(&pool)
             .await
             .expect("source migration must apply to a populated legacy database");
+
+        // The current row model includes the later nullable translation fields;
+        // apply that migration too so this test can verify loading the upgraded
+        // row while retaining the source migration's legacy NULL behavior.
+        let translation_migration = migrator
+            .iter()
+            .find(|m| m.version == TRANSLATION_MIGRATION_VERSION)
+            .expect("translation migration must exist");
+        sqlx::raw_sql(translation_migration.sql.as_ref())
+            .execute(&pool)
+            .await
+            .expect("translation migration must apply to a populated legacy database");
 
         let legacy: Transcript = sqlx::query_as("SELECT * FROM transcripts WHERE id = ?")
             .bind("transcript-legacy")

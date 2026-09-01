@@ -12,6 +12,7 @@ import { SummaryModelSettings } from '@/components/SummaryModelSettings';
 import { BetaSettings } from '@/components/BetaSettings';
 import { useConfig } from '@/contexts/ConfigContext';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import { TranslationSettings } from '@/components/TranslationSettings';
 
 // Tabs configuration (constant)
 const TABS = [
@@ -111,6 +112,7 @@ export default function SettingsPage() {
 
             <TabsContent value="general">
               <PreferenceSettings />
+              <TranslationSettings />
             </TabsContent>
             <TabsContent value="recording">
               <RecordingSettings />

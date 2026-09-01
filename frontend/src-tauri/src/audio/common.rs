@@ -64,6 +64,8 @@ pub(crate) fn create_transcript_segments(transcripts: &[(String, f64, f64)]) -> 
                 audio_end_time: Some(end_seconds),
                 duration: Some(duration),
                 source: None,
+                translation: None,
+                translation_target_language: None,
             }
         })
         .collect()

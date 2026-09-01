@@ -451,6 +451,16 @@ impl RecordingManager {
         self.recording_saver.add_transcript_segment(segment);
     }
 
+    pub fn update_transcript_translation(
+        &self,
+        sequence_id: u64,
+        translation: Option<String>,
+        target_language: String,
+    ) {
+        self.recording_saver
+            .update_transcript_translation(sequence_id, translation, target_language);
+    }
+
     /// Add a transcript chunk to be saved later (legacy method)
     pub fn add_transcript_chunk(&self, text: String) {
         self.recording_saver.add_transcript_chunk(text);

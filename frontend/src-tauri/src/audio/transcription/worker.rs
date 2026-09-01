@@ -64,6 +64,15 @@ pub fn start_transcription_task<R: Runtime>(
             }
         };
 
+        let translation_session = match super::translation::start_active_session(&app).await {
+            Ok(session) => Some(session),
+            Err(error) => {
+                error!("Failed to initialize translation session: {}", error);
+                let _ = app.emit("translation-error", error.to_string());
+                None
+            }
+        };
+
         // Create parallel workers for faster processing while preserving ALL chunks
         const NUM_WORKERS: usize = 1; // Serial processing ensures transcripts emit in chronological order
         let (work_sender, work_receiver) = tokio::sync::mpsc::unbounded_channel::<AudioChunk>();
@@ -89,6 +98,7 @@ pub fn start_transcription_task<R: Runtime>(
             let chunks_completed_clone = chunks_completed.clone();
             let input_finished_clone = input_finished.clone();
             let chunks_queued_clone = chunks_queued.clone();
+            let translation_session_clone = translation_session.clone();
 
             let worker_handle = tokio::spawn(async move {
                 info!("👷 Worker {} started", worker_id);
@@ -120,6 +130,7 @@ pub fn start_transcription_task<R: Runtime>(
 
                     match chunk {
                         Some(chunk) => {
+                            let is_final = chunk.is_final;
                             // PERFORMANCE OPTIMIZATION: Reduce logging in hot path
                             // Only log every 10th chunk per worker to reduce I/O overhead
                             let should_log_this_chunk = chunk.chunk_id % 10 == 0;
@@ -230,6 +241,35 @@ pub fn start_transcription_task<R: Runtime>(
                                                 "Worker {}: Failed to emit transcript update: {}",
                                                 worker_id, e
                                             );
+                                        }
+                                        if is_final {
+                                            if let Some(session) = &translation_session_clone {
+                                                if session.is_enabled() {
+                                                    let target_language = session.target_language().await;
+                                                    let pending = super::translation::TranslationUpdate {
+                                                        sequence_id,
+                                                        translation: None,
+                                                        target_language: target_language.clone(),
+                                                        status: "pending".to_string(),
+                                                        error: None,
+                                                    };
+                                                    let _ = app_clone.emit("translation-update", pending);
+                                                    let route = session.enqueue(super::translation::TranslationJob {
+                                                        sequence_id,
+                                                        text: update.text.clone(),
+                                                        target_language,
+                                                    });
+                                                    if route == super::translation::TranslationRoute::Full {
+                                                        let _ = app_clone.emit("translation-update", super::translation::TranslationUpdate {
+                                                            sequence_id,
+                                                            translation: None,
+                                                            target_language: session.target_language().await,
+                                                            status: "error".to_string(),
+                                                            error: Some("Translation queue is full; segment was not translated".to_string()),
+                                                        });
+                                                    }
+                                                }
+                                            }
                                         }
                                         // PERFORMANCE: Removed verbose logging of every emission
                                     } else if !transcript.trim().is_empty() && should_log_this_chunk
@@ -403,6 +443,10 @@ pub fn start_transcription_task<R: Runtime>(
                 break;
             }
         }
+
+        // Translation is intentionally drained only after transcription has
+        // finished, so provider latency can never delay transcript output.
+        super::translation::finish_active_session().await;
 
         info!("✅ Parallel transcription task completed - all workers finished, ready for model unload");
     })

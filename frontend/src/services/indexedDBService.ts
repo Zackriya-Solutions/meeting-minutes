@@ -26,6 +26,10 @@ export interface StoredTranscript {
   audio_start_time?: number;  // Recording-relative start time in seconds
   audio_end_time?: number;    // Recording-relative end time in seconds
   duration?: number;          // Duration in seconds
+  translation?: string;
+  translation_target_language?: string;
+  translation_status?: 'pending' | 'ready' | 'error' | 'disabled';
+  translation_error?: string;
   [key: string]: any;         // Allow additional fields from TranscriptUpdate
 }
 
@@ -249,9 +253,12 @@ class IndexedDBService {
     try {
       if (!this.db) await this.init();
 
+      const sequenceId = transcript.sequenceId ?? transcript.sequence_id;
       const storedTranscript: StoredTranscript = {
         ...transcript,
         meetingId,
+        sequenceId,
+        sequence_id: sequenceId,
         storedAt: Date.now()
       };
 
@@ -259,9 +266,19 @@ class IndexedDBService {
       const transcriptsStore = transaction.objectStore('transcripts');
       const meetingsStore = transaction.objectStore('meetings');
 
-      // Save transcript
+      const existing = await new Promise<StoredTranscript | null>((resolve, reject) => {
+        const request = transcriptsStore.index('meetingId').getAll(meetingId);
+        request.onsuccess = () => resolve(
+          (request.result as StoredTranscript[]).find(item => (item.sequenceId ?? item.sequence_id) === sequenceId) || null
+        );
+        request.onerror = () => reject(request.error);
+      });
+
+      // Save or update by sequence ID so translation events never create a duplicate row.
       await new Promise<void>((resolve, reject) => {
-        const request = transcriptsStore.add(storedTranscript);
+        const request = existing
+          ? transcriptsStore.put({ ...existing, ...storedTranscript, id: existing.id })
+          : transcriptsStore.add(storedTranscript);
         request.onsuccess = () => resolve();
         request.onerror = () => reject(request.error);
       });
@@ -275,7 +292,7 @@ class IndexedDBService {
 
       if (meeting) {
         meeting.lastUpdated = Date.now();
-        meeting.transcriptCount += 1;
+        if (!existing) meeting.transcriptCount += 1;
         await new Promise<void>((resolve, reject) => {
           const request = meetingsStore.put(meeting);
           request.onsuccess = () => resolve();
@@ -285,6 +302,45 @@ class IndexedDBService {
     } catch (error) {
       console.warn('Failed to save transcript to IndexedDB:', error);
       // Fail silently - don't interrupt recording
+    }
+  }
+
+  async updateTranscriptTranslation(meetingId: string, update: {
+    sequence_id: number;
+    translation: string | null;
+    target_language: string;
+    status: 'pending' | 'ready' | 'error' | 'disabled';
+    error?: string;
+  }): Promise<void> {
+    try {
+      if (!this.db) await this.init();
+      const transaction = this.db!.transaction(['transcripts'], 'readwrite');
+      const store = transaction.objectStore('transcripts');
+      await new Promise<void>((resolve, reject) => {
+        const request = store.index('meetingId').getAll(meetingId);
+        request.onsuccess = () => {
+          const existing = (request.result as StoredTranscript[]).find(
+            item => (item.sequenceId ?? item.sequence_id) === update.sequence_id
+          );
+          if (!existing) {
+            resolve();
+            return;
+          }
+          const putRequest = store.put({
+            ...existing,
+            translation: update.translation ?? undefined,
+            translation_target_language: update.target_language,
+            translation_status: update.status,
+            translation_error: update.error,
+            storedAt: Date.now(),
+          });
+          putRequest.onsuccess = () => resolve();
+          putRequest.onerror = () => reject(putRequest.error);
+        };
+        request.onerror = () => reject(request.error);
+      });
+    } catch (error) {
+      console.warn('Failed to update transcript translation in IndexedDB:', error);
     }
   }
 

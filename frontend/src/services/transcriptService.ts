@@ -8,6 +8,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, UnlistenFn } from '@tauri-apps/api/event';
 import { TranscriptUpdate, Transcript } from '@/types';
+import { TranslationUpdate } from '@/lib/translation';
 
 export interface TranscriptionStatus {
   chunks_in_queue: number;
@@ -55,6 +56,12 @@ export class TranscriptService {
    */
   async onTranscriptUpdate(callback: (update: TranscriptUpdate) => void): Promise<UnlistenFn> {
     return listen<TranscriptUpdate>('transcript-update', (event) => {
+      callback(event.payload);
+    });
+  }
+
+  async onTranslationUpdate(callback: (update: TranslationUpdate) => void): Promise<UnlistenFn> {
+    return listen<TranslationUpdate>('translation-update', (event) => {
       callback(event.payload);
     });
   }

@@ -41,6 +41,11 @@ export const LANGUAGE_OPTIONS: LanguageOption[] = [
   { code: 'uk', label: 'Ukrainian' },
 ];
 
+export const TRANSLATION_LANGUAGE_OPTIONS: LanguageOption[] = [
+  { code: 'pt-BR', label: 'Português (Brasil)' },
+  ...LANGUAGE_OPTIONS.filter(option => option.code !== 'pt'),
+];
+
 export const AUTO_VALUE = '__auto__' as const;
 
 const SUPPORTED_CODES: ReadonlySet<string> = new Set(LANGUAGE_OPTIONS.map((o) => o.code));

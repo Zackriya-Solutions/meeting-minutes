@@ -37,6 +37,8 @@ pub struct Transcript {
     pub audio_end_time: Option<f64>,
     pub duration: Option<f64>,
     pub source: Option<String>,
+    pub translation: Option<String>,
+    pub translation_target_language: Option<String>,
 }
 
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
@@ -105,6 +107,21 @@ pub struct Setting {
     #[sqlx(rename = "ollamaEndpoint")]
     #[serde(rename = "ollamaEndpoint")]
     pub ollama_endpoint: Option<String>,
+    #[sqlx(rename = "translationEnabled")]
+    #[serde(rename = "translationEnabled")]
+    pub translation_enabled: i64,
+    #[sqlx(rename = "translationEngine")]
+    #[serde(rename = "translationEngine")]
+    pub translation_engine: String,
+    #[sqlx(rename = "translationTargetLanguage")]
+    #[serde(rename = "translationTargetLanguage")]
+    pub translation_target_language: String,
+    #[sqlx(rename = "translationLibreTranslateEndpoint")]
+    #[serde(rename = "translationLibreTranslateEndpoint")]
+    pub translation_libretranslate_endpoint: String,
+    #[sqlx(rename = "translationOllamaModel")]
+    #[serde(rename = "translationOllamaModel")]
+    pub translation_ollama_model: String,
     /// Custom OpenAI-compatible endpoint configuration stored as JSON
     #[sqlx(rename = "customOpenAIConfig")]
     #[serde(rename = "customOpenAIConfig")]

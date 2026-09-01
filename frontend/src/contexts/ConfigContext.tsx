@@ -7,6 +7,7 @@ import { configService, ModelConfig } from '@/services/configService';
 import { invoke } from '@tauri-apps/api/core';
 import Analytics from '@/lib/analytics';
 import { BetaFeatures, BetaFeatureKey, loadBetaFeatures, saveBetaFeatures } from '@/types/betaFeatures';
+import { DEFAULT_LIBRETRANSLATE_ENDPOINT, DEFAULT_OLLAMA_ENDPOINT, DEFAULT_OLLAMA_MODEL, DEFAULT_TARGET_LANGUAGE, TranslationSettings } from '@/lib/translation';
 
 export interface OllamaModel {
   name: string;
@@ -91,6 +92,11 @@ interface ConfigContextType {
   isLoadingPreferences: boolean;
   loadPreferences: () => Promise<void>;
   updateNotificationSettings: (settings: NotificationSettings) => Promise<void>;
+  translationSettings: TranslationSettings;
+  setTranslationSettings: (settings: TranslationSettings) => Promise<void>;
+  translationEnabled: boolean;
+  setTranslationEnabled: (enabled: boolean) => Promise<void>;
+  setTranslationTarget: (targetLanguage: string) => Promise<void>;
 }
 
 const ConfigContext = createContext<ConfigContextType | undefined>(undefined);
@@ -111,6 +117,16 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     model: 'parakeet-tdt-0.6b-v3-int8',
     apiKey: null
   });
+
+  const [translationSettings, setTranslationSettingsState] = useState<TranslationSettings>({
+    enabled: false,
+    engine: 'ollama',
+    targetLanguage: DEFAULT_TARGET_LANGUAGE,
+    libretranslateEndpoint: DEFAULT_LIBRETRANSLATE_ENDPOINT,
+    ollamaEndpoint: DEFAULT_OLLAMA_ENDPOINT,
+    ollamaModel: DEFAULT_OLLAMA_MODEL,
+  });
+  const [translationEnabled, setTranslationEnabledState] = useState(false);
 
   // Provider-specific API keys (loaded once at startup)
   // Note: Gemini omitted for now - add when UI support is added
@@ -209,6 +225,14 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
       }
     };
     loadTranscriptConfig();
+  }, []);
+
+  useEffect(() => {
+    invoke<TranslationSettings>('api_get_translation_settings')
+      .then(settings => {
+        setTranslationSettingsState(settings);
+      })
+      .catch(error => console.error('[ConfigContext] Failed to load translation settings:', error));
   }, []);
 
   // Sync language preference to Rust on mount (fixes startup desync bug)
@@ -470,6 +494,28 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const setTranslationSettings = useCallback(async (settings: TranslationSettings) => {
+    await invoke('api_save_translation_settings', { settings });
+    setTranslationSettingsState(settings);
+  }, []);
+
+  const setTranslationEnabled = useCallback(async (enabled: boolean) => {
+    await invoke('set_translation_enabled', { enabled });
+    setTranslationEnabledState(enabled);
+  }, []);
+
+  const setTranslationTarget = useCallback(async (targetLanguage: string) => {
+    const next = { ...translationSettings, targetLanguage };
+    setTranslationSettingsState(next);
+    await invoke('api_save_translation_settings', { settings: next });
+    try {
+      await invoke('set_translation_target', { targetLanguage });
+    } catch (error) {
+      // The setting may be changed while no recording session is active.
+      console.debug('[ConfigContext] Translation target will apply on next recording:', error);
+    }
+  }, [translationSettings]);
+
   // Wrapper for setSelectedLanguage that persists to localStorage and syncs to Rust
   const handleSetSelectedLanguage = useCallback((lang: string) => {
     setSelectedLanguage(lang);
@@ -507,6 +553,11 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     isLoadingPreferences,
     loadPreferences,
     updateNotificationSettings,
+    translationSettings,
+    setTranslationSettings,
+    translationEnabled,
+    setTranslationEnabled,
+    setTranslationTarget,
   }), [
     modelConfig,
     isAutoSummary,
@@ -529,6 +580,11 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     isLoadingPreferences,
     loadPreferences,
     updateNotificationSettings,
+    translationSettings,
+    setTranslationSettings,
+    translationEnabled,
+    setTranslationEnabled,
+    setTranslationTarget,
   ]);
 
   return (
