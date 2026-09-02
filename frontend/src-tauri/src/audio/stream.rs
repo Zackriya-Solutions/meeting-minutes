@@ -456,15 +456,11 @@ impl AudioStreamManager {
         }
     }
 
-    /// Stop only the microphone stream, keeping system audio running.
-    /// Used for mic hot-swap when default input device changes.
-    pub fn stop_mic_stream(&mut self) -> Result<()> {
-        if let Some(mic_stream) = self.microphone_stream.take() {
-            info!("Stopping microphone stream for hot-swap");
-            mic_stream.stop()?;
-            info!("Microphone stream stopped for hot-swap");
-        }
-        Ok(())
+    /// Take the microphone stream OUT of the manager, keeping system audio
+    /// running. The caller stops/drops it OUTSIDE any lock — a cpal teardown
+    /// of a dead BT device can stall and must not block a held mutex.
+    pub fn take_mic_stream(&mut self) -> Option<AudioStream> {
+        self.microphone_stream.take()
     }
 
     /// Set a new microphone stream (used after hot-swap creation).

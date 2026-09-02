@@ -1239,8 +1239,8 @@ async fn perform_mic_hot_swap_task<R: Runtime>(
 
 /// Phased mic swap — lock is never held during async I/O.
 async fn do_mic_swap(device_name: &str, session: &Arc<super::RecordingState>) -> Result<(), String> {
-    // Phase 1: Lock briefly — verify identity, stop old stream
-    {
+    // Phase 1: Lock briefly — verify identity, take old stream OUT (no teardown under lock)
+    let old_mic = {
         let mut guard = RECORDING_MANAGER.lock().unwrap();
         let manager = guard.as_mut().ok_or_else(|| "Recording manager not available".to_string())?;
         if !manager.is_recording() {
@@ -1249,10 +1249,19 @@ async fn do_mic_swap(device_name: &str, session: &Arc<super::RecordingState>) ->
         if !Arc::ptr_eq(manager.get_state(), session) {
             return Err("Session changed before hot-swap — aborting".to_string());
         }
-        manager
-            .stop_mic_stream_for_swap()
-            .map_err(|e| format!("Failed to stop old mic stream: {}", e))?;
-    } // lock released
+        manager.take_mic_stream_for_swap()
+    }; // lock released
+
+    // Tear down the dead mic OUTSIDE the lock — cpal stop()/drop on a
+    // disconnected BT device can stall on the CoreAudio HAL lock; doing it
+    // under RECORDING_MANAGER would freeze stop_recording (deep-review #2).
+    // Non-fatal: the replacement stream is created next regardless, so a
+    // teardown error/stall on the already-dead device must not abort the swap.
+    if let Some(s) = old_mic {
+        if let Err(e) = s.stop() {
+            warn!("[HOT_SWAP] Failed to stop old mic stream (proceeding): {}", e);
+        }
+    }
 
     // Phase 2: Async I/O WITHOUT lock — may be slow, that's OK
     tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;

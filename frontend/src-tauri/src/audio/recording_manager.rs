@@ -578,10 +578,10 @@ impl RecordingManager {
         self.device_event_receiver.take()
     }
 
-    /// Stop only the mic stream for hot-swap (Phase 1).
-    /// System audio continues uninterrupted.
-    pub fn stop_mic_stream_for_swap(&mut self) -> Result<()> {
-        self.stream_manager.stop_mic_stream()
+    /// Take the mic stream OUT for hot-swap (Phase 1) so the caller can tear it
+    /// down without holding RECORDING_MANAGER. System audio continues uninterrupted.
+    pub fn take_mic_stream_for_swap(&mut self) -> Option<super::stream::AudioStream> {
+        self.stream_manager.take_mic_stream()
     }
 
     /// Set new mic stream and update device state after hot-swap (Phase 3).
