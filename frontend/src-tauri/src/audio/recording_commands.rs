@@ -53,6 +53,11 @@ fn recording_live() -> bool {
 /// Recording is live AND the global manager is still the session `s` belongs to.
 /// Used by the mic-disconnect fallback to refuse acting on a *later* recording
 /// after a Stop/Start swapped the manager out from under an in-flight task.
+///
+/// NOTE: this locks `RECORDING_MANAGER`. Never call it while already holding
+/// that lock (e.g. inside a `RECORDING_MANAGER.lock()` scope) — the std Mutex
+/// is non-reentrant and it would self-deadlock. All current callers invoke it
+/// outside any held lock; keep it that way.
 fn session_live(s: &Arc<super::RecordingState>) -> bool {
     recording_live()
         && RECORDING_MANAGER
@@ -66,6 +71,10 @@ fn session_live(s: &Arc<super::RecordingState>) -> bool {
 /// construction and clears it on Drop — including during unwind — so a panic
 /// anywhere in the ~320-line stop tail can't leave the flag stuck true and
 /// silently kill the mic-disconnect fallback for every later recording.
+///
+/// This unwind-clears behaviour depends on `panic = "unwind"` (the default).
+/// If a release profile ever sets `panic = "abort"`, Drop won't run on panic
+/// and the stuck-flag failure mode returns — add a start-time reset then.
 struct StoppingGuard;
 impl StoppingGuard {
     fn new() -> Self {
