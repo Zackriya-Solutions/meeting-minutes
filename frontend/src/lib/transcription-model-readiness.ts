@@ -24,6 +24,11 @@ const PROVIDER_COMMANDS: Record<string, ProviderCommands> = {
     hasAvailableModels: 'qwen_asr_has_available_models',
     getAvailableModels: 'qwen_asr_get_available_models',
   },
+  senseVoice: {
+    initialize: 'sense_voice_init',
+    hasAvailableModels: 'sense_voice_has_available_models',
+    getAvailableModels: 'sense_voice_get_available_models',
+  },
 };
 
 export function getProviderCommands(provider: string): ProviderCommands | null {

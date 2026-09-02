@@ -13,6 +13,7 @@ import {
   type ModelWithStatus,
 } from '@/lib/transcription-model-readiness';
 import { toast } from 'sonner';
+import type { ParakeetModelInfo } from '@/lib/parakeet';
 
 interface UseRecordingStartReturn {
   handleRecordingStart: () => Promise<void>;
@@ -43,7 +44,7 @@ export function useRecordingStart(
 
   const { clearTranscripts, setMeetingTitle } = useTranscripts();
   const { setIsMeetingActive } = useSidebar();
-  const { selectedDevices } = useConfig();
+  const { selectedDevices, transcriptModelConfig } = useConfig();
   const { setStatus } = useRecordingState();
 
   // CoreML performs an expensive one-time ANE specialization. Start it as soon as

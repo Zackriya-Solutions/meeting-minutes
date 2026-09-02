@@ -30,6 +30,14 @@ describe('transcription model readiness', () => {
     });
   });
 
+  test('uses SenseVoice commands when SenseVoice is the configured provider', () => {
+    expect(getProviderCommands('senseVoice')).toEqual({
+      initialize: 'sense_voice_init',
+      hasAvailableModels: 'sense_voice_has_available_models',
+      getAvailableModels: 'sense_voice_get_available_models',
+    });
+  });
+
   test('does not silently treat an unsupported provider as Parakeet', () => {
     expect(getProviderCommands('deepgram')).toBeNull();
   });
