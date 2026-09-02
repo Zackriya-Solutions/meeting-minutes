@@ -9,6 +9,7 @@ import {
   ParakeetAPI,
   getModelDisplayInfo,
   getModelDisplayName,
+  getModelDownloadProgress,
   formatFileSize
 } from '../lib/parakeet';
 
@@ -100,7 +101,7 @@ export function ParakeetModelManager({
             setModels(prevModels =>
               prevModels.map(model =>
                 model.name === modelName
-                  ? { ...model, status: { Downloading: progress } as ModelStatus }
+                  ? { ...model, status: { Downloading: { progress } } as ModelStatus }
                   : model
               )
             );
@@ -255,7 +256,7 @@ export function ParakeetModelManager({
       setModels(prevModels =>
         prevModels.map(model =>
           model.name === modelName
-            ? { ...model, status: { Downloading: 0 } as ModelStatus }
+            ? { ...model, status: { Downloading: { progress: 0 } } as ModelStatus }
             : model
         )
       );
@@ -444,10 +445,7 @@ function ModelCard({
   const isMissing = model.status === 'Missing';
   const isError = typeof model.status === 'object' && 'Error' in model.status;
   const isCorrupted = typeof model.status === 'object' && 'Corrupted' in model.status;
-  const downloadProgress =
-    typeof model.status === 'object' && 'Downloading' in model.status
-      ? model.status.Downloading
-      : null;
+  const downloadProgress = getModelDownloadProgress(model.status);
 
   return (
     <motion.div

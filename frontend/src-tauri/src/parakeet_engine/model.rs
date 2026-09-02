@@ -41,6 +41,8 @@ pub enum ParakeetError {
     OutputNotFound(String),
     #[error("Failed to get tensor shape for input: {0}")]
     TensorShape(String),
+    #[error("{0}")]
+    Other(String),
 }
 
 pub struct ParakeetModel {
