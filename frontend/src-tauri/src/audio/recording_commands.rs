@@ -50,6 +50,18 @@ fn recording_live() -> bool {
     IS_RECORDING.load(Ordering::SeqCst) && !IS_RECORDING_STOPPING.load(Ordering::SeqCst)
 }
 
+/// Recording is live AND the global manager is still the session `s` belongs to.
+/// Used by the mic-disconnect fallback to refuse acting on a *later* recording
+/// after a Stop/Start swapped the manager out from under an in-flight task.
+fn session_live(s: &Arc<super::RecordingState>) -> bool {
+    recording_live()
+        && RECORDING_MANAGER
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map_or(false, |m| Arc::ptr_eq(m.get_state(), s))
+}
+
 // Global recording manager and transcription task to keep them alive during recording
 static RECORDING_MANAGER: Mutex<Option<RecordingManager>> = Mutex::new(None);
 static TRANSCRIPTION_TASK: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
@@ -289,6 +301,7 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
     // Take the device event receiver BEFORE storing manager globally.
     // A background task will process device events (hot-swap) without frontend polling.
     let device_event_receiver = manager.take_device_event_receiver();
+    let session = manager.get_state().clone();
 
     // Store the manager globally to keep it alive
     {
@@ -298,7 +311,7 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
 
     // Spawn background device event processor (mic-disconnect fallback).
     if let Some(receiver) = device_event_receiver {
-        spawn_device_event_processor(app.clone(), receiver);
+        spawn_device_event_processor(app.clone(), receiver, session);
     }
 
     // Set recording flag and reset speech detection flag
@@ -462,6 +475,7 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
     // Take the device event receiver BEFORE storing manager globally.
     // A background task will process device events (hot-swap) without frontend polling.
     let device_event_receiver = manager.take_device_event_receiver();
+    let session = manager.get_state().clone();
 
     // Store the manager globally to keep it alive
     {
@@ -471,7 +485,7 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
 
     // Spawn background device event processor (mic-disconnect fallback).
     if let Some(receiver) = device_event_receiver {
-        spawn_device_event_processor(app.clone(), receiver);
+        spawn_device_event_processor(app.clone(), receiver, session);
     }
 
     // Set recording flag and reset speech detection flag
@@ -1155,10 +1169,14 @@ const MAX_MIC_FALLBACK_ATTEMPTS: u32 = 3;
 /// Perform mic hot-swap using phased locking — never holds RECORDING_MANAGER during I/O
 /// except the brief mic-stream stop in Phase 1.
 /// If CPAL hangs during stream creation, only this task blocks; stop flow stays unblocked.
-async fn perform_mic_hot_swap_task<R: Runtime>(new_device_name: String, app: AppHandle<R>) -> Result<(), String> {
+async fn perform_mic_hot_swap_task<R: Runtime>(
+    new_device_name: String,
+    session: &Arc<super::RecordingState>,
+    app: AppHandle<R>,
+) -> Result<(), String> {
     info!("[HOT_SWAP] Starting mic hot-swap to '{}'", new_device_name);
 
-    match do_mic_swap(&new_device_name).await {
+    match do_mic_swap(&new_device_name, session).await {
         Ok(()) => {
             info!("[HOT_SWAP] Mic switched to '{}'", new_device_name);
             let _ = app.emit("mic-device-switched", serde_json::json!({
@@ -1167,10 +1185,13 @@ async fn perform_mic_hot_swap_task<R: Runtime>(new_device_name: String, app: App
             Ok(())
         }
         Err(e) => {
+            if !session_live(session) {
+                return Err(e);
+            }
             warn!("[HOT_SWAP] First attempt failed: {} — retrying in 500ms", e);
             tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 
-            match do_mic_swap(&new_device_name).await {
+            match do_mic_swap(&new_device_name, session).await {
                 Ok(()) => {
                     info!("[HOT_SWAP] Mic switched to '{}' on retry", new_device_name);
                     let _ = app.emit("mic-device-switched", serde_json::json!({
@@ -1180,7 +1201,7 @@ async fn perform_mic_hot_swap_task<R: Runtime>(new_device_name: String, app: App
                 }
                 Err(e) => {
                     error!("[HOT_SWAP] Mic swap failed after retry: {}", e);
-                    if recording_live() {
+                    if session_live(session) {
                         let _ = app.emit("mic-swap-failed", serde_json::json!({
                             "error": e,
                             "device_name": new_device_name
@@ -1194,21 +1215,21 @@ async fn perform_mic_hot_swap_task<R: Runtime>(new_device_name: String, app: App
 }
 
 /// Phased mic swap — lock is never held during async I/O.
-async fn do_mic_swap(device_name: &str) -> Result<(), String> {
-    // Phase 1: Lock briefly — stop old stream, get state Arc
-    let state = {
+async fn do_mic_swap(device_name: &str, session: &Arc<super::RecordingState>) -> Result<(), String> {
+    // Phase 1: Lock briefly — verify identity, stop old stream
+    {
         let mut guard = RECORDING_MANAGER.lock().unwrap();
-        if let Some(manager) = guard.as_mut() {
-            if !manager.is_recording() {
-                return Err("Recording stopped — aborting mic hot-swap".to_string());
-            }
-            manager.stop_mic_stream_for_swap()
-                .map_err(|e| format!("Failed to stop old mic stream: {}", e))?;
-            manager.get_state().clone()
-        } else {
-            return Err("Recording manager not available".to_string());
+        let manager = guard.as_mut().ok_or_else(|| "Recording manager not available".to_string())?;
+        if !manager.is_recording() {
+            return Err("Recording stopped — aborting mic hot-swap".to_string());
         }
-    }; // lock released
+        if !Arc::ptr_eq(manager.get_state(), session) {
+            return Err("Session changed before hot-swap — aborting".to_string());
+        }
+        manager
+            .stop_mic_stream_for_swap()
+            .map_err(|e| format!("Failed to stop old mic stream: {}", e))?;
+    } // lock released
 
     // Phase 2: Async I/O WITHOUT lock — may be slow, that's OK
     tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
@@ -1228,7 +1249,7 @@ async fn do_mic_swap(device_name: &str) -> Result<(), String> {
     info!("[HOT_SWAP] Creating new mic stream for '{}' (lock released)", device_name);
     let new_stream = super::stream::AudioStream::create(
         device_arc.clone(),
-        state,
+        session.clone(),
         super::recording_state::DeviceType::Microphone,
         None,
     ).await.map_err(|e| format!("Failed to create mic stream: {}", e))?;
@@ -1237,14 +1258,20 @@ async fn do_mic_swap(device_name: &str) -> Result<(), String> {
     // must not block stop_recording (which needs RECORDING_MANAGER). (P1 #1)
     let system_name = default_output_device().ok().map(|d| d.name);
 
-    // Phase 3: Lock briefly — set new stream
+    // Phase 3: Lock briefly — install ONLY if still the same session
     {
         let mut guard = RECORDING_MANAGER.lock().unwrap();
-        if let Some(manager) = guard.as_mut() {
-            manager.set_mic_stream_after_swap(new_stream, device_arc, system_name);
-            info!("[HOT_SWAP] Mic hot-swap to '{}' completed", device_name);
-        } else {
-            return Err("Recording manager gone during hot-swap".to_string());
+        match guard.as_mut() {
+            Some(manager) if Arc::ptr_eq(manager.get_state(), session) => {
+                manager.set_mic_stream_after_swap(new_stream, device_arc, system_name);
+                info!("[HOT_SWAP] Mic hot-swap to '{}' completed", device_name);
+            }
+            Some(_) => {
+                return Err("Session changed during hot-swap — discarding stale mic stream".to_string());
+            }
+            None => {
+                return Err("Recording manager gone during hot-swap".to_string());
+            }
         }
     } // lock released
 
@@ -1269,6 +1296,7 @@ async fn do_mic_swap(device_name: &str) -> Result<(), String> {
 fn spawn_device_event_processor<R: Runtime>(
     app: AppHandle<R>,
     mut receiver: tokio::sync::mpsc::UnboundedReceiver<DeviceEvent>,
+    session: Arc<super::RecordingState>,
 ) {
     tokio::spawn(async move {
         info!("[DEVICE_EVENTS] Background event processor started");
@@ -1290,8 +1318,9 @@ fn spawn_device_event_processor<R: Runtime>(
                     if matches!(device_type, DeviceMonitorType::Microphone) {
                         let name = device_name.clone();
                         let app_clone = app.clone();
+                        let session = session.clone();
                         tokio::spawn(async move {
-                            trigger_mic_fallback_to_default(app_clone, name).await;
+                            trigger_mic_fallback_to_default(app_clone, name, session).await;
                         });
                     }
                 }
@@ -1326,6 +1355,7 @@ fn spawn_device_event_processor<R: Runtime>(
 async fn trigger_mic_fallback_to_default<R: Runtime>(
     app: AppHandle<R>,
     disconnected_name: String,
+    session: Arc<super::RecordingState>,
 ) {
     if !recording_live() {
         info!(
@@ -1475,15 +1505,10 @@ async fn trigger_mic_fallback_to_default<R: Runtime>(
     // wake is strictly better than no wake.
     #[cfg(target_os = "macos")]
     {
-        // Grab the current system device name without holding the recording
-        // manager lock across the blocking wake.
-        let sys_device_name = {
-            let guard = RECORDING_MANAGER.lock().unwrap();
-            guard
-                .as_ref()
-                .and_then(|m| m.get_state().get_system_device())
-                .map(|d| d.name.clone())
-        };
+        // Read from the captured session directly (no manager lock) — this
+        // stays correct even if the global manager has since been swapped by
+        // a Stop/Start of a different session.
+        let sys_device_name = session.get_system_device().map(|d| d.name.clone());
         if let Some(name) = sys_device_name {
             match super::recording_manager::wake_audio_connection_for_swap(&name).await {
                 Ok(()) => info!("[MIC_FALLBACK] Pre-swap audio wake completed"),
@@ -1507,7 +1532,7 @@ async fn trigger_mic_fallback_to_default<R: Runtime>(
     // perform_mic_hot_swap_task performs its own retry-once logic on failure
     // and emits the mic-device-switched / mic-swap-failed events, so we can
     // just delegate here. It does NOT touch MIC_SWAP_IN_PROGRESS internally.
-    match perform_mic_hot_swap_task(fallback_name.clone(), app.clone()).await {
+    match perform_mic_hot_swap_task(fallback_name.clone(), &session, app.clone()).await {
         Ok(()) => {
             info!(
                 "[MIC_FALLBACK] Fallback complete: now recording via '{}'",
@@ -1517,8 +1542,11 @@ async fn trigger_mic_fallback_to_default<R: Runtime>(
         }
         Err(e) => {
             error!("[MIC_FALLBACK] Fallback swap failed: {}", e);
+            if !session_live(&session) {
+                return;
+            }
             let n = MIC_FALLBACK_FAILED_ATTEMPTS.fetch_add(1, Ordering::SeqCst) + 1;
-            if n == MAX_MIC_FALLBACK_ATTEMPTS && recording_live() {
+            if n == MAX_MIC_FALLBACK_ATTEMPTS {
                 let _ = app.emit(
                     "mic-recovery-exhausted",
                     serde_json::json!({ "device_name": disconnected_name }),
