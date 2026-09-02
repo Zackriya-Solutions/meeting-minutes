@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
-import { ChevronDown, ChevronRight, File, Settings, ChevronLeftCircle, ChevronRightCircle, Calendar, Trash2, Mic, Plus, Pencil, NotebookPen, SearchIcon, X, Upload, Inbox, FolderKanban, AudioLines } from 'lucide-react';
+import { ChevronDown, ChevronRight, File, Settings, ChevronLeftCircle, ChevronRightCircle, Calendar, StickyNote, Home, Trash2, Mic, Square, Plus, Search, Pencil, NotebookPen, SearchIcon, X, Upload, Inbox, FolderKanban, AudioLines } from 'lucide-react';
 import { useRouter, usePathname } from 'next/navigation';
 import { useSidebar } from './SidebarProvider';
 import type { CurrentMeeting } from '@/components/Sidebar/SidebarProvider';
@@ -454,11 +454,26 @@ const Sidebar: React.FC = () => {
     const isProjectsPage = pathname === '/projects';
     const isMeetingPage = pathname?.includes('/meeting-details');
     const isSettingsPage = pathname === '/settings';
+    const isDictationPage = pathname === '/dictation-history';
 
     return (
       <TooltipProvider>
         <div className="flex flex-col items-center space-y-4 mt-4">
           <Logo isCollapsed={isCollapsed} />
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={() => router.push('/dictation-history')}
+                className={`p-2 rounded-lg transition-colors duration-150 ${isDictationPage ? 'bg-indigo-50' : 'hover:bg-gray-100'}`}
+              >
+                <AudioLines className="w-5 h-5 text-gray-600" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="right">
+              <p>Dictation history</p>
+            </TooltipContent>
+          </Tooltip>
 
           <Tooltip>
             <TooltipTrigger asChild>
@@ -822,6 +837,14 @@ const Sidebar: React.FC = () => {
                 <span>Import Audio</span>
               </button>
             )}
+
+            <button
+              onClick={() => router.push('/dictation-history')}
+              className="w-full flex items-center justify-center px-3 py-1.5 mt-1 text-sm font-medium text-gray-700 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-colors"
+            >
+              <AudioLines className="w-4 h-4 mr-2" />
+              <span>Dictation history</span>
+            </button>
 
             <button
               onClick={() => router.push('/settings')}

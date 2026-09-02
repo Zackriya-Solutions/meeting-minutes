@@ -19,6 +19,23 @@
                 "fullscreen": false,
                 "theme": "Light",
                 "decorations": true
+            },
+            {
+                "label": "dictation-overlay",
+                "title": "PulseTalq dictation",
+                "url": "/dictation-overlay",
+                "width": 72,
+                "height": 28,
+                "resizable": false,
+                "fullscreen": false,
+                "decorations": false,
+                "transparent": true,
+                "alwaysOnTop": true,
+                "visible": false,
+                "skipTaskbar": true,
+                "focus": false,
+                "focusable": false,
+                "shadow": false
             }
         ],
         "macOSPrivateApi": true,
@@ -40,7 +57,8 @@
                     "identifier": "main",
                     "description": "Main window capability with file system and media access",
                     "windows": [
-                        "main"
+                        "main",
+                        "dictation-overlay"
                     ],
                     "permissions": [
                         "fs:default",

@@ -83,7 +83,7 @@ chrono = { version = "0.4.31", features = ["serde"] }
 
 # Log
 log = "0.4"
-env_logger = "0.11"
+tauri-plugin-log = { version = "2.6.0", features = ["colored"] }
 tracing = "0.1.40"
 which = "6.0.1"
 
@@ -154,6 +154,7 @@ tauri-plugin-store = "2.4.0"
 tauri-plugin-notification = "2.3.1"
 tauri-plugin-updater = "2.3.0"
 tauri-plugin-process = "2.3.0"
+tauri-plugin-global-shortcut = "2.3.2"
 
 # Desktop-only single instance guard
 [target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
@@ -164,7 +165,6 @@ tauri-plugin-single-instance = "=2.3.7"
 tauri = { version = "2.6.2", features = ["protocol-asset", "macos-private-api", "tray-icon"] }
 once_cell = "1.17.1"
 objc = "0.2.7"
-tauri-plugin-log = { version = "2.6.0", features = ["colored"] }
 anyhow = "1.0"
 time = { version = "0.3", features = ["formatting"] }
 reqwest = { version = "0.11", features = ["multipart", "json"] }
@@ -186,6 +186,22 @@ whisper-rs = { version = "0.13.2", features = ["raw-api", "metal", "coreml"] }
 [target.'cfg(target_os = "windows")'.dependencies]
 whisper-rs = { version = "0.13.2", features = ["raw-api"] }
 futures-channel = "0.3.31"
+windows-sys = { version = "0.61.2", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_Security",
+    "Win32_System_DataExchange",
+    "Win32_System_Memory",
+    "Win32_System_Ole",
+    "Win32_System_Threading",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_WindowsAndMessaging",
+] }
+windows = { version = "0.61.3", features = [
+    "Win32_Foundation",
+    "Win32_System_Com",
+    "Win32_UI_Accessibility",
+] }
 
 # Linux-specific dependencies
 # Default: CPU-only build (no BLAS)

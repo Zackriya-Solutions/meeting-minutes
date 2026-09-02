@@ -1,0 +1,39 @@
+//! System-wide short-form dictation.
+//!
+//! The module owns the dictation lifecycle. Platform, transcription, cleanup,
+//! delivery, persistence, and UI integrations attach as adapters around this
+//! interface so meeting recording remains independent.
+
+mod activation;
+mod activation_bus;
+mod cleanup;
+pub mod commands;
+mod coordinator;
+mod delivery;
+mod history;
+mod overlay;
+mod session;
+mod short_audio;
+#[cfg(target_os = "windows")]
+mod windows_delivery;
+
+pub use activation::{
+    ActivationEvent, DictationShortcutStatus, DictationShortcutStatusState, HoldShortcut, KeyCode,
+    ShortcutTracker,
+};
+pub use activation_bus::ActivationBus;
+pub use cleanup::{cleanup_transcript, CleanupFallbackReason, CleanupResult};
+pub use coordinator::start_coordinator;
+pub use delivery::{deliver_text, ClipboardPort, DeliveryError, DeliveryReceipt, PastePort};
+pub use overlay::{
+    initialize_overlay, prepare_for_activation as prepare_overlay_for_activation,
+    set_enabled as set_overlay_enabled, set_expanded as set_overlay_expanded,
+    show_if_enabled as show_overlay_if_enabled, DictationOverlayState,
+};
+pub use session::{
+    DictationFailure, DictationFailureCode, DictationPhase, DictationSession,
+    DictationTransitionError,
+};
+pub use short_audio::{ShortAudioCapture, ShortAudioError};
+#[cfg(target_os = "windows")]
+pub use windows_delivery::{WindowsClipboard, WindowsPaste, WindowsTarget};

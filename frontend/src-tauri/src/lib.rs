@@ -41,6 +41,8 @@ pub mod audio;
 pub mod config;
 pub mod console_utils;
 pub mod database;
+mod diagnostics;
+pub mod dictation;
 pub mod notifications;
 pub mod ollama;
 pub mod onboarding;
@@ -388,9 +390,53 @@ pub fn get_language_preference_internal() -> Option<String> {
 }
 
 pub fn run() {
-    log::set_max_level(log::LevelFilter::Info);
+    let mut builder = tauri::Builder::default().plugin(
+        tauri_plugin_log::Builder::new()
+            .clear_targets()
+            .targets([
+                tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
+                tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir {
+                    file_name: Some("PulseTalq".to_string()),
+                })
+                .filter(diagnostics::should_persist),
+            ])
+            .level(log::LevelFilter::Info)
+            .max_file_size(1_000_000)
+            .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepSome(4))
+            .timezone_strategy(tauri_plugin_log::TimezoneStrategy::UseLocal)
+            .build(),
+    );
 
-    let mut builder = tauri::Builder::default();
+    #[cfg(any(target_os = "macos", windows, target_os = "linux"))]
+    let activation_bus = dictation::ActivationBus::new();
+    #[cfg(any(target_os = "macos", windows, target_os = "linux"))]
+    let shortcut_status = dictation::DictationShortcutStatusState::new();
+
+    #[cfg(any(target_os = "macos", windows, target_os = "linux"))]
+    {
+        let shortcut_bus = activation_bus.clone();
+        builder = builder.plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(move |_app, _shortcut, event| {
+                    use tauri_plugin_global_shortcut::ShortcutState;
+
+                    let event = match event.state() {
+                        ShortcutState::Pressed => dictation::ActivationEvent::Started,
+                        ShortcutState::Released => dictation::ActivationEvent::Stopped,
+                    };
+                    log::info!(
+                        target: "pulsetalk::dictation",
+                        "dictation_activation_received state={:?}",
+                        event
+                    );
+                    shortcut_bus.publish(event);
+                })
+                .build(),
+        );
+        builder = builder.manage(activation_bus);
+        builder = builder.manage(shortcut_status);
+        builder = builder.manage(dictation::DictationOverlayState::new());
+    }
 
     #[cfg(any(target_os = "macos", windows, target_os = "linux"))]
     {
@@ -418,7 +464,66 @@ pub fn run() {
         .manage(audio::init_system_audio_state())
         .manage(summary::summary_engine::ModelManagerState(Arc::new(tokio::sync::Mutex::new(None))))
         .setup(|_app| {
-            log::info!("Application setup complete");
+            log::info!(target: "pulsetalk::lifecycle", "Application setup complete");
+
+            #[cfg(any(target_os = "macos", windows, target_os = "linux"))]
+            {
+                use tauri_plugin_global_shortcut::{
+                    Code, GlobalShortcutExt, Modifiers, Shortcut,
+                };
+
+                let shortcut_candidates = [
+                    (
+                        "Ctrl+Shift+Space",
+                        Modifiers::CONTROL | Modifiers::SHIFT,
+                        Code::Space,
+                    ),
+                    (
+                        "Ctrl+Alt+D",
+                        Modifiers::CONTROL | Modifiers::ALT,
+                        Code::KeyD,
+                    ),
+                    (
+                        "Ctrl+Shift+F10",
+                        Modifiers::CONTROL | Modifiers::SHIFT,
+                        Code::F10,
+                    ),
+                ];
+                let mut registered = false;
+                for (label, modifiers, code) in shortcut_candidates {
+                    let shortcut = Shortcut::new(Some(modifiers), code);
+                    match _app.global_shortcut().register(shortcut) {
+                        Ok(()) => {
+                            _app
+                                .state::<dictation::DictationShortcutStatusState>()
+                                .registered(label);
+                            log::info!(
+                                target: "pulsetalk::dictation",
+                                "dictation_shortcut_registered shortcut={}",
+                                label
+                            );
+                            registered = true;
+                            break;
+                        }
+                        Err(error) => log::warn!(
+                            target: "pulsetalk::dictation",
+                            "dictation_shortcut_registration_failed code=shortcut_unavailable shortcut={} error={}",
+                            label,
+                            error
+                        ),
+                    }
+                }
+                if !registered {
+                    _app
+                        .state::<dictation::DictationShortcutStatusState>()
+                        .unavailable();
+                    log::error!(
+                        target: "pulsetalk::dictation",
+                        "dictation_activation_disabled code=shortcut_unavailable candidate_count={}",
+                        shortcut_candidates.len()
+                    );
+                }
+            }
 
             // Initialize system tray
             if let Err(e) = tray::create_tray(_app.handle()) {
@@ -499,6 +604,9 @@ pub fn run() {
             })
             .expect("Failed to initialize database");
 
+            dictation::start_coordinator(_app.handle().clone());
+            dictation::initialize_overlay(_app.handle());
+
             // Initialize bundled templates directory for dynamic template discovery
             log::info!("Initializing bundled templates directory...");
             if let Ok(resource_path) = _app.handle().path().resource_dir() {
@@ -530,6 +638,12 @@ pub fn run() {
             get_transcription_status,
             read_audio_file,
             save_transcript,
+            dictation::commands::dictation_list_history,
+            dictation::commands::dictation_copy_history,
+            dictation::commands::dictation_get_shortcut_status,
+            dictation::commands::dictation_get_overlay_enabled,
+            dictation::commands::dictation_set_overlay_enabled,
+            dictation::commands::dictation_set_overlay_expanded,
             analytics::commands::init_analytics,
             analytics::commands::disable_analytics,
             analytics::commands::track_event,
@@ -724,6 +838,7 @@ pub fn run() {
             // Database and Models path commands
             database::commands::get_database_directory,
             database::commands::open_database_folder,
+            diagnostics::open_diagnostics_folder,
             whisper_engine::commands::open_models_folder,
             // Onboarding commands
             onboarding::get_onboarding_status,
