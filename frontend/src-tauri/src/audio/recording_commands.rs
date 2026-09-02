@@ -62,6 +62,33 @@ fn session_live(s: &Arc<super::RecordingState>) -> bool {
             .map_or(false, |m| Arc::ptr_eq(m.get_state(), s))
 }
 
+/// RAII guard for the stop-tail flag. Sets `IS_RECORDING_STOPPING` true on
+/// construction and clears it on Drop — including during unwind — so a panic
+/// anywhere in the ~320-line stop tail can't leave the flag stuck true and
+/// silently kill the mic-disconnect fallback for every later recording.
+struct StoppingGuard;
+impl StoppingGuard {
+    fn new() -> Self {
+        IS_RECORDING_STOPPING.store(true, Ordering::SeqCst);
+        StoppingGuard
+    }
+}
+impl Drop for StoppingGuard {
+    fn drop(&mut self) {
+        IS_RECORDING_STOPPING.store(false, Ordering::SeqCst);
+    }
+}
+
+/// Shared start-path finalize. Both start commands MUST call this so a new
+/// start path can't silently ship with a per-session flag left unreset (e.g.
+/// the mic-recovery budget already exhausted).
+fn finalize_recording_start() {
+    info!("🔍 Setting IS_RECORDING to true and resetting SPEECH_DETECTED_EMITTED");
+    IS_RECORDING.store(true, Ordering::SeqCst);
+    MIC_FALLBACK_FAILED_ATTEMPTS.store(0, Ordering::SeqCst); // fresh mic-recovery budget per session
+    reset_speech_detected_flag(); // reset speech-detected emit latch for the new session
+}
+
 // Global recording manager and transcription task to keep them alive during recording
 static RECORDING_MANAGER: Mutex<Option<RecordingManager>> = Mutex::new(None);
 static TRANSCRIPTION_TASK: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
@@ -314,12 +341,10 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
         spawn_device_event_processor(app.clone(), receiver, session);
     }
 
-    // Set recording flag and reset speech detection flag
-    info!("🔍 Setting IS_RECORDING to true and resetting SPEECH_DETECTED_EMITTED");
-    IS_RECORDING.store(true, Ordering::SeqCst);
-    MIC_FALLBACK_FAILED_ATTEMPTS.store(0, Ordering::SeqCst); // fresh mic-recovery budget per session
+    // Flip recording live + reset per-session flags (speech-detected latch,
+    // mic-recovery budget). Shared with the other start path — see helper.
+    finalize_recording_start();
     drop(engine_lifecycle_guard);
-    reset_speech_detected_flag(); // Reset for new recording session
 
     // Start optimized parallel transcription task and store handle
     let task_handle = transcription::start_transcription_task(app.clone(), transcription_receiver);
@@ -488,12 +513,10 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
         spawn_device_event_processor(app.clone(), receiver, session);
     }
 
-    // Set recording flag and reset speech detection flag
-    info!("🔍 Setting IS_RECORDING to true and resetting SPEECH_DETECTED_EMITTED");
-    IS_RECORDING.store(true, Ordering::SeqCst);
-    MIC_FALLBACK_FAILED_ATTEMPTS.store(0, Ordering::SeqCst); // fresh mic-recovery budget per session
+    // Flip recording live + reset per-session flags (speech-detected latch,
+    // mic-recovery budget). Shared with the other start path — see helper.
+    finalize_recording_start();
     drop(engine_lifecycle_guard);
-    reset_speech_detected_flag(); // Reset for new recording session
 
     // Start optimized parallel transcription task and store handle
     let task_handle = transcription::start_transcription_task(app.clone(), transcription_receiver);
@@ -587,8 +610,9 @@ pub async fn stop_recording<R: Runtime>(
     // Mark the stop tail as in progress so a mic-disconnect fallback that was
     // queued before Stop short-circuits instead of retrying against the taken
     // manager. IS_RECORDING itself stays true until the tail completes — the
-    // frontend polls it to keep the stop UI up.
-    IS_RECORDING_STOPPING.store(true, Ordering::SeqCst);
+    // frontend polls it to keep the stop UI up. RAII so a panic in the tail
+    // below can't leave the flag stuck true.
+    let _stopping_guard = StoppingGuard::new();
 
     let stop_result = if let Some(mut manager) = manager_for_cleanup {
         // Use FORCE FLUSH to immediately process all accumulated audio - eliminates 30s delay!
@@ -610,8 +634,7 @@ pub async fn stop_recording<R: Runtime>(
         }
         Err(e) => {
             error!("❌ Failed to stop audio streams: {}", e);
-            IS_RECORDING_STOPPING.store(false, Ordering::SeqCst);
-            return Err(format!("Failed to stop audio streams: {}", e));
+            return Err(format!("Failed to stop audio streams: {}", e)); // _stopping_guard clears on return
         }
     }
 
@@ -930,7 +953,7 @@ pub async fn stop_recording<R: Runtime>(
     // Set recording flag to false
     info!("🔍 Setting IS_RECORDING to false");
     IS_RECORDING.store(false, Ordering::SeqCst);
-    IS_RECORDING_STOPPING.store(false, Ordering::SeqCst);
+    // IS_RECORDING_STOPPING is cleared by _stopping_guard on scope exit.
 
     // Step 4.5: Prepare metadata for frontend (NO database save)
     // NOTE: We do NOT save to database here. The frontend will save after all transcripts are displayed.
@@ -1357,7 +1380,7 @@ async fn trigger_mic_fallback_to_default<R: Runtime>(
     disconnected_name: String,
     session: Arc<super::RecordingState>,
 ) {
-    if !recording_live() {
+    if !session_live(&session) {
         info!(
             "[MIC_FALLBACK] Not recording — skipping fallback for '{}'",
             disconnected_name
@@ -1404,6 +1427,14 @@ async fn trigger_mic_fallback_to_default<R: Runtime>(
     // default when an explicitly-selected BT device disconnects.
     tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
 
+    // A Stop-A/Start-B during the sleep swapped our session out. Bail silently —
+    // emitting or spending the recovery budget here would fire against B with
+    // A's device. Covers the default_input_device() error branch below.
+    if !session_live(&session) {
+        info!("[MIC_FALLBACK] Session no longer live after wait — aborting fallback for '{}'", disconnected_name);
+        return;
+    }
+
     // Query the current system default input. If it still reports the
     // disconnected device, back off once more and re-query — this handles
     // the edge case where the OS hasn't propagated the change yet.
@@ -1435,6 +1466,10 @@ async fn trigger_mic_fallback_to_default<R: Runtime>(
             disconnected_name
         );
         tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
+        if !session_live(&session) {
+            info!("[MIC_FALLBACK] Session no longer live after retry wait — aborting fallback for '{}'", disconnected_name);
+            return;
+        }
         match default_input_device() {
             Ok(dev) if dev.name != disconnected_name => dev.name,
             Ok(dev) => {
@@ -1524,7 +1559,7 @@ async fn trigger_mic_fallback_to_default<R: Runtime>(
 
     // Stop may have started during the sleeps above — bail before touching
     // the (possibly already taken) manager.
-    if !recording_live() {
+    if !session_live(&session) {
         info!("[MIC_FALLBACK] Recording stopping — aborting fallback for '{}'", disconnected_name);
         return;
     }
