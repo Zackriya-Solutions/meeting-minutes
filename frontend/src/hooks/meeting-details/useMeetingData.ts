@@ -20,7 +20,7 @@ export function useMeetingData({ meeting, summaryData, onMeetingUpdated }: UseMe
   const [isTitleDirty, setIsTitleDirty] = useState(false);
   const [aiSummary, setAiSummary] = useState<Summary | null>(summaryData);
   const [isSaving, setIsSaving] = useState(false);
-  const [, setIsSummaryDirty] = useState(false);
+  const [isSummaryDirty, setIsSummaryDirty] = useState(false);
   const [, setError] = useState<string>('');
 
   // Ref for BlockNoteSummaryView
@@ -43,6 +43,7 @@ export function useMeetingData({ meeting, summaryData, onMeetingUpdated }: UseMe
 
   const handleSummaryChange = useCallback((newSummary: Summary) => {
     setAiSummary(newSummary);
+    setIsSummaryDirty(true);
   }, []);
 
   const handleSaveMeetingTitle = useCallback(async () => {
@@ -106,6 +107,7 @@ export function useMeetingData({ meeting, summaryData, onMeetingUpdated }: UseMe
       });
 
       console.log('✅ Save meeting summary success');
+      setIsSummaryDirty(false);
     } catch (error) {
       console.error('❌ Failed to save meeting summary:', error);
       if (error instanceof Error) {
@@ -113,6 +115,7 @@ export function useMeetingData({ meeting, summaryData, onMeetingUpdated }: UseMe
       } else {
         setError('Failed to save meeting summary: Unknown error');
       }
+      throw error;
     }
   }, [meeting.id, meetingTitle]);
 
@@ -121,7 +124,8 @@ export function useMeetingData({ meeting, summaryData, onMeetingUpdated }: UseMe
     try {
       // Save meeting title only if changed
       if (isTitleDirty) {
-        await handleSaveMeetingTitle();
+        const titleSaved = await handleSaveMeetingTitle();
+        if (!titleSaved) throw new Error('Meeting title could not be saved');
       }
 
       // Save BlockNote editor changes if dirty
@@ -158,6 +162,7 @@ export function useMeetingData({ meeting, summaryData, onMeetingUpdated }: UseMe
     meetingTitle,
     isEditingTitle,
     isTitleDirty,
+    isSummaryDirty,
     aiSummary,
     isSaving,
     blockNoteSummaryRef,

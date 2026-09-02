@@ -29,6 +29,14 @@ export default function Home() {
   const [barHeights, setBarHeights] = useState(['58%', '76%', '58%']);
   const [showRecoveryDialog, setShowRecoveryDialog] = useState(false);
   const [captureMode, setCaptureMode] = useState<CaptureMode>('record-meeting');
+  useEffect(() => {
+    const selectMeetingMode = () => setCaptureMode('record-meeting');
+    if (new URLSearchParams(window.location.search).get('mode') === 'record-meeting') {
+      setCaptureMode('record-meeting');
+    }
+    window.addEventListener('pulse-talq:new-capture', selectMeetingMode);
+    return () => window.removeEventListener('pulse-talq:new-capture', selectMeetingMode);
+  }, []);
 
   // Use contexts for state management
   const { meetingTitle } = useTranscripts();

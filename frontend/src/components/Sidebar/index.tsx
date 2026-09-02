@@ -13,7 +13,6 @@ import Analytics from '@/lib/analytics';
 import { invoke } from '@tauri-apps/api/core';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { toast } from 'sonner';
-import { useRecordingState } from '@/contexts/RecordingStateContext';
 import { useImportDialog } from '@/contexts/ImportDialogContext';
 import { useConfig } from '@/contexts/ConfigContext';
 
@@ -57,7 +56,6 @@ const Sidebar: React.FC = () => {
   } = useSidebar();
 
   // Get recording state from RecordingStateContext (single source of truth)
-  const { isRecording } = useRecordingState();
   const { openImportDialog } = useImportDialog();
   const { betaFeatures } = useConfig();
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set(['meetings']));
@@ -75,6 +73,11 @@ const Sidebar: React.FC = () => {
     model: 'parakeet-tdt-0.6b-v3-int8',
   });
   const [settingsSaveSuccess, setSettingsSaveSuccess] = useState<boolean | null>(null);
+
+  const openNewCapture = useCallback(() => {
+    window.dispatchEvent(new Event('pulse-talq:new-capture'));
+    router.push('/?mode=record-meeting');
+  }, [router]);
 
   // State for edit modal
   const [editModalState, setEditModalState] = useState<{ isOpen: boolean; meetingId: string | null; currentTitle: string }>({
@@ -486,7 +489,7 @@ const Sidebar: React.FC = () => {
               </button>
             </TooltipTrigger>
             <TooltipContent side="right">
-              <p>Inbox</p>
+              <p>Inbox · Preview</p>
             </TooltipContent>
           </Tooltip>
 
@@ -502,7 +505,7 @@ const Sidebar: React.FC = () => {
               </button>
             </TooltipTrigger>
             <TooltipContent side="right">
-              <p>Projects</p>
+              <p>Projects · Preview</p>
             </TooltipContent>
           </Tooltip>
 
@@ -739,10 +742,10 @@ const Sidebar: React.FC = () => {
             {!isCollapsed && (
               <div className="space-y-1">
                 {[
-                  { href: '/', label: 'Live capture', icon: AudioLines, active: pathname === '/' },
-                  { href: '/inbox', label: 'Inbox', icon: Inbox, active: pathname === '/inbox' },
-                  { href: '/projects', label: 'Projects', icon: FolderKanban, active: pathname === '/projects' },
-                ].map(({ href, label, icon: Icon, active }) => (
+                  { href: '/', label: 'Live capture', icon: AudioLines, active: pathname === '/', preview: false },
+                  { href: '/inbox', label: 'Inbox', icon: Inbox, active: pathname === '/inbox', preview: true },
+                  { href: '/projects', label: 'Projects', icon: FolderKanban, active: pathname === '/projects', preview: true },
+                ].map(({ href, label, icon: Icon, active, preview }) => (
                   <button
                     key={href}
                     type="button"
@@ -753,6 +756,7 @@ const Sidebar: React.FC = () => {
                     {active && <span aria-hidden="true" className="absolute left-0 inset-y-2 w-0.5 bg-[var(--pt-accent)]" />}
                     <Icon className="w-4 h-4" aria-hidden="true" />
                     <span>{label}</span>
+                    {preview && <span className="ml-auto text-[9px] font-semibold uppercase tracking-wider text-[var(--pt-text-inverse-muted)]">Preview</span>}
                   </button>
                 ))}
               </div>
@@ -802,7 +806,7 @@ const Sidebar: React.FC = () => {
           <div className="flex-shrink-0 p-3 border-t border-white/10">
             <button
               type="button"
-              onClick={() => router.push('/')}
+              onClick={openNewCapture}
               className="w-full min-h-11 flex items-center justify-center px-3 py-2 text-sm font-medium text-[var(--pt-text)] bg-[var(--pt-accent)] hover:bg-[var(--pt-accent-hover)] rounded-[3px] transition-all active:scale-[.98] pt-focus-ring"
             >
               <Mic className="w-4 h-4 mr-2" aria-hidden="true" />

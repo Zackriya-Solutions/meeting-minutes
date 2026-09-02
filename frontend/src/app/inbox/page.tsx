@@ -24,7 +24,7 @@ export default function InboxPage() {
             Inbox assignment is not connected to storage yet. For now, use the meeting list in the sidebar to open saved recordings.
           </p>
           <Link
-            href="/"
+            href="/?mode=record-meeting"
             className="mt-6 inline-flex min-h-10 w-fit items-center justify-center gap-2 rounded-[3px] border border-transparent bg-[var(--pt-accent)] px-4 text-sm font-medium text-[var(--pt-text)] transition-colors hover:bg-[var(--pt-accent-hover)] active:bg-[var(--pt-accent-active)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--pt-accent)]"
           >
             <Mic className="h-4 w-4" aria-hidden="true" />

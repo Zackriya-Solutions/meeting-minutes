@@ -37,7 +37,7 @@ export function CaptureModeSwitcher({
 }: CaptureModeSwitcherProps) {
   return (
     <div
-      role="tablist"
+      role="radiogroup"
       aria-label="Capture mode"
       className="grid w-full grid-cols-1 gap-2 sm:grid-cols-2"
     >
@@ -50,10 +50,8 @@ export function CaptureModeSwitcher({
           <button
             key={mode.value}
             type="button"
-            role="tab"
-            id={`capture-mode-${mode.value}`}
-            aria-selected={isSelected}
-            aria-controls={`capture-panel-${mode.value}`}
+            role="radio"
+            aria-checked={isSelected}
             disabled={isDisabled}
             onClick={() => onChange(mode.value)}
             className={`group min-h-[64px] rounded-[3px] border px-3 py-3 text-left transition-[background-color,border-color,transform] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--pt-accent)] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 ${

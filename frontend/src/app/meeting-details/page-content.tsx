@@ -169,7 +169,7 @@ export default function PageContent({
     };
   }, [shouldAutoGenerate, meeting.id]); // Re-run if meeting changes
 
-  const hasUnsavedChanges = meetingData.isTitleDirty || (meetingData.blockNoteSummaryRef.current?.isDirty || false);
+  const hasUnsavedChanges = meetingData.isTitleDirty || meetingData.isSummaryDirty || (meetingData.blockNoteSummaryRef.current?.isDirty || false);
 
   return (
     <motion.div

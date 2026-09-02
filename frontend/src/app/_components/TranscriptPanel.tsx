@@ -139,8 +139,6 @@ export function TranscriptPanel({
       {captureMode === 'type-anywhere' ? (
         <section
           id="capture-panel-type-anywhere"
-          role="tabpanel"
-          aria-labelledby="capture-mode-type-anywhere"
           className="mx-auto w-full max-w-[1180px] px-5 py-8 md:px-8"
         >
           <div className="grid gap-4 lg:grid-cols-[minmax(0,1.5fr)_minmax(280px,.7fr)]">
@@ -185,12 +183,12 @@ export function TranscriptPanel({
               </div>
               <ul className="mt-5 space-y-4 text-sm">
                 <li className="flex gap-3">
-                  <Check aria-hidden="true" className="mt-0.5 shrink-0 text-[var(--pt-success)]" size={16} />
-                  <span><span className="block font-medium">Local transcription</span><span className="mt-0.5 block text-xs text-[var(--pt-text-tertiary)]">Speech processing is available on device.</span></span>
+                  <Check aria-hidden="true" className={`mt-0.5 shrink-0 ${transcriptModelConfig?.model ? 'text-[var(--pt-success)]' : 'text-[var(--pt-warning)]'}`} size={16} />
+                  <span><span className="block font-medium">Local transcription</span><span className="mt-0.5 block text-xs text-[var(--pt-text-tertiary)]">{transcriptModelConfig?.model ? 'A local transcription model is configured.' : 'Choose a transcription model before using this mode.'}</span></span>
                 </li>
                 <li className="flex gap-3">
-                  <LockKeyhole aria-hidden="true" className="mt-0.5 shrink-0 text-[var(--pt-success)]" size={16} />
-                  <span><span className="block font-medium">Private by default</span><span className="mt-0.5 block text-xs text-[var(--pt-text-tertiary)]">Audio does not need to leave your computer.</span></span>
+                  <LockKeyhole aria-hidden="true" className={`mt-0.5 shrink-0 ${hasMicrophone ? 'text-[var(--pt-success)]' : 'text-[var(--pt-warning)]'}`} size={16} />
+                  <span><span className="block font-medium">Microphone access</span><span className="mt-0.5 block text-xs text-[var(--pt-text-tertiary)]">{hasMicrophone ? 'Ready for local audio capture.' : 'Microphone permission is still required.'}</span></span>
                 </li>
                 <li className="flex gap-3">
                   <MonitorUp aria-hidden="true" className="mt-0.5 shrink-0 text-[var(--pt-warning)]" size={16} />
@@ -209,8 +207,6 @@ export function TranscriptPanel({
         </section>
       ) : <div
         id="capture-panel-record-meeting"
-        role="tabpanel"
-        aria-labelledby="capture-mode-record-meeting"
         className="pb-36 pt-6"
       >
         <div className="flex justify-center">
