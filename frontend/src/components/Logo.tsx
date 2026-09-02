@@ -12,20 +12,20 @@ const Logo = React.forwardRef<HTMLButtonElement, LogoProps>(({ isCollapsed }, re
     <Dialog aria-describedby={undefined}>
       {isCollapsed ? (
         <DialogTrigger asChild>
-          <button ref={ref} className="pulse-talq-mark pulse-talq-mark--compact" aria-label="About pulse talq">
+          <button ref={ref} className="pulse-talq-mark pulse-talq-mark--compact" aria-label="About PulseTalq">
             <span>p</span>
           </button>
         </DialogTrigger>
       ) : (
         <DialogTrigger asChild>
-          <button ref={ref} className="pulse-talq-mark" aria-label="About pulse talq">
+          <button ref={ref} className="pulse-talq-mark" aria-label="About PulseTalq">
             <span>pulse </span><strong>talq</strong>
           </button>
         </DialogTrigger>
       )}
       <DialogContent>
         <VisuallyHidden>
-          <DialogTitle>About pulse talq</DialogTitle>
+          <DialogTitle>About PulseTalq</DialogTitle>
         </VisuallyHidden>
         <About />
       </DialogContent>

@@ -31,9 +31,9 @@
 //! # Custom Templates
 //!
 //! Users can add custom templates to:
-//! - macOS: `~/Library/Application Support/pulse talq/templates/`
-//! - Windows: `%APPDATA%\pulse talq\templates\`
-//! - Linux: `~/.config/pulse talq/templates/`
+//! - macOS: `~/Library/Application Support/PulseTalq/templates/`
+//! - Windows: `%APPDATA%\PulseTalq\templates\`
+//! - Linux: `~/.config/PulseTalq/templates/`
 //!
 //! Custom templates must follow the JSON schema defined in `types::Template`.
 

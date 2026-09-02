@@ -24,7 +24,7 @@ export function WelcomeStep() {
 
   return (
     <OnboardingContainer
-      title="Welcome to pulse talq"
+      title="Welcome to PulseTalq"
       description="Capture your voice, keep it private, and turn every transcript into useful work."
       step={1}
       hideProgress={true}

@@ -32,7 +32,7 @@ When you start recording, the app should automatically show a notification. The 
 
 When working correctly, you should see:
 - A native macOS notification appear in the top-right corner
-- Title: "Meetily"
+- Title: "PulseTalq"
 - Body: "Recording has started" (or test message)
 - The notification should appear like system notifications (microphone detected, etc.)
 

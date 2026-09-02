@@ -5,7 +5,7 @@ Python/FastAPI, Docker, and standalone whisper-server backend.
 
 ## Current Supported Development Flow
 
-Meetily no longer uses these backend scripts for supported development or user
+PulseTalq no longer uses these backend scripts for supported development or user
 setup. The supported app is the Tauri desktop application under `frontend/`,
 with Rust backend code in `frontend/src-tauri`.
 
@@ -23,4 +23,4 @@ deployments, or contributor setup.
 
 The old Docker deployment, FastAPI server, standalone whisper-server startup,
 and unauthenticated/CORS behavior are unsupported and must not be treated as the
-current Meetily backend.
+current PulseTalq backend.

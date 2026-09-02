@@ -1,10 +1,10 @@
 # GPU Acceleration Guide
 
-Meetily supports GPU acceleration for transcription, which can significantly improve performance. This guide provides detailed information on how to set up and configure GPU acceleration for your system.
+PulseTalq supports GPU acceleration for transcription, which can significantly improve performance. This guide provides detailed information on how to set up and configure GPU acceleration for your system.
 
 ## Supported Backends
 
-Meetily uses the `whisper-rs` library, which supports several GPU acceleration backends:
+PulseTalq uses the `whisper-rs` library, which supports several GPU acceleration backends:
 
 *   **CUDA:** For NVIDIA GPUs.
 *   **Metal:** For Apple Silicon and modern Intel-based Macs.

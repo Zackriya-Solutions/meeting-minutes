@@ -39,7 +39,7 @@ $ErrorActionPreference = 'Stop'
 # Configuration
 $ScriptDir = $PSScriptRoot
 $WhisperProjectName = 'whisper-server'
-$AppProjectName = 'meetily-backend'
+$AppProjectName = 'pulsetalq-backend'
 
 # Platform detection for cross-platform compatibility
 $DetectedOS = [System.Environment]::OSVersion.Platform
@@ -389,7 +389,7 @@ function Build-Image {
                     Write-Info "Tagging as generic: $genericTag"
                     docker tag $fullTag $genericTag
                     
-                    # For meetily-backend, also tag as 'latest'
+                    # For pulsetalq-backend, also tag as 'latest'
                     if ($BuildType -eq 'app') {
                         $latestTag = if ($Registry) { 
                             "$Registry/$projectName`:latest" 

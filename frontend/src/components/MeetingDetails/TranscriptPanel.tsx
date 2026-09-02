@@ -28,6 +28,7 @@ interface TranscriptPanelProps {
   meetingId?: string;
   meetingFolderPath?: string | null;
   onRefetchTranscripts?: () => Promise<void>;
+  mode?: 'transcript' | 'context';
 }
 
 export function TranscriptPanel({
@@ -48,6 +49,7 @@ export function TranscriptPanel({
   meetingId,
   meetingFolderPath,
   onRefetchTranscripts,
+  mode = 'transcript',
 }: TranscriptPanelProps) {
   // Convert transcripts to segments if pagination is not used but we want virtualization
   const convertedSegments = useMemo(() => {
@@ -65,9 +67,22 @@ export function TranscriptPanel({
   }, [transcripts, usePagination, segments]);
 
   return (
-    <div className="hidden md:flex md:w-1/4 lg:w-1/3 min-w-0 border-r border-gray-200 bg-white flex-col relative shrink-0">
+    <section className="flex min-w-0 flex-1 flex-col bg-[var(--pt-bg)]" aria-label={mode === 'context' ? 'Meeting context' : 'Meeting transcript'}>
+      <div className="mx-auto flex min-h-0 w-full max-w-[1180px] flex-1 flex-col px-5 py-5 md:px-8 md:py-6">
       {/* Title area */}
-      <div className="p-4 border-b border-gray-200">
+      <div className="mb-4 flex flex-col gap-1 border-b border-[var(--pt-border)] pb-4">
+        <p className="pt-label text-[var(--pt-text-tertiary)]">{mode === 'context' ? 'Summary guidance' : 'Source record'}</p>
+        <h2 className="text-[21px] font-medium tracking-[-.025em]">
+          {mode === 'context' ? 'Context for this meeting' : 'Transcript'}
+        </h2>
+        <p className="text-sm text-[var(--pt-text-secondary)]">
+          {mode === 'context'
+            ? 'Add names, goals, terms, and background the summary should account for.'
+            : 'Review the exact source, then copy or retranscribe when needed.'}
+        </p>
+      </div>
+
+      {mode === 'transcript' && <div className="mb-4">
         <TranscriptButtonGroup
           transcriptCount={usePagination ? (totalCount ?? convertedSegments.length) : (transcripts?.length || 0)}
           onCopyTranscript={onCopyTranscript}
@@ -76,10 +91,10 @@ export function TranscriptPanel({
           meetingFolderPath={meetingFolderPath}
           onRefetchTranscripts={onRefetchTranscripts}
         />
-      </div>
+      </div>}
 
       {/* Transcript content - use virtualized view for better performance */}
-      <div className="flex-1 overflow-hidden pb-4">
+      {mode === 'transcript' && <div className="min-h-0 flex-1 overflow-hidden border border-[var(--pt-border)] bg-[var(--pt-surface)] pb-4 shadow-[0_1px_2px_rgba(11,11,12,.025)]">
         <VirtualizedTranscriptView
           segments={convertedSegments}
           isRecording={isRecording}
@@ -95,19 +110,32 @@ export function TranscriptPanel({
           loadedCount={loadedCount}
           onLoadMore={onLoadMore}
         />
-      </div>
+      </div>}
 
       {/* Custom prompt input at bottom of transcript section */}
-      {!isRecording && convertedSegments.length > 0 && (
-        <div className="p-1 border-t border-gray-200">
+      {mode === 'context' && !isRecording && convertedSegments.length > 0 && (
+        <div className="max-w-3xl border-l-2 border-[var(--pt-accent)] bg-[var(--pt-surface)] p-5 shadow-[0_8px_20px_rgba(11,11,12,.07)]">
+          <label htmlFor="meeting-summary-context" className="mb-2 block text-sm font-medium text-[var(--pt-text)]">
+            What should pulse talq know?
+          </label>
           <textarea
-            placeholder="Add context for AI summary. For example people involved, meeting overview, objective etc..."
-            className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 bg-white shadow-sm min-h-[80px] resize-y"
+            id="meeting-summary-context"
+            placeholder="Example: This is a product review with Sam and Priya. Focus on launch risks, decisions, and who owns each follow-up."
+            className="pt-input min-h-[180px] resize-y py-3 font-[var(--pt-font-reading)] text-base leading-relaxed"
             value={customPrompt}
             onChange={(e) => onPromptChange(e.target.value)}
           />
+          <p className="mt-3 text-xs text-[var(--pt-text-tertiary)]">
+            pulse talq uses this context the next time you generate or regenerate outcomes.
+          </p>
         </div>
       )}
-    </div>
+      {mode === 'context' && convertedSegments.length === 0 && (
+        <div className="border border-[var(--pt-border)] bg-[var(--pt-surface)] p-5 text-sm text-[var(--pt-text-secondary)]">
+          Record or import audio before adding summary context.
+        </div>
+      )}
+      </div>
+    </section>
   );
 }

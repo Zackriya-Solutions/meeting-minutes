@@ -3,8 +3,8 @@ from playwright.sync_api import sync_playwright
 
 
 ROOT = Path(__file__).resolve().parents[1]
-URL = "http://localhost:8000/pulsetalk-identity.html"
-SCREENSHOT = ROOT / "docs" / "pulsetalk-identity-preview.png"
+URL = "http://localhost:8000/pulsetalq-identity.html"
+SCREENSHOT = ROOT / "docs" / "pulsetalq-identity-preview.png"
 
 
 with sync_playwright() as playwright:

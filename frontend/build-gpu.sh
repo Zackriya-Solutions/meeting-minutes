@@ -1,5 +1,5 @@
 #!/bin/bash
-# GPU-accelerated build script for Meetily
+# GPU-accelerated build script for PulseTalq
 # Automatically detects and builds with optimal GPU features
 
 set -e
@@ -11,7 +11,7 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-echo -e "${BLUE}🚀 Meetily GPU-Accelerated Build Script${NC}"
+echo -e "${BLUE}🚀 PulseTalq GPU-Accelerated Build Script${NC}"
 echo ""
 
 # Export CUDA flags for Linux/NVIDIA
@@ -52,7 +52,7 @@ else
 fi
 
 echo ""
-echo -e "${BLUE}📦 Building Meetily...${NC}"
+echo -e "${BLUE}📦 Building PulseTalq...${NC}"
 echo ""
 
 # Check for pnpm or npm

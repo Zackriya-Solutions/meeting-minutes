@@ -7,7 +7,7 @@ set -e
 
 # Configuration
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-DEFAULT_DB_PATH="/opt/homebrew/Cellar/meetily-backend/0.0.4/backend/meeting_minutes.db"
+DEFAULT_DB_PATH="/opt/homebrew/Cellar/pulsetalq-backend/0.0.4/backend/meeting_minutes.db"
 DOCKER_DB_DIR="$SCRIPT_DIR/data"
 DOCKER_DB_PATH="$DOCKER_DB_DIR/meeting_minutes.db"
 
@@ -136,9 +136,9 @@ find_existing_databases() {
     
     # Check other common locations
     local common_paths=(
-        "/opt/homebrew/Cellar/meetily-backend/*/backend/meeting_minutes.db"
-        "$HOME/.meetily/meeting_minutes.db"
-        "$HOME/Documents/meetily/meeting_minutes.db"
+        "/opt/homebrew/Cellar/pulsetalq-backend/*/backend/meeting_minutes.db"
+        "$HOME/.pulsetalq/meeting_minutes.db"
+        "$HOME/Documents/pulsetalq/meeting_minutes.db"
         "$HOME/Desktop/meeting_minutes.db"
         "./meeting_minutes.db"
     )

@@ -1,4 +1,4 @@
-# pulse talq design system
+# PulseTalq design system
 
 > Private productivity at the speed of thought.
 
@@ -12,7 +12,7 @@
 **Interaction tier:** L2, fluid interaction  
 **Dependencies:** React 18, Framer Motion 11, CSS transitions, and native browser APIs already present in the project. Do not add GSAP, Lenis, WebGL, or a custom cursor.
 
-The app is a working instrument. Visual emphasis follows the user's task: capture, review, connect, continue. The lowercase “pulse talq” wordmark keeps “pulse” in Blackout and “talq” in Hot Signal. Hot Signal red appears only where speed or an active state matters. Layered surfaces represent accumulated project context, not decoration.
+The app is a working instrument. Visual emphasis follows the user's task: capture, review, connect, continue. The lowercase “PulseTalq” wordmark keeps “pulse” in Blackout and “talq” in Hot Signal. Hot Signal red appears only where speed or an active state matters. Layered surfaces represent accumulated project context, not decoration.
 
 ## 2. Color palette and roles
 

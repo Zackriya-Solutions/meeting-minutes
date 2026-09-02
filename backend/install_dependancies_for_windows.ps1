@@ -167,8 +167,8 @@ try {
     Write-Host "1. restart your terminal"
     Write-Host "2. Run the following commands:"
     Write-Host "cd Documents"
-    Write-Host "git clone https://github.com/zackriya-solutions/meeting-minutes.git"
-    Write-Host "cd meeting-minutes/backend"
+    Write-Host "git clone https://github.com/Qblaauw/PulseTalq.git"
+    Write-Host "cd PulseTalq/backend"
     Write-Host "./build_whisper.cmd"
     Write-Host ""
    

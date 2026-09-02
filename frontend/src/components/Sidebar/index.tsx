@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
-import { ChevronDown, ChevronRight, File, Settings, ChevronLeftCircle, ChevronRightCircle, Calendar, StickyNote, Home, Trash2, Mic, Square, Plus, Search, Pencil, NotebookPen, SearchIcon, X, Upload } from 'lucide-react';
+import { ChevronDown, ChevronRight, File, Settings, ChevronLeftCircle, ChevronRightCircle, Calendar, Trash2, Mic, Plus, Pencil, NotebookPen, SearchIcon, X, Upload, Inbox, FolderKanban, AudioLines } from 'lucide-react';
 import { useRouter, usePathname } from 'next/navigation';
 import { useSidebar } from './SidebarProvider';
 import type { CurrentMeeting } from '@/components/Sidebar/SidebarProvider';
@@ -48,7 +48,6 @@ const Sidebar: React.FC = () => {
     sidebarItems,
     isCollapsed,
     toggleCollapse,
-    handleRecordingToggle,
     searchTranscripts,
     searchResults,
     isSearching,
@@ -447,7 +446,9 @@ const Sidebar: React.FC = () => {
   const renderCollapsedIcons = () => {
     if (!isCollapsed) return null;
 
-    const isHomePage = pathname === '/';
+    const isLiveCapturePage = pathname === '/';
+    const isInboxPage = pathname === '/inbox';
+    const isProjectsPage = pathname === '/projects';
     const isMeetingPage = pathname?.includes('/meeting-details');
     const isSettingsPage = pathname === '/settings';
 
@@ -460,33 +461,48 @@ const Sidebar: React.FC = () => {
             <TooltipTrigger asChild>
               <button
                 onClick={() => router.push('/')}
-                className={`w-10 h-10 flex items-center justify-center rounded-[3px] transition-colors duration-150 pt-focus-ring ${isHomePage ? 'bg-white/10 border-l-2 border-[var(--pt-accent)]' : 'hover:bg-white/[0.07]'
+                aria-current={isLiveCapturePage ? 'page' : undefined}
+                aria-label="Live capture"
+                className={`w-10 h-10 flex items-center justify-center rounded-[3px] transition-colors duration-150 pt-focus-ring ${isLiveCapturePage ? 'bg-white/10 border-l-2 border-[var(--pt-accent)]' : 'hover:bg-white/[0.07]'
                   }`}
               >
-                <Home className="w-5 h-5 text-[var(--pt-text-inverse-muted)]" />
+                <AudioLines className="w-5 h-5 text-[var(--pt-text-inverse-muted)]" />
               </button>
             </TooltipTrigger>
             <TooltipContent side="right">
-              <p>Home</p>
+              <p>Live capture</p>
             </TooltipContent>
           </Tooltip>
 
           <Tooltip>
             <TooltipTrigger asChild>
               <button
-                onClick={handleRecordingToggle}
-                disabled={isRecording}
-                className={`w-10 h-10 flex items-center justify-center ${isRecording ? 'bg-[var(--pt-accent-soft)] cursor-not-allowed' : 'bg-[var(--pt-accent)] hover:bg-[var(--pt-accent-hover)]'} rounded-[3px] transition-all duration-150 active:scale-[.98] pt-focus-ring`}
+                onClick={() => router.push('/inbox')}
+                aria-current={isInboxPage ? 'page' : undefined}
+                aria-label="Inbox"
+                className={`w-10 h-10 flex items-center justify-center rounded-[3px] transition-colors duration-150 pt-focus-ring ${isInboxPage ? 'bg-white/10 border-l-2 border-[var(--pt-accent)]' : 'hover:bg-white/[0.07]'}`}
               >
-                {isRecording ? (
-                  <Square className="w-5 h-5 text-white" />
-                ) : (
-                  <Mic className="w-5 h-5 text-white" />
-                )}
+                <Inbox className="w-5 h-5 text-[var(--pt-text-inverse-muted)]" />
               </button>
             </TooltipTrigger>
             <TooltipContent side="right">
-              <p>{isRecording ? "Recording in progress..." : "Start Recording"}</p>
+              <p>Inbox</p>
+            </TooltipContent>
+          </Tooltip>
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={() => router.push('/projects')}
+                aria-current={isProjectsPage ? 'page' : undefined}
+                aria-label="Projects"
+                className={`w-10 h-10 flex items-center justify-center rounded-[3px] transition-colors duration-150 pt-focus-ring ${isProjectsPage ? 'bg-white/10 border-l-2 border-[var(--pt-accent)]' : 'hover:bg-white/[0.07]'}`}
+              >
+                <FolderKanban className="w-5 h-5 text-[var(--pt-text-inverse-muted)]" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="right">
+              <p>Projects</p>
             </TooltipContent>
           </Tooltip>
 
@@ -718,18 +734,30 @@ const Sidebar: React.FC = () => {
 
         {/* Main content - scrollable area */}
         <div className="flex-1 flex flex-col min-h-0">
-          {/* Fixed navigation items */}
-          <div className="flex-shrink-0">
+          {/* Primary navigation */}
+          <nav className="flex-shrink-0 px-3 pt-3" aria-label="Primary navigation">
             {!isCollapsed && (
-              <div
-                onClick={() => router.push('/')}
-                className="p-3 text-sm font-medium items-center hover:bg-white/[0.07] h-10 flex mx-3 mt-3 rounded-[3px] cursor-pointer text-[var(--pt-text-inverse-muted)] hover:text-[var(--pt-text-inverse)]"
-              >
-                <Home className="w-4 h-4 mr-2" />
-                <span>Home</span>
+              <div className="space-y-1">
+                {[
+                  { href: '/', label: 'Live capture', icon: AudioLines, active: pathname === '/' },
+                  { href: '/inbox', label: 'Inbox', icon: Inbox, active: pathname === '/inbox' },
+                  { href: '/projects', label: 'Projects', icon: FolderKanban, active: pathname === '/projects' },
+                ].map(({ href, label, icon: Icon, active }) => (
+                  <button
+                    key={href}
+                    type="button"
+                    onClick={() => router.push(href)}
+                    aria-current={active ? 'page' : undefined}
+                    className={`relative w-full min-h-11 flex items-center gap-3 px-3 rounded-[3px] text-sm font-medium transition-colors pt-focus-ring ${active ? 'bg-white/[0.09] text-[var(--pt-text-inverse)]' : 'text-[var(--pt-text-inverse-muted)] hover:bg-white/[0.07] hover:text-[var(--pt-text-inverse)]'}`}
+                  >
+                    {active && <span aria-hidden="true" className="absolute left-0 inset-y-2 w-0.5 bg-[var(--pt-accent)]" />}
+                    <Icon className="w-4 h-4" aria-hidden="true" />
+                    <span>{label}</span>
+                  </button>
+                ))}
               </div>
             )}
-          </div>
+          </nav>
 
           {/* Content area */}
           <div className="flex-1 flex flex-col min-h-0">
@@ -773,21 +801,12 @@ const Sidebar: React.FC = () => {
 
           <div className="flex-shrink-0 p-3 border-t border-white/10">
             <button
-              onClick={handleRecordingToggle}
-              disabled={isRecording}
-              className={`w-full min-h-10 flex items-center justify-center px-3 py-2 text-sm font-medium text-[var(--pt-text)] ${isRecording ? 'bg-[var(--pt-accent-soft)] cursor-not-allowed' : 'bg-[var(--pt-accent)] hover:bg-[var(--pt-accent-hover)]'} rounded-[3px] transition-all active:scale-[.98] pt-focus-ring`}
+              type="button"
+              onClick={() => router.push('/')}
+              className="w-full min-h-11 flex items-center justify-center px-3 py-2 text-sm font-medium text-[var(--pt-text)] bg-[var(--pt-accent)] hover:bg-[var(--pt-accent-hover)] rounded-[3px] transition-all active:scale-[.98] pt-focus-ring"
             >
-              {isRecording ? (
-                <>
-                  <Square className="w-4 h-4 mr-2" />
-                  <span>Recording in progress...</span>
-                </>
-              ) : (
-                <>
-                  <Mic className="w-4 h-4 mr-2" />
-                  <span>Start Recording</span>
-                </>
-              )}
+              <Mic className="w-4 h-4 mr-2" aria-hidden="true" />
+              <span>New capture</span>
             </button>
 
             {betaFeatures.importAndRetranscribe && (

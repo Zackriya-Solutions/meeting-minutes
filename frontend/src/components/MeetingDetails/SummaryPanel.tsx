@@ -1,7 +1,6 @@
 "use client";
 
 import { Summary, SummaryResponse, Transcript } from '@/types';
-import { EditableTitle } from '@/components/EditableTitle';
 import { BlockNoteSummaryView, BlockNoteSummaryViewRef } from '@/components/AISummary/BlockNoteSummaryView';
 import { EmptyStateSummary } from '@/components/EmptyStateSummary';
 import { ModelConfig } from '@/components/ModelSettingsModal';
@@ -253,20 +252,12 @@ export function SummaryPanel({
   );
 
   return (
-    <div className="flex-1 min-w-0 flex flex-col bg-white overflow-hidden">
+    <section className="flex min-w-0 flex-1 flex-col overflow-hidden bg-[var(--pt-bg)]" aria-label="Meeting outcomes">
       {/* Title area */}
-      <div className="p-4 border-b border-gray-200">
-        {/* <EditableTitle
-          title={meetingTitle}
-          isEditing={isEditingTitle}
-          onStartEditing={onStartEditTitle}
-          onFinishEditing={onFinishEditTitle}
-          onChange={onTitleChange}
-        /> */}
-
+      <div className="shrink-0 border-b border-[var(--pt-border)] bg-[var(--pt-surface)] px-5 py-3 md:px-8">
         {/* Button groups - only show when summary exists */}
         {aiSummary && !isSummaryLoading && (
-          <div className="flex items-center justify-center w-full pt-0 gap-2">
+          <div className="mx-auto flex w-full max-w-[1180px] flex-wrap items-center justify-between gap-2">
             {/* Left-aligned: Summary Generator Button Group */}
             <div className="flex-shrink-0">
               <SummaryGeneratorButtonGroup
@@ -308,9 +299,9 @@ export function SummaryPanel({
       </div>
 
       {isSummaryLoading ? (
-        <div className="flex flex-col h-full">
+        <div className="flex h-full flex-col">
           {/* Show button group during generation */}
-          <div className="flex items-center justify-center pt-8 pb-4">
+          <div className="flex items-center justify-center pb-4 pt-8">
             <SummaryGeneratorButtonGroup
               modelConfig={modelConfig}
               setModelConfig={setModelConfig}
@@ -330,13 +321,13 @@ export function SummaryPanel({
           {/* Loading spinner */}
           <div className="flex items-center justify-center flex-1">
             <div className="text-center">
-              <div className="inline-block animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500 mb-4"></div>
-              <p className="text-gray-600">Generating AI Summary...</p>
+              <div className="mb-4 inline-block h-12 w-12 animate-spin rounded-full border-2 border-[var(--pt-border)] border-t-[var(--pt-accent)]"></div>
+              <p className="text-[var(--pt-text-secondary)]">Finding decisions and next steps…</p>
             </div>
           </div>
         </div>
       ) : !aiSummary ? (
-        <div className="flex flex-col h-full">
+        <div className="flex h-full flex-col">
           {/* Centered Summary Generator Button Group when no summary */}
           <div className="flex items-center justify-center gap-2 pt-8 pb-4">
             <SummaryGeneratorButtonGroup
@@ -365,7 +356,7 @@ export function SummaryPanel({
           />
         </div>
       ) : transcripts?.length > 0 && (
-        <div className="flex-1 overflow-y-auto min-h-0">
+        <div className="min-h-0 flex-1 overflow-y-auto">
           {summaryResponse && (
             <div className="fixed bottom-0 left-0 right-0 bg-white shadow-lg p-4 max-h-1/3 overflow-y-auto">
               <h3 className="text-lg font-semibold mb-2">Meeting Summary</h3>
@@ -411,7 +402,7 @@ export function SummaryPanel({
               ) : null}
             </div>
           )}
-          <div className="p-6 w-full">
+          <div className="mx-auto w-full max-w-[980px] p-5 md:p-8">
             <BlockNoteSummaryView
               ref={summaryRef}
               summaryData={aiSummary}
@@ -441,6 +432,6 @@ export function SummaryPanel({
           )}
         </div>
       )}
-    </div>
+    </section>
   );
 }

@@ -21,12 +21,14 @@ import { TranscriptRecovery } from '@/components/TranscriptRecovery';
 import { indexedDBService } from '@/services/indexedDBService';
 import { toast } from 'sonner';
 import { useRouter } from 'next/navigation';
+import { CaptureMode } from '@/components/CaptureModeSwitcher';
 
 export default function Home() {
   // Local page state (not moved to contexts)
   const [isRecording, setIsRecordingState] = useState(false);
   const [barHeights, setBarHeights] = useState(['58%', '76%', '58%']);
   const [showRecoveryDialog, setShowRecoveryDialog] = useState(false);
+  const [captureMode, setCaptureMode] = useState<CaptureMode>('record-meeting');
 
   // Use contexts for state management
   const { meetingTitle } = useTranscripts();
@@ -217,10 +219,12 @@ export default function Home() {
           isProcessingStop={isProcessingStop}
           isStopping={isStopping}
           showModal={showModal}
+          captureMode={captureMode}
+          onCaptureModeChange={setCaptureMode}
         />
 
         {/* Recording controls - only show when permissions are granted or already recording and not showing status messages */}
-        {(hasMicrophone || isRecording) &&
+        {captureMode === 'record-meeting' && (hasMicrophone || isRecording) &&
           status !== RecordingStatus.PROCESSING_TRANSCRIPTS &&
           status !== RecordingStatus.SAVING && (
             <div className="fixed bottom-7 left-0 right-0 z-20 pointer-events-none">

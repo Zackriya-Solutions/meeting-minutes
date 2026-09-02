@@ -46,7 +46,7 @@ export function SetupOverviewStep() {
   return (
     <OnboardingContainer
       title="Setup Overview"
-      description="pulse talq needs transcription and summarization models before it can work locally."
+      description="PulseTalq needs transcription and summarization models before it can work locally."
       step={2}
       totalSteps={isMac ? 4 : 3}
     >
@@ -98,7 +98,7 @@ export function SetupOverviewStep() {
           </Button>
           <div className="text-center">
             <a
-              href="https://github.com/Zackriya-Solutions/meeting-minutes"
+              href="https://github.com/Qblaauw/PulseTalq"
               target="_blank"
               rel="noopener noreferrer"
               className="text-xs text-gray-600 hover:underline"

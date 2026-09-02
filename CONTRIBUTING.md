@@ -1,6 +1,6 @@
-# Contributing to PulseTalk
+# Contributing to PulseTalq
 
-Thank you for contributing to PulseTalk. This document covers the local development workflow. See [Keeping PulseTalk up to date](docs/UPSTREAM_SYNC.md) for the fork and upstream sync process.
+Thank you for contributing to PulseTalq. This document covers the local development workflow. See [Keeping PulseTalq up to date](docs/UPSTREAM_SYNC.md) for the fork and upstream sync process.
 
 ## Development Workflow
 
@@ -12,15 +12,15 @@ Thank you for contributing to PulseTalk. This document covers the local developm
 
 ### Getting Started
 
-1. Clone the PulseTalk repository:
+1. Clone the PulseTalq repository:
    ```bash
-   git clone https://github.com/Qblaauw/PulseTalk.git
+   git clone https://github.com/Qblaauw/PulseTalq.git
    ```
 2. Add the original Meetily repository as upstream if it is not already configured:
    ```bash
    git remote add upstream https://github.com/Zackriya-Solutions/meetily.git
    ```
-3. Create a new branch from the current PulseTalk `main` branch:
+3. Create a new branch from the current PulseTalq `main` branch:
    ```bash
    git switch main
    git pull --ff-only origin main
@@ -29,7 +29,7 @@ Thank you for contributing to PulseTalk. This document covers the local developm
 
 ### Development Process
 
-1. Always start your work from the current PulseTalk `main` branch
+1. Always start your work from the current PulseTalq `main` branch
 2. Create a new branch for each feature/fix
 3. Make your changes
 4. Write or update tests as needed
@@ -51,7 +51,7 @@ Before starting work on a new feature or bug fix:
 
 ### Pull Request Process
 
-1. Create a PR from your feature branch to PulseTalk `main`
+1. Create a PR from your feature branch to PulseTalq `main`
 2. Link the PR to the related issue using the issue number (e.g., "Fixes #123")
 3. Fill out the PR template completely
 4. Ensure CI checks pass
@@ -137,7 +137,7 @@ Types:
 
 1. PRs require at least one review
 2. Address all review comments
-3. Keep the PR up to date with PulseTalk `main`
+3. Keep the PR up to date with PulseTalq `main`
 4. Squash commits if requested
 
 ## Getting Help

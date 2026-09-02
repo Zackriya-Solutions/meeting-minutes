@@ -4,7 +4,7 @@ version = "0.4.0"
 description = "A Tauri App for meeting minutes"
 authors = ["Sujith S"]
 license = "MIT"
-repository = "https://github.com/Zackriya-Solutions/meeting-minutes"
+repository = "https://github.com/Qblaauw/PulseTalq"
 edition = "2021"
 rust-version = "1.77"
 

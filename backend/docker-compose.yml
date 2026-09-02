@@ -170,12 +170,12 @@ services:
       - download
 
   # Meeting Summarizer Python App (Windows/Linux)
-  meetily-backend:
+  pulsetalq-backend:
     build:
       context: .
       dockerfile: Dockerfile.app
-    image: meetily-backend:latest
-    container_name: meetily-backend
+    image: pulsetalq-backend:latest
+    container_name: pulsetalq-backend
     restart: unless-stopped
     
     # Port mapping
@@ -231,12 +231,12 @@ services:
       - default
 
   # Meeting Summarizer Python App (macOS)
-  meetily-backend-macos:
+  pulsetalq-backend-macos:
     build:
       context: .
       dockerfile: Dockerfile.app
-    image: meetily-backend:latest
-    container_name: meetily-backend
+    image: pulsetalq-backend:latest
+    container_name: pulsetalq-backend
     restart: unless-stopped
     
     # Port mapping
@@ -302,7 +302,7 @@ services:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
     depends_on:
       - whisper-server
-      - meetily-backend
+      - pulsetalq-backend
     profiles:
       - web
 

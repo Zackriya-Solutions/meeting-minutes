@@ -127,15 +127,15 @@ function Find-ExistingDatabases {
     
     # Check other common locations (Windows/cross-platform paths)
     $commonPaths = @(
-        "$env:USERPROFILE\.meetily\meeting_minutes.db",
-        "$env:USERPROFILE\Documents\meetily\meeting_minutes.db",
+        "$env:USERPROFILE\.pulsetalq\meeting_minutes.db",
+        "$env:USERPROFILE\Documents\pulsetalq\meeting_minutes.db",
         "$env:USERPROFILE\Desktop\meeting_minutes.db",
         ".\meeting_minutes.db"
     )
     
     # Add potential HomeBrew paths if on macOS/Linux
     if ($env:HOMEBREW_PREFIX) {
-        $commonPaths += "$env:HOMEBREW_PREFIX/Cellar/meetily-backend/*/backend/meeting_minutes.db"
+        $commonPaths += "$env:HOMEBREW_PREFIX/Cellar/pulsetalq-backend/*/backend/meeting_minutes.db"
     }
     
     foreach ($pattern in $commonPaths) {

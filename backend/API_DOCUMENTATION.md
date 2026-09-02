@@ -1,11 +1,11 @@
 # Legacy Backend API Archive
 
 This document previously described the Python/FastAPI API used by older
-Meetily backend releases.
+PulseTalq backend releases.
 
 ## Current Supported API Surface
 
-Meetily no longer supports the standalone FastAPI backend as the active
+PulseTalq no longer supports the standalone FastAPI backend as the active
 application API. The supported application is the Tauri desktop app, where the
 Next.js UI communicates with the Rust core through Tauri commands and events.
 

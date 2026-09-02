@@ -14,7 +14,7 @@ set -e
 # Configuration
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 WHISPER_PROJECT_NAME="whisper-server"
-APP_PROJECT_NAME="meetily-backend"
+APP_PROJECT_NAME="pulsetalq-backend"
 REGISTRY=${REGISTRY:-""}
 PUSH=${PUSH:-false}
 # Default to current platform for local builds, multi-platform for registry pushes

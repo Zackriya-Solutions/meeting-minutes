@@ -165,7 +165,7 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
         return;
       }
 
-      // First launch starts with a clean pulse talq database.
+      // First launch starts with a clean PulseTalq database.
       await invoke('initialize_fresh_database');
       setDatabaseExists(true);
     } catch (error) {

@@ -474,7 +474,7 @@ export function DownloadProgressStep() {
   return (
     <OnboardingContainer
       title="Getting things ready"
-      description="You can start using pulse talq after downloading the transcription engine."
+      description="You can start using PulseTalq after downloading the transcription engine."
       step={3}
       totalSteps={isMac ? 4 : 3}
     >

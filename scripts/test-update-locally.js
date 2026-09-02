@@ -22,7 +22,7 @@ const PORT = 8080;
 const LATEST_JSON_PATH = path.join(__dirname, '..', 'latest.json');
 
 console.log('=========================================');
-console.log('  Meetily Update Testing Server');
+console.log('  PulseTalq Update Testing Server');
 console.log('=========================================\n');
 
 // Check if latest.json exists
@@ -105,7 +105,7 @@ server.listen(PORT, () => {
 
   console.log('⚠️  IMPORTANT: Restore production endpoint after testing!');
   console.log('   Change back to:');
-  console.log('   "endpoints": ["https://github.com/Zackriya-Solutions/meeting-minutes/releases/latest/download/latest.json"]\n');
+  console.log('   "endpoints": ["https://github.com/Qblaauw/PulseTalq/releases/latest/download/latest.json"]\n');
 
   console.log('=========================================');
   console.log('Press Ctrl+C to stop the server');
