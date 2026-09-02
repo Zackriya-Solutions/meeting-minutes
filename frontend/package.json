@@ -25,7 +25,8 @@
         "tauri:build:coreml": "tauri build -- --features coreml",
         "tauri:build:openblas": "tauri build -- --features openblas",
         "tauri:build:hipblas": "tauri build -- --features hipblas",
-        "lint": "next lint"
+        "lint": "next lint",
+        "brand:assets": "python ../scripts/brand/generate-installer-assets.py"
     },
     "dependencies": {
         "@blocknote/core": "0.36.0",

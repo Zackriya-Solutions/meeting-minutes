@@ -89,6 +89,14 @@
             "dmg"
         ],
         "createUpdaterArtifacts": true,
+        "publisher": "PolyphronAI",
+        "homepage": "https://polyphronai.com",
+        "copyright": "Copyright (c) 2026 PolyphronAI (polyphronai.com). MIT License. Includes work (c) 2024 Zackriya Solutions.",
+        "license": "MIT",
+        "licenseFile": "../../LICENSE.md",
+        "category": "Productivity",
+        "shortDescription": "Private meeting capture, transcription and notes. Audio stays on this device.",
+        "longDescription": "PulseTalq records meetings and voice notes, transcribes them locally, and turns them into summaries and project context. Audio and transcripts stay on this device unless you choose to send them to an AI provider you configure.",
         "icon": [
             "icons/icon.png",
             "icons/app_icon.icns",
@@ -104,10 +112,45 @@
         "macOS": {
             "entitlements": "entitlements.plist",
             "signingIdentity": "-",
-            "hardenedRuntime": true
+            "hardenedRuntime": true,
+            "dmg": {
+                "background": "installer/dmg-background.png",
+                "windowSize": {
+                    "width": 660,
+                    "height": 400
+                },
+                "appPosition": {
+                    "x": 180,
+                    "y": 170
+                },
+                "applicationFolderPosition": {
+                    "x": 480,
+                    "y": 170
+                }
+            }
         },
         "windows": {
-            "signCommand": "powershell -ExecutionPolicy Bypass -File scripts/sign-windows.ps1 -FilePath %1"
+            "signCommand": "powershell -ExecutionPolicy Bypass -File scripts/sign-windows.ps1 -FilePath %1",
+            "nsis": {
+                "installMode": "currentUser",
+                "headerImage": "installer/nsis-header.bmp",
+                "sidebarImage": "installer/nsis-sidebar.bmp",
+                "installerIcon": "icons/icon.ico",
+                "uninstallerIcon": "icons/icon.ico",
+                "languages": [
+                    "English"
+                ],
+                "displayLanguageSelector": false
+            },
+            "wix": {
+                "bannerPath": "installer/wix-banner.bmp",
+                "dialogImagePath": "installer/wix-dialog.bmp"
+            }
+        },
+        "linux": {
+            "deb": {
+                "section": "utils"
+            }
         }
     },
     "plugins": {

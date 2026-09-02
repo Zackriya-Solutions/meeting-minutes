@@ -1,8 +1,8 @@
 [package]
 name = "pulse-talq"
 version = "0.4.0"
-description = "A Tauri App for meeting minutes"
-authors = ["Sujith S"]
+description = "PulseTalq: private, local-first meeting capture, transcription and notes"
+authors = ["PolyphronAI <quinton@polyphronai.com>"]
 license = "MIT"
 repository = "https://github.com/Qblaauw/PulseTalq"
 edition = "2021"
