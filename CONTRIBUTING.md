@@ -1,14 +1,18 @@
 # Contributing to PulseTalq
 
-Thank you for contributing to PulseTalq. This document covers the local development workflow. See [Keeping PulseTalq up to date](docs/UPSTREAM_SYNC.md) for the fork and upstream sync process.
+Thank you for contributing to PulseTalq. This document covers the local development workflow. All human and agent contributors follow the [multi-agent operating model](docs/MULTI_AGENT_OPERATING_MODEL.md). See [Keeping PulseTalq up to date](docs/UPSTREAM_SYNC.md) for the fork and upstream sync process.
 
 ## Development Workflow
 
 ### Branch Strategy
 
-- `main` - Production branch
-- `devtest` - Development and testing branch
-- Feature branches should be created from `devtest`
+- `main` - Stable, releasable product
+- `integration/*` - Shared candidate that receives completed task branches
+- `agent/*`, `feature/*`, `fix/*`, `hotfix/*`, `docs/*`, `chore/*`, `refactor/*`, and `test/*` - One reviewable outcome per branch and worktree
+
+Task branches start from the current target integration branch. The integration
+branch starts from `main`. Only a validated integration candidate moves to
+`main`.
 
 ### Getting Started
 
@@ -20,21 +24,21 @@ Thank you for contributing to PulseTalq. This document covers the local developm
    ```bash
    git remote add upstream https://github.com/Zackriya-Solutions/meetily.git
    ```
-3. Create a new branch from the current PulseTalq `main` branch:
+3. Fetch the current integration branch and create one task branch and worktree:
    ```bash
-   git switch main
-   git pull --ff-only origin main
-   git switch -c feature/your-feature-name
+   git fetch origin --prune
+   git worktree add .worktrees/your-task -b feature/TASK-ID-your-feature origin/integration/pulsetalq-next
    ```
 
 ### Development Process
 
-1. Always start your work from the current PulseTalq `main` branch
-2. Create a new branch for each feature/fix
-3. Make your changes
-4. Write or update tests as needed
-5. Ensure all tests pass
-6. Update documentation if necessary
+1. Start from the current target `integration/*` branch
+2. Create one branch and worktree for each reviewable task
+3. Record the task ID, base SHA, owner, file scope, dependencies, and checks
+4. Make and commit changes only in the task worktree
+5. Write or update tests and documentation as needed
+6. Verify the exact task-branch commit
+7. Hand the completed branch to the integration coordinator
 
 ### Issue Creation
 
@@ -51,13 +55,14 @@ Before starting work on a new feature or bug fix:
 
 ### Pull Request Process
 
-1. Create a PR from your feature branch to PulseTalq `main`
+1. Create a PR from your task branch to the target PulseTalq `integration/*` branch
 2. Link the PR to the related issue using the issue number (e.g., "Fixes #123")
 3. Fill out the PR template completely
 4. Ensure CI checks pass
 5. Request review from at least one maintainer
 6. Address any review comments
-7. Once approved, the PR will be merged into `devtest`
+7. Once approved, the PR will be merged into the target integration branch
+8. A separate validated promotion moves the integration candidate to `main`
 
 ### PR Template
 
@@ -137,7 +142,7 @@ Types:
 
 1. PRs require at least one review
 2. Address all review comments
-3. Keep the PR up to date with PulseTalq `main`
+3. Keep the PR up to date with its target PulseTalq `integration/*` branch
 4. Squash commits if requested
 
 ## Getting Help

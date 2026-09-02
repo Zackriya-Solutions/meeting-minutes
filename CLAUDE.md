@@ -2,6 +2,11 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+Claude Code, Claude Cowork, Codex, T3 Code, Pulse/ProductOps, SALT-enabled
+agents, and human operators share one workflow. Read
+[the multi-agent operating model](docs/MULTI_AGENT_OPERATING_MODEL.md) before
+starting or handing off mutable work.
+
 ## Project Overview
 
 **PulseTalq** is a privacy-first AI meeting assistant that captures, transcribes, and summarizes meetings entirely on local infrastructure. The supported application is the Tauri desktop app with a Rust core.
@@ -385,9 +390,9 @@ $env:RUST_LOG="debug"; ./clean_run_windows.bat
 - **Naming**: Audio devices use "microphone" and "system" consistently (not "input"/"output")
 - **Git Branches**:
   - `main`: Stable releases
-  - `fix/*`: Bug fixes
-  - `enhance/*`: Feature enhancements
-  - Current: `fix/audio-mixing` (working on audio pipeline improvements)
+  - `integration/*`: Shared, coordinator-owned product candidate
+  - `agent/*`, `feature/*`, `fix/*`, `hotfix/*`, `docs/*`, `chore/*`, `refactor/*`, `test/*`: One reviewable task per branch and worktree
+  - Task work starts from the target integration branch; only validated integration candidates move to `main`
 
 ## Key Files Reference
 

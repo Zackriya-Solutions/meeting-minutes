@@ -77,6 +77,18 @@ jobs:
             echo "Build profile: release"
           fi
 
+      - name: Disable platform code signing
+        if: ${{ !inputs.sign-binaries }}
+        shell: bash
+        run: |
+          node - <<'NODE'
+          const fs = require('fs')
+          const path = 'frontend/src-tauri/tauri.conf.json'
+          const config = JSON.parse(fs.readFileSync(path, 'utf8'))
+          if (config.bundle?.windows) delete config.bundle.windows.signCommand
+          fs.writeFileSync(path, `${JSON.stringify(config, null, 2)}\n`)
+          NODE
+
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
