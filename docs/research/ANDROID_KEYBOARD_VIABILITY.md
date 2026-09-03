@@ -16,7 +16,8 @@ Viable, with a clear architecture. Every hard requirement has a proven precedent
   - **FlorisBoard** (Apache-2.0, slower-moving, NLP engine rewrite in limbo): permissive license but higher maintenance risk.
   - **FUTO Keyboard / Voice Input** (Source First License, NOT open source, restricts commercial use): great reference implementation, not a legal base for us.
   - **OpenBoard**: dead.
-- Building autocorrect/prediction from scratch is a multi-month effort on its own; reuse a base keyboard rather than building typing from zero.
+- Building autocorrect/prediction from scratch is a multi-month effort on its own. Do not write the suggestion engine from zero.
+- **Recommended base: own keyboard shell, borrowed engine.** HeliBoard's GPL-3.0 comes from the OpenBoard fork, but the upstream **AOSP LatinIME is Apache-2.0**, including the native C++ suggestion/autocorrect engine and dictionary format. Plan: write the IME shell in Kotlin/Compose ourselves (voice-first layout, dictation overlay, vocab, sync), integrate the AOSP LatinIME engine and dictionaries for autocorrect, lift permissive Compose components/layouts from FlorisBoard (Apache-2.0), and use HeliBoard/FUTO as read-only behaviour references. Skip swipe typing in v1. A voice-first keyboard only needs typing good enough to keep users until they discover dictation, not Gboard parity. Estimate 6 to 10 weeks for v1 versus 2 to 3 weeks to fork HeliBoard under GPL.
 
 ## 2. Parakeet on-device (Android)
 
@@ -49,7 +50,7 @@ Rejected: PowerSync/ElectricSQL (cloud-Postgres-centric), embedding Syncthing (f
 
 - **Phase 0, spike (1-2 weeks)**: extract `ParakeetModel` + `TranscriptionProvider` into a `pulsetalk-core` crate, cross-compile for `aarch64-linux-android`, wrap with uniffi, and benchmark INT8 v3 on 2 or 3 real phones (RTF, RAM, chunked latency). This is the single load-bearing unknown (no public phone benchmarks exist), so it gates everything.
 - **Phase 1, voice input app**: standalone Android voice-input app (registers as a voice IME / RecognizerIntent target usable from Gboard and HeliBoard), model in a separate-process foreground service, chunked pseudo-streaming UI. Much smaller scope than a full keyboard, validates the ASR stack with users.
-- **Phase 2, full keyboard**: fork HeliBoard (accepting GPL-3.0 for the keyboard app) or build a minimal keyboard if licensing rules that out, integrating the Phase 1 voice service natively plus PulseTalk theming and vocab.
+- **Phase 2, full keyboard**: own Kotlin/Compose IME shell with the Apache-2.0 AOSP LatinIME suggestion engine, integrating the Phase 1 voice service natively plus PulseTalk theming and vocab. No swipe typing in v1.
 - **Phase 3, sync**: Automerge + iroh in `pulsetalk-core`, QR pairing, sync dictation vocab/settings first, then meeting transcripts/summaries.
 
 ## 6. Key risks
@@ -59,6 +60,6 @@ Rejected: PowerSync/ElectricSQL (cloud-Postgres-centric), embedding Syncthing (f
 | No phone-verified Parakeet performance numbers | Phase 0 spike before committing |
 | 650 MB model footprint and RAM on mid-range devices | Separate-process service, Moonshine/whisper-tiny fallback engine behind the existing provider trait |
 | No true streaming (chunked pseudo-streaming) | Matches current desktop UX; set product expectations accordingly |
-| HeliBoard GPL-3.0 copyleft vs. product licensing | Decide early; FlorisBoard (Apache-2.0) or in-house minimal keyboard are the alternatives |
+| Autocorrect quality of an in-house keyboard | Use the Apache-2.0 AOSP LatinIME engine and dictionaries rather than writing prediction from scratch |
 | Keyboard trust/Play review scrutiny | Offline-by-default, prominent disclosure, network confined to model download and opt-in sync |
 | iroh mobile and uniffi pre-1.0 maturity | Pin versions, sync is Phase 3 so it does not block the keyboard |
