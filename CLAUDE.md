@@ -24,6 +24,48 @@ starting or handing off mutable work.
 
 ## Essential Development Commands
 
+### Mandatory installer branch sweep
+
+Run this release preflight before any `tauri build`, local installer build, or
+installer publication. The release coordinator owns this work.
+
+1. Start with clean worktrees. Fetch and prune every configured remote.
+2. Inventory local and remote task branches, especially `feature/*`, `fix/*`,
+   `hotfix/*`, `chore/*`, `refactor/*`, and `test/*`.
+3. Read task records, handoffs, pull requests, and recent commit history. A
+   branch name alone does not prove that work is complete or safe to ship.
+4. Compare every completed branch with the target release candidate using merge
+   bases, ancestry checks, and commit logs. Identify completed commits that are
+   not reachable from the candidate.
+5. Merge or cherry-pick approved completed features and fixes into the
+   coordinator-owned `integration/*` or `release/*` candidate. Resolve conflicts
+   as product decisions and rerun affected checks.
+6. Pull the combined candidate into the packaging worktree. Confirm that its
+   HEAD matches the intended remote commit and that the worktree is clean.
+7. Write an inclusion record for the installer. List each included branch and
+   SHA. List every completed branch left out, with its deferral reason and human
+   approval. Unaccounted completed work blocks packaging.
+8. Build and verify the installer from that exact candidate commit. Record the
+   platform, build command, artifact path, checksum, signing state, and results.
+
+Useful inventory commands:
+
+```bash
+git remote -v
+git fetch --all --prune
+git worktree list
+git branch -avv
+git log --all --decorate --oneline --since="30 days ago"
+git merge-base --is-ancestor <task-branch> <release-candidate>
+git log --left-right --cherry-pick --oneline <release-candidate>...<task-branch>
+```
+
+Do not treat an open worktree, a pushed branch, or a green standalone build as
+proof that the work belongs in the installer. Completion requires a committed
+handoff and focused verification. Inclusion requires the release coordinator to
+place that commit in the combined candidate. Never package while a completed
+feature or fix remains unreviewed or unexplained outside the candidate.
+
 ### Frontend Development (Tauri Desktop App)
 
 **Location**: `/frontend`
