@@ -106,14 +106,14 @@
 
 .dictation-voice-cursor {
   width: 48px;
-  height: 40px;
+  height: 48px;
   flex: 0 0 auto;
   display: grid;
   place-items: center;
   color: #ffffff;
   background: rgba(42, 46, 56, 0.98);
   border: 1px solid rgba(255, 255, 255, 0.2);
-  border-radius: 18px;
+  border-radius: 999px;
   box-shadow: 0 8px 24px rgba(5, 9, 18, 0.3), inset 0 1px rgba(255, 255, 255, 0.09);
   transition: background 150ms ease, border-color 150ms ease, transform 170ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }

@@ -1,9 +1,9 @@
 "use client"
 
 import { invoke } from "@tauri-apps/api/core"
-import { AudioLines, ClipboardCheck, FolderOpen, History, LockKeyhole, Mic2, PictureInPicture2, Sparkles } from "lucide-react"
+import { AudioLines, ClipboardCheck, FolderOpen, History, Keyboard, LockKeyhole, Mic2, PictureInPicture2, Sparkles } from "lucide-react"
 import { useRouter } from "next/navigation"
-import { useEffect, useState } from "react"
+import { type KeyboardEvent, useEffect, useState } from "react"
 import { Switch } from '@/components/ui/switch'
 
 type ShortcutStatus = {
@@ -20,6 +20,9 @@ export function DictationSettings() {
   const [openingDiagnostics, setOpeningDiagnostics] = useState(false)
   const [diagnosticsError, setDiagnosticsError] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [capturingShortcut, setCapturingShortcut] = useState(false)
+  const [savingShortcut, setSavingShortcut] = useState(false)
+  const [shortcutError, setShortcutError] = useState<string | null>(null)
 
   useEffect(() => {
     invoke<ShortcutStatus>('dictation_get_shortcut_status')
@@ -29,6 +32,45 @@ export function DictationSettings() {
       .then(setOverlayEnabled)
       .catch(cause => setError(String(cause)))
   }, [])
+
+  const captureShortcut = async (event: KeyboardEvent<HTMLButtonElement>) => {
+    if (!capturingShortcut) return
+    event.preventDefault()
+    if (['Control', 'Shift', 'Alt', 'Meta'].includes(event.key)) return
+
+    const key = event.code.startsWith('Key')
+      ? event.code.slice(3)
+      : event.code.startsWith('Digit')
+        ? event.code.slice(5)
+        : event.code === 'Space'
+          ? 'Space'
+          : event.code
+    if (!key) return
+
+    const modifiers = [
+      event.ctrlKey ? 'Ctrl' : null,
+      event.altKey ? 'Alt' : null,
+      event.shiftKey ? 'Shift' : null,
+      event.metaKey ? 'Cmd' : null,
+    ].filter(Boolean)
+    if (modifiers.length === 0) {
+      setShortcutError('Hold Ctrl, Alt, Shift, or Cmd while choosing a key.')
+      return
+    }
+
+    const nextShortcut = [...modifiers, key].join('+')
+    setSavingShortcut(true)
+    setShortcutError(null)
+    try {
+      const nextStatus = await invoke<ShortcutStatus>('dictation_set_shortcut', { shortcut: nextShortcut })
+      setStatus(nextStatus)
+      setCapturingShortcut(false)
+    } catch (cause) {
+      setShortcutError(String(cause))
+    } finally {
+      setSavingShortcut(false)
+    }
+  }
 
   const toggleOverlay = async (enabled: boolean) => {
     const previous = overlayEnabled
@@ -71,14 +113,32 @@ export function DictationSettings() {
             </div>
             <p className="mt-1 text-sm text-gray-600">Hold while speaking and release when finished. PulseTalk records only while the shortcut is held.</p>
             {status?.enabled ? (
-              <kbd className="mt-4 inline-flex rounded-lg border border-gray-300 bg-gray-50 px-3 py-1.5 text-sm font-semibold text-gray-800 shadow-sm">
-                {status.shortcut}
-              </kbd>
+              <div className="mt-4 flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShortcutError(null)
+                    setCapturingShortcut(true)
+                  }}
+                  onKeyDown={captureShortcut}
+                  onBlur={() => setCapturingShortcut(false)}
+                  disabled={savingShortcut}
+                  className={`inline-flex min-w-[180px] items-center justify-center gap-2 rounded-xl border px-3 py-2 text-sm font-semibold shadow-sm transition focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 ${capturingShortcut
+                    ? 'border-indigo-500 bg-indigo-50 text-indigo-800'
+                    : 'border-gray-300 bg-gray-50 text-gray-800 hover:border-indigo-300 hover:bg-indigo-50/50'
+                    }`}
+                  aria-label="Edit dictation shortcut"
+                >
+                  <Keyboard className="h-4 w-4" />
+                  {capturingShortcut ? (savingShortcut ? 'Saving shortcut…' : 'Press a shortcut…') : status.shortcut}
+                </button>
+                {!capturingShortcut && <span className="text-xs text-gray-500">Click to change</span>}
+              </div>
             ) : (
               <p className="mt-3 text-sm text-amber-700">{status?.message ?? 'Checking shortcut availability…'}</p>
             )}
-            {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
-            <p className="mt-3 text-xs text-gray-500">If the preferred shortcut is occupied, PulseTalk tries Ctrl+Alt+D and then Ctrl+Shift+F10. The active choice is always shown here and under General.</p>
+            {(error || shortcutError) && <p className="mt-3 text-sm text-red-600">{error ?? shortcutError}</p>}
+            <p className="mt-3 text-xs text-gray-500">Choose a modifier plus one key. The shortcut is saved for the next launch and takes effect immediately.</p>
           </div>
         </div>
       </section>

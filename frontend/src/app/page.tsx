@@ -228,31 +228,26 @@ export default function Home() {
         {(hasMicrophone || isRecording) &&
           status !== RecordingStatus.PROCESSING_TRANSCRIPTS &&
           status !== RecordingStatus.SAVING && (
-            <div className="fixed bottom-12 left-0 right-0 z-10">
+            <div className="pointer-events-none fixed bottom-7 left-0 right-0 z-10">
               <div
-                className="flex justify-center pl-8 transition-[margin] duration-300"
-                style={{
-                  marginLeft: sidebarCollapsed ? '4rem' : '16rem'
-                }}
+                className="flex justify-center"
               >
-                <div className="w-2/3 max-w-[750px] flex justify-center">
-                  <div className="bg-white rounded-full shadow-lg flex items-center">
-                    <RecordingControls
-                      isRecording={recordingState.isRecording}
-                      onRecordingStop={(callApi = true) => handleRecordingStop(callApi)}
-                      onRecordingStart={handleRecordingStart}
-                      onTranscriptReceived={() => { }} // Not actually used by RecordingControls
-                      onStopInitiated={() => setIsStopping(true)}
-                      barHeights={barHeights}
-                      onTranscriptionError={(message) => {
-                        showModal('errorAlert', message);
-                      }}
-                      isRecordingDisabled={isRecordingDisabled}
-                      isParentProcessing={isProcessingStop}
-                      selectedDevices={selectedDevices}
-                      meetingName={meetingTitle}
-                    />
-                  </div>
+                <div className="pointer-events-auto flex w-auto max-w-[750px] justify-center">
+                  <RecordingControls
+                    isRecording={recordingState.isRecording}
+                    onRecordingStop={(callApi = true) => handleRecordingStop(callApi)}
+                    onRecordingStart={handleRecordingStart}
+                    onTranscriptReceived={() => { }} // Not actually used by RecordingControls
+                    onStopInitiated={() => setIsStopping(true)}
+                    barHeights={barHeights}
+                    onTranscriptionError={(message) => {
+                      showModal('errorAlert', message);
+                    }}
+                    isRecordingDisabled={isRecordingDisabled}
+                    isParentProcessing={isProcessingStop}
+                    selectedDevices={selectedDevices}
+                    meetingName={meetingTitle}
+                  />
                 </div>
               </div>
             </div>
