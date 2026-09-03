@@ -1,6 +1,12 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::sync::RwLock;
+use tauri::{AppHandle, Manager};
+use tauri_plugin_store::StoreExt;
+
+pub const DEFAULT_SHORTCUT: &str = "Ctrl+Shift+Space";
+const PREFERENCE_STORE: &str = "preferences.json";
+const SHORTCUT_KEY: &str = "dictation_shortcut";
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -54,6 +60,35 @@ impl DictationShortcutStatusState {
                 message: Some("Shortcut status is temporarily unavailable.".into()),
             })
     }
+}
+
+pub fn configured_shortcut<R: tauri::Runtime>(app: &AppHandle<R>) -> Option<String> {
+    app.store(PREFERENCE_STORE)
+        .ok()
+        .and_then(|store| store.get(SHORTCUT_KEY))
+        .and_then(|value| value.as_str().map(str::to_owned))
+}
+
+#[cfg(test)]
+mod shortcut_config_tests {
+    use super::DEFAULT_SHORTCUT;
+    use std::str::FromStr;
+    use tauri_plugin_global_shortcut::Shortcut;
+
+    #[test]
+    fn default_shortcut_is_accepted_by_global_shortcut_parser() {
+        assert!(Shortcut::from_str(DEFAULT_SHORTCUT).is_ok());
+    }
+}
+
+pub fn save_shortcut<R: tauri::Runtime>(app: &AppHandle<R>, shortcut: &str) -> Result<(), String> {
+    let store = app
+        .store(PREFERENCE_STORE)
+        .map_err(|error| format!("Could not open dictation preferences: {error}"))?;
+    store.set(SHORTCUT_KEY, serde_json::Value::String(shortcut.to_owned()));
+    store
+        .save()
+        .map_err(|error| format!("Could not save dictation shortcut: {error}"))
 }
 
 impl Default for DictationShortcutStatusState {

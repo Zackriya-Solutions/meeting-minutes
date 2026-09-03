@@ -341,8 +341,8 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
 
   return (
     <TooltipProvider>
-      <div className="w-full flex flex-col space-y-2">
-        <div className={`w-full flex items-center gap-3 bg-[var(--pt-surface-dark)] text-[var(--pt-text-inverse)] rounded-[3px] shadow-[0_14px_34px_rgba(11,11,12,.18)] px-4 py-3 border border-black ${isRecording ? 'border-t-2 border-t-[var(--pt-accent)]' : ''}`}>
+      <div className="flex flex-col items-center space-y-2">
+        <div className="flex items-center space-x-2">
           {isProcessing && !isParentProcessing ? (
             <div className="flex items-center space-x-3">
               <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-[var(--pt-accent)]"></div>
