@@ -7,10 +7,11 @@ use std::path::PathBuf;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 
-static THINK_ENVELOPE_REGEX: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"(?is)<think(?:ing)?>.*?</think(?:ing)?>").unwrap());
+static THINK_ENVELOPE_REGEX: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"(?is)<think(?:ing)?(?:\s+[^>]*)?>.*?</think(?:ing)?\s*>").unwrap()
+});
 static THINK_MARKER_REGEX: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"(?is)</?think(?:ing)?>").unwrap());
+    Lazy::new(|| Regex::new(r"(?is)</?think(?:ing)?(?:\s+[^>]*)?>").unwrap());
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CleanedLlmMarkdown {
@@ -861,11 +862,27 @@ mod tests {
         let fenced = clean_llm_markdown_detailed("```\n<think>private</think>\nvisible\n```");
         assert_eq!(fenced.markdown, "visible");
         assert!(fenced.reasoning_stripped);
+
+        let attributed = clean_llm_markdown_detailed(
+            "Visible\n<thinking class=\"internal\">private</thinking>\nTail",
+        );
+        assert!(attributed.reasoning_stripped);
+        assert!(!attributed.markdown.contains("private"));
+        assert!(attributed.markdown.contains("Visible"));
+        assert!(attributed.markdown.contains("Tail"));
+
+        let literal = clean_llm_markdown_detailed("<thinker>Visible</thinker>");
+        assert!(!literal.reasoning_stripped);
+        assert_eq!(literal.markdown, "<thinker>Visible</thinker>");
     }
 
     #[test]
     fn cleaner_rejects_unterminated_reasoning_markers() {
-        for raw in ["Visible\n<think>private", "Visible\n</thinking>"] {
+        for raw in [
+            "Visible\n<think>private",
+            "Visible\n</thinking>",
+            "Visible\n<think class=\"internal\">private",
+        ] {
             let cleaned = clean_llm_markdown_detailed(raw);
             assert_eq!(
                 require_visible_markdown("Final summary", &cleaned),

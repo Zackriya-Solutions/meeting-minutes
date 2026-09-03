@@ -6,6 +6,10 @@ describe('summary content validation', () => {
     expect(hasVisibleSummaryContent({ markdown: '# Summary\nVisible' })).toBe(true);
     expect(hasVisibleSummaryContent({ markdown: '   ' })).toBe(false);
     expect(hasVisibleSummaryContent({ markdown: '<think>private</think>' })).toBe(false);
+    expect(hasVisibleSummaryContent({
+      markdown: '<thinking class="internal">private</thinking>',
+    })).toBe(false);
+    expect(hasVisibleSummaryContent({ markdown: '<thinker>Visible</thinker>' })).toBe(true);
   });
 
   test('validates BlockNote and legacy summary content', () => {

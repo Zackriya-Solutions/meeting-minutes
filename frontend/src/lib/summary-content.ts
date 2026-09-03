@@ -1,7 +1,7 @@
 import type { MeetingSummary } from '@/types';
 import { z } from 'zod';
 
-const REASONING_MARKER = /<\/?think(?:ing)?>/i;
+const REASONING_MARKER = /<\/?think(?:ing)?(?:\s+[^>]*)?>/i;
 const SummaryObject = z.record(z.unknown());
 
 function parseSummaryObject(value: unknown) {
