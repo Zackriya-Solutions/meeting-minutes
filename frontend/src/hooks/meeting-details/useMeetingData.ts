@@ -4,6 +4,7 @@ import { BlockNoteSummaryViewRef } from '@/components/AISummary/BlockNoteSummary
 import { CurrentMeeting, useSidebar } from '@/components/Sidebar/SidebarProvider';
 import { invoke as invokeTauri } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
+import { hasVisibleSummaryContent } from '@/lib/summary-content';
 
 interface UseMeetingDataProps {
   meeting: any;
@@ -19,7 +20,6 @@ export function useMeetingData({ meeting, summaryData, onMeetingUpdated }: UseMe
   const [aiSummary, setAiSummary] = useState<MeetingSummary | null>(summaryData);
   const [isSaving, setIsSaving] = useState(false);
   const [isSummaryDirty, setIsSummaryDirty] = useState(false);
-  const [, setError] = useState<string>('');
 
   // Ref for BlockNoteSummaryView
   const blockNoteSummaryRef = useRef<BlockNoteSummaryViewRef>(null);
@@ -40,46 +40,17 @@ export function useMeetingData({ meeting, summaryData, onMeetingUpdated }: UseMe
 
 
   const handleSaveSummary = useCallback(async (summary: MeetingSummary) => {
-    console.log('📄 handleSaveSummary called with:', {
-      hasMarkdown: 'markdown' in summary,
-      hasSummaryJson: 'summary_json' in summary,
-      summaryKeys: Object.keys(summary)
-    });
-
-    try {
-      let formattedSummary: any;
-
-      // Check if it's the new BlockNote format
-      if ('markdown' in summary || 'summary_json' in summary) {
-        console.log('📄 Saving new format (markdown/blocknote)');
-        formattedSummary = summary;
-      } else {
-        console.log('📄 Saving legacy format');
-        formattedSummary = {
-          MeetingName: meetingTitle,
-          MeetingNotes: {
-            sections: Object.entries(summary).map(([, section]) => ({
-              title: section.title,
-              blocks: section.blocks
-            }))
-          }
-        };
-      }
-
-      await invokeTauri('api_save_meeting_summary', {
-        meetingId: meeting.id,
-        summary: formattedSummary,
-      });
-
-      console.log('✅ Save meeting summary success');
-    } catch (error) {
-      console.error('❌ Failed to save meeting summary:', error);
-      if (error instanceof Error) {
-        setError(error.message);
-      } else {
-        setError('Failed to save meeting summary: Unknown error');
-      }
+    if (!hasVisibleSummaryContent(summary)) {
+      throw new Error('Summary contains no visible content to save.');
     }
+
+    const formattedSummary = 'markdown' in summary || 'summary_json' in summary
+      ? summary
+      : { MeetingName: meetingTitle, ...summary };
+    await invokeTauri('api_save_meeting_summary', {
+      meetingId: meeting.id,
+      summary: formattedSummary,
+    });
   }, [meeting.id, meetingTitle]);
 
   const saveAllChanges = useCallback(async () => {

@@ -4,6 +4,7 @@ import { BlockNoteSummaryViewRef } from '@/components/AISummary/BlockNoteSummary
 import { toast } from 'sonner';
 import Analytics from '@/lib/analytics';
 import { invoke as invokeTauri } from '@tauri-apps/api/core';
+import { hasVisibleSummaryContent } from '@/lib/summary-content';
 
 interface UseCopyOperationsProps {
   meeting: any;
@@ -106,6 +107,10 @@ export function useCopyOperations({
 
   // Copy summary to clipboard
   const handleCopySummary = useCallback(async () => {
+    if (!hasVisibleSummaryContent(aiSummary)) {
+      toast.error('No summary content available to copy');
+      return;
+    }
     try {
       let summaryMarkdown = '';
 

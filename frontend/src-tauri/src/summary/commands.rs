@@ -10,12 +10,31 @@ use crate::summary::metadata::{
 use crate::summary::language_detection::{
     detect_summary_language, SummaryLanguageDetection,
 };
+use crate::summary::processor::{clean_llm_markdown_detailed, contains_reasoning_marker};
 use crate::summary::service::SummaryService;
 use log::{error as log_error, info as log_info, warn as log_warn};
+use chrono::{DateTime, Duration, SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use std::sync::{LazyLock, Mutex};
 use tauri::{AppHandle, Runtime};
 
+
+static SUMMARY_START_LOCK: LazyLock<tokio::sync::Mutex<()>> =
+    LazyLock::new(|| tokio::sync::Mutex::new(()));
+static LAST_SUMMARY_START: LazyLock<Mutex<Option<DateTime<Utc>>>> =
+    LazyLock::new(|| Mutex::new(None));
+fn next_summary_start(now: DateTime<Utc>) -> DateTime<Utc> {
+    let mut last = LAST_SUMMARY_START
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let next = match *last {
+        Some(previous) if now <= previous => previous + Duration::nanoseconds(1),
+        _ => now,
+    };
+    *last = Some(next);
+    next
+}
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SummaryResponse {
     pub status: String,
@@ -84,7 +103,11 @@ pub async fn api_save_meeting_summary<R: Runtime>(
         "api_save_meeting_summary (native) called for meeting_id: {}",
         meeting_id
     );
+    if !summary_is_renderable(&summary) {
+        return Err("Summary contains no visible content or model reasoning markers and was not saved.".into());
+    }
     let pool = state.db_manager.pool();
+
 
     match SummaryProcessesRepository::update_meeting_summary(pool, &meeting_id, &summary).await {
         Ok(true) => {
@@ -223,15 +246,105 @@ async fn resolve_meeting_folder(
     Ok(MeetingFolderResolution::Folder(PathBuf::from(folder_path)))
 }
 
+fn blocknote_has_visible_text(value: &serde_json::Value) -> bool {
+    match value {
+        serde_json::Value::Array(items) => items.iter().any(blocknote_has_visible_text),
+        serde_json::Value::Object(object) => {
+            object
+                .get("text")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|text| !text.trim().is_empty())
+                || object
+                    .get("content")
+                    .is_some_and(blocknote_has_visible_text)
+                || object
+                    .get("children")
+                    .is_some_and(blocknote_has_visible_text)
+        }
+        _ => false,
+    }
+}
+
+fn legacy_section_has_visible_text(value: &serde_json::Value) -> bool {
+    value
+        .get("blocks")
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(|blocks| {
+            blocks.iter().any(|block| {
+                block
+                    .get("content")
+                    .and_then(serde_json::Value::as_str)
+                    .is_some_and(|content| !content.trim().is_empty())
+            })
+        })
+}
+
+fn summary_contains_reasoning_marker(value: &serde_json::Value) -> bool {
+    match value {
+        serde_json::Value::Array(items) => items.iter().any(summary_contains_reasoning_marker),
+        serde_json::Value::Object(object) => object.iter().any(|(key, value)| match key.as_str() {
+            "markdown" | "text" | "content" => value
+                .as_str()
+                .is_some_and(contains_reasoning_marker)
+                || value.is_array() && summary_contains_reasoning_marker(value),
+            "summary_json" | "children" => summary_contains_reasoning_marker(value),
+            _ => false,
+        }),
+        _ => false,
+    }
+}
+
+fn summary_is_renderable(value: &serde_json::Value) -> bool {
+    let Some(object) = value.as_object() else {
+        return false;
+    };
+    if summary_contains_reasoning_marker(value) {
+        return false;
+    }
+    if let Some(markdown) = object.get("markdown") {
+        return markdown
+            .as_str()
+            .is_some_and(|markdown| !markdown.trim().is_empty());
+    }
+    if let Some(blocks) = object.get("summary_json") {
+        return blocknote_has_visible_text(blocks);
+    }
+    object
+        .iter()
+        .filter(|(key, _)| !matches!(key.as_str(), "MeetingName" | "_section_order"))
+        .any(|(_, value)| legacy_section_has_visible_text(value))
+}
+
+fn sanitize_markdown_value(value: Option<&mut serde_json::Value>) -> bool {
+    let Some(serde_json::Value::String(markdown)) = value else {
+        return false;
+    };
+    let cleaned = clean_llm_markdown_detailed(markdown);
+    let reasoning_stripped = cleaned.reasoning_stripped;
+    *markdown = cleaned.markdown;
+    reasoning_stripped
+}
+
 fn redact_flagged_reasoning(mut result: serde_json::Value) -> serde_json::Value {
-    if result
+    let Some(object) = result.as_object_mut() else {
+        return result;
+    };
+    let mut reasoning_stripped = object
         .get("reasoning_stripped")
         .and_then(serde_json::Value::as_bool)
-        == Some(true)
+        == Some(true);
+    if reasoning_stripped {
+        object.remove("reasoning");
+    }
+    reasoning_stripped |= sanitize_markdown_value(object.get_mut("markdown"));
+    if let Some(cache) = object
+        .get_mut("english_cache")
+        .and_then(serde_json::Value::as_object_mut)
     {
-        if let Some(object) = result.as_object_mut() {
-            object.remove("reasoning");
-        }
+        reasoning_stripped |= sanitize_markdown_value(cache.get_mut("markdown"));
+    }
+    if reasoning_stripped {
+        object.insert("reasoning_stripped".to_string(), serde_json::Value::Bool(true));
     }
     result
 }
@@ -254,12 +367,12 @@ pub async fn api_get_summary<R: Runtime>(
 
     match SummaryProcessesRepository::get_summary_data_for_meeting(pool, &meeting_id).await {
         Ok(Some(process)) => {
-            let status = process.status.to_lowercase();
-            let error = process.error;
+            let mut status = process.status.to_lowercase();
+            let mut error = process.error;
 
-            // Parse result data if it exists (regardless of status)
-            // This allows displaying restored summaries after cancellation or failure
-            let data = if let Some(result_str) = process.result {
+            // Parse result data if it exists (regardless of status) so restored
+            // summaries remain available after cancellation or failure.
+            let mut data = if let Some(result_str) = process.result {
                 match serde_json::from_str::<serde_json::Value>(&result_str) {
                     Ok(parsed) => Some(redact_flagged_reasoning(parsed)),
                     Err(e) => {
@@ -270,6 +383,14 @@ pub async fn api_get_summary<R: Runtime>(
             } else {
                 None
             };
+            if status == "completed" && !data.as_ref().is_some_and(summary_is_renderable) {
+                status = "error".to_string();
+                error = Some(
+                    "Stored summary data is missing or invalid. Generate the summary again."
+                        .to_string(),
+                );
+                data = None;
+            }
 
             // Fetch meeting title from database
             let meeting_name = match MeetingsRepository::get_meeting(pool, &meeting_id).await {
@@ -291,8 +412,10 @@ pub async fn api_get_summary<R: Runtime>(
                 status: status.clone(),
                 meeting_name,
                 meeting_id: meeting_id.clone(),
-                start: process.start_time.map(|t| t.to_rfc3339()),
-                end: process.end_time.map(|t| t.to_rfc3339()),
+                start: process
+                    .start_time
+                    .map(|time| time.to_rfc3339_opts(SecondsFormat::Nanos, true)),
+                end: process.end_time.map(|time| time.to_rfc3339()),
                 data,
                 error,
             };
@@ -369,18 +492,16 @@ pub async fn api_process_transcript<R: Runtime>(
         if t.is_empty() { None } else { Some(t.to_string()) }
     });
 
-    // Create or reset the process entry in the database
-    SummaryProcessesRepository::create_or_reset_process(&pool, &m_id)
+    // ponytail: summary starts are rare; use per-meeting locks only if start contention is measured.
+    let _start_guard = SUMMARY_START_LOCK.lock().await;
+    let started_at = next_summary_start(Utc::now());
+    SummaryProcessesRepository::create_or_reset_process(&pool, &m_id, started_at)
         .await
         .map_err(|e| format!("Failed to initialize process: {}", e))?;
 
-    log_info!("✓ Summary process initialized for meeting_id: {}", &m_id);
-
-    // Save transcript chunks data (matching Python backend behavior)
     let chunk_size = _chunk_size.unwrap_or(40000);
     let overlap = _overlap.unwrap_or(1000);
-
-    TranscriptChunksRepository::save_transcript_data(
+    if let Err(error) = TranscriptChunksRepository::save_transcript_data(
         &pool,
         &m_id,
         &text,
@@ -390,17 +511,28 @@ pub async fn api_process_transcript<R: Runtime>(
         overlap,
     )
     .await
-    .map_err(|e| format!("Failed to save transcript data: {}", e))?;
+    {
+        let message = format!("Failed to save transcript data: {}", error);
+        let _ = SummaryProcessesRepository::update_process_failed(
+            &pool,
+            &m_id,
+            started_at,
+            &message,
+        )
+        .await;
+        return Err(message);
+    }
 
-    log_info!("✓ Transcript chunks saved for meeting_id: {}", &m_id);
-
-    // Spawn background task for actual processing
+    let cancellation_token =
+        SummaryService::register_cancellation_token(&m_id, started_at);
     let meeting_id_clone = m_id.clone();
     tauri::async_runtime::spawn(async move {
         SummaryService::process_transcript_background(
             app,
             pool,
-            meeting_id_clone.clone(),
+            meeting_id_clone,
+            started_at,
+            cancellation_token,
             text,
             model,
             model_name,
@@ -412,10 +544,9 @@ pub async fn api_process_transcript<R: Runtime>(
     });
 
     log_info!("🚀 Background task spawned for meeting_id: {}", &m_id);
-
     Ok(ProcessTranscriptResponse {
         message: "Summary generation started".to_string(),
-        process_id: m_id,
+        process_id: started_at.to_rfc3339_opts(SecondsFormat::Nanos, true),
     })
 }
 
@@ -428,32 +559,36 @@ pub async fn api_cancel_summary<R: Runtime>(
     _app: AppHandle<R>,
     state: tauri::State<'_, AppState>,
     meeting_id: String,
+    process_id: String,
 ) -> Result<serde_json::Value, String> {
+    let started_at = DateTime::parse_from_rfc3339(&process_id)
+        .map_err(|_| "Invalid summary process ID".to_string())?
+        .with_timezone(&Utc);
     log_info!("api_cancel_summary called for meeting_id: {}", meeting_id);
 
-    // Trigger cancellation via the service
-    let cancelled = SummaryService::cancel_summary(&meeting_id);
-
+    let cancelled = SummaryService::cancel_summary(&meeting_id, started_at);
     if cancelled {
-        // Update database status to cancelled
         let pool = state.db_manager.pool();
-        if let Err(e) = SummaryProcessesRepository::update_process_cancelled(pool, &meeting_id).await {
-            log_error!("Failed to update DB status to cancelled for {}: {}", meeting_id, e);
-            return Err(format!("Failed to update cancellation status: {}", e));
+        match SummaryProcessesRepository::update_process_cancelled(pool, &meeting_id, started_at)
+            .await
+        {
+            Ok(true) => log_info!("Successfully cancelled summary generation for meeting_id: {}", meeting_id),
+            Ok(false) => log_info!("Summary generation was already terminal for meeting_id: {}", meeting_id),
+            Err(error) => {
+                log_error!("Failed to update cancellation status for {}: {}", meeting_id, error);
+                return Err(format!("Failed to update cancellation status: {}", error));
+            }
         }
-
-        log_info!("Successfully cancelled summary generation for meeting_id: {}", meeting_id);
-        Ok(serde_json::json!({
-            "message": "Summary generation cancelled successfully",
-            "meeting_id": meeting_id,
-        }))
-    } else {
-        log_warn!("No active summary generation found for meeting_id: {}", meeting_id);
-        Ok(serde_json::json!({
-            "message": "No active summary generation to cancel",
-            "meeting_id": meeting_id,
-        }))
     }
+
+    Ok(serde_json::json!({
+        "message": if cancelled {
+            "Summary generation cancelled successfully"
+        } else {
+            "No active summary generation to cancel"
+        },
+        "meeting_id": meeting_id,
+    }))
 }
 
 #[cfg(test)]
@@ -466,6 +601,7 @@ mod tests {
         assert_eq!(
             redact_flagged_reasoning(json!({
                 "reasoning_stripped": true,
+
                 "reasoning": "private",
                 "markdown": "visible",
             })),
@@ -475,5 +611,34 @@ mod tests {
             redact_flagged_reasoning(json!({"reasoning": "custom", "markdown": "visible"})),
             json!({"reasoning": "custom", "markdown": "visible"})
         );
+    }
+
+    #[test]
+    fn summary_start_tokens_are_monotonic_with_identical_clock_inputs() {
+        let first = next_summary_start(Utc::now());
+        assert_eq!(
+            next_summary_start(first),
+            first + Duration::nanoseconds(1)
+        );
+    }
+
+    #[test]
+    fn summary_validation_rejects_blank_and_reasoning_content() {
+        assert!(!summary_is_renderable(&json!({"markdown": "   "})));
+        assert!(!summary_is_renderable(&json!({
+            "summary_json": [{"content": [{"type": "text", "text": "<think>private</think>"}]}]
+        })));
+        assert!(summary_is_renderable(&json!({
+            "summary_json": [{"content": [{"type": "text", "text": "Visible"}]}]
+        })));
+    }
+
+    #[test]
+    fn response_redaction_strips_closed_markdown_envelopes() {
+        let redacted = redact_flagged_reasoning(json!({
+            "markdown": "Visible\n<think>private</think>\nTail"
+        }));
+        assert_eq!(redacted["markdown"], "Visible\n\nTail");
+        assert_eq!(redacted["reasoning_stripped"], true);
     }
 }

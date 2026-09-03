@@ -152,6 +152,7 @@ export function MeetingDetailsSplitView({
           aria-valuenow={Math.round(ratio * 100)}
           aria-valuemin={Math.round(MIN_RATIO * 100)}
           aria-valuemax={Math.round(MAX_RATIO * 100)}
+          aria-valuetext={`Transcript panel ${Math.round(ratio * 100)} percent`}
           aria-label="Resize transcript and summary"
           tabIndex={0}
           className="group relative z-10 hidden w-2 flex-shrink-0 cursor-col-resize items-stretch justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-inset md:flex"

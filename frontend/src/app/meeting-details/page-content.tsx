@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
-import { MeetingSummary, SummaryResponse } from '@/types';
+import { MeetingSummary } from '@/types';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
 import Analytics from '@/lib/analytics';
 import { invoke } from '@tauri-apps/api/core';
@@ -56,19 +56,19 @@ export default function PageContent({
 
   // State
   const [customPrompt, setCustomPrompt] = useState<string>('');
-  const [isRecording] = useState(false);
-  const [summaryResponse] = useState<SummaryResponse | null>(null);
+  const isRecording = false;
   const [activeTab, setActiveTab] = useState<MeetingDetailsTab>('transcript');
 
   // Ref to store the modal open function from SummaryGeneratorButtonGroup
   const openModelSettingsRef = useRef<(() => void) | null>(null);
   const autoSwitchedSummaryMeetingIdsRef = useRef(new Set<string>());
+  const manuallySelectedTabMeetingIdsRef = useRef(new Set<string>());
 
   // Sidebar context
   const { serverAddress } = useSidebar();
 
   // Get model config from ConfigContext
-  const { modelConfig, setModelConfig } = useConfig();
+  const { modelConfig, setModelConfig, isModelConfigLoading } = useConfig();
 
   // Custom hooks
   const meetingData = useMeetingData({ meeting, summaryData, onMeetingUpdated });
@@ -117,7 +117,7 @@ export default function PageContent({
     meeting,
     transcripts: meetingData.transcripts,
     modelConfig: modelConfig,
-    isModelConfigLoading: false, // ConfigContext loads on mount
+    isModelConfigLoading,
     selectedTemplate: templates.selectedTemplate,
     onMeetingUpdated,
     updateMeetingTitle: meetingData.updateMeetingTitle,
@@ -144,8 +144,9 @@ export default function PageContent({
 
   useEffect(() => {
     if (
-      (meetingData.aiSummary || summaryGeneration.summaryStatus === 'completed') &&
-      !autoSwitchedSummaryMeetingIdsRef.current.has(meeting.id)
+      (meetingData.aiSummary || summaryGeneration.summaryStatus === 'completed')
+      && !autoSwitchedSummaryMeetingIdsRef.current.has(meeting.id)
+      && !manuallySelectedTabMeetingIdsRef.current.has(meeting.id)
     ) {
       autoSwitchedSummaryMeetingIdsRef.current.add(meeting.id);
       setActiveTab('summary');
@@ -186,7 +187,10 @@ export default function PageContent({
       <div className="flex flex-1 min-w-0 overflow-hidden">
         <MeetingDetailsSplitView
           activeTab={activeTab}
-          onTabChange={setActiveTab}
+          onTabChange={(tab) => {
+            manuallySelectedTabMeetingIdsRef.current.add(meeting.id);
+            setActiveTab(tab);
+          }}
           transcript={
             <TranscriptPanel
               transcripts={meetingData.transcripts}
@@ -217,7 +221,6 @@ export default function PageContent({
               isSummaryDirty={meetingData.isSummaryDirty}
               onSaveAll={meetingData.saveAllChanges}
               onCopySummary={copyOperations.handleCopySummary}
-              onOpenFolder={meetingOperations.handleOpenMeetingFolder}
               aiSummary={meetingData.aiSummary}
               summaryStatus={summaryGeneration.summaryStatus}
               transcripts={meetingData.transcripts}
@@ -227,7 +230,6 @@ export default function PageContent({
               onGenerateSummary={summaryGeneration.handleGenerateSummary}
               onStopGeneration={summaryGeneration.handleStopGeneration}
               customPrompt={customPrompt}
-              summaryResponse={summaryResponse}
               onSaveSummary={meetingData.handleSaveSummary}
               onSummaryChange={meetingData.handleSummaryChange}
               onDirtyChange={meetingData.setIsSummaryDirty}
@@ -237,7 +239,7 @@ export default function PageContent({
               availableTemplates={templates.availableTemplates}
               selectedTemplate={templates.selectedTemplate}
               onTemplateSelect={templates.handleTemplateSelection}
-              isModelConfigLoading={false}
+              isModelConfigLoading={isModelConfigLoading}
               onOpenModelSettings={handleRegisterModalOpen}
             />
           }

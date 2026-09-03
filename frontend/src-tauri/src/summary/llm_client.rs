@@ -94,7 +94,7 @@ pub struct Choice {
 #[derive(Deserialize, Debug)]
 pub struct MessageContent {
     #[serde(default)]
-    pub content: String,
+    pub content: Option<String>,
     #[serde(default)]
     pub reasoning: Option<String>,
     #[serde(default)]
@@ -155,7 +155,12 @@ impl ChatResponse {
             .ok_or("No content in LLM response")?
             .message;
         Ok(LlmCompletion {
-            content: message.content.trim().to_string(),
+            content: message
+                .content
+                .as_deref()
+                .unwrap_or_default()
+                .trim()
+                .to_string(),
             reasoning_stripped: [message.reasoning.as_deref(), message.reasoning_content.as_deref()]
                 .into_iter()
                 .flatten()
@@ -434,7 +439,7 @@ pub(crate) async fn generate_summary(
         let status = response.status();
         let error_body = await_or_cancel(response.text(), cancellation_token)
             .await?
-            .unwrap_or_else(|_| "Unknown error".to_string());
+            .unwrap_or_else(|error| format!("Failed to read LLM error response body: {error}"));
         if provider != &LLMProvider::Ollama || !ollama_rejects_reasoning_effort(status, &error_body) {
             return Err(format!(
                 "LLM API request failed with status {}: {}",
@@ -472,7 +477,7 @@ pub(crate) async fn generate_summary(
         let status = response.status();
         let error_body = await_or_cancel(response.text(), cancellation_token)
             .await?
-            .unwrap_or_else(|_| "Unknown error".to_string());
+            .unwrap_or_else(|error| format!("Failed to read LLM error response body: {error}"));
         return Err(format!(
             "LLM API request failed with status {}: {}",
             status, error_body
@@ -585,17 +590,22 @@ mod tests {
 
     #[test]
     fn compatible_reasoning_is_separate_from_visible_content() {
-        let response: ChatResponse = serde_json::from_value(json!({
-            "choices": [{"message": {"reasoning_content": "private"}}]
-        }))
-        .unwrap();
-        assert_eq!(
-            response.completion().unwrap(),
-            LlmCompletion {
-                content: String::new(),
-                reasoning_stripped: true,
-            }
-        );
+        for message in [
+            json!({"reasoning_content": "private"}),
+            json!({"content": null, "reasoning_content": "private"}),
+        ] {
+            let response: ChatResponse = serde_json::from_value(json!({
+                "choices": [{"message": message}]
+            }))
+            .unwrap();
+            assert_eq!(
+                response.completion().unwrap(),
+                LlmCompletion {
+                    content: String::new(),
+                    reasoning_stripped: true,
+                }
+            );
+        }
     }
 
     #[test]

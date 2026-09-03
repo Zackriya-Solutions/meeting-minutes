@@ -1,6 +1,6 @@
 "use client";
 
-import { MeetingSummary, Summary, SummaryResponse, Transcript } from '@/types';
+import { MeetingSummary, Summary, Transcript } from '@/types';
 import { BlockNoteSummaryView, BlockNoteSummaryViewRef } from '@/components/AISummary/BlockNoteSummaryView';
 import { EmptyStateSummary } from '@/components/EmptyStateSummary';
 import { ModelConfig } from '@/components/ModelSettingsModal';
@@ -20,6 +20,7 @@ import {
   saveMeetingSummaryLanguage,
   SummaryLanguageStorage,
 } from '@/lib/summary-language-preferences';
+import { hasVisibleSummaryContent } from '@/lib/summary-content';
 
 interface SummaryPanelProps {
   meeting: {
@@ -33,7 +34,6 @@ interface SummaryPanelProps {
   isSaving: boolean;
   onSaveAll: () => Promise<void>;
   onCopySummary: () => Promise<void>;
-  onOpenFolder: () => Promise<void>;
   aiSummary: MeetingSummary | null;
   summaryStatus: 'idle' | 'processing' | 'summarizing' | 'regenerating' | 'completed' | 'error';
   transcripts: Transcript[];
@@ -43,7 +43,6 @@ interface SummaryPanelProps {
   onGenerateSummary: (customPrompt: string) => Promise<void>;
   onStopGeneration: () => void;
   customPrompt: string;
-  summaryResponse: SummaryResponse | null;
   onSaveSummary: (summary: MeetingSummary) => Promise<void>;
   onSummaryChange: (summary: Summary) => void;
   onDirtyChange: (isDirty: boolean) => void;
@@ -65,7 +64,6 @@ export function SummaryPanel({
   isSaving,
   onSaveAll,
   onCopySummary,
-  onOpenFolder,
   aiSummary,
   summaryStatus,
   transcripts,
@@ -75,7 +73,6 @@ export function SummaryPanel({
   onGenerateSummary,
   onStopGeneration,
   customPrompt,
-  summaryResponse,
   onSaveSummary,
   onSummaryChange,
   onDirtyChange,
@@ -214,6 +211,7 @@ export function SummaryPanel({
   };
 
   const isSummaryLoading = summaryStatus === 'processing' || summaryStatus === 'summarizing' || summaryStatus === 'regenerating';
+  const hasSummary = hasVisibleSummaryContent(aiSummary);
 
   const languageSlot = (
     <Popover open={langPickerOpen} onOpenChange={setLangPickerOpen}>
@@ -261,26 +259,20 @@ export function SummaryPanel({
               selectedTemplate={selectedTemplate}
               onTemplateSelect={onTemplateSelect}
               hasTranscripts={transcripts.length > 0}
-              hasSummary={!!aiSummary}
+              hasSummary={hasSummary}
               isModelConfigLoading={isModelConfigLoading}
               onOpenModelSettings={onOpenModelSettings}
-              languageSlot={transcripts.length > 0 || !!aiSummary ? languageSlot : undefined}
+              languageSlot={transcripts.length > 0 || hasSummary ? languageSlot : undefined}
             />
           </div>
 
-          {aiSummary && !isSummaryLoading && (
+          {hasSummary && !isSummaryLoading && (
             <div className="flex-shrink-0">
               <SummaryUpdaterButtonGroup
                 isSaving={isSaving}
                 isDirty={isSummaryDirty}
                 onSave={onSaveAll}
                 onCopy={onCopySummary}
-                onFind={() => {
-                  // TODO: Implement find in summary functionality
-                  console.log('Find in summary clicked');
-                }}
-                onOpenFolder={onOpenFolder}
-                hasSummary={!!aiSummary}
               />
             </div>
           )}
@@ -294,59 +286,15 @@ export function SummaryPanel({
             <p className="text-gray-600">Generating AI Summary...</p>
           </div>
         </div>
-      ) : !aiSummary ? (
+      ) : !hasSummary ? (
         <EmptyStateSummary
           onGenerate={() => onGenerateSummary(customPrompt)}
           hasModel={modelConfig.provider !== null && modelConfig.model !== null}
           isGenerating={isSummaryLoading}
+          error={summaryError}
         />
       ) : (
         <div className="flex-1 overflow-y-auto overflow-x-auto min-h-0">
-          {summaryResponse && (
-            <div className="fixed bottom-0 left-0 right-0 bg-white shadow-lg p-4 max-h-1/3 overflow-y-auto">
-              <h3 className="text-lg font-semibold mb-2">Meeting Summary</h3>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="bg-white p-4 rounded-lg shadow-sm">
-                  <h4 className="font-medium mb-1">Key Points</h4>
-                  <ul className="list-disc pl-4">
-                    {summaryResponse.summary.key_points.blocks.map((block, i) => (
-                      <li key={i} className="text-sm">{block.content}</li>
-                    ))}
-                  </ul>
-                </div>
-                <div className="bg-white p-4 rounded-lg shadow-sm mt-4">
-                  <h4 className="font-medium mb-1">Action Items</h4>
-                  <ul className="list-disc pl-4">
-                    {summaryResponse.summary.action_items.blocks.map((block, i) => (
-                      <li key={i} className="text-sm">{block.content}</li>
-                    ))}
-                  </ul>
-                </div>
-                <div className="bg-white p-4 rounded-lg shadow-sm mt-4">
-                  <h4 className="font-medium mb-1">Decisions</h4>
-                  <ul className="list-disc pl-4">
-                    {summaryResponse.summary.decisions.blocks.map((block, i) => (
-                      <li key={i} className="text-sm">{block.content}</li>
-                    ))}
-                  </ul>
-                </div>
-                <div className="bg-white p-4 rounded-lg shadow-sm mt-4">
-                  <h4 className="font-medium mb-1">Main Topics</h4>
-                  <ul className="list-disc pl-4">
-                    {summaryResponse.summary.main_topics.blocks.map((block, i) => (
-                      <li key={i} className="text-sm">{block.content}</li>
-                    ))}
-                  </ul>
-                </div>
-              </div>
-              {summaryResponse.raw_summary ? (
-                <div className="mt-4">
-                  <h4 className="font-medium mb-1">Full Summary</h4>
-                  <p className="text-sm whitespace-pre-wrap">{summaryResponse.raw_summary}</p>
-                </div>
-              ) : null}
-            </div>
-          )}
           <div className="p-6 w-full">
             <BlockNoteSummaryView
               ref={summaryRef}

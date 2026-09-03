@@ -79,6 +79,8 @@ export interface BlockNoteBlock {
 export interface SummaryDataResponse {
   markdown?: string;
   summary_json?: BlockNoteBlock[];
+  reasoning_stripped?: boolean;
+  normalization_fallback?: boolean;
   // Legacy format fields
   MeetingName?: string;
   _section_order?: string[];
@@ -86,6 +88,30 @@ export interface SummaryDataResponse {
 }
 
 export type MeetingSummary = Summary | SummaryDataResponse;
+
+export type SummaryProcessStatus =
+  | 'pending'
+  | 'processing'
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
+  | 'error'
+  | 'idle';
+
+export interface ProcessTranscriptResponse {
+  message: string;
+  process_id: string;
+}
+
+export interface SummaryProcessResponse {
+  status: SummaryProcessStatus;
+  meetingName: string | null;
+  meeting_id: string;
+  start: string | null;
+  end: string | null;
+  data: unknown | null;
+  error: string | null;
+}
 
 // Pagination types for optimized transcript loading
 export interface MeetingMetadata {
