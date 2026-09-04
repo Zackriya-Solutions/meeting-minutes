@@ -176,7 +176,7 @@ export function AudioBackendSelector({
 
       <div className="text-xs text-gray-500 space-y-1">
         <p>• Backend selection only affects system audio capture</p>
-        <p>• Microphone always uses the default method</p>
+        <p>• Microphone always uses the selected Meetily input device</p>
         <p>• Changes apply to new recording sessions</p>
       </div>
     </div>

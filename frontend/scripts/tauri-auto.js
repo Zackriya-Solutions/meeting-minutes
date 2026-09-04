@@ -47,11 +47,23 @@ if (platform === 'linux' && feature === 'cuda') {
   env.CMAKE_POSITION_INDEPENDENT_CODE = 'ON';
 }
 
+const features = [];
+if (feature && feature !== 'none') {
+  features.push(feature);
+}
+if (process.env.MEETILY_CAPTURE) {
+  if (process.env.MEETILY_CAPTURE !== 'pocketstation') {
+    console.error('MEETILY_CAPTURE must be "pocketstation" when it is set');
+    process.exit(1);
+  }
+  features.push('pocketstation-capture');
+}
+
 // Build the tauri command
 let tauriCmd = `tauri ${command}`;
-if (feature && feature !== 'none') {
-  tauriCmd += ` -- --features ${feature}`;
-  console.log(`🚀 Running: tauri ${command} with features: ${feature}`);
+if (features.length > 0) {
+  tauriCmd += ` -- --features ${features.join(',')}`;
+  console.log(`🚀 Running: tauri ${command} with features: ${features.join(', ')}`);
 } else {
   console.log(`🚀 Running: tauri ${command} (CPU-only mode)`);
 }

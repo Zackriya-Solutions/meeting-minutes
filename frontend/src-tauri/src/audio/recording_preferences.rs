@@ -8,7 +8,6 @@ use anyhow::Result;
 #[cfg(target_os = "macos")]
 use log::error;
 
-#[cfg(target_os = "macos")]
 use crate::audio::capture::AudioCaptureBackend;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -20,7 +19,6 @@ pub struct RecordingPreferences {
     pub preferred_mic_device: Option<String>,
     #[serde(default)]
     pub preferred_system_device: Option<String>,
-    #[cfg(target_os = "macos")]
     #[serde(default)]
     pub system_audio_backend: Option<String>,
 }
@@ -33,8 +31,7 @@ impl Default for RecordingPreferences {
             file_format: "mp4".to_string(),
             preferred_mic_device: None,
             preferred_system_device: None,
-            #[cfg(target_os = "macos")]
-            system_audio_backend: Some("coreaudio".to_string()),
+            system_audio_backend: Some(AudioCaptureBackend::default().to_string()),
         }
     }
 }
@@ -110,12 +107,8 @@ pub async fn load_recording_preferences<R: Runtime>(
         match serde_json::from_value::<RecordingPreferences>(value.clone()) {
             Ok(mut p) => {
                 info!("Loaded recording preferences from store");
-                // Update macOS backend to current value if needed
-                #[cfg(target_os = "macos")]
-                {
-                    let backend = crate::audio::capture::get_current_backend();
-                    p.system_audio_backend = Some(backend.to_string());
-                }
+                let backend = crate::audio::capture::get_current_backend();
+                p.system_audio_backend = Some(backend.to_string());
                 p
             }
             Err(e) => {
@@ -163,7 +156,6 @@ pub async fn save_recording_preferences<R: Runtime>(
     info!("Successfully persisted recording preferences to disk");
 
     // Save backend preference to global config
-    #[cfg(target_os = "macos")]
     if let Some(backend_str) = &preferences.system_audio_backend {
         if let Some(backend) = AudioCaptureBackend::from_string(backend_str) {
             info!("Setting audio capture backend to: {:?}", backend);
@@ -259,89 +251,42 @@ pub async fn select_recording_folder<R: Runtime>(
 /// Get available audio capture backends for the current platform
 #[tauri::command]
 pub async fn get_available_audio_backends() -> Result<Vec<String>, String> {
-    #[cfg(target_os = "macos")]
-    {
-        let backends = crate::audio::capture::get_available_backends();
-        Ok(backends.iter().map(|b| b.to_string()).collect())
-    }
-
-    #[cfg(not(target_os = "macos"))]
-    {
-        // Only ScreenCaptureKit available on non-macOS
-        Ok(vec!["screencapturekit".to_string()])
-    }
+    let backends = crate::audio::capture::get_available_backends();
+    Ok(backends.iter().map(|backend| backend.to_string()).collect())
 }
 
 /// Get current audio capture backend
 #[tauri::command]
 pub async fn get_current_audio_backend() -> Result<String, String> {
-    #[cfg(target_os = "macos")]
-    {
-        let backend = crate::audio::capture::get_current_backend();
-        Ok(backend.to_string())
-    }
-
-    #[cfg(not(target_os = "macos"))]
-    {
-        Ok("screencapturekit".to_string())
-    }
+    Ok(crate::audio::capture::get_current_backend().to_string())
 }
 
 /// Set audio capture backend
 #[tauri::command]
 pub async fn set_audio_backend(backend: String) -> Result<(), String> {
+    let backend_enum = AudioCaptureBackend::from_string(&backend)
+        .ok_or_else(|| format!("Audio backend is not available: {backend}"))?;
+
     #[cfg(target_os = "macos")]
-    {
-        use crate::audio::capture::AudioCaptureBackend;
+    if backend_enum == AudioCaptureBackend::CoreAudio {
         use crate::audio::permissions::{
             check_screen_recording_permission, request_screen_recording_permission,
         };
-
-        let backend_enum = AudioCaptureBackend::from_string(&backend)
-            .ok_or_else(|| format!("Invalid backend: {}", backend))?;
-
-        // If switching to Core Audio, log information about Audio Capture permission
-        if backend_enum == AudioCaptureBackend::CoreAudio {
-            info!("🔐 Core Audio backend requires Audio Capture permission (macOS 14.4+)");
-            info!("📍 Permission dialog will appear automatically when recording starts");
-
-            // Check if permission is already granted (this is informational only)
-            if !check_screen_recording_permission() {
-                warn!("⚠️  Audio Capture permission may not be granted");
-
-                // Attempt to open System Settings (opens System Settings)
-                if let Err(e) = request_screen_recording_permission() {
-                    error!("Failed to open System Settings: {}", e);
-                }
-
-                return Err(
-                    "Core Audio requires Audio Capture permission. \
-                    The permission dialog will appear when you start recording. \
-                    If already denied, enable it in System Settings → Privacy & Security → Audio Capture, \
-                    then restart the app.".to_string()
-                );
+        info!("Core Audio requires Audio Capture permission on macOS 14.4 and later");
+        if !check_screen_recording_permission() {
+            if let Err(error) = request_screen_recording_permission() {
+                error!("Failed to open System Settings: {error}");
             }
-
-            info!(
-                "✅ Core Audio backend selected - permission check will occur at recording start"
+            return Err(
+                "Allow Audio Capture in System Settings → Privacy & Security, then restart Meetily"
+                    .to_string(),
             );
         }
-
-        info!("Setting audio backend to: {:?}", backend_enum);
-        crate::audio::capture::set_current_backend(backend_enum);
-        Ok(())
     }
 
-    #[cfg(not(target_os = "macos"))]
-    {
-        if backend != "screencapturekit" {
-            return Err(format!(
-                "Backend {} not available on this platform",
-                backend
-            ));
-        }
-        Ok(())
-    }
+    info!("Setting audio backend to: {backend_enum:?}");
+    crate::audio::capture::set_current_backend(backend_enum);
+    Ok(())
 }
 
 /// Get backend information (name and description)
@@ -354,34 +299,12 @@ pub struct BackendInfo {
 
 #[tauri::command]
 pub async fn get_audio_backend_info() -> Result<Vec<BackendInfo>, String> {
-    #[cfg(target_os = "macos")]
-    {
-        use crate::audio::capture::AudioCaptureBackend;
-
-        let backends = vec![
-            BackendInfo {
-                id: AudioCaptureBackend::ScreenCaptureKit.to_string(),
-                name: AudioCaptureBackend::ScreenCaptureKit.name().to_string(),
-                description: AudioCaptureBackend::ScreenCaptureKit
-                    .description()
-                    .to_string(),
-            },
-            BackendInfo {
-                id: AudioCaptureBackend::CoreAudio.to_string(),
-                name: AudioCaptureBackend::CoreAudio.name().to_string(),
-                description: AudioCaptureBackend::CoreAudio.description().to_string(),
-            },
-        ];
-        Ok(backends)
-    }
-
-    #[cfg(not(target_os = "macos"))]
-    {
-        Ok(vec![BackendInfo {
-            id: "screencapturekit".to_string(),
-            name: "ScreenCaptureKit".to_string(),
-            description: "Default system audio capture".to_string(),
-        }])
-    }
+    Ok(crate::audio::capture::get_available_backends()
+        .into_iter()
+        .map(|backend| BackendInfo {
+            id: backend.to_string(),
+            name: backend.name().to_string(),
+            description: backend.description().to_string(),
+        })
+        .collect())
 }
-

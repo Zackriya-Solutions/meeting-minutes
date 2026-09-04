@@ -356,6 +356,11 @@ impl AudioStream {
 pub struct AudioStreamManager {
     microphone_stream: Option<AudioStream>,
     system_stream: Option<AudioStream>,
+    #[cfg(all(
+        feature = "pocketstation-capture",
+        any(target_os = "windows", target_os = "linux")
+    ))]
+    pocketstation: Option<super::capture::pocketstation::PocketStationCapture>,
     state: Arc<RecordingState>,
 }
 
@@ -367,6 +372,11 @@ impl AudioStreamManager {
         Self {
             microphone_stream: None,
             system_stream: None,
+            #[cfg(all(
+                feature = "pocketstation-capture",
+                any(target_os = "windows", target_os = "linux")
+            ))]
+            pocketstation: None,
             state,
         }
     }
@@ -400,30 +410,66 @@ impl AudioStreamManager {
             info!("ℹ️ No microphone device specified, skipping microphone stream");
         }
 
-        // Start system audio stream
-        if let Some(sys_device) = system_device {
-            info!("🔊 Creating system audio stream: {} (backend: {:?})", sys_device.name, backend);
-            match AudioStream::create(sys_device.clone(), self.state.clone(), DeviceType::System, recording_sender.clone()).await {
-                Ok(stream) => {
-                    self.state.set_system_device(sys_device);
-                    self.system_stream = Some(stream);
-                    info!("✅ System audio stream created with {:?} backend", backend);
-                }
-                Err(e) => {
-                    warn!("⚠️ Failed to create system audio stream: {}", e);
-                    // Don't fail if only system audio fails
-                }
-            }
+        #[cfg(all(
+            feature = "pocketstation-capture",
+            any(target_os = "windows", target_os = "linux")
+        ))]
+        if backend == AudioCaptureBackend::PocketStation {
+            self.pocketstation = Some(
+                super::capture::pocketstation::PocketStationCapture::start(Arc::clone(
+                    &self.state,
+                ))?,
+            );
+            info!("PocketStation system audio started");
+        } else if let Some(system_device) = system_device {
+            self.start_system_stream(system_device, recording_sender.clone(), backend)
+                .await;
         } else {
-            info!("ℹ️ No system device specified, skipping system audio stream");
+            info!("No system audio device was selected");
+        }
+
+        #[cfg(not(all(
+            feature = "pocketstation-capture",
+            any(target_os = "windows", target_os = "linux")
+        )))]
+        if let Some(system_device) = system_device {
+            self.start_system_stream(system_device, recording_sender.clone(), backend)
+                .await;
+        } else {
+            info!("No system audio device was selected");
         }
 
         // Ensure at least one stream was created
-        if self.microphone_stream.is_none() && self.system_stream.is_none() {
+        if !self.has_active_streams() {
             return Err(anyhow::anyhow!("No audio streams could be created"));
         }
 
         Ok(())
+    }
+
+    async fn start_system_stream(
+        &mut self,
+        device: Arc<AudioDevice>,
+        recording_sender: Option<mpsc::UnboundedSender<super::recording_state::AudioChunk>>,
+        backend: AudioCaptureBackend,
+    ) {
+        match AudioStream::create(
+            Arc::clone(&device),
+            Arc::clone(&self.state),
+            DeviceType::System,
+            recording_sender,
+        )
+        .await
+        {
+            Ok(stream) => {
+                self.state.set_system_device(device);
+                self.system_stream = Some(stream);
+                info!("System audio stream created with {:?}", backend);
+            }
+            Err(error) => {
+                warn!("Failed to create system audio stream: {}", error);
+            }
+        }
     }
 
     /// Stop all audio streams
@@ -431,6 +477,16 @@ impl AudioStreamManager {
         info!("Stopping all audio streams");
 
         let mut errors = Vec::new();
+
+        #[cfg(all(
+            feature = "pocketstation-capture",
+            any(target_os = "windows", target_os = "linux")
+        ))]
+        if let Some(mut capture) = self.pocketstation.take() {
+            if let Err(error) = capture.stop() {
+                errors.push(error);
+            }
+        }
 
         // Stop microphone stream
         if let Some(mic_stream) = self.microphone_stream.take() {
@@ -477,12 +533,29 @@ impl AudioStreamManager {
         if self.system_stream.is_some() {
             count += 1;
         }
+        #[cfg(all(
+            feature = "pocketstation-capture",
+            any(target_os = "windows", target_os = "linux")
+        ))]
+        if self.pocketstation.is_some() {
+            count += 1;
+        }
         count
     }
 
     /// Check if any streams are active
     pub fn has_active_streams(&self) -> bool {
-        self.microphone_stream.is_some() || self.system_stream.is_some()
+        let active = self.microphone_stream.is_some() || self.system_stream.is_some();
+        #[cfg(all(
+            feature = "pocketstation-capture",
+            any(target_os = "windows", target_os = "linux")
+        ))]
+        return active || self.pocketstation.is_some();
+        #[cfg(not(all(
+            feature = "pocketstation-capture",
+            any(target_os = "windows", target_os = "linux")
+        )))]
+        active
     }
 }
 
