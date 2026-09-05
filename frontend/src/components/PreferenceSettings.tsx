@@ -14,6 +14,7 @@ export function PreferenceSettings() {
     storageLocations,
     isLoadingPreferences,
     loadPreferences,
+    refreshRecordingsStorageLocation,
     updateNotificationSettings
   } = useConfig();
 
@@ -25,9 +26,10 @@ export function PreferenceSettings() {
   // Lazy load preferences on mount (only loads if not already cached)
   useEffect(() => {
     loadPreferences();
+    refreshRecordingsStorageLocation();
     // Reset tracking ref on mount (every tab visit)
     hasTrackedViewRef.current = false;
-  }, [loadPreferences]);
+  }, [loadPreferences, refreshRecordingsStorageLocation]);
 
   // Track preferences viewed analytics on every tab visit (once per mount)
   useEffect(() => {

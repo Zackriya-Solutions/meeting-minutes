@@ -20,7 +20,7 @@ use uuid::Uuid;
 use super::audio_processing::create_meeting_folder;
 use super::common::{create_transcript_segments, split_segment_at_silence, write_transcripts_json};
 use super::constants::AUDIO_EXTENSIONS;
-use super::recording_preferences::get_default_recordings_folder;
+use super::recording_preferences::get_recordings_save_folder;
 
 /// Global flag to track if import is in progress
 static IMPORT_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
@@ -339,7 +339,7 @@ async fn run_import<R: Runtime>(
     }
 
     // Create meeting folder
-    let base_folder = get_default_recordings_folder();
+    let base_folder = get_recordings_save_folder(&app).await;
     let meeting_folder = create_meeting_folder(&base_folder, &title, false)?;
 
     // Copy audio file to meeting folder

@@ -91,6 +91,7 @@ interface ConfigContextType {
   storageLocations: StorageLocations | null;
   isLoadingPreferences: boolean;
   loadPreferences: () => Promise<void>;
+  refreshRecordingsStorageLocation: () => Promise<void>;
   updateNotificationSettings: (settings: NotificationSettings) => Promise<void>;
 }
 
@@ -415,6 +416,23 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     setProviderApiKeys(prev => ({ ...prev, [provider]: apiKey }));
   }, []);
 
+  const fetchRecordingsFolder = useCallback(async (): Promise<string> => {
+    try {
+      const prefs = await invoke<{ save_folder: string }>('get_recording_preferences');
+      return prefs.save_folder;
+    } catch (error) {
+      console.error('[ConfigContext] Failed to load recording preferences, using default folder:', error);
+      return invoke<string>('get_default_recordings_folder_path');
+    }
+  }, []);
+
+  const refreshRecordingsStorageLocation = useCallback(async () => {
+    const recordings = await fetchRecordingsFolder();
+    setStorageLocations((prev) =>
+      prev ? { ...prev, recordings } : { database: '', models: '', recordings }
+    );
+  }, [fetchRecordingsFolder]);
+
   // Lazy load preference settings (only loads if not already cached)
   const loadPreferences = useCallback(async () => {
     // If already loaded, don't reload
@@ -441,11 +459,11 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
         setNotificationSettings(null);
       }
 
-      // Load storage locations
+      // Load storage locations (recordings uses saved preference, not platform default)
       const [dbDir, modelsDir, recordingsDir] = await Promise.all([
         invoke<string>('get_database_directory'),
         invoke<string>('whisper_get_models_directory'),
-        invoke<string>('get_default_recordings_folder_path')
+        fetchRecordingsFolder(),
       ]);
 
       setStorageLocations({
@@ -462,7 +480,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
       isLoadingRef.current = false;
       setIsLoadingPreferences(false);
     }
-  }, []);
+  }, [fetchRecordingsFolder]);
 
   // Update notification settings
   const updateNotificationSettings = useCallback(async (settings: NotificationSettings) => {
@@ -512,6 +530,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     storageLocations,
     isLoadingPreferences,
     loadPreferences,
+    refreshRecordingsStorageLocation,
     updateNotificationSettings,
   }), [
     modelConfig,
@@ -535,6 +554,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     storageLocations,
     isLoadingPreferences,
     loadPreferences,
+    refreshRecordingsStorageLocation,
     updateNotificationSettings,
   ]);
 

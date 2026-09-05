@@ -7,6 +7,7 @@ use tokio::sync::mpsc;
 use serde::{Serialize, Deserialize};
 use std::path::PathBuf;
 
+use super::recording_preferences::get_default_recordings_folder;
 use super::recording_state::AudioChunk;
 use super::audio_processing::create_meeting_folder;
 use super::incremental_saver::IncrementalAudioSaver;
@@ -51,6 +52,7 @@ pub struct RecordingSaver {
     incremental_saver: Option<Arc<AsyncMutex<IncrementalAudioSaver>>>,
     meeting_folder: Option<PathBuf>,
     meeting_name: Option<String>,
+    base_save_folder: Option<PathBuf>,
     metadata: Option<MeetingMetadata>,
     transcript_segments: Arc<Mutex<Vec<TranscriptSegment>>>,
     chunk_receiver: Option<mpsc::UnboundedReceiver<AudioChunk>>,
@@ -63,11 +65,17 @@ impl RecordingSaver {
             incremental_saver: None,
             meeting_folder: None,
             meeting_name: None,
+            base_save_folder: None,
             metadata: None,
             transcript_segments: Arc::new(Mutex::new(Vec::new())),
             chunk_receiver: None,
             is_saving: Arc::new(Mutex::new(false)),
         }
+    }
+
+    /// Set the base folder where meeting recordings are stored.
+    pub fn set_save_folder(&mut self, folder: PathBuf) {
+        self.base_save_folder = Some(folder);
     }
 
     /// Set the meeting name for this recording session
@@ -228,8 +236,10 @@ impl RecordingSaver {
     /// * `meeting_name` - Name of the meeting
     /// * `create_checkpoints` - Whether to create .checkpoints/ directory and IncrementalAudioSaver
     fn initialize_meeting_folder(&mut self, meeting_name: &str, create_checkpoints: bool) -> Result<()> {
-        // Load preferences to get base recordings folder
-        let base_folder = super::recording_preferences::get_default_recordings_folder();
+        let base_folder = self
+            .base_save_folder
+            .clone()
+            .unwrap_or_else(get_default_recordings_folder);
 
         // Create meeting folder structure (with or without .checkpoints/ subdirectory)
         let meeting_folder = create_meeting_folder(&base_folder, meeting_name, create_checkpoints)?;
