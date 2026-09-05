@@ -30,6 +30,7 @@ describe('Parakeet model manager', () => {
         onCancel={() => {}}
         onDelete={() => {}}
         isDownloading={true}
+        isCancelling={false}
       />
     );
 

@@ -768,7 +768,7 @@ export class Analytics {
         modelProvider,
         modelName,
         success,
-        durationSeconds,
+        durationSeconds: durationSeconds === undefined ? undefined : Math.floor(durationSeconds),
         errorMessage
       });
       console.log('Summary generation completed event tracked successfully');

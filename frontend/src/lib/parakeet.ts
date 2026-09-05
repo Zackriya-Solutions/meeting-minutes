@@ -21,6 +21,20 @@ export type ModelStatus =
   | { Error: string }
   | { Corrupted: { file_size: number; expected_min_size: number } };
 
+export type CancelDownloadOutcome = 'cancelled' | 'pending';
+export type ParakeetDownloadEventStatus = 'downloading' | 'completed' | 'cancelled';
+
+export interface ParakeetDownloadProgressEvent {
+  modelName: string;
+  progress: number;
+  downloaded_bytes?: number;
+  total_bytes?: number;
+  downloaded_mb?: number;
+  total_mb?: number;
+  speed_mbps?: number;
+  status: ParakeetDownloadEventStatus;
+}
+
 export interface ParakeetEngineState {
   currentModel: string | null;
   availableModels: ParakeetModelInfo[];
@@ -184,8 +198,8 @@ export class ParakeetAPI {
     await invoke('parakeet_download_model', { modelName });
   }
 
-  static async cancelDownload(modelName: string): Promise<void> {
-    await invoke('parakeet_cancel_download', { modelName });
+  static async cancelDownload(modelName: string): Promise<CancelDownloadOutcome> {
+    return await invoke('parakeet_cancel_download', { modelName });
   }
 
   static async deleteCorruptedModel(modelName: string): Promise<string> {
