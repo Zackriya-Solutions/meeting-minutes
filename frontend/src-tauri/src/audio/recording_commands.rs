@@ -91,19 +91,23 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
 
     // Validate that transcription models are available before starting recording
     info!("🔍 Validating transcription model availability before starting recording...");
-    if let Err(validation_error) = transcription::validate_transcription_model_ready(&app).await {
-        error!("Model validation failed: {}", validation_error);
+    let max_live_segment_duration_ms =
+        match transcription::validate_transcription_model_ready(&app).await {
+            Ok(duration) => duration,
+            Err(validation_error) => {
+                error!("Model validation failed: {}", validation_error);
 
-        // Emit error event for frontend - actionable: false to show toast instead of modal
-        // (download progress is already shown in top-right toast)
-        let _ = app.emit("transcription-error", serde_json::json!({
-            "error": validation_error,
-            "userMessage": "Recording cannot start: Transcription model is still downloading. Please wait for the download to complete.",
-            "actionable": false
-        }));
+                // Emit error event for frontend - actionable: false to show toast instead of modal
+                // (download progress is already shown in top-right toast)
+                let _ = app.emit("transcription-error", serde_json::json!({
+                    "error": validation_error,
+                    "userMessage": "Recording cannot start: Transcription model is still downloading. Please wait for the download to complete.",
+                    "actionable": false
+                }));
 
-        return Err(validation_error);
-    }
+                return Err(validation_error);
+            }
+        };
     info!("✅ Transcription model validation passed");
 
     // Async-first approach - no more blocking operations!
@@ -234,7 +238,12 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
 
     // Start recording with resolved devices (replaces start_recording_with_defaults_and_auto_save call)
     let transcription_receiver = manager
-        .start_recording(microphone_device, system_device, auto_save)
+        .start_recording(
+            microphone_device,
+            system_device,
+            auto_save,
+            max_live_segment_duration_ms,
+        )
         .await
         .map_err(|e| format!("Failed to start recording: {}", e))?;
 
@@ -337,19 +346,23 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
 
     // Validate that transcription models are available before starting recording
     info!("🔍 Validating transcription model availability before starting recording...");
-    if let Err(validation_error) = transcription::validate_transcription_model_ready(&app).await {
-        error!("Model validation failed: {}", validation_error);
+    let max_live_segment_duration_ms =
+        match transcription::validate_transcription_model_ready(&app).await {
+            Ok(duration) => duration,
+            Err(validation_error) => {
+                error!("Model validation failed: {}", validation_error);
 
-        // Emit error event for frontend - actionable: false to show toast instead of modal
-        // (download progress is already shown in top-right toast)
-        let _ = app.emit("transcription-error", serde_json::json!({
-            "error": validation_error,
-            "userMessage": "Recording cannot start: Transcription model is still downloading. Please wait for the download to complete.",
-            "actionable": false
-        }));
+                // Emit error event for frontend - actionable: false to show toast instead of modal
+                // (download progress is already shown in top-right toast)
+                let _ = app.emit("transcription-error", serde_json::json!({
+                    "error": validation_error,
+                    "userMessage": "Recording cannot start: Transcription model is still downloading. Please wait for the download to complete.",
+                    "actionable": false
+                }));
 
-        return Err(validation_error);
-    }
+                return Err(validation_error);
+            }
+        };
     info!("✅ Transcription model validation passed");
 
     // Parse devices
@@ -405,7 +418,12 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
 
     // Start recording with specified devices and auto_save setting
     let transcription_receiver = manager
-        .start_recording(mic_device, system_device, auto_save)
+        .start_recording(
+            mic_device,
+            system_device,
+            auto_save,
+            max_live_segment_duration_ms,
+        )
         .await
         .map_err(|e| format!("Failed to start recording: {}", e))?;
 
@@ -669,6 +687,47 @@ pub async fn stop_recording<R: Runtime>(
                 }
             } else {
                 warn!("⚠️ No Parakeet engine found to unload model");
+            }
+        }
+        Some("qwen3Asr") => {
+            info!("Unloading Qwen3-ASR model...");
+            let engine = {
+                let guard = crate::qwen_asr_engine::commands::QWEN_ASR_ENGINE
+                    .lock()
+                    .unwrap();
+                guard.as_ref().cloned()
+            };
+            if let Some(engine) = engine {
+                let current_model = engine
+                    .get_current_model()
+                    .await
+                    .unwrap_or_else(|| "unknown".to_string());
+                if engine.unload_model().await {
+                    info!("Qwen3-ASR model '{}' unloaded successfully", current_model);
+                }
+            }
+        }
+        Some("senseVoice") => {
+            #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+            info!("Keeping the SenseVoice CoreML model resident to reuse its ANE specialization");
+            #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+            {
+                info!("Unloading SenseVoice model...");
+                let engine = {
+                    let guard = crate::sense_voice_engine::commands::SENSE_VOICE_ENGINE
+                        .lock()
+                        .unwrap();
+                    guard.as_ref().cloned()
+                };
+                if let Some(engine) = engine {
+                    let current_model = engine
+                        .get_current_model()
+                        .await
+                        .unwrap_or_else(|| "unknown".to_string());
+                    if engine.unload_model().await {
+                        info!("SenseVoice model '{}' unloaded successfully", current_model);
+                    }
+                }
             }
         }
         _ => {

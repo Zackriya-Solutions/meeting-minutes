@@ -23,6 +23,10 @@ import { useConfig } from '@/contexts/ConfigContext';
 import { LANGUAGES } from '@/constants/languages';
 import { useTranscriptionModels, ModelOption } from '@/hooks/useTranscriptionModels';
 import Analytics from '@/lib/analytics';
+import {
+  getTranscriptionLanguageCapability,
+  supportsTranscriptionLanguage,
+} from '@/lib/parakeet';
 
 interface RetranscribeDialogProps {
   open: boolean;
@@ -92,13 +96,25 @@ export function RetranscribeDialog({
     const name = selectedModelKey.slice(colonIndex + 1);
     return availableModels.find(m => m.provider === provider && m.name === name);
   }, [selectedModelKey, availableModels]);
-  const isParakeetModel = selectedModelDetails?.provider === 'parakeet';
+  const usesAutomaticLanguage = selectedModelDetails?.provider === 'parakeet'
+    || selectedModelDetails?.provider === 'senseVoice';
+  const languageCapability = useMemo(
+    () => getTranscriptionLanguageCapability(
+      selectedModelDetails?.provider,
+      selectedModelDetails?.name
+    ),
+    [selectedModelDetails?.provider, selectedModelDetails?.name]
+  );
 
   useEffect(() => {
-    if (isParakeetModel && selectedLang !== 'auto') {
+    if (
+      (!languageCapability.allowsLanguageSelection
+        || !supportsTranscriptionLanguage(languageCapability, selectedLang))
+      && selectedLang !== 'auto'
+    ) {
       setSelectedLang('auto');
     }
-  }, [isParakeetModel, selectedLang]);
+  }, [languageCapability, selectedLang]);
 
   // Reset state only when dialog transitions from closed to open
   // This prevents re-initialization when config changes while dialog is already open
@@ -207,9 +223,9 @@ export function RetranscribeDialog({
     setProgress(null);
 
     try {
-      const languageToSend = isParakeetModel ? null : selectedLang === 'auto' ? null : selectedLang;
+      const languageToSend = usesAutomaticLanguage ? null : selectedLang === 'auto' ? null : selectedLang;
       await Analytics.track('enhance_transcript_started', {
-        language: isParakeetModel ? 'auto' : (selectedLang === 'auto' ? 'auto' : selectedLang),
+        language: usesAutomaticLanguage ? 'auto' : (selectedLang === 'auto' ? 'auto' : selectedLang),
         model_provider: selectedModelDetails?.provider || '',
         model_name: selectedModelDetails?.name || ''
       });
@@ -301,7 +317,7 @@ export function RetranscribeDialog({
 
         <div className="space-y-4 py-4">
           {!isProcessing && !error && (
-            !isParakeetModel ? (
+            !usesAutomaticLanguage ? (
               <div className="space-y-3">
                 <div className="flex items-center gap-2">
                   <Globe className="h-4 w-4 text-muted-foreground" />
@@ -312,7 +328,9 @@ export function RetranscribeDialog({
                     <SelectValue placeholder="Select language" />
                   </SelectTrigger>
                   <SelectContent className="max-h-60">
-                    {LANGUAGES.map((lang) => (
+                    {LANGUAGES.filter((lang) =>
+                      supportsTranscriptionLanguage(languageCapability, lang.code)
+                    ).map((lang) => (
                       <SelectItem key={lang.code} value={lang.code}>
                         {lang.name}
                       </SelectItem>
@@ -330,7 +348,7 @@ export function RetranscribeDialog({
                   <span className="text-sm font-medium">Language</span>
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  Language selection isn't supported for Parakeet. It always uses automatic detection.
+                  This model always uses automatic language detection.
                 </p>
               </div>
             )

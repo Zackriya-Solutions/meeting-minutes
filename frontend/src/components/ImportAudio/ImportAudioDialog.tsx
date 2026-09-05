@@ -37,6 +37,10 @@ import { useRouter } from 'next/navigation';
 import { useSidebar } from '../Sidebar/SidebarProvider';
 import { LANGUAGES } from '@/constants/languages';
 import { useTranscriptionModels, ModelOption } from '@/hooks/useTranscriptionModels';
+import {
+  getTranscriptionLanguageCapability,
+  supportsTranscriptionLanguage,
+} from '@/lib/parakeet';
 
 
 interface ImportAudioDialogProps {
@@ -169,13 +173,22 @@ export function ImportAudioDialog({
     const name = selectedModelKey.slice(colonIndex + 1);
     return availableModels.find((m) => m.provider === provider && m.name === name);
   }, [selectedModelKey, availableModels]);
-  const isParakeetModel = selectedModel?.provider === 'parakeet';
+  const usesAutomaticLanguage = selectedModel?.provider === 'parakeet'
+    || selectedModel?.provider === 'senseVoice';
+  const languageCapability = useMemo(
+    () => getTranscriptionLanguageCapability(selectedModel?.provider, selectedModel?.name),
+    [selectedModel?.provider, selectedModel?.name]
+  );
 
   useEffect(() => {
-    if (isParakeetModel && selectedLang !== 'auto') {
+    if (
+      (!languageCapability.allowsLanguageSelection
+        || !supportsTranscriptionLanguage(languageCapability, selectedLang))
+      && selectedLang !== 'auto'
+    ) {
       setSelectedLang('auto');
     }
-  }, [isParakeetModel, selectedLang]);
+  }, [languageCapability, selectedLang]);
 
   const handleSelectFile = async () => {
     const info = await selectFile();
@@ -190,7 +203,7 @@ export function ImportAudioDialog({
     await startImport(
       fileInfo.path,
       title || fileInfo.filename,
-      isParakeetModel ? null : selectedLang === 'auto' ? null : selectedLang,
+      usesAutomaticLanguage ? null : selectedLang === 'auto' ? null : selectedLang,
       selectedModel?.name || null,
       selectedModel?.provider || null
     );
@@ -343,7 +356,7 @@ export function ImportAudioDialog({
                   {showAdvanced && (
                     <div className="p-3 pt-0 space-y-4 border-t">
                       {/* Language selector */}
-                      {!isParakeetModel ? (
+                      {!usesAutomaticLanguage ? (
                         <div className="space-y-2">
                           <div className="flex items-center gap-2">
                             <Globe className="h-4 w-4 text-muted-foreground" />
@@ -354,7 +367,9 @@ export function ImportAudioDialog({
                               <SelectValue placeholder="Select language" />
                             </SelectTrigger>
                             <SelectContent className="max-h-60">
-                              {LANGUAGES.map((lang) => (
+                              {LANGUAGES.filter((lang) =>
+                                supportsTranscriptionLanguage(languageCapability, lang.code)
+                              ).map((lang) => (
                                 <SelectItem key={lang.code} value={lang.code}>
                                   {lang.name}
                                 </SelectItem>
@@ -369,7 +384,7 @@ export function ImportAudioDialog({
                             <span className="text-sm font-medium">Language</span>
                           </div>
                           <p className="text-xs text-muted-foreground">
-                            Language selection isn't supported for Parakeet. It always uses automatic detection.
+                            This model always uses automatic language detection.
                           </p>
                         </div>
                       )}

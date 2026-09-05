@@ -17,7 +17,7 @@ pub(crate) async fn acquire_engine_lifecycle_lock() -> OwnedMutexGuard<()> {
 /// Unload the transcription engine after a batch job (import or retranscription).
 /// Skips unloading if a live recording is currently in progress, since recording
 /// uses the same global engine instances.
-pub(crate) async fn unload_engine_after_batch(use_parakeet: bool) {
+pub(crate) async fn unload_engine_after_batch(provider: &str) {
     let _engine_lifecycle_guard = acquire_engine_lifecycle_lock().await;
 
     if crate::audio::recording_commands::is_recording().await {
@@ -25,23 +25,55 @@ pub(crate) async fn unload_engine_after_batch(use_parakeet: bool) {
         return;
     }
 
-    if use_parakeet {
-        use crate::parakeet_engine::commands::PARAKEET_ENGINE;
-        let engine = {
-            let guard = PARAKEET_ENGINE.lock().unwrap_or_else(|e| e.into_inner());
-            guard.as_ref().cloned()
-        };
-        if let Some(e) = engine {
-            e.unload_model().await;
+    match provider {
+        "parakeet" => {
+            let engine = {
+                let guard = crate::parakeet_engine::commands::PARAKEET_ENGINE
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner());
+                guard.as_ref().cloned()
+            };
+            if let Some(engine) = engine {
+                engine.unload_model().await;
+            }
         }
-    } else {
-        use crate::whisper_engine::commands::WHISPER_ENGINE;
-        let engine = {
-            let guard = WHISPER_ENGINE.lock().unwrap_or_else(|e| e.into_inner());
-            guard.as_ref().cloned()
-        };
-        if let Some(e) = engine {
-            e.unload_model().await;
+        "qwen3Asr" => {
+            let engine = {
+                let guard = crate::qwen_asr_engine::commands::QWEN_ASR_ENGINE
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner());
+                guard.as_ref().cloned()
+            };
+            if let Some(engine) = engine {
+                engine.unload_model().await;
+            }
+        }
+        "senseVoice" => {
+            #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+            log::info!("Keeping the SenseVoice CoreML model resident after the batch job");
+            #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+            {
+                let engine = {
+                    let guard = crate::sense_voice_engine::commands::SENSE_VOICE_ENGINE
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner());
+                    guard.as_ref().cloned()
+                };
+                if let Some(engine) = engine {
+                    engine.unload_model().await;
+                }
+            }
+        }
+        _ => {
+            let engine = {
+                let guard = crate::whisper_engine::commands::WHISPER_ENGINE
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner());
+                guard.as_ref().cloned()
+            };
+            if let Some(engine) = engine {
+                engine.unload_model().await;
+            }
         }
     }
 }

@@ -1,8 +1,15 @@
 use anyhow::{anyhow, Result};
+use rubato::{
+    Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType, WindowFunction,
+};
 use silero_rs::{VadConfig, VadSession, VadTransition};
 use log::{debug, info, warn};
 use std::collections::VecDeque;
 use std::time::Duration;
+
+const VAD_SAMPLE_RATE: usize = 16_000;
+// Qwen rejects inputs shorter than 100 ms; align VAD tails with that boundary.
+pub(crate) const MIN_TRANSCRIPTION_SEGMENT_SAMPLES: usize = 1_600;
 
 /// Represents a complete speech segment detected by VAD
 #[derive(Debug, Clone)]
@@ -18,24 +25,35 @@ pub struct ContinuousVadProcessor {
     session: VadSession,
     chunk_size: usize,
     sample_rate: u32,
+    resampler: Option<SincFixedIn<f32>>,
+    resampler_input_buffer: Vec<f32>,
     buffer: Vec<f32>,
     speech_segments: VecDeque<SpeechSegment>,
-    current_speech: Vec<f32>,
     in_speech: bool,
     processed_samples: usize,
-    speech_start_sample: usize,
+    speech_start_timestamp_ms: Option<f64>,
+    emitted_speech_samples: usize,
+    max_live_segment_samples: Option<usize>,
     // State tracking for smart logging
     last_logged_state: bool,
 }
 
 impl ContinuousVadProcessor {
     pub fn new(input_sample_rate: u32, redemption_time_ms: u32) -> Result<Self> {
+        Self::new_with_max_segment_duration(input_sample_rate, redemption_time_ms, None)
+    }
+
+    pub fn new_with_max_segment_duration(
+        input_sample_rate: u32,
+        redemption_time_ms: u32,
+        max_live_segment_duration_ms: Option<u32>,
+    ) -> Result<Self> {
         // Silero VAD MUST use 16kHz - this is hardcoded requirement
-        const VAD_SAMPLE_RATE: u32 = 16000;
+        const VAD_SAMPLE_RATE_HZ: u32 = VAD_SAMPLE_RATE as u32;
 
         // Use STRICT settings to prevent silence from reaching Whisper
         let mut config = VadConfig::default();
-        config.sample_rate = VAD_SAMPLE_RATE as usize;
+        config.sample_rate = VAD_SAMPLE_RATE;
 
         // CONTINUOUS SPEECH FIX: Tuned for capturing complete 5+ second utterances
         // Previous: 0.55/0.40 with 400ms redemption was fragmenting speech into 40ms segments
@@ -62,21 +80,50 @@ impl ContinuousVadProcessor {
             .map_err(|e| anyhow!("Failed to create VAD session: {:?}", e))?;
 
         // VAD uses 30ms chunks at 16kHz (480 samples)
-        let vad_chunk_size = (VAD_SAMPLE_RATE as f32 * 0.03) as usize; // 480 samples
+        let vad_chunk_size = (VAD_SAMPLE_RATE_HZ as f32 * 0.03) as usize; // 480 samples
+        let max_live_segment_samples = max_live_segment_duration_ms.map(|duration_ms| {
+            ((duration_ms as usize * VAD_SAMPLE_RATE) / 1000).max(vad_chunk_size)
+        });
 
-        info!("VAD processor created: input={}Hz, vad={}Hz, chunk_size={} samples",
-              input_sample_rate, VAD_SAMPLE_RATE, vad_chunk_size);
+        let resampler = if input_sample_rate == VAD_SAMPLE_RATE_HZ {
+            None
+        } else {
+            let input_frames = ((input_sample_rate as usize) / 100).max(1);
+            let params = SincInterpolationParameters {
+                sinc_len: 256,
+                f_cutoff: 0.95,
+                interpolation: SincInterpolationType::Cubic,
+                oversampling_factor: 256,
+                window: WindowFunction::BlackmanHarris2,
+            };
+            Some(
+                SincFixedIn::<f32>::new(
+                    VAD_SAMPLE_RATE_HZ as f64 / input_sample_rate as f64,
+                    2.0,
+                    params,
+                    input_frames,
+                    1,
+                )
+                .map_err(|error| anyhow!("Failed to create VAD resampler: {error}"))?,
+            )
+        };
+
+        info!("VAD processor created: input={}Hz, vad={}Hz, chunk_size={} samples, live_segment_limit={:?}ms",
+              input_sample_rate, VAD_SAMPLE_RATE_HZ, vad_chunk_size, max_live_segment_duration_ms);
 
         Ok(Self {
             session,
             chunk_size: vad_chunk_size,
-            sample_rate: input_sample_rate, // Store input rate for resampling ratio in resample_to_16k()
+            sample_rate: input_sample_rate,
+            resampler,
+            resampler_input_buffer: Vec::new(),
             buffer: Vec::with_capacity(vad_chunk_size * 2),
             speech_segments: VecDeque::new(),
-            current_speech: Vec::new(),
             in_speech: false,
             processed_samples: 0,
-            speech_start_sample: 0,
+            speech_start_timestamp_ms: None,
+            emitted_speech_samples: 0,
+            max_live_segment_samples,
             // Initialize state tracking
             last_logged_state: false,
         })
@@ -109,62 +156,74 @@ impl ContinuousVadProcessor {
         Ok(completed_segments)
     }
 
-    /// Improved resampling from input sample rate to 16kHz with anti-aliasing
-    /// Uses linear interpolation and basic low-pass filtering for better quality
-    fn resample_to_16k(&self, samples: &[f32]) -> Result<Vec<f32>> {
+    /// Resample to 16kHz while preserving the filter state across audio callbacks.
+    fn resample_to_16k(&mut self, samples: &[f32]) -> Result<Vec<f32>> {
         if self.sample_rate == 16000 {
             return Ok(samples.to_vec());
         }
 
-        // Calculate downsampling ratio
-        let ratio = self.sample_rate as f64 / 16000.0;
-        let output_len = (samples.len() as f64 / ratio) as usize;
-        let mut resampled = Vec::with_capacity(output_len);
+        self.resampler_input_buffer.extend_from_slice(samples);
+        let mut resampled = Vec::with_capacity(
+            samples.len() * VAD_SAMPLE_RATE / self.sample_rate as usize + self.chunk_size,
+        );
 
-        // Apply simple low-pass filter before downsampling to reduce aliasing
-        let cutoff_freq = 0.4; // Normalized frequency (0.4 * Nyquist)
-        let mut filtered_samples = Vec::with_capacity(samples.len());
-        
-        // Simple moving average filter (basic low-pass)
-        let filter_size = (self.sample_rate as f64 / (cutoff_freq * self.sample_rate as f64)) as usize;
-        let filter_size = std::cmp::max(1, std::cmp::min(filter_size, 5)); // Limit filter size
-        
-        for i in 0..samples.len() {
-            let start = if i >= filter_size { i - filter_size } else { 0 };
-            let end = std::cmp::min(i + filter_size + 1, samples.len());
-            let sum: f32 = samples[start..end].iter().sum();
-            filtered_samples.push(sum / (end - start) as f32);
-        }
+        loop {
+            let input_frames = self
+                .resampler
+                .as_ref()
+                .ok_or_else(|| anyhow!("VAD resampler is not initialized"))?
+                .input_frames_next();
+            if self.resampler_input_buffer.len() < input_frames {
+                break;
+            }
 
-        // Linear interpolation downsampling
-        for i in 0..output_len {
-            let source_pos = i as f64 * ratio;
-            let source_index = source_pos as usize;
-            let fraction = source_pos - source_index as f64;
-            
-            if source_index + 1 < filtered_samples.len() {
-                // Linear interpolation
-                let sample1 = filtered_samples[source_index];
-                let sample2 = filtered_samples[source_index + 1];
-                let interpolated = sample1 + (sample2 - sample1) * fraction as f32;
-                resampled.push(interpolated);
-            } else if source_index < filtered_samples.len() {
-                resampled.push(filtered_samples[source_index]);
+            let input: Vec<f32> = self.resampler_input_buffer.drain(..input_frames).collect();
+            let mut output = self
+                .resampler
+                .as_mut()
+                .expect("resampler was checked above")
+                .process(&[input], None)
+                .map_err(|error| anyhow!("VAD resampling failed: {error}"))?;
+            if let Some(channel) = output.pop() {
+                resampled.extend(channel.into_iter().map(|sample| sample.clamp(-1.0, 1.0)));
             }
         }
 
-        debug!("Resampled from {} samples ({}Hz) to {} samples (16kHz) with anti-aliasing",
-               samples.len(), self.sample_rate, resampled.len());
+        debug!(
+            "Resampled {} input samples ({}Hz) to {} samples (16kHz), {} input samples buffered",
+            samples.len(),
+            self.sample_rate,
+            resampled.len(),
+            self.resampler_input_buffer.len()
+        );
 
         Ok(resampled)
     }
 
     /// Flush any remaining audio and return final speech segments
     pub fn flush(&mut self) -> Result<Vec<SpeechSegment>> {
-        debug!("VAD flush: in_speech={}, current_speech_len={}, buffer_len={}, speech_segments_queued={}",
-              self.in_speech, self.current_speech.len(), self.buffer.len(), self.speech_segments.len());
+        debug!("VAD flush: in_speech={}, current_speech_len={}, emitted_speech_len={}, buffer_len={}, speech_segments_queued={}",
+              self.in_speech, self.session.current_speech_samples(), self.emitted_speech_samples,
+              self.buffer.len(), self.speech_segments.len());
 
         let mut completed_segments = Vec::new();
+
+        if !self.resampler_input_buffer.is_empty() {
+            let remaining = std::mem::take(&mut self.resampler_input_buffer);
+            let mut output = self
+                .resampler
+                .as_mut()
+                .ok_or_else(|| anyhow!("VAD resampler is not initialized"))?
+                .process_partial(Some(&[remaining]), None)
+                .map_err(|error| anyhow!("Failed to flush VAD resampler: {error}"))?;
+            if let Some(channel) = output.pop() {
+                self.buffer.extend(
+                    channel
+                        .into_iter()
+                        .map(|sample| sample.clamp(-1.0, 1.0)),
+                );
+            }
+        }
 
         // Process any remaining buffered audio
         if !self.buffer.is_empty() {
@@ -181,24 +240,25 @@ impl ContinuousVadProcessor {
         }
 
         // Force end any ongoing speech
-        if self.in_speech && !self.current_speech.is_empty() {
-            // processed_samples and speech_start_sample always count 16kHz samples (post-resampling)
-            let start_ms = (self.speech_start_sample as f64 / 16000.0) * 1000.0;
-            let end_ms = (self.processed_samples as f64 / 16000.0) * 1000.0;
+        if self.in_speech {
+            let current_speech = self.session.get_current_speech();
+            if let Some(segment) = remaining_speech_segment(
+                current_speech,
+                self.speech_start_timestamp_ms.unwrap_or_else(|| {
+                    samples_to_ms(self.processed_samples.saturating_sub(current_speech.len()))
+                }),
+                self.emitted_speech_samples,
+                0.8,
+            ) {
+                debug!("VAD flush: Force-ending speech - start={}ms, end={}ms, duration={}ms, samples={}",
+                      segment.start_timestamp_ms, segment.end_timestamp_ms,
+                      segment.end_timestamp_ms - segment.start_timestamp_ms, segment.samples.len());
+                self.speech_segments.push_back(segment);
+            }
 
-            debug!("VAD flush: Force-ending speech - start={}ms, end={}ms, duration={}ms, samples={}",
-                  start_ms, end_ms, end_ms - start_ms, self.current_speech.len());
-
-            let segment = SpeechSegment {
-                samples: self.current_speech.clone(),
-                start_timestamp_ms: start_ms,
-                end_timestamp_ms: end_ms,
-                confidence: 0.8, // Estimated confidence for forced end
-            };
-
-            self.speech_segments.push_back(segment);
-            self.current_speech.clear();
             self.in_speech = false;
+            self.speech_start_timestamp_ms = None;
+            self.emitted_speech_samples = 0;
         }
 
         // Extract all remaining segments
@@ -211,7 +271,7 @@ impl ContinuousVadProcessor {
 
     fn process_chunk(&mut self, chunk: &[f32]) -> Result<()> {
         // Track accumulated speech buffer size to detect memory issues
-        let current_speech_size = self.current_speech.len();
+        let current_speech_size = self.session.current_speech_samples();
         if current_speech_size > 1_000_000 {
             // More than ~62 seconds of accumulated speech at 16kHz
             warn!("VAD: Accumulated speech buffer is large: {} samples ({:.1}s) - possible memory issue",
@@ -236,12 +296,10 @@ impl ContinuousVadProcessor {
                         self.last_logged_state = true;
                     }
                     self.in_speech = true;
-                    // Silero's timestamp_ms is already session-absolute (derived from its own
-                    // processed_duration), so it must NOT be offset by processed_samples —
-                    // adding them double-counts and yields start times past the end of the audio.
-                    // Convert ms to samples at the 16kHz VAD processing rate.
-                    self.speech_start_sample = timestamp_ms * 16000 / 1000;
-                    self.current_speech.clear();
+                    // Silero's timestamp is already session-absolute, so do not offset it by
+                    // processed_samples or the segment start will be counted twice.
+                    self.speech_start_timestamp_ms = Some(timestamp_ms as f64);
+                    self.emitted_speech_samples = 0;
                 }
                 VadTransition::SpeechEnd { start_timestamp_ms, end_timestamp_ms, samples } => {
                     // Only log if we were previously in speech state
@@ -251,40 +309,106 @@ impl ContinuousVadProcessor {
                     }
                     self.in_speech = false;
 
-                    // Use samples from VAD transition if available, otherwise use accumulated samples
+                    // Use samples from VAD transition if available, otherwise use the session cache.
                     let speech_samples = if !samples.is_empty() {
                         samples
                     } else {
-                        self.current_speech.clone()
+                        self.session.get_current_speech().to_vec()
                     };
 
-                    if !speech_samples.is_empty() {
-                        let segment = SpeechSegment {
-                            samples: speech_samples,
-                            start_timestamp_ms: start_timestamp_ms as f64,
-                            end_timestamp_ms: end_timestamp_ms as f64,
-                            confidence: 0.9, // VAD confidence
-                        };
-
+                    if let Some(segment) = remaining_speech_segment(
+                        &speech_samples,
+                        start_timestamp_ms as f64,
+                        self.emitted_speech_samples,
+                        0.9,
+                    ) {
                         info!("VAD: Completed speech segment: {:.1}ms duration, {} samples",
-                              end_timestamp_ms - start_timestamp_ms, segment.samples.len());
+                              segment.end_timestamp_ms - segment.start_timestamp_ms, segment.samples.len());
 
                         self.speech_segments.push_back(segment);
                     }
 
-                    self.current_speech.clear();
+                    self.speech_start_timestamp_ms = None;
+                    self.emitted_speech_samples = 0;
                 }
             }
         }
 
-        // Accumulate speech if we're currently in a speech state
+        // Natural SpeechEnd remains the preferred boundary. For uninterrupted speech,
+        // emit fixed-size checkpoints so live captions do not wait until recording stops.
         if self.in_speech {
-            self.current_speech.extend_from_slice(chunk);
+            let current_speech = self.session.get_current_speech();
+            let live_segments = collect_live_segments(
+                current_speech,
+                self.speech_start_timestamp_ms.unwrap_or(0.0),
+                &mut self.emitted_speech_samples,
+                self.max_live_segment_samples,
+            );
+            for segment in live_segments {
+                info!("VAD: Live speech checkpoint: {:.1}ms duration, {} samples",
+                      segment.end_timestamp_ms - segment.start_timestamp_ms, segment.samples.len());
+                self.speech_segments.push_back(segment);
+            }
         }
 
         self.processed_samples += chunk.len();
         Ok(())
     }
+}
+
+fn samples_to_ms(samples: usize) -> f64 {
+    samples as f64 * 1000.0 / VAD_SAMPLE_RATE as f64
+}
+
+fn collect_live_segments(
+    current_speech: &[f32],
+    speech_start_timestamp_ms: f64,
+    emitted_speech_samples: &mut usize,
+    max_live_segment_samples: Option<usize>,
+) -> Vec<SpeechSegment> {
+    let Some(max_segment_samples) = max_live_segment_samples else {
+        return Vec::new();
+    };
+    if *emitted_speech_samples > current_speech.len() {
+        warn!("VAD live cursor exceeded current speech buffer: {} > {}",
+              *emitted_speech_samples, current_speech.len());
+        *emitted_speech_samples = current_speech.len();
+    }
+
+    let mut segments = Vec::new();
+    let checkpoint_threshold =
+        max_segment_samples.saturating_add(MIN_TRANSCRIPTION_SEGMENT_SAMPLES);
+    while current_speech.len().saturating_sub(*emitted_speech_samples) >= checkpoint_threshold {
+        let start = *emitted_speech_samples;
+        let end = start + max_segment_samples;
+        segments.push(SpeechSegment {
+            samples: current_speech[start..end].to_vec(),
+            start_timestamp_ms: speech_start_timestamp_ms + samples_to_ms(start),
+            end_timestamp_ms: speech_start_timestamp_ms + samples_to_ms(end),
+            confidence: 0.8,
+        });
+        *emitted_speech_samples = end;
+    }
+    segments
+}
+
+fn remaining_speech_segment(
+    speech_samples: &[f32],
+    speech_start_timestamp_ms: f64,
+    emitted_speech_samples: usize,
+    confidence: f32,
+) -> Option<SpeechSegment> {
+    let start = emitted_speech_samples.min(speech_samples.len());
+    if start == speech_samples.len() {
+        return None;
+    }
+
+    Some(SpeechSegment {
+        samples: speech_samples[start..].to_vec(),
+        start_timestamp_ms: speech_start_timestamp_ms + samples_to_ms(start),
+        end_timestamp_ms: speech_start_timestamp_ms + samples_to_ms(speech_samples.len()),
+        confidence,
+    })
 }
 
 /// Legacy function for backward compatibility - now uses the optimized approach
@@ -450,6 +574,207 @@ mod tests {
     }
 
     #[test]
+    fn stateful_resampling_is_independent_of_callback_boundaries() {
+        let input_rate = 48_000;
+        let input: Vec<f32> = (0..47_520)
+            .map(|index| {
+                let time = index as f32 / input_rate as f32;
+                0.4 * (2.0 * std::f32::consts::PI * 440.0 * time).sin()
+            })
+            .collect();
+
+        let mut single = ContinuousVadProcessor::new(input_rate, 400)
+            .expect("failed to create single-call processor");
+        let expected = single
+            .resample_to_16k(&input)
+            .expect("single-call resampling failed");
+
+        let mut chunked = ContinuousVadProcessor::new(input_rate, 400)
+            .expect("failed to create chunked processor");
+        let mut actual = Vec::new();
+        for chunk in input.chunks(2_317) {
+            actual.extend(
+                chunked
+                    .resample_to_16k(chunk)
+                    .expect("chunked resampling failed"),
+            );
+        }
+
+        assert!(15_840usize.abs_diff(expected.len()) <= 64);
+        assert_eq!(actual, expected);
+        assert!(chunked.resampler_input_buffer.is_empty());
+    }
+
+    #[test]
+    fn test_live_segments_are_emitted_once_with_remaining_tail() {
+        let five_seconds = 5 * VAD_SAMPLE_RATE;
+        let mut speech: Vec<f32> = (0..five_seconds * 2 + VAD_SAMPLE_RATE / 2)
+            .map(|index| index as f32)
+            .collect();
+        let mut emitted = 0;
+
+        let segments = collect_live_segments(&speech, 1_250.0, &mut emitted, Some(five_seconds));
+        assert_eq!(segments.len(), 2);
+        assert_eq!(segments[0].samples.len(), five_seconds);
+        assert_eq!(segments[0].start_timestamp_ms, 1_250.0);
+        assert_eq!(segments[0].end_timestamp_ms, 6_250.0);
+        assert_eq!(segments[1].start_timestamp_ms, 6_250.0);
+        assert_eq!(segments[1].end_timestamp_ms, 11_250.0);
+        assert_eq!(emitted, five_seconds * 2);
+
+        assert!(collect_live_segments(&speech, 1_250.0, &mut emitted, Some(five_seconds)).is_empty());
+
+        let tail = remaining_speech_segment(&speech, 1_250.0, emitted, 0.9)
+            .expect("expected the final half-second tail");
+        assert_eq!(tail.samples.len(), VAD_SAMPLE_RATE / 2);
+        assert_eq!(tail.start_timestamp_ms, 11_250.0);
+        assert_eq!(tail.end_timestamp_ms, 11_750.0);
+
+        let reconstructed: Vec<f32> = segments
+            .iter()
+            .flat_map(|segment| segment.samples.iter().copied())
+            .chain(tail.samples.iter().copied())
+            .collect();
+        assert_eq!(reconstructed, speech);
+
+        speech.extend((speech.len()..speech.len() + five_seconds).map(|index| index as f32));
+        let next = collect_live_segments(&speech, 1_250.0, &mut emitted, Some(five_seconds));
+        assert_eq!(next.len(), 1);
+        assert_eq!(next[0].start_timestamp_ms, 11_250.0);
+        assert_eq!(next[0].end_timestamp_ms, 16_250.0);
+    }
+
+    #[test]
+    fn test_live_checkpoint_always_preserves_a_transcribable_tail() {
+        let max_segment_samples = 5 * VAD_SAMPLE_RATE;
+        let cases = [
+            (max_segment_samples + MIN_TRANSCRIPTION_SEGMENT_SAMPLES - 1, 0),
+            (max_segment_samples + MIN_TRANSCRIPTION_SEGMENT_SAMPLES, 1),
+            (2 * max_segment_samples + MIN_TRANSCRIPTION_SEGMENT_SAMPLES, 2),
+        ];
+
+        for (sample_count, expected_live_segments) in cases {
+            let speech: Vec<f32> = (0..sample_count).map(|index| index as f32).collect();
+            let mut emitted = 0;
+            let live_segments = collect_live_segments(
+                &speech,
+                500.0,
+                &mut emitted,
+                Some(max_segment_samples),
+            );
+            let tail = remaining_speech_segment(&speech, 500.0, emitted, 0.9)
+                .expect("expected a reserved final tail");
+
+            assert_eq!(live_segments.len(), expected_live_segments);
+            assert!(live_segments
+                .iter()
+                .all(|segment| segment.samples.len() == max_segment_samples));
+            assert!(tail.samples.len() >= MIN_TRANSCRIPTION_SEGMENT_SAMPLES);
+
+            let reconstructed: Vec<f32> = live_segments
+                .iter()
+                .flat_map(|segment| segment.samples.iter().copied())
+                .chain(tail.samples.iter().copied())
+                .collect();
+            assert_eq!(reconstructed, speech);
+        }
+    }
+
+    #[test]
+    fn test_live_vad_emits_before_flush_for_continuous_speech() {
+        let audio = generate_test_audio_with_speech(4.0, VAD_SAMPLE_RATE as u32);
+        let mut processor = ContinuousVadProcessor::new_with_max_segment_duration(
+            VAD_SAMPLE_RATE as u32,
+            400,
+            Some(1_000),
+        )
+        .expect("failed to create live VAD processor");
+
+        let mut live_segments = Vec::new();
+        let mut processed_samples = 0;
+        for chunk in audio.chunks(processor.chunk_size) {
+            let segments = processor
+                .process_audio(chunk)
+                .expect("continuous speech processing failed");
+            processed_samples += chunk.len();
+            live_segments.extend(segments);
+            if !live_segments.is_empty() && processor.in_speech {
+                break;
+            }
+        }
+        assert!(
+            !live_segments.is_empty(),
+            "expected live segments before flush, found {}",
+            live_segments.len()
+        );
+        assert!(live_segments.iter().all(|segment| {
+            segment.samples.len() <= VAD_SAMPLE_RATE
+                && segment.end_timestamp_ms > segment.start_timestamp_ms
+        }));
+
+        let expected_speech = processor.session.get_current_speech().to_vec();
+        let final_segments = processor.flush().expect("first flush failed");
+        assert!(!final_segments.is_empty(), "expected a reserved final tail");
+        assert!(final_segments
+            .iter()
+            .all(|segment| segment.samples.len() >= MIN_TRANSCRIPTION_SEGMENT_SAMPLES));
+        for flush_index in 2..=4 {
+            assert!(
+                processor.flush().unwrap_or_else(|_| panic!("flush {flush_index} failed")).is_empty(),
+                "repeated flush must not emit duplicate audio"
+            );
+        }
+
+        let all_segments: Vec<&SpeechSegment> = live_segments
+            .iter()
+            .chain(final_segments.iter())
+            .collect();
+        assert!(all_segments.windows(2).all(|pair| {
+            (pair[0].end_timestamp_ms - pair[1].start_timestamp_ms).abs() < f64::EPSILON
+        }));
+
+        let total_samples: usize = all_segments
+            .iter()
+            .map(|segment| segment.samples.len())
+            .sum();
+        assert!(total_samples <= processed_samples);
+        let reconstructed: Vec<f32> = all_segments
+            .iter()
+            .flat_map(|segment| segment.samples.iter().copied())
+            .collect();
+        assert_eq!(reconstructed, expected_speech);
+    }
+
+    #[test]
+    fn test_live_vad_natural_speech_end_keeps_contiguous_audio() {
+        let audio = generate_test_audio_with_speech(7.0, VAD_SAMPLE_RATE as u32);
+        let mut processor = ContinuousVadProcessor::new_with_max_segment_duration(
+            VAD_SAMPLE_RATE as u32,
+            400,
+            Some(1_000),
+        )
+        .expect("failed to create live VAD processor");
+
+        let segments = processor
+            .process_audio(&audio)
+            .expect("speech ending processing failed");
+        let expected_speech = processor.session.get_current_speech().to_vec();
+        assert!(segments.len() >= 2, "expected checkpoints and a natural tail");
+        assert!(segments.windows(2).all(|pair| {
+            (pair[0].end_timestamp_ms - pair[1].start_timestamp_ms).abs() < f64::EPSILON
+        }));
+        assert!(segments
+            .last()
+            .is_some_and(|segment| segment.samples.len() >= MIN_TRANSCRIPTION_SEGMENT_SAMPLES));
+        let reconstructed: Vec<f32> = segments
+            .iter()
+            .flat_map(|segment| segment.samples.iter().copied())
+            .collect();
+        assert_eq!(reconstructed, expected_speech);
+        assert!(processor.flush().expect("flush after SpeechEnd failed").is_empty());
+    }
+
+    #[test]
     fn test_vad_chunked_vs_single_processing() {
         // Generate 60 seconds of audio with speech patterns at 16kHz
         let audio = generate_test_audio_with_speech(60.0, 16000);
@@ -595,4 +920,3 @@ mod tests {
         }
     }
 }
-

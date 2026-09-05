@@ -3,8 +3,10 @@
 use crate::api::TranscriptSegment;
 use crate::audio::decoder::{decode_audio_file, decode_audio_file_with_progress};
 use crate::audio::vad::get_speech_chunks_with_progress;
-use crate::config::{DEFAULT_WHISPER_MODEL, DEFAULT_PARAKEET_MODEL};
+use crate::config::{DEFAULT_PARAKEET_MODEL, DEFAULT_WHISPER_MODEL};
 use crate::parakeet_engine::ParakeetEngine;
+use crate::qwen_asr_engine::QwenAsrEngine;
+use crate::sense_voice_engine::SenseVoiceEngine;
 use crate::state::AppState;
 use crate::whisper_engine::WhisperEngine;
 use anyhow::{anyhow, Result};
@@ -140,8 +142,7 @@ pub fn validate_audio_file(path: &Path) -> Result<AudioFileInfo> {
     }
 
     // Get file size
-    let metadata = std::fs::metadata(path)
-        .map_err(|e| anyhow!("Cannot read file: {}", e))?;
+    let metadata = std::fs::metadata(path).map_err(|e| anyhow!("Cannot read file: {}", e))?;
     let size_bytes = metadata.len();
 
     // Check file size limit
@@ -163,10 +164,7 @@ pub fn validate_audio_file(path: &Path) -> Result<AudioFileInfo> {
     // Try fast metadata-only validation first
     let duration_seconds = match extract_duration_from_metadata(path) {
         Ok(duration) => {
-            debug!(
-                "Got duration from metadata: {:.2}s (fast path)",
-                duration
-            );
+            debug!("Got duration from metadata: {:.2}s (fast path)", duration);
             duration
         }
         Err(e) => {
@@ -198,8 +196,8 @@ fn extract_duration_from_metadata(path: &Path) -> Result<f64> {
     use symphonia::core::probe::Hint;
 
     // Open the file
-    let file = std::fs::File::open(path)
-        .map_err(|e| anyhow!("Failed to open audio file: {}", e))?;
+    let file =
+        std::fs::File::open(path).map_err(|e| anyhow!("Failed to open audio file: {}", e))?;
 
     let mss = MediaSourceStream::new(Box::new(file), Default::default());
 
@@ -265,19 +263,11 @@ pub async fn start_import<R: Runtime>(
     // Reset cancellation flag
     IMPORT_CANCELLED.store(false, Ordering::SeqCst);
 
-    let use_parakeet = provider.as_deref() == Some("parakeet");
-    let result = run_import(
-        app.clone(),
-        source_path,
-        title,
-        language,
-        model,
-        provider,
-    )
-    .await;
+    let provider_for_unload = provider.clone().unwrap_or_else(|| "whisper".to_string());
+    let result = run_import(app.clone(), source_path, title, language, model, provider).await;
 
     // Unload the engine after the batch job (success, failure, or cancellation)
-    super::common::unload_engine_after_batch(use_parakeet).await;
+    super::common::unload_engine_after_batch(&provider_for_unload).await;
 
     // Guard will automatically clear flag on drop
     // No need for manual: IMPORT_IN_PROGRESS.store(false, Ordering::SeqCst);
@@ -330,6 +320,8 @@ async fn run_import<R: Runtime>(
 
     // Determine which provider to use (default to whisper)
     let use_parakeet = provider.as_deref() == Some("parakeet");
+    let use_qwen = provider.as_deref() == Some("qwen3Asr");
+    let use_sense_voice = provider.as_deref() == Some("senseVoice");
 
     emit_progress(&app, "copying", 5, "Creating meeting folder...");
 
@@ -347,10 +339,7 @@ async fn run_import<R: Runtime>(
 
     let dest_filename = format!(
         "audio.{}",
-        source
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("mp4")
+        source.extension().and_then(|e| e.to_str()).unwrap_or("mp4")
     );
     let dest_path = meeting_folder.join(&dest_filename);
 
@@ -454,17 +443,24 @@ async fn run_import<R: Runtime>(
     .map_err(|e| anyhow!("VAD processing failed: {}", e))?;
 
     let total_segments = speech_segments.len();
-    info!("VAD detected {} speech segments (redemption_time={}ms)", total_segments, VAD_REDEMPTION_TIME_MS);
+    info!(
+        "VAD detected {} speech segments (redemption_time={}ms)",
+        total_segments, VAD_REDEMPTION_TIME_MS
+    );
 
     // Diagnostic: log segment duration distribution
     if !speech_segments.is_empty() {
-        let durations_ms: Vec<f64> = speech_segments.iter()
+        let durations_ms: Vec<f64> = speech_segments
+            .iter()
             .map(|s| s.end_timestamp_ms - s.start_timestamp_ms)
             .collect();
         let total_speech_ms: f64 = durations_ms.iter().sum();
         let avg_duration = total_speech_ms / durations_ms.len() as f64;
         let min_duration = durations_ms.iter().cloned().fold(f64::INFINITY, f64::min);
-        let max_duration = durations_ms.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+        let max_duration = durations_ms
+            .iter()
+            .cloned()
+            .fold(f64::NEG_INFINITY, f64::max);
         info!(
             "VAD segment stats: avg={:.0}ms, min={:.0}ms, max={:.0}ms, total_speech={:.1}s/{:.1}s ({:.0}%)",
             avg_duration, min_duration, max_duration,
@@ -474,8 +470,14 @@ async fn run_import<R: Runtime>(
         // Log first 10 segments for detailed inspection
         for (i, seg) in speech_segments.iter().take(10).enumerate() {
             let dur = seg.end_timestamp_ms - seg.start_timestamp_ms;
-            debug!("  Segment {}: {:.0}ms-{:.0}ms ({:.0}ms, {} samples)",
-                i, seg.start_timestamp_ms, seg.end_timestamp_ms, dur, seg.samples.len());
+            debug!(
+                "  Segment {}: {:.0}ms-{:.0}ms ({:.0}ms, {} samples)",
+                i,
+                seg.start_timestamp_ms,
+                seg.end_timestamp_ms,
+                dur,
+                seg.samples.len()
+            );
         }
         if total_segments > 10 {
             debug!("  ... and {} more segments", total_segments - 10);
@@ -492,7 +494,8 @@ async fn run_import<R: Runtime>(
                 warning: "No speech detected in audio file".to_string(),
                 details: Some(
                     "The file was imported successfully, but VAD did not detect any speech. \
-                     The meeting was created but contains no transcripts.".to_string()
+                     The meeting was created but contains no transcripts."
+                        .to_string(),
                 ),
             },
         );
@@ -508,7 +511,7 @@ async fn run_import<R: Runtime>(
     emit_progress(&app, "transcribing", 30, "Loading transcription engine...");
 
     // Initialize the appropriate engine
-    let whisper_engine = if !use_parakeet && total_segments > 0 {
+    let whisper_engine = if !use_parakeet && !use_qwen && !use_sense_voice && total_segments > 0 {
         Some(get_or_init_whisper(&app, model.as_deref()).await?)
     } else {
         None
@@ -518,22 +521,36 @@ async fn run_import<R: Runtime>(
     } else {
         None
     };
+    let qwen_engine = if use_qwen && total_segments > 0 {
+        Some(get_or_init_qwen(&app, model.as_deref()).await?)
+    } else {
+        None
+    };
+    let sense_voice_engine = if use_sense_voice && total_segments > 0 {
+        Some(get_or_init_sense_voice(&app, model.as_deref()).await?)
+    } else {
+        None
+    };
 
     // Split very long segments at silence boundaries for better transcription quality.
     // Hard cuts at arbitrary sample positions lose words at boundaries. Instead, scan
     // for the lowest-energy window near the target split point and cut there.
-    const MAX_SEGMENT_SAMPLES: usize = 25 * 16000; // 25 seconds at 16kHz
+    let max_segment_samples = if use_qwen {
+        20 * 16_000
+    } else {
+        25 * 16_000
+    };
 
     let mut processable_segments: Vec<crate::audio::vad::SpeechSegment> = Vec::new();
     for segment in &speech_segments {
-        if segment.samples.len() > MAX_SEGMENT_SAMPLES {
+        if segment.samples.len() > max_segment_samples {
             debug!(
                 "Splitting large segment ({:.0}ms, {} samples) at silence boundaries",
                 segment.end_timestamp_ms - segment.start_timestamp_ms,
                 segment.samples.len()
             );
 
-            let sub_segments = split_segment_at_silence(segment, MAX_SEGMENT_SAMPLES);
+            let sub_segments = split_segment_at_silence(segment, max_segment_samples);
             debug!("Split into {} sub-segments", sub_segments.len());
             processable_segments.extend(sub_segments);
         } else {
@@ -542,7 +559,10 @@ async fn run_import<R: Runtime>(
     }
 
     let processable_count = processable_segments.len();
-    info!("Processing {} segments (after splitting)", processable_count);
+    info!(
+        "Processing {} segments (after splitting)",
+        processable_count
+    );
 
     // Process each speech segment
     let mut all_transcripts: Vec<(String, f64, f64)> = Vec::new();
@@ -586,6 +606,22 @@ async fn run_import<R: Runtime>(
                 .await
                 .map_err(|e| anyhow!("Parakeet transcription failed on segment {}: {}", i, e))?;
             (text, 0.9f32)
+        } else if use_qwen {
+            let text = qwen_engine
+                .as_ref()
+                .unwrap()
+                .transcribe_audio(segment.samples.clone(), language.clone())
+                .await
+                .map_err(|e| anyhow!("Qwen3-ASR transcription failed on segment {}: {}", i, e))?;
+            (text, 0.0f32)
+        } else if use_sense_voice {
+            let text = sense_voice_engine
+                .as_ref()
+                .unwrap()
+                .transcribe_audio(segment.samples.clone())
+                .await
+                .map_err(|e| anyhow!("SenseVoice transcription failed on segment {}: {}", i, e))?;
+            (text, 0.0f32)
         } else {
             let engine = whisper_engine.as_ref().unwrap();
             let (text, conf, _) = engine
@@ -599,13 +635,29 @@ async fn run_import<R: Runtime>(
         if !trimmed.is_empty() {
             debug!(
                 "Segment {}/{}: {:.1}s, conf={:.2}, text='{}'",
-                i + 1, processable_count, segment_duration_sec, conf,
-                if trimmed.len() > 80 { let mut end = 80; while !trimmed.is_char_boundary(end) { end -= 1; } &trimmed[..end] } else { trimmed }
+                i + 1,
+                processable_count,
+                segment_duration_sec,
+                conf,
+                if trimmed.len() > 80 {
+                    let mut end = 80;
+                    while !trimmed.is_char_boundary(end) {
+                        end -= 1;
+                    }
+                    &trimmed[..end]
+                } else {
+                    trimmed
+                }
             );
             all_transcripts.push((text, segment.start_timestamp_ms, segment.end_timestamp_ms));
             total_confidence += conf;
         } else {
-            debug!("Segment {}/{}: {:.1}s — empty transcription", i + 1, processable_count, segment_duration_sec);
+            debug!(
+                "Segment {}/{}: {:.1}s — empty transcription",
+                i + 1,
+                processable_count,
+                segment_duration_sec
+            );
         }
     }
 
@@ -685,7 +737,6 @@ fn emit_progress<R: Runtime>(app: &AppHandle<R>, stage: &str, progress: u32, mes
     );
 }
 
-
 /// Create a new meeting with transcripts in the database
 async fn create_meeting_with_transcripts(
     pool: &sqlx::SqlitePool,
@@ -697,7 +748,10 @@ async fn create_meeting_with_transcripts(
     let now = chrono::Utc::now();
 
     // Start transaction
-    let mut conn = pool.acquire().await.map_err(|e| anyhow!("DB error: {}", e))?;
+    let mut conn = pool
+        .acquire()
+        .await
+        .map_err(|e| anyhow!("DB error: {}", e))?;
     let mut tx = sqlx::Connection::begin(&mut *conn)
         .await
         .map_err(|e| anyhow!("Failed to start transaction: {}", e))?;
@@ -839,18 +893,64 @@ async fn get_or_init_parakeet<R: Runtime>(
     }
 }
 
+async fn get_or_init_qwen<R: Runtime>(
+    _app: &AppHandle<R>,
+    requested_model: Option<&str>,
+) -> Result<Arc<QwenAsrEngine>> {
+    let target_model = requested_model.unwrap_or(crate::qwen_asr_engine::QWEN3_ASR_MODEL);
+    if target_model != crate::qwen_asr_engine::QWEN3_ASR_MODEL {
+        return Err(anyhow!("Unsupported Qwen3-ASR model: {}", target_model));
+    }
+    let engine = {
+        let guard = crate::qwen_asr_engine::commands::QWEN_ASR_ENGINE
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        guard.as_ref().cloned()
+    }
+    .ok_or_else(|| anyhow!("Qwen3-ASR engine not initialized"))?;
+
+    if engine.get_current_model().await.as_deref() != Some(target_model) {
+        engine.load_model(target_model).await?;
+    }
+    Ok(engine)
+}
+
+async fn get_or_init_sense_voice<R: Runtime>(
+    _app: &AppHandle<R>,
+    requested_model: Option<&str>,
+) -> Result<Arc<SenseVoiceEngine>> {
+    let target_model = requested_model.unwrap_or(crate::sense_voice_engine::SENSE_VOICE_MODEL);
+    if crate::sense_voice_engine::model_definition(target_model).is_none() {
+        return Err(anyhow!("Unsupported SenseVoice model: {}", target_model));
+    }
+    let engine = {
+        let guard = crate::sense_voice_engine::commands::SENSE_VOICE_ENGINE
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        guard.as_ref().cloned()
+    }
+    .ok_or_else(|| anyhow!("SenseVoice engine not initialized"))?;
+
+    if engine.get_current_model().await.as_deref() != Some(target_model) {
+        engine.load_model(target_model).await?;
+    }
+    Ok(engine)
+}
+
 /// Get the configured model from database
-async fn get_configured_model<R: Runtime>(app: &AppHandle<R>, provider_type: &str) -> Result<String> {
+async fn get_configured_model<R: Runtime>(
+    app: &AppHandle<R>,
+    provider_type: &str,
+) -> Result<String> {
     let app_state = app
         .try_state::<AppState>()
         .ok_or_else(|| anyhow!("App state not available"))?;
 
-    let result: Option<(String, String)> = sqlx::query_as(
-        "SELECT provider, model FROM transcript_settings WHERE id = '1'",
-    )
-    .fetch_optional(app_state.db_manager.pool())
-    .await
-    .map_err(|e| anyhow!("Failed to query config: {}", e))?;
+    let result: Option<(String, String)> =
+        sqlx::query_as("SELECT provider, model FROM transcript_settings WHERE id = '1'")
+            .fetch_optional(app_state.db_manager.pool())
+            .await
+            .map_err(|e| anyhow!("Failed to query config: {}", e))?;
 
     match result {
         Some((provider, model)) => {
@@ -926,7 +1026,10 @@ pub async fn select_and_validate_audio_command<R: Runtime>(
         app_clone
             .dialog()
             .file()
-            .add_filter("Audio Files", &AUDIO_EXTENSIONS.iter().map(|s| *s).collect::<Vec<_>>())
+            .add_filter(
+                "Audio Files",
+                &AUDIO_EXTENSIONS.iter().map(|s| *s).collect::<Vec<_>>(),
+            )
             .blocking_pick_file()
     })
     .await
@@ -1057,7 +1160,11 @@ mod tests {
             // Should succeed and return a reasonable duration
             assert!(result.is_ok());
             let duration = result.unwrap();
-            assert!(duration > 0.0 && duration < 60.0, "Duration {} seems unreasonable", duration);
+            assert!(
+                duration > 0.0 && duration < 60.0,
+                "Duration {} seems unreasonable",
+                duration
+            );
         }
     }
 
@@ -1103,7 +1210,10 @@ mod tests {
 
         let result = validate_audio_file(&temp_file);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Unsupported format"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Unsupported format"));
 
         // Cleanup
         let _ = std::fs::remove_file(temp_file);
@@ -1139,7 +1249,11 @@ mod tests {
         };
 
         let result = split_segment_at_silence(&segment, 25 * 16000);
-        assert!(result.len() >= 2, "Should split into at least 2 segments, got {}", result.len());
+        assert!(
+            result.len() >= 2,
+            "Should split into at least 2 segments, got {}",
+            result.len()
+        );
 
         // All sub-segments should have samples
         for (i, seg) in result.iter().enumerate() {
@@ -1147,7 +1261,9 @@ mod tests {
             assert!(
                 seg.start_timestamp_ms < seg.end_timestamp_ms,
                 "Segment {} has invalid timestamps: {} >= {}",
-                i, seg.start_timestamp_ms, seg.end_timestamp_ms
+                i,
+                seg.start_timestamp_ms,
+                seg.end_timestamp_ms
             );
         }
     }
@@ -1193,7 +1309,11 @@ mod tests {
         ];
 
         let result = write_transcripts_json(dir.path(), &segments);
-        assert!(result.is_ok(), "write_transcripts_json failed: {:?}", result);
+        assert!(
+            result.is_ok(),
+            "write_transcripts_json failed: {:?}",
+            result
+        );
 
         // Verify file exists and is valid JSON
         let path = dir.path().join("transcripts.json");
@@ -1253,8 +1373,8 @@ mod tests {
 
         // Step 1: Decode
         println!("Decoding {}...", audio_path);
-        let decoded = crate::audio::decoder::decode_audio_file(path)
-            .expect("Failed to decode audio file");
+        let decoded =
+            crate::audio::decoder::decode_audio_file(path).expect("Failed to decode audio file");
         println!(
             "Decoded: {:.2}s, {}Hz, {} channels, {} samples",
             decoded.duration_seconds,
@@ -1266,7 +1386,11 @@ mod tests {
         // Step 2: Resample to 16kHz mono
         println!("Resampling to 16kHz mono...");
         let samples = decoded.to_whisper_format();
-        println!("Resampled: {} samples ({:.2}s at 16kHz)", samples.len(), samples.len() as f64 / 16000.0);
+        println!(
+            "Resampled: {} samples ({:.2}s at 16kHz)",
+            samples.len(),
+            samples.len() as f64 / 16000.0
+        );
 
         // Step 3: Run VAD with both redemption times and compare
         for redemption_ms in [400u32, 2000] {
@@ -1280,13 +1404,15 @@ mod tests {
                     }
                     true
                 },
-            ).expect("VAD failed");
+            )
+            .expect("VAD failed");
 
             let total_segments = segments.len();
             println!("Found {} segments", total_segments);
 
             if !segments.is_empty() {
-                let durations: Vec<f64> = segments.iter()
+                let durations: Vec<f64> = segments
+                    .iter()
                     .map(|s| s.end_timestamp_ms - s.start_timestamp_ms)
                     .collect();
                 let total_speech: f64 = durations.iter().sum();

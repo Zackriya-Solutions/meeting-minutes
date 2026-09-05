@@ -51,6 +51,30 @@ export interface ModelDisplayInfo {
   tier: 'fastest' | 'balanced' | 'precise';
 }
 
+export interface TranscriptionLanguageCapability {
+  allowsLanguageSelection: boolean;
+  displayName: string;
+  description: string;
+  analyticsLanguage: string;
+  supportedLanguageCodes?: readonly string[];
+}
+
+export const QWEN3_ASR_LANGUAGE_CODES = [
+  'auto', 'en', 'zh', 'yue', 'ar', 'de', 'fr', 'es', 'pt', 'id', 'it', 'ko',
+  'ru', 'th', 'vi', 'ja', 'tr', 'hi', 'ms', 'nl', 'sv', 'da', 'fi', 'pl',
+  'cs', 'fil', 'fa', 'el', 'hu', 'mk', 'ro',
+] as const;
+
+export const SENSE_VOICE_LANGUAGE_CODES = ['auto', 'zh', 'yue', 'en', 'ja', 'ko'] as const;
+
+export function supportsTranscriptionLanguage(
+  capability: TranscriptionLanguageCapability,
+  languageCode: string
+): boolean {
+  return !capability.supportedLanguageCodes
+    || capability.supportedLanguageCodes.includes(languageCode);
+}
+
 export const MODEL_DISPLAY_CONFIG: Record<string, ModelDisplayInfo> = {
   'parakeet-tdt-0.6b-v3-int8': {
     friendlyName: 'Lightning',
@@ -121,6 +145,46 @@ export function getModelDisplayInfo(modelName: string): ModelDisplayInfo | null 
   return MODEL_DISPLAY_CONFIG[modelName] || null;
 }
 
+export function getTranscriptionLanguageCapability(
+  provider?: string,
+  modelName?: string
+): TranscriptionLanguageCapability {
+  if (provider === 'qwen3Asr') {
+    return {
+      allowsLanguageSelection: true,
+      displayName: 'Automatic or selected language',
+      description: 'Choose Chinese or another supported language to improve accuracy, or keep automatic detection for multilingual speech.',
+      analyticsLanguage: 'selected',
+      supportedLanguageCodes: QWEN3_ASR_LANGUAGE_CODES,
+    };
+  }
+
+  if (provider === 'senseVoice') {
+    return {
+      allowsLanguageSelection: false,
+      displayName: 'Automatic (Mandarin, Cantonese, English, Japanese, Korean)',
+      description: 'SenseVoice automatically detects Mandarin, Cantonese, English, Japanese, and Korean. Translation is not available.',
+      analyticsLanguage: 'auto',
+      supportedLanguageCodes: SENSE_VOICE_LANGUAGE_CODES,
+    };
+  }
+
+  if (provider !== 'parakeet') {
+    return {
+      allowsLanguageSelection: true,
+      displayName: '',
+      description: '',
+      analyticsLanguage: 'selected',
+    };
+  }
+
+  return {
+    allowsLanguageSelection: false,
+    displayName: 'English',
+    description: 'This Parakeet model transcribes English. Language selection and translation are not available.',
+    analyticsLanguage: 'en',
+  };
+}
 export function getStatusColor(status: ModelStatus): string {
   if (status === 'Available') return 'green';
   if (status === 'Missing') return 'gray';

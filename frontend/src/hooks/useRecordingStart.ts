@@ -13,6 +13,7 @@ import {
   type ModelWithStatus,
 } from '@/lib/transcription-model-readiness';
 import { toast } from 'sonner';
+import type { ParakeetModelInfo } from '@/lib/parakeet';
 
 interface UseRecordingStartReturn {
   handleRecordingStart: () => Promise<void>;
@@ -43,8 +44,34 @@ export function useRecordingStart(
 
   const { clearTranscripts, setMeetingTitle } = useTranscripts();
   const { setIsMeetingActive } = useSidebar();
-  const { selectedDevices } = useConfig();
+  const { selectedDevices, transcriptModelConfig } = useConfig();
   const { setStatus } = useRecordingState();
+
+  // CoreML performs an expensive one-time ANE specialization. Start it as soon as
+  // the downloaded SenseVoice model becomes the active choice, then keep it resident.
+  useEffect(() => {
+    if (transcriptModelConfig.provider !== 'senseVoice') return;
+
+    let cancelled = false;
+    void (async () => {
+      try {
+        await invoke('sense_voice_init');
+        const models = await invoke<ParakeetModelInfo[]>('sense_voice_get_available_models');
+        const ready = models.some(
+          model => model.name === transcriptModelConfig.model && model.status === 'Available'
+        );
+        if (ready && !cancelled) {
+          await invoke('sense_voice_load_model', { modelName: transcriptModelConfig.model });
+        }
+      } catch (error) {
+        if (!cancelled) console.warn('SenseVoice background preparation failed:', error);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [transcriptModelConfig.provider, transcriptModelConfig.model]);
 
   // Generate meeting title with timestamp
   const generateMeetingTitle = useCallback(() => {

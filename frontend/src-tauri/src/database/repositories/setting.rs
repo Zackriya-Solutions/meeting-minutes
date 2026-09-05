@@ -211,7 +211,7 @@ impl SettingsRepository {
     ) -> std::result::Result<Option<String>, sqlx::Error> {
         let api_key_column = match provider {
             "localWhisper" => "whisperApiKey",
-            "parakeet" => return Ok(None), // Parakeet doesn't need an API key
+            "parakeet" | "qwen3Asr" | "senseVoice" => return Ok(None), // Embedded providers don't need an API key
             "deepgram" => "deepgramApiKey",
             "elevenLabs" => "elevenLabsApiKey",
             "groq" => "groqApiKey",
@@ -344,5 +344,22 @@ impl SettingsRepository {
         .await?;
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn qwen_asr_config_does_not_require_an_api_key() {
+        let pool = SqlitePool::connect_lazy("sqlite::memory:")
+            .expect("failed to create an in-memory SQLite pool");
+
+        let api_key = SettingsRepository::get_transcript_api_key(&pool, "qwen3Asr")
+            .await
+            .expect("Qwen3-ASR must be accepted as an embedded provider");
+
+        assert_eq!(api_key, None);
     }
 }
