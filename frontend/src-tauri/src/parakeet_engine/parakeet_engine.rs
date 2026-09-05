@@ -180,6 +180,13 @@ struct DownloadStateTestHook {
     continue_discovery: tokio::sync::Notify,
 }
 
+#[cfg(test)]
+struct ModelLifecycleTestHook {
+    load_started: tokio::sync::Notify,
+    continue_load: tokio::sync::Notify,
+    unload_attempted: tokio::sync::Notify,
+}
+
 enum ContentRange {
     Range { start: u64, end: u64, total: u64 },
     Unsatisfied { total: u64 },
@@ -257,10 +264,13 @@ pub struct ParakeetEngine {
     models_dir: PathBuf,
     current_model: Arc<RwLock<Option<ParakeetModel>>>,
     current_model_name: Arc<RwLock<Option<String>>>,
+    model_lifecycle_lock: Mutex<()>,
     pub(crate) available_models: Arc<RwLock<HashMap<String, ModelInfo>>>,
     active_downloads: Arc<Mutex<ActiveDownloadState>>,
     #[cfg(test)]
     download_state_test_hook: Mutex<Option<Arc<DownloadStateTestHook>>>,
+    #[cfg(test)]
+    model_lifecycle_test_hook: Mutex<Option<Arc<ModelLifecycleTestHook>>>,
 }
 
 impl ParakeetEngine {
@@ -298,16 +308,24 @@ impl ParakeetEngine {
             models_dir,
             current_model: Arc::new(RwLock::new(None)),
             current_model_name: Arc::new(RwLock::new(None)),
+            model_lifecycle_lock: Mutex::new(()),
             available_models: Arc::new(RwLock::new(HashMap::new())),
             active_downloads: Arc::new(Mutex::new(ActiveDownloadState::default())),
             #[cfg(test)]
             download_state_test_hook: Mutex::new(None),
+            #[cfg(test)]
+            model_lifecycle_test_hook: Mutex::new(None),
         })
     }
 
     #[cfg(test)]
     async fn test_hook(&self) -> Option<Arc<DownloadStateTestHook>> {
         self.download_state_test_hook.lock().await.clone()
+    }
+
+    #[cfg(test)]
+    async fn load_test_hook(&self) -> Option<Arc<ModelLifecycleTestHook>> {
+        self.model_lifecycle_test_hook.lock().await.clone()
     }
 
     /// Discover available Parakeet models.
@@ -412,33 +430,61 @@ impl ParakeetEngine {
 
     /// Load a Parakeet model
     pub async fn load_model(&self, model_name: &str) -> Result<()> {
-        let models = self.available_models.read().await;
-        let model_info = models
-            .get(model_name)
-            .ok_or_else(|| anyhow!("Model {} not found", model_name))?;
+        let model_info = {
+            let models = self.available_models.read().await;
+            models
+                .get(model_name)
+                .cloned()
+                .ok_or_else(|| anyhow!("Model {} not found", model_name))?
+        };
 
-        match model_info.status {
+        match &model_info.status {
             ModelStatus::Available => {
-                // Check if this model is already loaded
-                if let Some(current_model) = self.current_model_name.read().await.as_ref() {
-                    if current_model == model_name {
-                        log::info!("Parakeet model {} is already loaded, skipping reload", model_name);
-                        return Ok(());
-                    }
-
-                    // Unload current model before loading new one
-                    log::info!("Unloading current Parakeet model '{}' before loading '{}'", current_model, model_name);
-                    self.unload_model().await;
+                let _lifecycle_guard = self.model_lifecycle_lock.lock().await;
+                let current_model = self.current_model_name.read().await.clone();
+                if current_model.as_deref() == Some(model_name) {
+                    log::info!("Parakeet model {} is already loaded, skipping reload", model_name);
+                    return Ok(());
                 }
+
+                if let Some(current_model) = current_model {
+                    log::info!(
+                        "Unloading current Parakeet model '{}' before loading '{}'",
+                        current_model,
+                        model_name
+                    );
+                }
+                self.unload_model_locked().await;
 
                 log::info!("Loading Parakeet model: {}", model_name);
 
-                // Load model based on quantization type
                 let quantized = model_info.quantization == QuantizationType::Int8;
-                let model = ParakeetModel::new(&model_info.path, quantized)
-                    .map_err(|e| anyhow!("Failed to load Parakeet model {}: {}", model_name, e))?;
+                let model_path = model_info.path.clone();
+                #[cfg(test)]
+                let model_lifecycle_test_hook = self.load_test_hook().await;
+                #[cfg(test)]
+                let runtime_handle = tokio::runtime::Handle::current();
+                let model = tokio::task::spawn_blocking(move || {
+                    #[cfg(test)]
+                    if let Some(hook) = model_lifecycle_test_hook {
+                        hook.load_started.notify_one();
+                        runtime_handle.block_on(hook.continue_load.notified());
+                    }
+                    ParakeetModel::new(&model_path, quantized)
+                        .map_err(|error| error.to_string())
+                })
+                .await
+                .map_err(|error| {
+                    anyhow!(
+                        "Parakeet model load task failed for {}: {}",
+                        model_name,
+                        error
+                    )
+                })?
+                .map_err(|error| {
+                    anyhow!("Failed to load Parakeet model {}: {}", model_name, error)
+                })?;
 
-                // Update current model and model name
                 *self.current_model.write().await = Some(model);
                 *self.current_model_name.write().await = Some(model_name.to_string());
 
@@ -455,7 +501,7 @@ impl ParakeetEngine {
             ModelStatus::Downloading { .. } => {
                 Err(anyhow!("Parakeet model {} is currently downloading", model_name))
             }
-            ModelStatus::Error(ref err) => {
+            ModelStatus::Error(err) => {
                 Err(anyhow!("Parakeet model {} has error: {}", model_name, err))
             }
             ModelStatus::Corrupted { .. } => {
@@ -466,15 +512,20 @@ impl ParakeetEngine {
 
     /// Unload the current model
     pub async fn unload_model(&self) -> bool {
-        let mut model_guard = self.current_model.write().await;
-        let unloaded = model_guard.take().is_some();
+        #[cfg(test)]
+        if let Some(hook) = self.load_test_hook().await {
+            hook.unload_attempted.notify_one();
+        }
+        let _lifecycle_guard = self.model_lifecycle_lock.lock().await;
+        self.unload_model_locked().await
+    }
+
+    async fn unload_model_locked(&self) -> bool {
+        let unloaded = self.current_model.write().await.take().is_some();
         if unloaded {
             log::info!("Parakeet model unloaded");
         }
-
-        let mut model_name_guard = self.current_model_name.write().await;
-        model_name_guard.take();
-
+        self.current_model_name.write().await.take();
         unloaded
     }
 
@@ -1353,6 +1404,92 @@ mod tests {
             .await
             .expect("seed one-byte-oversized artifact");
         assert!(ParakeetEngine::validate_model_directory(temp_dir.path(), SMALL_ARTIFACTS).is_err());
+    }
+
+    #[tokio::test]
+    async fn loading_releases_available_models_and_serializes_unload() {
+        let (_temp_dir, engine, _model_dir) = test_engine().await;
+        engine
+            .available_models
+            .write()
+            .await
+            .get_mut(TEST_MODEL_NAME)
+            .expect("test model remains registered")
+            .status = ModelStatus::Available;
+        *engine.current_model_name.write().await = Some("previous-test-model".to_string());
+
+        let hook = Arc::new(ModelLifecycleTestHook {
+            load_started: tokio::sync::Notify::new(),
+            continue_load: tokio::sync::Notify::new(),
+            unload_attempted: tokio::sync::Notify::new(),
+        });
+        *engine.model_lifecycle_test_hook.lock().await = Some(Arc::clone(&hook));
+
+        let load_engine = Arc::clone(&engine);
+        let load = tokio::spawn(async move { load_engine.load_model(TEST_MODEL_NAME).await });
+        tokio::time::timeout(Duration::from_secs(1), hook.load_started.notified())
+            .await
+            .expect("model load must reach its blocking task");
+
+        {
+            let mut models = tokio::time::timeout(
+                Duration::from_secs(1),
+                engine.available_models.write(),
+            )
+            .await
+            .expect("model cache must remain writable during native loading");
+            models
+                .get_mut(TEST_MODEL_NAME)
+                .expect("test model remains registered")
+                .description = "updated while native load is paused".to_string();
+        }
+
+        let (unloaded_tx, mut unloaded_rx) = oneshot::channel();
+        let unload_engine = Arc::clone(&engine);
+        let unload = tokio::spawn(async move {
+            let unloaded = unload_engine.unload_model().await;
+            unloaded_tx
+                .send(unloaded)
+                .expect("unload receiver remains connected");
+        });
+        tokio::time::timeout(Duration::from_secs(1), hook.unload_attempted.notified())
+            .await
+            .expect("unload must reach the lifecycle boundary");
+        assert!(matches!(
+            unloaded_rx.try_recv(),
+            Err(oneshot::error::TryRecvError::Empty)
+        ));
+
+        hook.continue_load.notify_one();
+        tokio::time::timeout(Duration::from_secs(1), load)
+            .await
+            .expect("model load must finish after release")
+            .expect("join model load task")
+            .expect_err("empty model directory must fail loading");
+        assert!(
+            !tokio::time::timeout(Duration::from_secs(1), unloaded_rx)
+                .await
+                .expect("unload must finish after model load")
+                .expect("unload sender remains connected")
+        );
+        tokio::time::timeout(Duration::from_secs(1), unload)
+            .await
+            .expect("unload task must join")
+            .expect("join unload task");
+
+        assert_eq!(
+            engine
+                .available_models
+                .read()
+                .await
+                .get(TEST_MODEL_NAME)
+                .expect("test model remains registered")
+                .description,
+            "updated while native load is paused"
+        );
+        assert!(engine.current_model.read().await.is_none());
+        assert!(engine.current_model_name.read().await.is_none());
+        *engine.model_lifecycle_test_hook.lock().await = None;
     }
 
     #[tokio::test]

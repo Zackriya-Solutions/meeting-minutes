@@ -38,6 +38,11 @@ export function ParakeetModelManager({
   const onModelSelectRef = useRef(onModelSelect);
   const autoSaveRef = useRef(autoSave);
 
+  useEffect(() => {
+    onModelSelectRef.current = onModelSelect;
+    autoSaveRef.current = autoSave;
+  }, [onModelSelect, autoSave]);
+
   // Progress throttle map to prevent rapid updates
   const progressThrottleRef = useRef<Map<string, { progress: number; timestamp: number }>>(new Map());
   const latestStatusByModelRef = useRef<Map<string, ModelStatus>>(new Map());
