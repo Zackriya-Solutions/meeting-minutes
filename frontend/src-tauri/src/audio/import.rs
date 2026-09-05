@@ -5,6 +5,7 @@ use crate::audio::decoder::{decode_audio_file, decode_audio_file_with_progress};
 use crate::audio::vad::get_speech_chunks_with_progress;
 use crate::config::{DEFAULT_WHISPER_MODEL, DEFAULT_PARAKEET_MODEL};
 use crate::parakeet_engine::ParakeetEngine;
+use crate::qwen_asr_engine::QwenAsrEngine;
 use crate::state::AppState;
 use crate::whisper_engine::WhisperEngine;
 use anyhow::{anyhow, Result};
@@ -265,7 +266,7 @@ pub async fn start_import<R: Runtime>(
     // Reset cancellation flag
     IMPORT_CANCELLED.store(false, Ordering::SeqCst);
 
-    let use_parakeet = provider.as_deref() == Some("parakeet");
+    let provider_for_unload = provider.clone().unwrap_or_else(|| "whisper".to_string());
     let result = run_import(
         app.clone(),
         source_path,
@@ -277,7 +278,7 @@ pub async fn start_import<R: Runtime>(
     .await;
 
     // Unload the engine after the batch job (success, failure, or cancellation)
-    super::common::unload_engine_after_batch(use_parakeet).await;
+    super::common::unload_engine_after_batch(&provider_for_unload).await;
 
     // Guard will automatically clear flag on drop
     // No need for manual: IMPORT_IN_PROGRESS.store(false, Ordering::SeqCst);
@@ -330,6 +331,7 @@ async fn run_import<R: Runtime>(
 
     // Determine which provider to use (default to whisper)
     let use_parakeet = provider.as_deref() == Some("parakeet");
+    let use_qwen = provider.as_deref() == Some("qwen3Asr");
 
     emit_progress(&app, "copying", 5, "Creating meeting folder...");
 
@@ -508,7 +510,7 @@ async fn run_import<R: Runtime>(
     emit_progress(&app, "transcribing", 30, "Loading transcription engine...");
 
     // Initialize the appropriate engine
-    let whisper_engine = if !use_parakeet && total_segments > 0 {
+    let whisper_engine = if !use_parakeet && !use_qwen && total_segments > 0 {
         Some(get_or_init_whisper(&app, model.as_deref()).await?)
     } else {
         None
@@ -518,22 +520,31 @@ async fn run_import<R: Runtime>(
     } else {
         None
     };
+    let qwen_engine = if use_qwen && total_segments > 0 {
+        Some(get_or_init_qwen(&app, model.as_deref()).await?)
+    } else {
+        None
+    };
 
     // Split very long segments at silence boundaries for better transcription quality.
     // Hard cuts at arbitrary sample positions lose words at boundaries. Instead, scan
     // for the lowest-energy window near the target split point and cut there.
-    const MAX_SEGMENT_SAMPLES: usize = 25 * 16000; // 25 seconds at 16kHz
+    let max_segment_samples = if use_qwen {
+        20 * 16_000
+    } else {
+        25 * 16_000
+    };
 
     let mut processable_segments: Vec<crate::audio::vad::SpeechSegment> = Vec::new();
     for segment in &speech_segments {
-        if segment.samples.len() > MAX_SEGMENT_SAMPLES {
+        if segment.samples.len() > max_segment_samples {
             debug!(
                 "Splitting large segment ({:.0}ms, {} samples) at silence boundaries",
                 segment.end_timestamp_ms - segment.start_timestamp_ms,
                 segment.samples.len()
             );
 
-            let sub_segments = split_segment_at_silence(segment, MAX_SEGMENT_SAMPLES);
+            let sub_segments = split_segment_at_silence(segment, max_segment_samples);
             debug!("Split into {} sub-segments", sub_segments.len());
             processable_segments.extend(sub_segments);
         } else {
@@ -586,6 +597,14 @@ async fn run_import<R: Runtime>(
                 .await
                 .map_err(|e| anyhow!("Parakeet transcription failed on segment {}: {}", i, e))?;
             (text, 0.9f32)
+        } else if use_qwen {
+            let text = qwen_engine
+                .as_ref()
+                .unwrap()
+                .transcribe_audio(segment.samples.clone(), language.clone())
+                .await
+                .map_err(|e| anyhow!("Qwen3-ASR transcription failed on segment {}: {}", i, e))?;
+            (text, 0.0f32)
         } else {
             let engine = whisper_engine.as_ref().unwrap();
             let (text, conf, _) = engine
@@ -837,6 +856,28 @@ async fn get_or_init_parakeet<R: Runtime>(
         }
         None => Err(anyhow!("Parakeet engine not initialized")),
     }
+}
+
+async fn get_or_init_qwen<R: Runtime>(
+    _app: &AppHandle<R>,
+    requested_model: Option<&str>,
+) -> Result<Arc<QwenAsrEngine>> {
+    let target_model = requested_model.unwrap_or(crate::qwen_asr_engine::QWEN3_ASR_MODEL);
+    if !crate::qwen_asr_engine::is_supported_model(target_model) {
+        return Err(anyhow!("Unsupported Qwen3-ASR model: {}", target_model));
+    }
+    let engine = {
+        let guard = crate::qwen_asr_engine::commands::QWEN_ASR_ENGINE
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        guard.as_ref().cloned()
+    }
+    .ok_or_else(|| anyhow!("Qwen3-ASR engine not initialized"))?;
+
+    if engine.get_current_model().await.as_deref() != Some(target_model) {
+        engine.load_model(target_model).await?;
+    }
+    Ok(engine)
 }
 
 /// Get the configured model from database
