@@ -14,6 +14,12 @@ import {
 } from '@/lib/transcription-model-readiness';
 import { toast } from 'sonner';
 
+const TRANSCRIPTION_RUNTIME_START_ERROR_CODE = 'TRANSCRIPTION_RUNTIME_INITIALIZATION_FAILED';
+const TRANSCRIPTION_RUNTIME_USER_MESSAGE = 'Speech recognition could not initialize. Restart Meetily. If the problem continues, repair or reinstall the app.';
+
+const isTranscriptionRuntimeStartError = (error: unknown) =>
+  String(error) === TRANSCRIPTION_RUNTIME_START_ERROR_CODE;
+
 interface UseRecordingStartReturn {
   handleRecordingStart: () => Promise<void>;
   isAutoStarting: boolean;
@@ -161,9 +167,13 @@ export function useRecordingStart(
       await showRecordingNotification();
     } catch (error) {
       console.error('Failed to start recording:', error);
-      setStatus(RecordingStatus.ERROR, error instanceof Error ? error.message : 'Failed to start recording');
+      const isRuntimeError = isTranscriptionRuntimeStartError(error);
+      setStatus(RecordingStatus.ERROR, isRuntimeError
+        ? TRANSCRIPTION_RUNTIME_USER_MESSAGE
+        : error instanceof Error ? error.message : 'Failed to start recording');
       setIsRecording(false); // Reset state on error
       Analytics.trackButtonClick('start_recording_error', 'home_page');
+      if (isRuntimeError) return;
       // Re-throw so RecordingControls can handle device-specific errors
       throw error;
     }
@@ -230,8 +240,13 @@ export function useRecordingStart(
             await showRecordingNotification();
           } catch (error) {
             console.error('Failed to auto-start recording:', error);
-            setStatus(RecordingStatus.ERROR, error instanceof Error ? error.message : 'Failed to auto-start recording');
-            alert('Failed to start recording. Check console for details.');
+            const isRuntimeError = isTranscriptionRuntimeStartError(error);
+            setStatus(RecordingStatus.ERROR, isRuntimeError
+              ? TRANSCRIPTION_RUNTIME_USER_MESSAGE
+              : error instanceof Error ? error.message : 'Failed to auto-start recording');
+            if (!isRuntimeError) {
+              alert('Failed to start recording. Check console for details.');
+            }
             Analytics.trackButtonClick('start_recording_error', 'sidebar_auto');
           } finally {
             setIsAutoStarting(false);
@@ -317,8 +332,13 @@ export function useRecordingStart(
         await showRecordingNotification();
       } catch (error) {
         console.error('Failed to start recording from sidebar:', error);
-        setStatus(RecordingStatus.ERROR, error instanceof Error ? error.message : 'Failed to start recording from sidebar');
-        alert('Failed to start recording. Check console for details.');
+        const isRuntimeError = isTranscriptionRuntimeStartError(error);
+        setStatus(RecordingStatus.ERROR, isRuntimeError
+          ? TRANSCRIPTION_RUNTIME_USER_MESSAGE
+          : error instanceof Error ? error.message : 'Failed to start recording from sidebar');
+        if (!isRuntimeError) {
+          alert('Failed to start recording. Check console for details.');
+        }
         Analytics.trackButtonClick('start_recording_error', 'sidebar_direct');
       } finally {
         setIsAutoStarting(false);

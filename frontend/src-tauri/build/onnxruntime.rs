@@ -7,9 +7,13 @@ use std::{
     process,
 };
 
+#[cfg(windows)]
+use std::os::windows::fs::MetadataExt;
+
 const WINDOWS_X64_TARGET: &str = "x86_64-pc-windows-msvc";
 const ARCHIVE_URL: &str = "https://github.com/microsoft/onnxruntime/releases/download/v1.22.0/onnxruntime-win-x64-1.22.0.zip";
 const ARCHIVE_SHA256: &str = "174c616efc0271194488642a72f1a514e01487da4dfe84c49296d66e40ebe0da";
+const ARCHIVE_SIZE: u64 = 72_368_545;
 
 struct Artifact {
     archive_path: &'static str,
@@ -63,16 +67,49 @@ pub fn ensure_onnxruntime_runtime() {
             );
             return;
         }
-        Err(error) if destination.exists() => {
-            println!("cargo:warning=Replacing invalid bundled ONNX Runtime: {error}");
-            fs::remove_dir_all(&destination).unwrap_or_else(|remove_error| {
+        Err(verification_error) => match fs::symlink_metadata(&destination) {
+            Ok(metadata) if is_link_or_reparse_point(&metadata) => {
                 panic!(
-                    "Failed to remove invalid ONNX Runtime at {}: {remove_error}",
+                    "Refusing to replace linked or reparse-point ONNX Runtime stage at {}: {verification_error}",
                     destination.display()
-                )
-            });
-        }
-        Err(_) => {}
+                );
+            }
+            Ok(metadata) if metadata.is_dir() => {
+                println!(
+                    "cargo:warning=Replacing invalid bundled ONNX Runtime: {verification_error}"
+                );
+                fs::remove_dir_all(&destination).unwrap_or_else(|remove_error| {
+                    panic!(
+                        "Failed to remove invalid ONNX Runtime directory at {}: {remove_error}",
+                        destination.display()
+                    )
+                });
+            }
+            Ok(metadata) if metadata.is_file() => {
+                println!(
+                    "cargo:warning=Replacing invalid bundled ONNX Runtime: {verification_error}"
+                );
+                fs::remove_file(&destination).unwrap_or_else(|remove_error| {
+                    panic!(
+                        "Failed to remove invalid ONNX Runtime file at {}: {remove_error}",
+                        destination.display()
+                    )
+                });
+            }
+            Ok(_) => {
+                panic!(
+                    "Refusing to replace special ONNX Runtime stage at {}: {verification_error}",
+                    destination.display()
+                );
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                panic!(
+                    "Failed to inspect invalid ONNX Runtime stage at {}: {error}",
+                    destination.display()
+                );
+            }
+        },
     }
 
     fs::create_dir_all(
@@ -119,7 +156,7 @@ pub fn ensure_onnxruntime_runtime() {
 
 fn stage_runtime(archive_path: &Path, destination: &Path) -> Result<(), String> {
     download_archive(archive_path)?;
-    verify_file(archive_path, ARCHIVE_URL, 72_368_545, ARCHIVE_SHA256)?;
+    verify_file(archive_path, ARCHIVE_URL, ARCHIVE_SIZE, ARCHIVE_SHA256)?;
 
     fs::create_dir_all(destination)
         .map_err(|error| format!("failed to create {}: {error}", destination.display()))?;
@@ -141,8 +178,6 @@ fn stage_runtime(archive_path: &Path, destination: &Path) -> Result<(), String> 
             .map_err(|error| format!("failed to create {}: {error}", output.display()))?;
         std::io::copy(&mut source, &mut file)
             .map_err(|error| format!("failed to extract {}: {error}", artifact.archive_path))?;
-        file.flush()
-            .map_err(|error| format!("failed to flush {}: {error}", output.display()))?;
         verify_file(
             &output,
             artifact.output_name,
@@ -167,35 +202,99 @@ fn download_archive(destination: &Path) -> Result<(), String> {
         .map_err(|error| format!("ONNX Runtime download failed: {error}"))?;
     let mut file = File::create(destination)
         .map_err(|error| format!("failed to create {}: {error}", destination.display()))?;
-    let mut hasher = Sha256::new();
-    let mut buffer = [0_u8; 64 * 1024];
-    let mut total = 0_u64;
+    copy_exact(&mut response, &mut file, ARCHIVE_SIZE)
+}
 
-    loop {
-        let read = response
-            .read(&mut buffer)
-            .map_err(|error| format!("failed to read ONNX Runtime download: {error}"))?;
-        if read == 0 {
-            break;
-        }
-        file.write_all(&buffer[..read])
-            .map_err(|error| format!("failed to write {}: {error}", destination.display()))?;
-        hasher.update(&buffer[..read]);
-        total += read as u64;
+fn copy_exact<R: Read, W: Write>(
+    source: &mut R,
+    destination: &mut W,
+    expected_size: u64,
+) -> Result<(), String> {
+    let copied = std::io::copy(
+        &mut source.by_ref().take(expected_size),
+        destination,
+    )
+    .map_err(|error| format!("failed to copy ONNX Runtime download: {error}"))?;
+    if copied != expected_size {
+        return Err(format!(
+            "downloaded ONNX Runtime archive has size {copied}, expected {expected_size}"
+        ));
     }
-    file.flush()
-        .map_err(|error| format!("failed to flush {}: {error}", destination.display()))?;
 
-    if total != 72_368_545 || format!("{:x}", hasher.finalize()) != ARCHIVE_SHA256 {
-        return Err(
-            "downloaded ONNX Runtime archive failed size or SHA-256 verification".to_string(),
-        );
+    let mut probe = [0_u8; 1];
+    if source
+        .read(&mut probe)
+        .map_err(|error| format!("failed to copy ONNX Runtime download: {error}"))?
+        != 0
+    {
+        return Err(format!(
+            "downloaded ONNX Runtime archive exceeds expected size {expected_size}"
+        ));
     }
 
     Ok(())
 }
 
+fn is_link_or_reparse_point(metadata: &fs::Metadata) -> bool {
+    if metadata.file_type().is_symlink() {
+        return true;
+    }
+
+    #[cfg(windows)]
+    {
+        return metadata.file_attributes() & 0x0000_0400 != 0;
+    }
+
+    #[cfg(not(windows))]
+    false
+}
+
 fn verify_staged_runtime(destination: &Path) -> Result<(), String> {
+    let metadata = fs::symlink_metadata(destination)
+        .map_err(|error| format!("failed to inspect runtime stage: {error}"))?;
+    if is_link_or_reparse_point(&metadata) {
+        return Err("runtime stage is a link or reparse point".to_string());
+    }
+    if !metadata.file_type().is_dir() {
+        return Err("runtime stage is not a directory".to_string());
+    }
+
+    let entries = fs::read_dir(destination)
+        .map_err(|error| format!("failed to enumerate runtime stage: {error}"))?;
+    for entry in entries {
+        let entry =
+            entry.map_err(|error| format!("failed to enumerate runtime stage entry: {error}"))?;
+        let entry_metadata = fs::symlink_metadata(entry.path()).map_err(|error| {
+            format!(
+                "failed to inspect runtime stage entry {}: {error}",
+                entry.path().display()
+            )
+        })?;
+        if is_link_or_reparse_point(&entry_metadata) {
+            return Err(format!(
+                "runtime stage entry {} is a link or reparse point",
+                entry.path().display()
+            ));
+        }
+        if !entry_metadata.file_type().is_file() {
+            return Err(format!(
+                "runtime stage entry {} is not a regular file",
+                entry.path().display()
+            ));
+        }
+
+        let name = entry.file_name();
+        if !ARTIFACTS
+            .iter()
+            .any(|artifact| name.as_os_str() == artifact.output_name)
+        {
+            return Err(format!(
+                "runtime stage contains undeclared entry {}",
+                entry.path().display()
+            ));
+        }
+    }
+
     for artifact in ARTIFACTS {
         verify_file(
             &destination.join(artifact.output_name),

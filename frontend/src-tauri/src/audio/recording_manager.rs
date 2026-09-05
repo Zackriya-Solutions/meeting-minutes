@@ -21,6 +21,14 @@ pub enum StreamManagerType {
     Standard(AudioStreamManager),
 }
 
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum RecordingStartError {
+    #[error("Failed to initialize speech recognition: {0}")]
+    TranscriptionRuntime(#[source] anyhow::Error),
+    #[error(transparent)]
+    Other(#[from] anyhow::Error),
+}
+
 /// Simplified recording manager that coordinates all audio components
 pub struct RecordingManager {
     state: Arc<RecordingState>,
@@ -60,21 +68,17 @@ impl RecordingManager {
     /// * `microphone_device` - Optional microphone device to use
     /// * `system_device` - Optional system audio device to use
     /// * `auto_save` - Whether to save audio checkpoints (true) or just transcripts/metadata (false)
-    pub async fn start_recording(
+    pub(crate) async fn start_recording(
         &mut self,
         microphone_device: Option<Arc<AudioDevice>>,
         system_device: Option<Arc<AudioDevice>>,
         auto_save: bool,
-    ) -> Result<mpsc::UnboundedReceiver<AudioChunk>> {
+    ) -> std::result::Result<mpsc::UnboundedReceiver<AudioChunk>, RecordingStartError> {
         info!("Starting recording manager (auto_save: {})", auto_save);
 
         // Set up transcription channel
         let (transcription_sender, transcription_receiver) = mpsc::unbounded_channel::<AudioChunk>();
-
-        // CRITICAL FIX: Create recording sender for pre-mixed audio from pipeline
-        // Pipeline will mix mic + system audio professionally and send to this channel
-        // Pass auto_save to control whether audio checkpoints are created
-        let recording_sender = self.recording_saver.start_accumulation(auto_save);
+        let (recording_sender, recording_receiver) = mpsc::unbounded_channel::<AudioChunk>();
 
         // Start recording state first
         self.state.start_recording()?;
@@ -97,12 +101,6 @@ impl RecordingManager {
             ("No System Audio".to_string(), super::device_detection::InputDeviceKind::Unknown)
         };
 
-        // Update recording metadata with device information
-        self.recording_saver.set_device_info(
-            microphone_device.as_ref().map(|d| d.name.clone()),
-            system_device.as_ref().map(|d| d.name.clone())
-        );
-
         // Start the audio processing pipeline with FFmpeg adaptive mixer
         // Pipeline will: 1) Mix mic+system audio with adaptive buffering, 2) Send mixed to recording_sender,
         // 3) Apply VAD and send speech segments to transcription
@@ -118,8 +116,14 @@ impl RecordingManager {
             sys_kind,
         ) {
             self.state.stop_recording();
-            return Err(error);
+            return Err(RecordingStartError::TranscriptionRuntime(error));
         }
+
+        self.recording_saver.start_accumulation(auto_save, recording_receiver);
+        self.recording_saver.set_device_info(
+            microphone_device.as_ref().map(|d| d.name.clone()),
+            system_device.as_ref().map(|d| d.name.clone())
+        );
 
         // Give the pipeline a moment to fully initialize before starting streams
         tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
@@ -189,7 +193,9 @@ impl RecordingManager {
             }
 
             // Start recording with selected devices and auto_save setting
-            self.start_recording(microphone_device, system_device, auto_save).await
+            self.start_recording(microphone_device, system_device, auto_save)
+                .await
+                .map_err(anyhow::Error::new)
         }
 
         #[cfg(not(target_os = "macos"))]
@@ -224,7 +230,9 @@ impl RecordingManager {
                 return Err(anyhow::anyhow!("No microphone device available"));
             }
 
-            self.start_recording(microphone_device, system_device, auto_save).await
+            self.start_recording(microphone_device, system_device, auto_save)
+                .await
+                .map_err(anyhow::Error::new)
         }
     }
 
