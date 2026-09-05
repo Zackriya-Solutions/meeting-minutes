@@ -45,6 +45,13 @@ export function TranscriptPanel({
       endTime: t.audio_end_time,
       text: t.text,
       confidence: t.confidence,
+      speaker_id: t.speaker_id,
+      speaker_label: t.speaker_label,
+      speaker_color: t.speaker_color,
+      is_overlap: t.is_overlap,
+      diarization_status: t.diarization_status,
+      diarization_method: t.diarization_method,
+      diarization_confidence: t.diarization_confidence,
     })),
     [transcripts]
   );

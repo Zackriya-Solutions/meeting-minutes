@@ -7,6 +7,7 @@ import { configService, ModelConfig } from '@/services/configService';
 import { invoke } from '@tauri-apps/api/core';
 import Analytics from '@/lib/analytics';
 import { BetaFeatures, BetaFeatureKey, loadBetaFeatures, saveBetaFeatures } from '@/types/betaFeatures';
+import { DEFAULT_DIARIZATION_SETTINGS, type DiarizationSettings } from '@/types/diarization';
 
 export interface OllamaModel {
   name: string;
@@ -67,6 +68,11 @@ interface ConfigContextType {
   // Beta features
   betaFeatures: BetaFeatures;
   toggleBetaFeature: (featureKey: BetaFeatureKey, enabled: boolean) => void;
+
+  // Speaker diarization settings
+  diarizationSettings: DiarizationSettings;
+  isLoadingDiarizationSettings: boolean;
+  updateDiarizationSettings: (settings: DiarizationSettings) => Promise<void>;
 
   // Ollama models
   models: OllamaModel[];
@@ -170,6 +176,10 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
   const [betaFeatures, setBetaFeatures] = useState<BetaFeatures>(() => {
     return loadBetaFeatures();
   });
+
+  // Speaker diarization settings state
+  const [diarizationSettings, setDiarizationSettings] = useState<DiarizationSettings>(DEFAULT_DIARIZATION_SETTINGS);
+  const [isLoadingDiarizationSettings, setIsLoadingDiarizationSettings] = useState(false);
 
   // Preference settings state (lazy loaded)
   const [notificationSettings, setNotificationSettings] = useState<NotificationSettings | null>(null);
@@ -366,6 +376,24 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     loadDevicePreferences();
   }, []);
 
+  // Load speaker diarization settings on mount
+  useEffect(() => {
+    const loadDiarizationSettings = async () => {
+      setIsLoadingDiarizationSettings(true);
+      try {
+        const settings = await configService.getDiarizationSettings();
+        setDiarizationSettings(settings);
+      } catch (error) {
+        console.error('[ConfigContext] Failed to load diarization settings:', error);
+        setDiarizationSettings(DEFAULT_DIARIZATION_SETTINGS);
+      } finally {
+        setIsLoadingDiarizationSettings(false);
+      }
+    };
+
+    loadDiarizationSettings();
+  }, []);
+
   // Calculate model options based on available models
   const modelOptions: Record<ModelConfig['provider'], string[]> = {
     ollama: models.map(model => model.name),
@@ -408,6 +436,11 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
 
       return updated;
     });
+  }, []);
+
+  const updateDiarizationSettings = useCallback(async (settings: DiarizationSettings) => {
+    setDiarizationSettings(settings);
+    await configService.saveDiarizationSettings(settings);
   }, []);
 
   // Update individual provider API key
@@ -505,6 +538,9 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     toggleConfidenceIndicator,
     betaFeatures,
     toggleBetaFeature,
+    diarizationSettings,
+    isLoadingDiarizationSettings,
+    updateDiarizationSettings,
     models,
     modelOptions,
     error,
@@ -528,6 +564,9 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     toggleConfidenceIndicator,
     betaFeatures,
     toggleBetaFeature,
+    diarizationSettings,
+    isLoadingDiarizationSettings,
+    updateDiarizationSettings,
     models,
     modelOptions,
     error,

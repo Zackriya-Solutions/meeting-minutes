@@ -7,6 +7,7 @@
 
 import { invoke } from '@tauri-apps/api/core';
 import { TranscriptModelProps } from '@/components/TranscriptSettings';
+import type { DiarizationSettings } from '@/types/diarization';
 
 export interface ModelConfig {
   provider: 'ollama' | 'groq' | 'claude' | 'openrouter' | 'openai' | 'builtin-ai' | 'custom-openai';
@@ -68,6 +69,22 @@ export class ConfigService {
    */
   async getRecordingPreferences(): Promise<RecordingPreferences> {
     return invoke<RecordingPreferences>('get_recording_preferences');
+  }
+
+  /**
+   * Get saved diarization settings
+   * @returns Promise with diarization settings
+   */
+  async getDiarizationSettings(): Promise<DiarizationSettings> {
+    return invoke<DiarizationSettings>('get_diarization_settings');
+  }
+
+  /**
+   * Save diarization settings
+   * @param settings - DiarizationSettings to save
+   */
+  async saveDiarizationSettings(settings: DiarizationSettings): Promise<void> {
+    return invoke<void>('save_diarization_settings', { settings });
   }
 
   /**

@@ -47,8 +47,13 @@ impl TranscriptsRepository {
         for segment in transcripts {
             let transcript_id = format!("transcript-{}", Uuid::new_v4());
             let result = sqlx::query(
-                "INSERT INTO transcripts (id, meeting_id, transcript, timestamp, audio_start_time, audio_end_time, duration)
-                 VALUES (?, ?, ?, ?, ?, ?, ?)"
+                "INSERT INTO transcripts (
+                    id, meeting_id, transcript, timestamp,
+                    audio_start_time, audio_end_time, duration,
+                    speaker_id, speaker_label, speaker_color, is_overlap,
+                    diarization_status, diarization_method, diarization_confidence
+                 )
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             )
             .bind(&transcript_id)
             .bind(&meeting_id)
@@ -57,6 +62,13 @@ impl TranscriptsRepository {
             .bind(segment.audio_start_time)
             .bind(segment.audio_end_time)
             .bind(segment.duration)
+            .bind(&segment.speaker_id)
+            .bind(&segment.speaker_label)
+            .bind(&segment.speaker_color)
+            .bind(segment.is_overlap.unwrap_or(false) as i64)
+            .bind(segment.diarization_status.as_deref().unwrap_or("none"))
+            .bind(&segment.diarization_method)
+            .bind(segment.diarization_confidence)
             .execute(&mut *transaction)
             .await;
 

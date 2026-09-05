@@ -22,10 +22,17 @@ export interface BetaFeatures {
    * @since v0.3.0
    */
   importAndRetranscribe: boolean;
+
+  /**
+   * Label speakers in transcripts with live provisional labels and post-call refinement
+   * @since v0.4.2
+   */
+  speakerDiarization: boolean;
 }
 
 export const DEFAULT_BETA_FEATURES: BetaFeatures = {
   importAndRetranscribe: true, // Default: enabled
+  speakerDiarization: false,
 };
 
 
@@ -34,6 +41,7 @@ export const DEFAULT_BETA_FEATURES: BetaFeatures = {
  */
 export const BETA_FEATURE_NAMES: Record<keyof BetaFeatures, string> = {
   importAndRetranscribe: 'Import Audio & Retranscribe',
+  speakerDiarization: 'Speaker Labels',
 };
 
 /**
@@ -41,6 +49,7 @@ export const BETA_FEATURE_NAMES: Record<keyof BetaFeatures, string> = {
  */
 export const BETA_FEATURE_DESCRIPTIONS: Record<keyof BetaFeatures, string> = {
   importAndRetranscribe: 'Import audio files to transcribe or retranscribe existing meetings with different language settings.',
+  speakerDiarization: 'Label speakers in transcripts with live provisional labels and post-call refinement.',
 };
 
 /**

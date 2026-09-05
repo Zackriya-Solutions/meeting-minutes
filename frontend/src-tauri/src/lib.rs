@@ -41,6 +41,7 @@ pub mod audio;
 pub mod config;
 pub mod console_utils;
 pub mod database;
+pub mod diarization;
 pub mod notifications;
 pub mod ollama;
 pub mod onboarding;
@@ -643,6 +644,12 @@ pub fn run() {
             api::api_get_transcript_config,
             api::api_save_transcript_config,
             api::api_get_transcript_api_key,
+            // Diarization settings commands
+            diarization::commands::get_diarization_settings,
+            diarization::commands::save_diarization_settings,
+            diarization::commands::get_meeting_speakers,
+            diarization::commands::rename_speaker,
+            diarization::commands::apply_diarization_segments,
             api::api_delete_meeting,
             api::api_get_meeting,
             api::api_get_meeting_metadata,
