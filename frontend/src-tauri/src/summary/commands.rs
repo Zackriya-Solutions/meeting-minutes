@@ -304,7 +304,7 @@ fn summary_is_renderable(value: &serde_json::Value) -> bool {
     if let Some(markdown) = object.get("markdown") {
         return markdown
             .as_str()
-            .is_some_and(|markdown| !markdown.trim().is_empty());
+            .is_some_and(|markdown| !clean_llm_markdown_detailed(markdown).markdown.is_empty());
     }
     if let Some(blocks) = object.get("summary_json") {
         return blocknote_has_visible_text(blocks);
@@ -566,24 +566,35 @@ pub async fn api_cancel_summary<R: Runtime>(
         .with_timezone(&Utc);
     log_info!("api_cancel_summary called for meeting_id: {}", meeting_id);
 
-    let cancelled = SummaryService::cancel_summary(&meeting_id, started_at);
-    if cancelled {
+    let cancellation_requested = SummaryService::cancel_summary(&meeting_id, started_at);
+    let cancelled = if cancellation_requested {
         let pool = state.db_manager.pool();
         match SummaryProcessesRepository::update_process_cancelled(pool, &meeting_id, started_at)
             .await
         {
-            Ok(true) => log_info!("Successfully cancelled summary generation for meeting_id: {}", meeting_id),
-            Ok(false) => log_info!("Summary generation was already terminal for meeting_id: {}", meeting_id),
+            Ok(true) => {
+                log_info!("Successfully cancelled summary generation for meeting_id: {}", meeting_id);
+                true
+            }
+            Ok(false) => {
+                log_info!("Summary generation was already terminal for meeting_id: {}", meeting_id);
+                false
+            }
             Err(error) => {
                 log_error!("Failed to update cancellation status for {}: {}", meeting_id, error);
                 return Err(format!("Failed to update cancellation status: {}", error));
             }
         }
-    }
+    } else {
+        false
+    };
 
     Ok(serde_json::json!({
+        "cancelled": cancelled,
         "message": if cancelled {
             "Summary generation cancelled successfully"
+        } else if cancellation_requested {
+            "Summary generation was already terminal"
         } else {
             "No active summary generation to cancel"
         },
@@ -625,6 +636,7 @@ mod tests {
     #[test]
     fn summary_validation_rejects_blank_and_reasoning_content() {
         assert!(!summary_is_renderable(&json!({"markdown": "   "})));
+        assert!(!summary_is_renderable(&json!({"markdown": "```\r\n```"})));
         assert!(!summary_is_renderable(&json!({
             "summary_json": [{"content": [{"type": "text", "text": "<think>private</think>"}]}]
         })));

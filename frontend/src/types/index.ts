@@ -103,6 +103,12 @@ export interface ProcessTranscriptResponse {
   process_id: string;
 }
 
+export interface CancelSummaryResponse {
+  cancelled: boolean;
+  message: string;
+  meeting_id: string;
+}
+
 export interface SummaryProcessResponse {
   status: SummaryProcessStatus;
   meetingName: string | null;

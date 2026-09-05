@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef } from 'react';
 import {
+  CancelSummaryResponse,
   MeetingSummary,
   ProcessTranscriptResponse,
   SummaryProcessResponse,
@@ -452,26 +453,54 @@ export function useSummaryGeneration({
   const handleStopGeneration = useCallback(async () => {
     const generationId = generationIdRef.current;
     const processId = activeProcessIdRef.current;
-    generationIdRef.current += 1;
-    activeProcessIdRef.current = null;
-    if (processId) {
-      try {
-        await invokeTauri('api_cancel_summary', {
-          meetingId: meeting.id,
-          processId,
-        });
-      } catch (error) {
-        console.error('Failed to cancel summary generation:', error);
-      }
-      stopSummaryPolling(meeting.id, processId);
+    if (!processId) {
+      generationIdRef.current += 1;
+      activeProcessIdRef.current = null;
+      setSummaryStatus('idle');
+      setSummaryError(null);
+      await finishGeneration(generationId, 'cancelled');
+      toast.info('Summary generation stopped', {
+        description: 'You can generate a new summary anytime',
+        duration: 3000,
+      });
+      return;
     }
-    setSummaryStatus('idle');
-    setSummaryError(null);
-    await finishGeneration(generationId, 'cancelled');
-    toast.info('Summary generation stopped', {
-      description: 'You can generate a new summary anytime',
-      duration: 3000,
-    });
+
+    try {
+      const result = await invokeTauri<CancelSummaryResponse>('api_cancel_summary', {
+        meetingId: meeting.id,
+        processId,
+      });
+      if (generationId !== generationIdRef.current) {
+        return;
+      }
+      if (result.cancelled) {
+        generationIdRef.current += 1;
+        activeProcessIdRef.current = null;
+        stopSummaryPolling(meeting.id, processId);
+        setSummaryStatus('idle');
+        setSummaryError(null);
+        await finishGeneration(generationId, 'cancelled');
+        toast.info('Summary generation stopped', {
+          description: 'You can generate a new summary anytime',
+          duration: 3000,
+        });
+      } else if (activeProcessIdRef.current === processId) {
+        toast.info('Summary is already finishing', {
+          description: 'Waiting for the latest result.',
+        });
+      }
+    } catch (error) {
+      console.error('Failed to cancel summary generation:', error);
+      if (
+        generationId === generationIdRef.current
+        && activeProcessIdRef.current === processId
+      ) {
+        toast.error('Failed to stop summary generation', {
+          description: 'Generation is still running; waiting for its latest status.',
+        });
+      }
+    }
   }, [finishGeneration, meeting.id, stopSummaryPolling]);
 
   return {

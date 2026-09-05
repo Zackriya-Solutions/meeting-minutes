@@ -214,3 +214,152 @@ impl SummaryProcessesRepository {
         Ok(update.rows_affected() == 1)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    async fn test_pool() -> SqlitePool {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::query(
+            "CREATE TABLE summary_processes (
+                meeting_id TEXT PRIMARY KEY,
+                status TEXT NOT NULL,
+                created_at TEXT,
+                updated_at TEXT,
+                start_time TEXT,
+                result TEXT,
+                result_backup TEXT,
+                result_backup_timestamp TEXT,
+                end_time TEXT,
+                chunk_count INTEGER,
+                processing_time REAL,
+                error TEXT
+            )",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        pool
+    }
+
+    async fn seed_pending(
+        pool: &SqlitePool,
+        meeting_id: &str,
+        started_at: DateTime<Utc>,
+        result: Option<&str>,
+        result_backup: Option<&str>,
+    ) {
+        sqlx::query(
+            "INSERT INTO summary_processes (
+                meeting_id, status, created_at, updated_at, start_time, result, result_backup
+            ) VALUES (?, 'PENDING', ?, ?, ?, ?, ?)",
+        )
+        .bind(meeting_id)
+        .bind(started_at)
+        .bind(started_at)
+        .bind(started_at)
+        .bind(result)
+        .bind(result_backup)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn terminal_compare_and_set_preserves_first_writer() {
+        let pool = test_pool().await;
+        let completed_start = Utc::now();
+        seed_pending(&pool, "completed-first", completed_start, None, None).await;
+        assert!(
+            SummaryProcessesRepository::update_process_completed(
+                &pool,
+                "completed-first",
+                completed_start,
+                json!({"markdown": "completed"}),
+                1,
+                1.0,
+            )
+            .await
+            .unwrap()
+        );
+        assert!(
+            !SummaryProcessesRepository::update_process_cancelled(
+                &pool,
+                "completed-first",
+                completed_start,
+            )
+            .await
+            .unwrap()
+        );
+        let completed_status: String = sqlx::query_scalar(
+            "SELECT status FROM summary_processes WHERE meeting_id = 'completed-first'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(completed_status, "completed");
+
+        let cancelled_start = completed_start + chrono::Duration::nanoseconds(1);
+        let previous = r#"{"markdown":"previous"}"#;
+        seed_pending(
+            &pool,
+            "cancelled-first",
+            cancelled_start,
+            Some(previous),
+            Some(previous),
+        )
+        .await;
+        assert!(
+            SummaryProcessesRepository::update_process_cancelled(
+                &pool,
+                "cancelled-first",
+                cancelled_start,
+            )
+            .await
+            .unwrap()
+        );
+        assert!(
+            !SummaryProcessesRepository::update_process_completed(
+                &pool,
+                "cancelled-first",
+                cancelled_start,
+                json!({"markdown": "completed"}),
+                1,
+                1.0,
+            )
+            .await
+            .unwrap()
+        );
+        let cancelled: (String, String) = sqlx::query_as(
+            "SELECT status, result FROM summary_processes WHERE meeting_id = 'cancelled-first'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(cancelled, ("cancelled".to_string(), previous.to_string()));
+    }
+
+    #[tokio::test]
+    async fn cancelled_compare_and_set_rejects_stale_start_time() {
+        let pool = test_pool().await;
+        let current_start = Utc::now();
+        seed_pending(&pool, "stale-cancel", current_start, None, None).await;
+        assert!(
+            !SummaryProcessesRepository::update_process_cancelled(
+                &pool,
+                "stale-cancel",
+                current_start - chrono::Duration::nanoseconds(1),
+            )
+            .await
+            .unwrap()
+        );
+        let status: String =
+            sqlx::query_scalar("SELECT status FROM summary_processes WHERE meeting_id = 'stale-cancel'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(status, "PENDING");
+    }
+}

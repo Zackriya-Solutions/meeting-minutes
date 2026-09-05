@@ -63,6 +63,7 @@ export default function PageContent({
   const openModelSettingsRef = useRef<(() => void) | null>(null);
   const autoSwitchedSummaryMeetingIdsRef = useRef(new Set<string>());
   const manuallySelectedTabMeetingIdsRef = useRef(new Set<string>());
+  const autoGenerationStartedMeetingIdRef = useRef<string | null>(null);
 
   // Sidebar context
   const { serverAddress } = useSidebar();
@@ -153,29 +154,31 @@ export default function PageContent({
     }
   }, [meeting.id, meetingData.aiSummary, summaryGeneration.summaryStatus]);
 
-  // Auto-generate summary when flag is set
+  // Auto-generate only after the model configuration has settled.
   useEffect(() => {
-    let cancelled = false;
+    if (
+      !shouldAutoGenerate
+      || isModelConfigLoading
+      || meetingData.transcripts.length === 0
+      || autoGenerationStartedMeetingIdRef.current === meeting.id
+    ) {
+      return;
+    }
 
-    const autoGenerate = async () => {
-      if (shouldAutoGenerate && meetingData.transcripts.length > 0 && !cancelled) {
-        console.log(`🤖 Auto-generating summary with ${modelConfig.provider}/${modelConfig.model}...`);
-        await summaryGeneration.handleGenerateSummary('');
-
-        // Notify parent that auto-generation is complete (only if not cancelled)
-        if (onAutoGenerateComplete && !cancelled) {
-          onAutoGenerateComplete();
-        }
-      }
-    };
-
-    autoGenerate();
-
-    // Cleanup: cancel if component unmounts or meeting changes
-    return () => {
-      cancelled = true;
-    };
-  }, [shouldAutoGenerate, meeting.id]); // Re-run if meeting changes
+    autoGenerationStartedMeetingIdRef.current = meeting.id;
+    console.log(`🤖 Auto-generating summary with ${modelConfig.provider}/${modelConfig.model}...`);
+    onAutoGenerateComplete?.();
+    void summaryGeneration.handleGenerateSummary('');
+  }, [
+    shouldAutoGenerate,
+    meeting.id,
+    meetingData.transcripts.length,
+    isModelConfigLoading,
+    modelConfig.provider,
+    modelConfig.model,
+    summaryGeneration.handleGenerateSummary,
+    onAutoGenerateComplete,
+  ]);
 
   return (
     <motion.div

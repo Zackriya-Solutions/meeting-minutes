@@ -23,7 +23,7 @@ pub fn clean_llm_markdown_detailed(raw: &str) -> CleanedLlmMarkdown {
     let visible = THINK_ENVELOPE_REGEX.replace_all(raw, "");
     let reasoning_stripped = visible.as_ref() != raw;
     let trimmed = visible.trim();
-    const PREFIXES: &[&str] = &["```markdown\n", "```\n"];
+    const PREFIXES: &[&str] = &["```markdown\n", "```\n", "```markdown\r\n", "```\r\n"];
     const SUFFIX: &str = "```";
     let markdown = PREFIXES
         .iter()
@@ -898,7 +898,23 @@ mod tests {
             require_visible_markdown("Final summary", &reasoning_only),
             Err("Final summary returned no visible summary content after reasoning removal".to_string())
         );
-        let empty_fence = clean_llm_markdown_detailed("```markdown\n```");
-        assert!(require_visible_markdown("Translation", &empty_fence).is_err());
+        for raw in ["```\n```", "```markdown\n```", "```\r\n```", "```markdown\r\n```"] {
+            let empty_fence = clean_llm_markdown_detailed(raw);
+            assert_eq!(empty_fence.markdown, "");
+            assert_eq!(
+                require_visible_markdown("Translation", &empty_fence),
+                Err("Translation returned no visible summary content after reasoning removal".to_string())
+            );
+        }
+    }
+
+    #[test]
+    fn cleaner_strips_outer_crlf_fence_without_normalizing_inner_markdown() {
+        let markdown = "# Heading\r\n\r\n```rust\r\nlet x = 1;\r\n```";
+        let wrapped = format!("```\r\n{markdown}\r\n```");
+        let cleaned = clean_llm_markdown_detailed(&wrapped);
+        assert_eq!(cleaned.markdown, markdown);
+        assert!(!cleaned.reasoning_stripped);
+        assert_eq!(clean_llm_markdown_detailed(markdown).markdown, markdown);
     }
 }
