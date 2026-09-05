@@ -396,6 +396,13 @@ impl AudioCapture {
             data.to_vec()
         };
 
+        // Feed the live mic meter (raw level, pre-enhancement) for the floating indicator
+        if matches!(self.device_type, DeviceType::Microphone) && !mono_data.is_empty() {
+            let rms = (mono_data.iter().map(|&x| x * x).sum::<f32>() / mono_data.len() as f32).sqrt();
+            let peak = mono_data.iter().fold(0.0f32, |m, &x| m.max(x.abs()));
+            super::mic_level::update(rms, peak);
+        }
+
         // CRITICAL FIX: Resample to 48kHz if device uses different sample rate
         // This fixes Bluetooth devices (like Sony WH-1000XM4) that report 16kHz or 44.1kHz
         // Without this, audio is sped up 3x and VAD fails

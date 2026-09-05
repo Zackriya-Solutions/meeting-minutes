@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Recording</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      background: transparent;
+      overflow: hidden;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    .pill {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      padding: 0 6px 0 3px;
+      border-radius: 15px;
+      background: rgba(48, 50, 54, 0.95);
+      border: 1px solid rgba(255, 255, 255, 0.10);
+    }
+
+    /* Drag handle: six dots, grab cursor */
+    .grip {
+      display: grid;
+      grid-template-columns: repeat(2, 2px);
+      grid-template-rows: repeat(3, 2px);
+      gap: 2.5px;
+      padding: 6px 4px;
+      height: 100%;
+      align-content: center;
+      cursor: grab;
+      flex-shrink: 0;
+    }
+
+    .grip:active { cursor: grabbing; }
+
+    .grip .gd {
+      width: 2px;
+      height: 2px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.40);
+    }
+
+    .grip:hover .gd { background: rgba(255, 255, 255, 0.62); }
+
+    .wave {
+      display: flex;
+      align-items: center;
+      gap: 1.5px;
+      height: 16px;
+      flex-shrink: 0;
+      cursor: grab;
+    }
+
+    .wave .bar {
+      width: 2px;
+      height: 2px;
+      border-radius: 1px;
+      background: rgba(209, 213, 219, 0.85);
+      transition: height 130ms ease-out;
+    }
+
+    .time {
+      font-size: 11px;
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
+      color: rgba(229, 231, 235, 0.92);
+      white-space: nowrap;
+      cursor: grab;
+      padding: 0 1px;
+    }
+
+    .stop {
+      position: relative;
+      z-index: 20;
+      width: 20px;
+      height: 20px;
+      border: none;
+      border-radius: 50%;
+      background: rgba(120, 124, 130, 0.95);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      flex-shrink: 0;
+      transition: background 120ms ease, transform 120ms ease;
+    }
+
+    .stop:hover { background: rgba(150, 154, 160, 0.95); transform: scale(1.08); }
+    .stop:active { transform: scale(0.94); }
+    .stop:disabled { background: rgba(80, 82, 86, 0.95); cursor: default; transform: none; }
+
+    .stop .square {
+      width: 7px;
+      height: 7px;
+      border-radius: 1.5px;
+      background: #f3f4f6;
+    }
+
+    /* Paused state */
+    body.paused .wave .bar { background: rgba(255, 255, 255, 0.22); }
+    body.paused .time { color: rgba(180, 184, 190, 0.95); }
+
+    /* Stopping state */
+    body.stopping .pill { opacity: 0.6; }
+  </style>
+</head>
+<body>
+  <div class="pill" id="pill">
+    <div class="grip" id="grip" title="Drag to move">
+      <div class="gd"></div><div class="gd"></div>
+      <div class="gd"></div><div class="gd"></div>
+      <div class="gd"></div><div class="gd"></div>
+    </div>
+    <div class="wave" id="wave"></div>
+    <div class="time" id="time">0:00</div>
+    <button class="stop" id="stop" title="Stop recording" aria-label="Stop recording">
+      <div class="square"></div>
+    </button>
+  </div>
+  <script src="floating-indicator.js"></script>
+</body>
+</html>
