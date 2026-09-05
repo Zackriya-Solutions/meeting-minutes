@@ -1,15 +1,16 @@
 import { useCallback, RefObject } from 'react';
-import { Transcript, Summary } from '@/types';
+import { MeetingSummary, Transcript } from '@/types';
 import { BlockNoteSummaryViewRef } from '@/components/AISummary/BlockNoteSummaryView';
 import { toast } from 'sonner';
 import Analytics from '@/lib/analytics';
 import { invoke as invokeTauri } from '@tauri-apps/api/core';
+import { hasVisibleSummaryContent } from '@/lib/summary-content';
 
 interface UseCopyOperationsProps {
   meeting: any;
   transcripts: Transcript[];
   meetingTitle: string;
-  aiSummary: Summary | null;
+  aiSummary: MeetingSummary | null;
   blockNoteSummaryRef: RefObject<BlockNoteSummaryViewRef>;
 }
 
@@ -106,6 +107,10 @@ export function useCopyOperations({
 
   // Copy summary to clipboard
   const handleCopySummary = useCallback(async () => {
+    if (!hasVisibleSummaryContent(aiSummary)) {
+      toast.error('No summary content available to copy');
+      return;
+    }
     try {
       let summaryMarkdown = '';
 
@@ -119,9 +124,9 @@ export function useCopyOperations({
       }
 
       // Fallback: Check if aiSummary has markdown property
-      if (!summaryMarkdown && aiSummary && 'markdown' in aiSummary) {
+      if (!summaryMarkdown && aiSummary && typeof aiSummary.markdown === 'string') {
         console.log('📝 Using markdown from aiSummary');
-        summaryMarkdown = (aiSummary as any).markdown || '';
+        summaryMarkdown = aiSummary.markdown;
         console.log('📝 Markdown from aiSummary, length:', summaryMarkdown.length);
       }
 
