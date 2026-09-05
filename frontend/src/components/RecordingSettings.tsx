@@ -1,10 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Switch } from '@/components/ui/switch';
+import { Button } from '@/components/ui/button';
 import { FolderOpen } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { DeviceSelection, SelectedDevices } from '@/components/DeviceSelection';
 import Analytics from '@/lib/analytics';
 import { toast } from 'sonner';
+import { useConfig } from '@/contexts/ConfigContext';
 
 export interface RecordingPreferences {
   save_folder: string;
@@ -19,6 +21,7 @@ interface RecordingSettingsProps {
 }
 
 export function RecordingSettings({ onSave }: RecordingSettingsProps) {
+  const { updateRecordingSaveFolder } = useConfig();
   const [preferences, setPreferences] = useState<RecordingPreferences>({
     save_folder: '',
     auto_save: true,
@@ -26,22 +29,35 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
     preferred_mic_device: null,
     preferred_system_device: null
   });
+  const preferencesRef = useRef(preferences);
+  const chooserBusyRef = useRef(false);
+  const savingRef = useRef(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [choosingFolder, setChoosingFolder] = useState(false);
   const [showRecordingNotification, setShowRecordingNotification] = useState(true);
+  const controlsBusy = saving || choosingFolder;
+
+  const updatePreferences = (next: RecordingPreferences) => {
+    preferencesRef.current = next;
+    setPreferences(next);
+  };
 
   // Load recording preferences on component mount
   useEffect(() => {
     const loadPreferences = async () => {
       try {
         const prefs = await invoke<RecordingPreferences>('get_recording_preferences');
-        setPreferences(prefs);
+        updatePreferences(prefs);
       } catch (error) {
         console.error('Failed to load recording preferences:', error);
         // If loading fails, get default folder path
         try {
           const defaultPath = await invoke<string>('get_default_recordings_folder_path');
-          setPreferences(prev => ({ ...prev, save_folder: defaultPath }));
+          updatePreferences({
+            ...preferencesRef.current,
+            save_folder: defaultPath,
+          });
         } catch (defaultError) {
           console.error('Failed to get default folder path:', defaultError);
         }
@@ -51,6 +67,33 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
     };
 
     loadPreferences();
+  }, []);
+
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+
+    import('@tauri-apps/api/event')
+      .then(({ listen }) =>
+        listen<RecordingPreferences>('recording-preferences-updated', (event) => {
+          updatePreferences(event.payload);
+        }),
+      )
+      .then((cleanup) => {
+        if (disposed) {
+          cleanup();
+        } else {
+          unlisten = cleanup;
+        }
+      })
+      .catch((error) => {
+        console.error('Failed to listen for recording preference updates:', error);
+      });
+
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
   }, []);
 
   // Load recording notification preference
@@ -69,8 +112,8 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
   }, []);
 
   const handleAutoSaveToggle = async (enabled: boolean) => {
-    const newPreferences = { ...preferences, auto_save: enabled };
-    setPreferences(newPreferences);
+    const newPreferences = { ...preferencesRef.current, auto_save: enabled };
+    updatePreferences(newPreferences);
     await savePreferences(newPreferences);
 
     // Track auto-save setting change
@@ -81,11 +124,11 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
 
   const handleDeviceChange = async (devices: SelectedDevices) => {
     const newPreferences = {
-      ...preferences,
+      ...preferencesRef.current,
       preferred_mic_device: devices.micDevice,
       preferred_system_device: devices.systemDevice
     };
-    setPreferences(newPreferences);
+    updatePreferences(newPreferences);
     await savePreferences(newPreferences);
 
     // Track default device preference changes
@@ -101,6 +144,54 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
       await invoke('open_recordings_folder');
     } catch (error) {
       console.error('Failed to open recordings folder:', error);
+      toast.error('Failed to open recordings folder', {
+        description: error instanceof Error ? error.message : String(error),
+      });
+    }
+  };
+
+  const handleChooseFolder = async () => {
+    if (chooserBusyRef.current || savingRef.current) return;
+    chooserBusyRef.current = true;
+    setChoosingFolder(true);
+    try {
+      const selectedFolder = await invoke<string | null>('select_recording_folder');
+      if (!selectedFolder) return;
+
+      savingRef.current = true;
+      setSaving(true);
+      let persistedPreferences: RecordingPreferences;
+      try {
+        persistedPreferences = await invoke<RecordingPreferences>(
+          'set_recording_save_folder',
+          { saveFolder: selectedFolder },
+        );
+      } catch (error) {
+        console.error('Failed to save recording folder:', error);
+        toast.error('Failed to save recording folder', {
+          description: error instanceof Error ? error.message : String(error),
+        });
+        return;
+      } finally {
+        savingRef.current = false;
+        setSaving(false);
+      }
+
+      updatePreferences(persistedPreferences);
+      updateRecordingSaveFolder(persistedPreferences.save_folder);
+      onSave?.(persistedPreferences);
+      toast.success('Recording folder saved');
+      await Analytics.track('recording_save_folder_changed', {
+        folder_selected: 'true',
+      });
+    } catch (error) {
+      console.error('Failed to choose recordings folder:', error);
+      toast.error('Failed to choose recording folder', {
+        description: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      chooserBusyRef.current = false;
+      setChoosingFolder(false);
     }
   };
 
@@ -122,6 +213,7 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
   };
 
   const savePreferences = async (prefs: RecordingPreferences) => {
+    savingRef.current = true;
     setSaving(true);
     try {
       await invoke('set_recording_preferences', { preferences: prefs });
@@ -139,6 +231,7 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
         description: error instanceof Error ? error.message : String(error)
       });
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   };
@@ -172,7 +265,7 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
         <Switch
           checked={preferences.auto_save}
           onCheckedChange={handleAutoSaveToggle}
-          disabled={saving}
+          disabled={controlsBusy}
         />
       </div>
 
@@ -184,13 +277,28 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
             <div className="text-sm text-gray-600 mb-3 break-all">
               {preferences.save_folder || 'Default folder'}
             </div>
-            <button
-              onClick={handleOpenFolder}
-              className="flex items-center gap-2 px-3 py-2 text-sm border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
-            >
-              <FolderOpen className="w-4 h-4" />
-              Open Folder
-            </button>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleOpenFolder}
+                disabled={controlsBusy}
+              >
+                <FolderOpen className="w-4 h-4" />
+                Open Folder
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleChooseFolder}
+                disabled={controlsBusy}
+              >
+                <FolderOpen className="w-4 h-4" />
+                Choose Folder
+              </Button>
+            </div>
           </div>
 
           <div className="p-4 border rounded-lg bg-blue-50">
@@ -224,6 +332,7 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
         <Switch
           checked={showRecordingNotification}
           onCheckedChange={handleNotificationToggle}
+          disabled={controlsBusy}
         />
       </div>
 
@@ -242,7 +351,7 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
                 systemDevice: preferences.preferred_system_device
               }}
               onDeviceChange={handleDeviceChange}
-              disabled={saving}
+              disabled={controlsBusy}
             />
           </div>
         </div>

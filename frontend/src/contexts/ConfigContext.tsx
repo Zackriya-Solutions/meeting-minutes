@@ -92,6 +92,7 @@ interface ConfigContextType {
   isLoadingPreferences: boolean;
   loadPreferences: () => Promise<void>;
   updateNotificationSettings: (settings: NotificationSettings) => Promise<void>;
+  updateRecordingSaveFolder: (saveFolder: string) => void;
 }
 
 const ConfigContext = createContext<ConfigContextType | undefined>(undefined);
@@ -177,6 +178,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
   const [isLoadingPreferences, setIsLoadingPreferences] = useState(false);
   const preferencesLoadedRef = useRef(false);
   const isLoadingRef = useRef(false);
+  const pendingRecordingSaveFolderRef = useRef<string | null>(null);
 
   // Load Ollama models (uses saved endpoint, re-runs when endpoint changes after config load)
   useEffect(() => {
@@ -442,17 +444,19 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
       }
 
       // Load storage locations
-      const [dbDir, modelsDir, recordingsDir] = await Promise.all([
+      const [dbDir, modelsDir, recordingPreferences] = await Promise.all([
         invoke<string>('get_database_directory'),
         invoke<string>('whisper_get_models_directory'),
-        invoke<string>('get_default_recordings_folder_path')
+        invoke<{ save_folder: string }>('get_recording_preferences')
       ]);
 
       setStorageLocations({
         database: dbDir,
         models: modelsDir,
-        recordings: recordingsDir
+        recordings:
+          pendingRecordingSaveFolderRef.current ?? recordingPreferences.save_folder
       });
+      pendingRecordingSaveFolderRef.current = null;
 
       // Mark as loaded
       preferencesLoadedRef.current = true;
@@ -473,6 +477,13 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
       console.error('[ConfigContext] Failed to update notification settings:', error);
       throw error; // Re-throw so component can handle error
     }
+  }, []);
+
+  const updateRecordingSaveFolder = useCallback((saveFolder: string) => {
+    pendingRecordingSaveFolderRef.current = saveFolder;
+    setStorageLocations(previous =>
+      previous ? { ...previous, recordings: saveFolder } : previous,
+    );
   }, []);
 
   // Wrapper for setSelectedLanguage that persists to localStorage and syncs to Rust
@@ -513,6 +524,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     isLoadingPreferences,
     loadPreferences,
     updateNotificationSettings,
+    updateRecordingSaveFolder,
   }), [
     modelConfig,
     isModelConfigLoading,
@@ -536,6 +548,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     isLoadingPreferences,
     loadPreferences,
     updateNotificationSettings,
+    updateRecordingSaveFolder,
   ]);
 
   return (

@@ -20,13 +20,21 @@ use uuid::Uuid;
 use super::audio_processing::create_meeting_folder;
 use super::common::{create_transcript_segments, split_segment_at_silence, write_transcripts_json};
 use super::constants::AUDIO_EXTENSIONS;
-use super::recording_preferences::get_default_recordings_folder;
+use super::recording_preferences::{load_recording_preferences, RecordingPreferences};
 
 /// Global flag to track if import is in progress
 static IMPORT_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
 
 /// Global flag to signal cancellation
 static IMPORT_CANCELLED: AtomicBool = AtomicBool::new(false);
+
+fn create_import_meeting_folder(base_folder: &PathBuf, title: &str) -> Result<PathBuf> {
+    create_meeting_folder(base_folder, title, false)
+}
+
+fn capture_import_save_folder(preferences: &RecordingPreferences) -> PathBuf {
+    preferences.save_folder.clone()
+}
 
 /// RAII guard for IMPORT_IN_PROGRESS flag
 /// Ensures flag is cleared even if import panics or returns early
@@ -253,6 +261,7 @@ fn extract_duration_from_metadata(path: &Path) -> Result<f64> {
 /// Start import of an audio file
 pub async fn start_import<R: Runtime>(
     app: AppHandle<R>,
+    save_folder: PathBuf,
     source_path: String,
     title: String,
     language: Option<String>,
@@ -268,6 +277,7 @@ pub async fn start_import<R: Runtime>(
     let use_parakeet = provider.as_deref() == Some("parakeet");
     let result = run_import(
         app.clone(),
+        save_folder,
         source_path,
         title,
         language,
@@ -310,6 +320,7 @@ pub async fn start_import<R: Runtime>(
 /// Internal function to run import
 async fn run_import<R: Runtime>(
     app: AppHandle<R>,
+    save_folder: PathBuf,
     source_path: String,
     title: String,
     language: Option<String>,
@@ -339,8 +350,7 @@ async fn run_import<R: Runtime>(
     }
 
     // Create meeting folder
-    let base_folder = get_default_recordings_folder();
-    let meeting_folder = create_meeting_folder(&base_folder, &title, false)?;
+    let meeting_folder = create_import_meeting_folder(&save_folder, &title)?;
 
     // Copy audio file to meeting folder
     emit_progress(&app, "copying", 10, "Copying audio file...");
@@ -974,9 +984,23 @@ pub async fn start_import_audio_command<R: Runtime>(
         return Err("Import already in progress".to_string());
     }
 
+    let preferences = load_recording_preferences(&app)
+        .await
+        .map_err(|error| format!("Failed to load recording preferences: {}", error))?;
+    let save_folder = capture_import_save_folder(&preferences);
+
     // Spawn import in background
     tauri::async_runtime::spawn(async move {
-        let result = start_import(app, source_path, title, language, model, provider).await;
+        let result = start_import(
+            app,
+            save_folder,
+            source_path,
+            title,
+            language,
+            model,
+            provider,
+        )
+        .await;
 
         if let Err(e) = result {
             error!("Import failed: {}", e);
@@ -1007,6 +1031,45 @@ pub async fn is_import_in_progress_command() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn import_root_creates_meeting_beneath_selected_folder() {
+        let temp_dir = tempfile::tempdir().expect("temporary directory");
+        let selected_root = temp_dir.path().join("knowledge-base");
+
+        let meeting_folder = create_import_meeting_folder(&selected_root, "Imported Meeting")
+            .expect("create import meeting folder");
+
+        assert!(meeting_folder.starts_with(&selected_root));
+        assert!(meeting_folder.is_dir());
+    }
+
+    #[test]
+    fn import_root_rejects_existing_file() {
+        let temp_dir = tempfile::tempdir().expect("temporary directory");
+        let file_root = temp_dir.path().join("not-a-directory");
+        std::fs::write(&file_root, b"file").expect("create file root");
+
+        let result = create_import_meeting_folder(&file_root, "Rejected Import");
+
+        assert!(result.is_err());
+        assert!(file_root.is_file());
+    }
+
+    #[test]
+    fn import_save_folder_snapshot_is_not_changed_by_later_preferences() {
+        let first_root = std::env::temp_dir().join("first-import-root");
+        let second_root = std::env::temp_dir().join("second-import-root");
+        let mut preferences = super::super::recording_preferences::RecordingPreferences {
+            save_folder: first_root.clone(),
+            ..Default::default()
+        };
+
+        let captured = capture_import_save_folder(&preferences);
+        preferences.save_folder = second_root;
+
+        assert_eq!(captured, first_root);
+    }
 
     #[test]
     fn test_audio_extensions() {
