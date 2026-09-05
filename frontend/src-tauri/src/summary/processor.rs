@@ -23,6 +23,7 @@ pub fn clean_llm_markdown_detailed(raw: &str) -> CleanedLlmMarkdown {
     let visible = THINK_ENVELOPE_REGEX.replace_all(raw, "");
     let reasoning_stripped = visible.as_ref() != raw;
     let trimmed = visible.trim();
+    let trimmed = trimmed.strip_prefix('\u{feff}').unwrap_or(trimmed);
     const PREFIXES: &[&str] = &["```markdown\n", "```\n", "```markdown\r\n", "```\r\n"];
     const SUFFIX: &str = "```";
     let markdown = PREFIXES
@@ -916,5 +917,19 @@ mod tests {
         assert_eq!(cleaned.markdown, markdown);
         assert!(!cleaned.reasoning_stripped);
         assert_eq!(clean_llm_markdown_detailed(markdown).markdown, markdown);
+    }
+
+    #[test]
+    fn cleaner_strips_leading_bom_before_outer_fence() {
+        let markdown = "# Heading\n\n```rust\nlet x = 1;\n```";
+        let wrapped = format!("\u{feff}```markdown\n{markdown}\n```");
+        let cleaned = clean_llm_markdown_detailed(&wrapped);
+
+        assert_eq!(cleaned.markdown, markdown);
+        assert!(!cleaned.reasoning_stripped);
+
+        let markdown = "# Heading\r\n\r\n```rust\r\nlet x = 1;\r\n```";
+        let wrapped = format!("\u{feff}```markdown\r\n{markdown}\r\n```");
+        assert_eq!(clean_llm_markdown_detailed(&wrapped).markdown, markdown);
     }
 }
