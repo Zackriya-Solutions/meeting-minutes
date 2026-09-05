@@ -65,6 +65,7 @@ impl RecordingManager {
         microphone_device: Option<Arc<AudioDevice>>,
         system_device: Option<Arc<AudioDevice>>,
         auto_save: bool,
+        max_live_segment_duration_ms: Option<u32>,
     ) -> Result<mpsc::UnboundedReceiver<AudioChunk>> {
         info!("Starting recording manager (auto_save: {})", auto_save);
 
@@ -109,7 +110,7 @@ impl RecordingManager {
         self.pipeline_manager.start(
             self.state.clone(),
             transcription_sender,
-            0, // Ignored - using dynamic sizing internally
+            max_live_segment_duration_ms,
             48000, // 48kHz sample rate
             Some(recording_sender), // CRITICAL: Pass recording sender to receive pre-mixed audio
             mic_name,
@@ -167,7 +168,11 @@ impl RecordingManager {
     ///
     /// User still hears audio via Bluetooth (playback), but recording captures
     /// via stable wired path for best quality.
-    pub async fn start_recording_with_defaults_and_auto_save(&mut self, auto_save: bool) -> Result<mpsc::UnboundedReceiver<AudioChunk>> {
+    pub async fn start_recording_with_defaults_and_auto_save(
+        &mut self,
+        auto_save: bool,
+        max_live_segment_duration_ms: Option<u32>,
+    ) -> Result<mpsc::UnboundedReceiver<AudioChunk>> {
         #[cfg(target_os = "macos")]
         {
             info!("🎙️ [macOS] Starting recording with smart device selection (Bluetooth override enabled)");
@@ -186,7 +191,12 @@ impl RecordingManager {
             }
 
             // Start recording with selected devices and auto_save setting
-            self.start_recording(microphone_device, system_device, auto_save).await
+            self.start_recording(
+                microphone_device,
+                system_device,
+                auto_save,
+                max_live_segment_duration_ms,
+            ).await
         }
 
         #[cfg(not(target_os = "macos"))]
@@ -221,7 +231,12 @@ impl RecordingManager {
                 return Err(anyhow::anyhow!("No microphone device available"));
             }
 
-            self.start_recording(microphone_device, system_device, auto_save).await
+            self.start_recording(
+                microphone_device,
+                system_device,
+                auto_save,
+                max_live_segment_duration_ms,
+            ).await
         }
     }
 

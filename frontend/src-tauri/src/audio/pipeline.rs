@@ -11,7 +11,7 @@ use rubato::{Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolat
 use super::devices::AudioDevice;
 use super::recording_state::{AudioChunk, AudioError, RecordingState, DeviceType};
 use super::audio_processing::{audio_to_mono, LoudnessNormalizer, NoiseSuppressionProcessor, HighPassFilter};
-use super::vad::{ContinuousVadProcessor};
+use super::vad::{ContinuousVadProcessor, MIN_TRANSCRIPTION_SEGMENT_SAMPLES};
 
 /// Ring buffer for synchronized audio mixing
 /// Accumulates samples from mic and system streams until we have aligned windows
@@ -25,7 +25,7 @@ struct AudioMixerRingBuffer {
 impl AudioMixerRingBuffer {
     fn new(sample_rate: u32) -> Self {
         // Use 50ms windows for mixing
-        let window_ms = 600.0;
+        let window_ms = 50.0;
         let window_size_samples = (sample_rate as f32 * window_ms / 1000.0) as usize;
 
         // CRITICAL FIX: Increase max buffer to 400ms for system audio stability
@@ -75,7 +75,7 @@ impl AudioMixerRingBuffer {
                   self.system_buffer.len() - self.max_buffer_size);
         }
 
-        // Safety: prevent buffer overflow (keep only last 200ms)
+        // Safety: prevent buffer overflow (keep only the last 400ms)
         while self.mic_buffer.len() > self.max_buffer_size {
             self.mic_buffer.pop_front();
         }
@@ -701,7 +701,7 @@ impl AudioPipeline {
         receiver: mpsc::UnboundedReceiver<AudioChunk>,
         transcription_sender: mpsc::UnboundedSender<AudioChunk>,
         state: Arc<RecordingState>,
-        target_chunk_duration_ms: u32,
+        max_live_segment_duration_ms: Option<u32>,
         sample_rate: u32,
         mic_device_name: String,
         mic_device_kind: super::device_detection::InputDeviceKind,
@@ -726,9 +726,19 @@ impl AudioPipeline {
 
         let redemption_time = if cfg!(target_os = "macos") { 400 } else { 400 };
 
-        let vad_processor = match ContinuousVadProcessor::new(sample_rate, redemption_time) {
+        let vad_processor = match ContinuousVadProcessor::new_with_max_segment_duration(
+            sample_rate,
+            redemption_time,
+            max_live_segment_duration_ms,
+        ) {
             Ok(processor) => {
-                info!("VAD-driven pipeline: VAD segments will be sent directly to Whisper (no time-based accumulation)");
+                match max_live_segment_duration_ms {
+                    Some(duration_ms) => info!(
+                        "VAD-driven pipeline: natural speech boundaries with a {}ms live transcription limit",
+                        duration_ms
+                    ),
+                    None => info!("VAD-driven pipeline: using natural speech boundaries"),
+                }
                 processor
             }
             Err(e) => {
@@ -740,9 +750,6 @@ impl AudioPipeline {
         // Initialize professional audio mixing components
         let ring_buffer = AudioMixerRingBuffer::new(sample_rate);
         let mixer = ProfessionalAudioMixer::new(sample_rate);
-
-        // Note: target_chunk_duration_ms is ignored - VAD controls segmentation now
-        let _ = target_chunk_duration_ms;
 
         Self {
             receiver,
@@ -837,7 +844,7 @@ impl AudioPipeline {
                                     for segment in speech_segments {
                                         let duration_ms = segment.end_timestamp_ms - segment.start_timestamp_ms;
 
-                                        if segment.samples.len() >= 800 {  // Minimum 50ms at 16kHz - matches Parakeet capability
+                                        if segment.samples.len() >= MIN_TRANSCRIPTION_SEGMENT_SAMPLES {
                                             info!("📤 Sending VAD segment: {:.1}ms, {} samples",
                                                   duration_ms, segment.samples.len());
 
@@ -855,8 +862,8 @@ impl AudioPipeline {
                                                 self.chunk_id_counter += 1;
                                             }
                                         } else {
-                                            debug!("⏭️ Dropping short VAD segment: {:.1}ms ({} samples < 800)",
-                                                   duration_ms, segment.samples.len());
+                                            debug!("⏭️ Dropping short VAD segment: {:.1}ms ({} samples < {})",
+                                                   duration_ms, segment.samples.len(), MIN_TRANSCRIPTION_SEGMENT_SAMPLES);
                                         }
                                     }
                                 }
@@ -906,8 +913,8 @@ impl AudioPipeline {
                 for segment in final_segments {
                     let duration_ms = segment.end_timestamp_ms - segment.start_timestamp_ms;
 
-                    // Send segments >= 50ms (800 samples at 16kHz) - matches main pipeline filter
-                    if segment.samples.len() >= 800 {
+                    // Keep this aligned with the live checkpoint's reserved tail.
+                    if segment.samples.len() >= MIN_TRANSCRIPTION_SEGMENT_SAMPLES {
                         info!("📤 Sending final VAD segment to Whisper: {:.1}ms duration, {} samples",
                               duration_ms, segment.samples.len());
 
@@ -925,8 +932,8 @@ impl AudioPipeline {
                             self.chunk_id_counter += 1;
                         }
                     } else {
-                        info!("⏭️ Skipping short final segment: {:.1}ms ({} samples < 800)",
-                              duration_ms, segment.samples.len());
+                        info!("⏭️ Skipping short final segment: {:.1}ms ({} samples < {})",
+                              duration_ms, segment.samples.len(), MIN_TRANSCRIPTION_SEGMENT_SAMPLES);
                     }
                 }
             }
@@ -959,7 +966,7 @@ impl AudioPipelineManager {
         &mut self,
         state: Arc<RecordingState>,
         transcription_sender: mpsc::UnboundedSender<AudioChunk>,
-        target_chunk_duration_ms: u32,
+        max_live_segment_duration_ms: Option<u32>,
         sample_rate: u32,
         recording_sender: Option<mpsc::UnboundedSender<AudioChunk>>,
         mic_device_name: String,
@@ -983,7 +990,7 @@ impl AudioPipelineManager {
             audio_receiver,
             transcription_sender,
             state.clone(),
-            target_chunk_duration_ms,
+            max_live_segment_duration_ms,
             sample_rate,
             mic_device_name,
             mic_device_kind,
@@ -1076,5 +1083,34 @@ impl AudioPipelineManager {
 impl Default for AudioPipelineManager {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mixer_uses_fifty_millisecond_windows() {
+        let mixer = AudioMixerRingBuffer::new(48_000);
+
+        assert_eq!(mixer.window_size_samples, 2_400);
+        assert_eq!(mixer.max_buffer_size, 19_200);
+    }
+
+    #[test]
+    fn mixer_pads_a_missing_source_without_delaying_the_available_source() {
+        let mut mixer = AudioMixerRingBuffer::new(48_000);
+        let microphone = vec![0.25; 2_400];
+        mixer.add_samples(DeviceType::Microphone, microphone.clone());
+
+        let (mic_window, system_window) = mixer
+            .extract_window()
+            .expect("a complete microphone window should be mixable");
+
+        assert_eq!(mic_window, microphone);
+        assert_eq!(system_window, vec![0.0; 2_400]);
+        assert!(mixer.mic_buffer.is_empty());
+        assert!(mixer.system_buffer.is_empty());
     }
 }

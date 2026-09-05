@@ -1,8 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { Globe } from 'lucide-react';
+import { Globe, Info } from 'lucide-react';
 import Analytics from '@/lib/analytics';
 import { toast } from 'sonner';
 import { useConfig } from '@/contexts/ConfigContext';
+import {
+  getTranscriptionLanguageCapability,
+  supportsTranscriptionLanguage,
+} from '@/lib/parakeet';
 
 export interface Language {
   code: string;
@@ -15,6 +19,7 @@ const LANGUAGES: Language[] = [
   { code: 'auto-translate', name: 'Auto Detect (Translate to English)' },
   { code: 'en', name: 'English' },
   { code: 'zh', name: 'Chinese' },
+  { code: 'yue', name: 'Cantonese' },
   { code: 'de', name: 'German' },
   { code: 'es', name: 'Spanish' },
   { code: 'ru', name: 'Russian' },
@@ -32,6 +37,7 @@ const LANGUAGES: Language[] = [
   { code: 'id', name: 'Indonesian' },
   { code: 'hi', name: 'Hindi' },
   { code: 'fi', name: 'Finnish' },
+  { code: 'fil', name: 'Filipino' },
   { code: 'vi', name: 'Vietnamese' },
   { code: 'he', name: 'Hebrew' },
   { code: 'uk', name: 'Ukrainian' },
@@ -118,23 +124,30 @@ interface LanguageSelectionProps {
   selectedLanguage: string;
   onLanguageChange: (language: string) => void;
   disabled?: boolean;
-  provider?: 'localWhisper' | 'parakeet' | 'deepgram' | 'elevenLabs' | 'groq' | 'openai';
+  provider?: 'localWhisper' | 'parakeet' | 'qwen3Asr' | 'deepgram' | 'elevenLabs' | 'groq' | 'openai';
+  model?: string;
 }
 
 export function LanguageSelection({
   selectedLanguage,
   onLanguageChange,
   disabled = false,
-  provider = 'localWhisper'
+  provider = 'localWhisper',
+  model,
 }: LanguageSelectionProps) {
   const [saving, setSaving] = useState(false);
   const { setSelectedLanguage } = useConfig();
 
-  // Parakeet only supports auto-detection (doesn't support manual language selection)
-  const isParakeet = provider === 'parakeet';
-  const availableLanguages = isParakeet
-    ? LANGUAGES.filter(lang => lang.code === 'auto' || lang.code === 'auto-translate')
-    : LANGUAGES;
+  const languageCapability = getTranscriptionLanguageCapability(provider, model);
+  const availableLanguages = !languageCapability.allowsLanguageSelection
+    ? [{ code: 'auto', name: languageCapability.displayName }]
+    : LANGUAGES.filter((language) =>
+        supportsTranscriptionLanguage(languageCapability, language.code)
+      );
+  const effectiveLanguage = languageCapability.allowsLanguageSelection
+    && supportsTranscriptionLanguage(languageCapability, selectedLanguage)
+    ? selectedLanguage
+    : 'auto';
 
   const handleLanguageChange = async (languageCode: string) => {
     setSaving(true);
@@ -170,7 +183,7 @@ export function LanguageSelection({
 
   // Find the selected language name for display
   const selectedLanguageName = LANGUAGES.find(
-    lang => lang.code === selectedLanguage
+    lang => lang.code === effectiveLanguage
   )?.name || 'Auto Detect (Original Language)';
 
   return (
@@ -184,7 +197,7 @@ export function LanguageSelection({
 
       <div className="space-y-2">
         <select
-          value={selectedLanguage}
+          value={effectiveLanguage}
           onChange={(e) => handleLanguageChange(e.target.value)}
           disabled={disabled || saving}
           className="w-full px-3 py-2 text-sm bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-50 disabled:text-gray-500"
@@ -197,11 +210,13 @@ export function LanguageSelection({
           ))}
         </select>
 
-        {/* Parakeet language limitation warning */}
-        {isParakeet && (
+        {!languageCapability.allowsLanguageSelection && (
           <div className="p-2 bg-amber-50 border border-amber-200 rounded text-amber-800">
-            <p className="font-medium">ℹ️ Parakeet Language Support</p>
-            <p className="mt-1 text-xs">Parakeet currently only supports automatic language detection. Manual language selection is not available. Use Whisper if you need to specify a particular language.</p>
+            <p className="font-medium flex items-center gap-1.5">
+              <Info className="h-3.5 w-3.5" />
+              Model language support
+            </p>
+            <p className="mt-1 text-xs">{languageCapability.description}</p>
           </div>
         )}
 
