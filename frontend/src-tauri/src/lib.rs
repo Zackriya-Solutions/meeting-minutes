@@ -418,6 +418,31 @@ pub fn run() {
         .manage(audio::init_system_audio_state())
         .manage(summary::summary_engine::ModelManagerState(Arc::new(tokio::sync::Mutex::new(None))))
         .setup(|_app| {
+            #[cfg(target_os = "windows")]
+            match _app.path().resolve(
+                "onnxruntime.dll",
+                tauri::path::BaseDirectory::Resource,
+            ) {
+                Ok(runtime_path) => match ort::init_from(runtime_path.to_string_lossy().into_owned())
+                    .with_telemetry(false)
+                    .commit()
+                {
+                    Ok(_) => log::info!(
+                        "Initialized bundled ONNX Runtime from {}",
+                        runtime_path.display()
+                    ),
+                    Err(error) => log::error!(
+                        "Failed to initialize bundled ONNX Runtime from {}: {}",
+                        runtime_path.display(),
+                        error
+                    ),
+                },
+                Err(error) => log::error!(
+                    "Failed to resolve bundled ONNX Runtime resource: {}",
+                    error
+                ),
+            };
+
             log::info!("Application setup complete");
 
             // Initialize system tray

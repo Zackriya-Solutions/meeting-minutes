@@ -106,7 +106,7 @@ impl RecordingManager {
         // Start the audio processing pipeline with FFmpeg adaptive mixer
         // Pipeline will: 1) Mix mic+system audio with adaptive buffering, 2) Send mixed to recording_sender,
         // 3) Apply VAD and send speech segments to transcription
-        self.pipeline_manager.start(
+        if let Err(error) = self.pipeline_manager.start(
             self.state.clone(),
             transcription_sender,
             0, // Ignored - using dynamic sizing internally
@@ -116,7 +116,10 @@ impl RecordingManager {
             mic_kind,
             sys_name,
             sys_kind,
-        )?;
+        ) {
+            self.state.stop_recording();
+            return Err(error);
+        }
 
         // Give the pipeline a moment to fully initialize before starting streams
         tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;

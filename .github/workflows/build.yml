@@ -565,6 +565,13 @@ jobs:
         with:
           path: frontend/src-tauri/binaries/ffmpeg-*
           key: ${{ runner.os }}-ffmpeg-${{ hashFiles('frontend/src-tauri/build.rs', 'frontend/src-tauri/build/ffmpeg.rs') }}    
+      - name: Cache Windows ONNX Runtime
+        if: contains(inputs.platform, 'windows')
+        uses: actions/cache@v4
+        with:
+          path: frontend/src-tauri/binaries/onnxruntime
+          key: ${{ runner.os }}-onnxruntime-${{ inputs.target }}-${{ hashFiles('frontend/src-tauri/build/onnxruntime.rs') }}
+
 
       - name: Build with Tauri
         id: tauri-build
