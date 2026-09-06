@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { RefreshCw, Mic, Speaker } from 'lucide-react';
@@ -70,6 +70,60 @@ export function DeviceSelection({ selectedDevices, onDeviceChange, disabled = fa
   useEffect(() => {
     fetchDevices();
   }, []);
+
+  // Auto-select the default when a previously-selected device is no longer
+  // available (e.g. AirPods that have since disconnected). Without this the
+  // dropdown keeps showing a device that's gone — Radix Select renders an
+  // empty/stale trigger for a value not among its options — and start would
+  // send a name the backend can't open. Matches Pro's DeviceSelection prune.
+  //
+  // Format trap: selected values carry the " (input)"/" (output)" suffix (the
+  // SelectItem value form below), while enumeration returns raw device names —
+  // so compare against the suffixed form, else every non-default selection is
+  // wrongly pruned.
+  //
+  // ponytail: enumeration-driven prune only (fires on mount + manual refresh).
+  // We deliberately do NOT mutate the selection from the mic-device-switched
+  // event — that stays toast-only; reopening Settings after a meeting refetches
+  // and prunes. onDeviceChange is held in a ref so the effect isn't re-run by
+  // the parent passing a fresh (non-memoized) handler each render.
+  const onDeviceChangeRef = useRef(onDeviceChange);
+  useEffect(() => { onDeviceChangeRef.current = onDeviceChange; }, [onDeviceChange]);
+
+  useEffect(() => {
+    // Skip while loading (list not ready) or disabled (selector locked during
+    // recording — never reset the device a live recording is using).
+    if (loading || disabled) return;
+
+    const inputs = devices.filter(d => d.device_type === 'Input');
+    const outputs = devices.filter(d => d.device_type === 'Output');
+
+    let next = selectedDevices;
+    // Guard on a non-empty list per direction so a transient phantom-empty
+    // enumeration doesn't wipe a valid selection.
+    if (
+      selectedDevices.micDevice &&
+      inputs.length > 0 &&
+      !inputs.some(d => `${d.name} (input)` === selectedDevices.micDevice)
+    ) {
+      console.warn(`[DeviceSelection] Selected mic '${selectedDevices.micDevice}' not available — resetting to default`);
+      next = { ...next, micDevice: null };
+    }
+    if (
+      selectedDevices.systemDevice &&
+      outputs.length > 0 &&
+      !outputs.some(d => `${d.name} (output)` === selectedDevices.systemDevice)
+    ) {
+      console.warn(`[DeviceSelection] Selected system audio '${selectedDevices.systemDevice}' not available — resetting to default`);
+      next = { ...next, systemDevice: null };
+    }
+
+    // Only propagate if something actually changed. Resetting to null makes the
+    // next run's absent-check falsy, so there's no loop.
+    if (next !== selectedDevices) {
+      onDeviceChangeRef.current(next);
+    }
+  }, [devices, loading, disabled, selectedDevices]);
 
   // Set up audio level event listener
   useEffect(() => {

@@ -2,23 +2,177 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 use anyhow::Result;
 use log::{debug, error, info, warn};
-
-use super::devices::{AudioDevice, list_audio_devices};
-
 #[cfg(target_os = "macos")]
-use super::devices::get_safe_recording_devices_macos;
+use std::time::Duration;
+#[cfg(target_os = "macos")]
+use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
-#[cfg(not(target_os = "macos"))]
-use super::devices::{default_input_device, default_output_device};
-use super::recording_state::{RecordingState, AudioChunk, DeviceType as RecordingDeviceType};
+use super::devices::AudioDevice;
+
+use super::recording_state::{RecordingState, AudioChunk};
 use super::pipeline::AudioPipelineManager;
 use super::stream::AudioStreamManager;
 use super::recording_saver::RecordingSaver;
-use super::device_monitor::{AudioDeviceMonitor, DeviceEvent, DeviceMonitorType};
+use super::device_monitor::{AudioDeviceMonitor, DeviceEvent};
 
 /// Stream manager type enumeration
 pub enum StreamManagerType {
     Standard(AudioStreamManager),
+}
+
+// ============================================================================
+// macOS Core Audio "pre-wake" — ported from feat/audio-device-handling
+// (commit 8bf6af8b, with refinements from d266feac + 7107adc7 + a10f8e55).
+// ============================================================================
+//
+// When a macOS Mac has a Bluetooth device as the active audio output, the
+// built-in audio hardware unit — and, crucially, the BT audio connection
+// itself — can sit in a low-power state where registered IO procs do not
+// fire even though `AudioDeviceStart` returned `noErr`. The symptom is a
+// 60–90 second "silent" period at recording start (or during a disconnect
+// fallback) where the mic is technically capturing but no samples reach
+// the pipeline, until something nudges Core Audio back to life.
+//
+// The workaround, empirically validated by Sujith in the audio-device-
+// handling branch: briefly play 300 ms of digital silence through the
+// output device by name. The name-based enumeration is itself part of the
+// fix ("enumeration wake" — it forces the HAL to bring the device out of
+// its idle power state). The subsequent `stream.play()` on the output
+// activates the hardware unit fully, at which point the built-in mic's
+// IO proc starts firing normally. Total cost: ~300 ms added to recording
+// start, ~150 ms added to the disconnect-fallback hot-swap path.
+
+#[cfg(target_os = "macos")]
+const AUDIO_WAKE_DURATION: Duration = Duration::from_millis(300);
+
+#[cfg(target_os = "macos")]
+const AUDIO_WAKE_SWAP_DURATION: Duration = Duration::from_millis(150);
+
+/// Synchronous implementation of the wake. Must be called from a blocking
+/// thread (not directly from async code) because it sleeps 300 ms and does
+/// sync cpal I/O. The async wrapper below routes to it via spawn_blocking.
+#[cfg(target_os = "macos")]
+fn wake_audio_connection_sync(speaker_device_name: &str) -> Result<()> {
+    info!("[AUDIO_WAKE] Waking audio via speaker: '{}'", speaker_device_name);
+
+    let host = cpal::default_host();
+
+    let output_device = host.output_devices()?
+        .find(|d| d.name().ok().as_deref() == Some(speaker_device_name))
+        .ok_or_else(|| anyhow::anyhow!("Output device '{}' not found", speaker_device_name))?;
+
+    let config = output_device.default_output_config()?;
+    info!("[AUDIO_WAKE] Output config: {} Hz, {} channels",
+          config.sample_rate().0, config.channels());
+
+    let stream = match config.sample_format() {
+        cpal::SampleFormat::F32 => {
+            output_device.build_output_stream(
+                &config.into(),
+                |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
+                    for sample in data.iter_mut() { *sample = 0.0; }
+                },
+                |err| error!("[AUDIO_WAKE] Output stream error: {}", err),
+                None,
+            )?
+        }
+        cpal::SampleFormat::I16 => {
+            // BT HFP mode frequently picks I16 for the output config — without
+            // this branch the wake would error out exactly when we need it most.
+            output_device.build_output_stream(
+                &config.into(),
+                |data: &mut [i16], _: &cpal::OutputCallbackInfo| {
+                    for sample in data.iter_mut() { *sample = 0; }
+                },
+                |err| error!("[AUDIO_WAKE] Output stream error: {}", err),
+                None,
+            )?
+        }
+        format => {
+            return Err(anyhow::anyhow!("Unsupported sample format: {:?}", format));
+        }
+    };
+
+    stream.play()?;
+    info!("[AUDIO_WAKE] Playing silence for {} ms to wake audio connection...", AUDIO_WAKE_DURATION.as_millis());
+    std::thread::sleep(AUDIO_WAKE_DURATION);
+    drop(stream);
+    info!("[AUDIO_WAKE] Audio wake completed");
+
+    Ok(())
+}
+
+/// Async wrapper around `wake_audio_connection_sync`. Used at recording start
+/// so the 300 ms sleep doesn't block the tokio runtime. Non-fatal — the caller
+/// should log the error and proceed if this fails; recording will still work,
+/// it just may have the 60-90s silent startup on BT.
+#[cfg(target_os = "macos")]
+async fn wake_audio_connection(speaker_device_name: &str) -> Result<()> {
+    let name = speaker_device_name.to_string();
+    tokio::task::spawn_blocking(move || {
+        wake_audio_connection_sync(&name)
+    }).await.map_err(|e| anyhow::anyhow!("Join error: {}", e))?
+}
+
+/// Public async wake for use by the disconnect-fallback hot-swap path in
+/// `recording_commands.rs::trigger_mic_fallback_to_default`.
+///
+/// Differences from the start-time wake:
+///   - Shorter 150 ms sleep to minimize fallback latency (the window of no
+///     audio between primary death and secondary-taking-over)
+///   - Falls back to the system default output if the named device isn't
+///     found (e.g. the original BT output just disappeared, and we're
+///     waking the MacBook speakers instead)
+///   - Still handles both F32 and I16 sample formats for robustness
+#[cfg(target_os = "macos")]
+pub async fn wake_audio_connection_for_swap(speaker_device_name: &str) -> Result<()> {
+    let name = speaker_device_name.to_string();
+    tokio::task::spawn_blocking(move || {
+        info!("[AUDIO_WAKE] Hot-swap wake via speaker: '{}'", name);
+        let host = cpal::default_host();
+        // Try the specified device first, fall back to default output. During
+        // a BT disconnect the original output device name may no longer
+        // enumerate, so the fallback is what actually runs in practice.
+        let (output_device, config) = host.output_devices()?
+            .find(|d| d.name().ok().as_deref() == Some(&*name))
+            .and_then(|d| d.default_output_config().ok().map(|c| (d, c)))
+            .or_else(|| {
+                info!("[AUDIO_WAKE] '{}' not found or config failed — using default output device", name);
+                host.default_output_device()
+                    .and_then(|d| d.default_output_config().ok().map(|c| (d, c)))
+            })
+            .ok_or_else(|| anyhow::anyhow!("No output device available for wake"))?;
+        let stream = match config.sample_format() {
+            cpal::SampleFormat::F32 => {
+                output_device.build_output_stream(
+                    &config.into(),
+                    |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
+                        for sample in data.iter_mut() { *sample = 0.0; }
+                    },
+                    |err| error!("[AUDIO_WAKE] Hot-swap wake error: {}", err),
+                    None,
+                )?
+            }
+            cpal::SampleFormat::I16 => {
+                output_device.build_output_stream(
+                    &config.into(),
+                    |data: &mut [i16], _: &cpal::OutputCallbackInfo| {
+                        for sample in data.iter_mut() { *sample = 0; }
+                    },
+                    |err| error!("[AUDIO_WAKE] Hot-swap wake error: {}", err),
+                    None,
+                )?
+            }
+            format => {
+                return Err(anyhow::anyhow!("Unsupported sample format for wake: {:?}", format));
+            }
+        };
+        stream.play()?;
+        std::thread::sleep(AUDIO_WAKE_SWAP_DURATION);
+        drop(stream);
+        info!("[AUDIO_WAKE] Hot-swap wake completed");
+        Ok(())
+    }).await.map_err(|e| anyhow::anyhow!("Join error: {}", e))?
 }
 
 /// Simplified recording manager that coordinates all audio components
@@ -118,6 +272,26 @@ impl RecordingManager {
             sys_kind,
         )?;
 
+        // Wake the audio connection on macOS before opening capture streams.
+        // Without this, a deep-cold Bluetooth link can deliver no mic audio
+        // for the first 60-90 seconds of recording. Non-fatal on failure.
+        #[cfg(target_os = "macos")]
+        {
+            let wake_name = system_device
+                .as_ref()
+                .map(|s| s.name.clone())
+                .or_else(|| {
+                    cpal::default_host()
+                        .default_output_device()
+                        .and_then(|d| d.name().ok())
+                });
+            if let Some(name) = wake_name {
+                if let Err(e) = wake_audio_connection(&name).await {
+                    warn!("[AUDIO_WAKE] Wake failed: {} — proceeding anyway", e);
+                }
+            }
+        }
+
         // Give the pipeline a moment to fully initialize before starting streams
         tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
 
@@ -139,90 +313,6 @@ impl RecordingManager {
                self.stream_manager.active_stream_count());
 
         Ok(transcription_receiver)
-    }
-
-    /// Start recording with default devices and auto_save setting
-    ///
-    /// # Arguments
-    /// * `auto_save` - Whether to save audio checkpoints (true) or just transcripts/metadata (false)
-    ///
-    /// # Platform-Specific Behavior
-    ///
-    /// **macOS**: Uses smart device selection that automatically overrides
-    /// Bluetooth devices to built-in wired devices for stable, consistent sample rates.
-    /// This prevents Core Audio/ScreenCaptureKit from delivering variable sample rate
-    /// streams that cause sync issues when mixing mic + system audio.
-    ///
-    /// **Windows/Linux**: Uses system default devices directly without override.
-    ///
-    /// # macOS Bluetooth Override Strategy
-    ///
-    /// - Microphone: If Bluetooth → Use built-in MacBook mic
-    /// - Speaker: If Bluetooth → Use built-in MacBook speaker (for ScreenCaptureKit)
-    /// - Each device is checked INDEPENDENTLY
-    ///
-    /// Rationale: Bluetooth devices on macOS can have variable sample rates as Core Audio
-    /// and the Bluetooth stack may resample dynamically. Built-in devices provide
-    /// fixed, consistent sample rates for reliable audio mixing.
-    ///
-    /// User still hears audio via Bluetooth (playback), but recording captures
-    /// via stable wired path for best quality.
-    pub async fn start_recording_with_defaults_and_auto_save(&mut self, auto_save: bool) -> Result<mpsc::UnboundedReceiver<AudioChunk>> {
-        #[cfg(target_os = "macos")]
-        {
-            info!("🎙️ [macOS] Starting recording with smart device selection (Bluetooth override enabled)");
-
-            // Get safe recording devices with automatic Bluetooth fallback
-            // This function handles all the detection and override logic for macOS
-            let (microphone_device, system_device) = get_safe_recording_devices_macos()?;
-
-            // Wrap in Arc for sharing across threads
-            let microphone_device = microphone_device.map(Arc::new);
-            let system_device = system_device.map(Arc::new);
-
-            // Ensure at least microphone is available
-            if microphone_device.is_none() {
-                return Err(anyhow::anyhow!("❌ No microphone device available for recording"));
-            }
-
-            // Start recording with selected devices and auto_save setting
-            self.start_recording(microphone_device, system_device, auto_save).await
-        }
-
-        #[cfg(not(target_os = "macos"))]
-        {
-            info!("Starting recording with default devices");
-
-            // Get default devices (no Bluetooth override on Windows/Linux)
-            let microphone_device = match default_input_device() {
-                Ok(device) => {
-                    info!("Using default microphone: {}", device.name);
-                    Some(Arc::new(device))
-                }
-                Err(e) => {
-                    warn!("No default microphone available: {}", e);
-                    None
-                }
-            };
-
-            let system_device = match default_output_device() {
-                Ok(device) => {
-                    info!("Using default system audio: {}", device.name);
-                    Some(Arc::new(device))
-                }
-                Err(e) => {
-                    warn!("No default system audio available: {}", e);
-                    None
-                }
-            };
-
-            // Ensure at least microphone is available
-            if microphone_device.is_none() {
-                return Err(anyhow::anyhow!("No microphone device available"));
-            }
-
-            self.start_recording(microphone_device, system_device, auto_save).await
-        }
     }
 
     /// Stop recording streams without saving (for use when waiting for transcription)
@@ -483,116 +573,39 @@ impl RecordingManager {
         self.recording_saver.get_meeting_folder().map(|p| p.clone())
     }
 
-    /// Check for device events (disconnects/reconnects)
-    /// Returns Some(DeviceEvent) if an event occurred, None otherwise
-    pub fn poll_device_events(&mut self) -> Option<DeviceEvent> {
-        if let Some(ref mut receiver) = self.device_event_receiver {
-            receiver.try_recv().ok()
-        } else {
-            None
-        }
+    /// Take ownership of the device event receiver for use by a background processor.
+    pub fn take_device_event_receiver(&mut self) -> Option<mpsc::UnboundedReceiver<DeviceEvent>> {
+        self.device_event_receiver.take()
     }
 
-    /// Attempt to reconnect a disconnected device
-    /// Returns true if reconnection successful
-    pub async fn attempt_device_reconnect(&mut self, device_name: &str, device_type: DeviceMonitorType) -> Result<bool> {
-        info!("🔄 Attempting to reconnect device: {} ({:?})", device_name, device_type);
-
-        // List current devices
-        let available_devices = list_audio_devices().await?;
-
-        // Find the device by name
-        let device = available_devices.iter()
-            .find(|d| d.name == device_name)
-            .cloned();
-
-        if let Some(device) = device {
-            info!("✅ Device '{}' found, recreating stream...", device_name);
-
-            // Determine which device to reconnect based on type
-            let device_arc: Arc<AudioDevice> = Arc::new(device);
-            match device_type {
-                DeviceMonitorType::Microphone => {
-                    // Stop existing mic stream and start new one
-                    // We need to keep system audio running if it exists
-                    let system_device = self.state.get_system_device();
-
-                    // Restart streams with new microphone
-                    self.stream_manager.stop_streams()?;
-                    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-
-                    self.stream_manager.start_streams(Some(device_arc.clone()), system_device, None).await?;
-                    self.state.set_microphone_device(device_arc);
-
-                    info!("✅ Microphone reconnected successfully");
-                    Ok(true)
-                }
-                DeviceMonitorType::SystemAudio => {
-                    // Stop existing system audio stream and start new one
-                    let microphone_device = self.state.get_microphone_device();
-
-                    // Restart streams with new system audio
-                    self.stream_manager.stop_streams()?;
-                    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-
-                    self.stream_manager.start_streams(microphone_device, Some(device_arc.clone()), None).await?;
-                    self.state.set_system_device(device_arc);
-
-                    info!("✅ System audio reconnected successfully");
-                    Ok(true)
-                }
-            }
-        } else {
-            warn!("❌ Device '{}' not yet available", device_name);
-            Ok(false)
-        }
+    /// Take the mic stream OUT for hot-swap (Phase 1) so the caller can tear it
+    /// down without holding RECORDING_MANAGER. System audio continues uninterrupted.
+    pub fn take_mic_stream_for_swap(&mut self) -> Option<super::stream::AudioStream> {
+        self.stream_manager.take_mic_stream()
     }
 
-    /// Handle a device disconnect event
-    /// Pauses recording and attempts reconnection
-    pub async fn handle_device_disconnect(&mut self, device_name: String, device_type: DeviceMonitorType) {
-        warn!("📱 Device disconnected: {} ({:?})", device_name, device_type);
-
-        // Mark state as reconnecting (keeps recording alive but in waiting state)
-        let device = match device_type {
-            DeviceMonitorType::Microphone => self.state.get_microphone_device(),
-            DeviceMonitorType::SystemAudio => self.state.get_system_device(),
-        };
-
-        if let Some(device) = device {
-            let recording_device_type = match device_type {
-                DeviceMonitorType::Microphone => RecordingDeviceType::Microphone,
-                DeviceMonitorType::SystemAudio => RecordingDeviceType::System,
-            };
-            self.state.start_reconnecting(device, recording_device_type);
+    /// Set new mic stream and update device state after hot-swap (Phase 3).
+    pub fn set_mic_stream_after_swap(
+        &mut self,
+        stream: super::stream::AudioStream,
+        device: Arc<AudioDevice>,
+        system_name: Option<String>,
+    ) {
+        self.stream_manager.set_mic_stream(stream);
+        // Notify the device monitor so it tracks the new mic (and updated
+        // system output) instead of the dead ones (M8 fix). BT devices like
+        // AirPods are often both mic AND speaker — when they disconnect, both
+        // monitor entries go stale. `system_name` is the *current* default
+        // output, resolved lock-free in Phase 2 by the caller (do_mic_swap)
+        // so a CoreAudio stall can't happen under the RECORDING_MANAGER lock;
+        // `state.get_system_device()` still holds the pre-swap
+        // reference (e.g. AirPods) because we don't mutate system_device
+        // during a mic-only hot-swap, which would leave the monitor tracking
+        // the dead name and spamming "missing for N checks".
+        if let Some(ref monitor) = self.device_monitor {
+            monitor.notify_mic_swapped(device.name.clone(), system_name);
         }
-    }
-
-    /// Handle a device reconnect event
-    pub async fn handle_device_reconnect(&mut self, device_name: String, device_type: DeviceMonitorType) -> Result<()> {
-        info!("📱 Device reconnected: {} ({:?})", device_name, device_type);
-
-        // Attempt to reconnect the device
-        match self.attempt_device_reconnect(&device_name, device_type).await {
-            Ok(true) => {
-                info!("✅ Successfully reconnected device: {}", device_name);
-                self.state.stop_reconnecting();
-                Ok(())
-            }
-            Ok(false) => {
-                warn!("Device reconnect attempt failed (device not yet available)");
-                Err(anyhow::anyhow!("Device not available"))
-            }
-            Err(e) => {
-                error!("Device reconnect failed: {}", e);
-                Err(e)
-            }
-        }
-    }
-
-    /// Check if currently attempting to reconnect
-    pub fn is_reconnecting(&self) -> bool {
-        self.state.is_reconnecting()
+        self.state.set_microphone_device(device);
     }
 
     /// Get reference to recording state for external access
@@ -611,5 +624,17 @@ impl Drop for RecordingManager {
     fn drop(&mut self) {
         // Note: Can't call async cleanup in Drop, but streams have their own Drop implementations
         self.state.cleanup();
+    }
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod wake_tests {
+    use super::*;
+
+    #[test]
+    fn wake_fails_gracefully_for_unknown_device() {
+        // Nonexistent device name fails at the `find` step — no audio hardware needed.
+        // Asserts the wake is non-fatal (returns Err, does not panic).
+        assert!(wake_audio_connection_sync("__no_such_device__").is_err());
     }
 }
