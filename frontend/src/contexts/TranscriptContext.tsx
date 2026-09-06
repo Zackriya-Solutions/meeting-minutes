@@ -244,24 +244,19 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
 
       if (allNewTranscripts.length > 0) {
         setTranscripts(prev => {
-          // Create a set of existing sequence_ids for deduplication
-          const existingSequenceIds = new Set(prev.map(t => t.sequence_id).filter(id => id !== undefined));
-
-          // Filter out any new transcripts that already exist
-          const uniqueNewTranscripts = allNewTranscripts.filter(transcript =>
-            transcript.sequence_id !== undefined && !existingSequenceIds.has(transcript.sequence_id)
+          const updatesBySequence = new Map(
+            allNewTranscripts
+              .filter(transcript => transcript.sequence_id !== undefined)
+              .map(transcript => [transcript.sequence_id!, transcript])
           );
-
-          // Only combine if we have unique new transcripts
-          if (uniqueNewTranscripts.length === 0) {
-            console.log('No unique transcripts to add - all were duplicates');
-            return prev; // No new unique transcripts to add
-          }
-
-          console.log(`Adding ${uniqueNewTranscripts.length} unique transcripts out of ${allNewTranscripts.length} received`);
-
-          // Merge with existing transcripts, maintaining chronological order
-          const combined = [...prev, ...uniqueNewTranscripts];
+          const combined = prev.map(transcript => {
+            if (transcript.sequence_id === undefined) return transcript;
+            const replacement = updatesBySequence.get(transcript.sequence_id);
+            if (!replacement) return transcript;
+            updatesBySequence.delete(transcript.sequence_id);
+            return replacement;
+          });
+          combined.push(...updatesBySequence.values());
 
           // Sort by chunk_start_time first, then by sequence_id
           return combined.sort((a, b) => {
@@ -296,10 +291,9 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
             buffer_size_before: transcriptBuffer.size
           });
 
-          // Check for duplicate sequence_id before processing
+          // A system-audio result may intentionally replace an earlier microphone echo.
           if (transcriptBuffer.has(update.sequence_id)) {
-            console.log('🚫 MAIN LISTENER: Duplicate sequence_id, skipping buffer:', update.sequence_id);
-            return;
+            console.log('Replacing buffered transcript:', update.sequence_id);
           }
 
           // Create transcript for buffer with NEW timestamp fields
@@ -315,6 +309,7 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
             audio_start_time: update.audio_start_time,
             audio_end_time: update.audio_end_time,
             duration: update.duration,
+            source: update.source,
           };
 
           // Add to buffer
@@ -383,6 +378,7 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
             audio_start_time: segment.audio_start_time,
             audio_end_time: segment.audio_end_time,
             duration: segment.duration,
+            source: segment.source,
           }));
 
           setTranscripts(formattedTranscripts);
@@ -424,22 +420,16 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
       audio_start_time: update.audio_start_time,
       audio_end_time: update.audio_end_time,
       duration: update.duration,
+      source: update.source,
     };
 
     setTranscripts(prev => {
       console.log('📊 Current transcripts count before update:', prev.length);
 
-      // Check if this transcript already exists
-      const exists = prev.some(
-        t => t.text === update.text && t.timestamp === update.timestamp
-      );
-      if (exists) {
-        console.log('🚫 Duplicate transcript detected, skipping:', update.text.substring(0, 30) + '...');
-        return prev;
-      }
-
-      // Add new transcript and sort by sequence_id to maintain order
-      const updated = [...prev, newTranscript];
+      const existingIndex = prev.findIndex(t => t.sequence_id === update.sequence_id);
+      const updated = existingIndex >= 0
+        ? prev.map((transcript, index) => index === existingIndex ? newTranscript : transcript)
+        : [...prev, newTranscript];
       const sorted = updated.sort((a, b) => (a.sequence_id || 0) - (b.sequence_id || 0));
 
       console.log('✅ Added new transcript. New count:', sorted.length);

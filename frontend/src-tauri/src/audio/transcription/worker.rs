@@ -4,9 +4,11 @@
 
 use super::engine::TranscriptionEngine;
 use super::provider::TranscriptionError;
+use crate::audio::recording_state::TranscriptSource;
 use crate::audio::AudioChunk;
 use log::{error, info, warn};
 use serde::{Deserialize, Serialize};
+use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Runtime};
@@ -33,7 +35,7 @@ fn should_emit_transcript(text: &str) -> bool {
 pub struct TranscriptUpdate {
     pub text: String,
     pub timestamp: String, // Wall-clock time for reference (e.g., "14:30:05")
-    pub source: String,
+    pub source: TranscriptSource,
     pub sequence_id: u64,
     pub chunk_start_time: f64, // Legacy field, kept for compatibility
     pub is_partial: bool,
@@ -42,6 +44,109 @@ pub struct TranscriptUpdate {
     pub audio_start_time: f64, // Seconds from recording start (e.g., 125.3)
     pub audio_end_time: f64,   // Seconds from recording start (e.g., 128.6)
     pub duration: f64,          // Segment duration in seconds (e.g., 3.3)
+}
+
+#[derive(Debug, Clone)]
+struct RecentTranscript {
+    text: String,
+    source: TranscriptSource,
+    sequence_id: u64,
+    start_time: f64,
+    end_time: f64,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum DeduplicationDecision {
+    EmitNew,
+    ReplaceMicrophone(u64),
+    SuppressMicrophone,
+}
+
+fn deduplication_decision(
+    recent: &VecDeque<RecentTranscript>,
+    text: &str,
+    source: TranscriptSource,
+    start_time: f64,
+    end_time: f64,
+) -> DeduplicationDecision {
+    let duplicate = recent.iter().rev().find(|candidate| {
+        candidate.source != source
+            && transcript_windows_overlap(
+                candidate.start_time,
+                candidate.end_time,
+                start_time,
+                end_time,
+            )
+            && normalized_text_similarity(&candidate.text, text) >= 0.82
+    });
+
+    match (source, duplicate) {
+        (TranscriptSource::Microphone, Some(candidate))
+            if candidate.source == TranscriptSource::SystemAudio =>
+        {
+            DeduplicationDecision::SuppressMicrophone
+        }
+        (TranscriptSource::SystemAudio, Some(candidate))
+            if candidate.source == TranscriptSource::Microphone =>
+        {
+            DeduplicationDecision::ReplaceMicrophone(candidate.sequence_id)
+        }
+        _ => DeduplicationDecision::EmitNew,
+    }
+}
+
+fn transcript_windows_overlap(
+    first_start: f64,
+    first_end: f64,
+    second_start: f64,
+    second_end: f64,
+) -> bool {
+    let overlap = first_end.min(second_end) - first_start.max(second_start);
+    let shortest_duration = (first_end - first_start)
+        .min(second_end - second_start)
+        .max(0.001);
+    overlap > 0.0 && overlap / shortest_duration >= 0.35
+}
+
+fn normalized_text_similarity(left: &str, right: &str) -> f64 {
+    let left = normalize_transcript(left);
+    let right = normalize_transcript(right);
+    if left.is_empty() || right.is_empty() {
+        return 0.0;
+    }
+
+    let left: Vec<char> = left.chars().collect();
+    let right: Vec<char> = right.chars().collect();
+    let distance = levenshtein_distance(&left, &right);
+    1.0 - distance as f64 / left.len().max(right.len()) as f64
+}
+
+fn normalize_transcript(text: &str) -> String {
+    text.chars()
+        .filter(|character| character.is_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect()
+}
+
+fn levenshtein_distance(left: &[char], right: &[char]) -> usize {
+    let mut previous: Vec<usize> = (0..=right.len()).collect();
+    let mut current = vec![0; right.len() + 1];
+
+    for (left_index, left_character) in left.iter().enumerate() {
+        current[0] = left_index + 1;
+        for (right_index, right_character) in right.iter().enumerate() {
+            current[right_index + 1] = if left_character == right_character {
+                previous[right_index]
+            } else {
+                1 + previous[right_index]
+                    .min(previous[right_index + 1])
+                    .min(current[right_index])
+            };
+        }
+        std::mem::swap(&mut previous, &mut current);
+    }
+
+    previous[right.len()]
 }
 
 // NOTE: get_transcript_history and get_recording_meeting_name functions
@@ -97,6 +202,7 @@ pub fn start_transcription_task<R: Runtime>(
 
             let worker_handle = tokio::spawn(async move {
                 info!("👷 Worker {} started", worker_id);
+                let mut recent_transcripts = VecDeque::<RecentTranscript>::new();
 
                 // PRE-VALIDATE model state to avoid repeated async calls per chunk
                 let initial_model_loaded = engine_clone.is_model_loaded().await;
@@ -148,6 +254,7 @@ pub fn start_transcription_task<R: Runtime>(
 
                             let chunk_timestamp = chunk.timestamp;
                             let chunk_duration = chunk.data.len() as f64 / chunk.sample_rate as f64;
+                            let transcript_source = TranscriptSource::from(chunk.device_type);
 
                             // Transcribe with provider-agnostic approach
                             match transcribe_chunk_with_provider(
@@ -188,10 +295,37 @@ pub fn start_transcription_task<R: Runtime>(
                                             info!("🔍 Speech already detected in this session, not re-emitting");
                                         }
 
-                                        // Generate sequence ID and calculate timestamps FIRST
-                                        let sequence_id = SEQUENCE_COUNTER.fetch_add(1, Ordering::SeqCst);
                                         let audio_start_time = chunk_timestamp; // Already in seconds from recording start
                                         let audio_end_time = chunk_timestamp + chunk_duration;
+
+                                        while recent_transcripts.len() >= 64 {
+                                            recent_transcripts.pop_front();
+                                        }
+
+                                        let sequence_id = match deduplication_decision(
+                                            &recent_transcripts,
+                                            &transcript,
+                                            transcript_source,
+                                            audio_start_time,
+                                            audio_end_time,
+                                        ) {
+                                            DeduplicationDecision::EmitNew => {
+                                                Some(SEQUENCE_COUNTER.fetch_add(1, Ordering::SeqCst))
+                                            }
+                                            DeduplicationDecision::ReplaceMicrophone(sequence_id) => {
+                                                recent_transcripts.retain(|candidate| {
+                                                    candidate.sequence_id != sequence_id
+                                                });
+                                                Some(sequence_id)
+                                            }
+                                            DeduplicationDecision::SuppressMicrophone => {
+                                                info!(
+                                                    "Suppressing likely microphone echo for system transcript at {:.2}s",
+                                                    audio_start_time
+                                                );
+                                                None
+                                            }
+                                        };
 
                                         // Save structured transcript segment to recording manager (only final results)
                                         // Save ALL segments (partial and final) to ensure complete JSON
@@ -202,26 +336,36 @@ pub fn start_transcription_task<R: Runtime>(
 
                                         // Emit transcript update with NEW recording-relative timestamps
 
-                                        let update = TranscriptUpdate {
-                                            text: transcript,
-                                            timestamp: format_current_timestamp(), // Wall-clock for reference
-                                            source: "Audio".to_string(),
-                                            sequence_id,
-                                            chunk_start_time: chunk_timestamp, // Legacy compatibility
-                                            is_partial,
-                                            confidence: confidence_opt.unwrap_or(0.85), // Default for providers without confidence
-                                            // NEW: Recording-relative timestamps for sync
-                                            audio_start_time,
-                                            audio_end_time,
-                                            duration: chunk_duration,
-                                        };
+                                        if let Some(sequence_id) = sequence_id {
+                                            recent_transcripts.push_back(RecentTranscript {
+                                                text: transcript.clone(),
+                                                source: transcript_source,
+                                                sequence_id,
+                                                start_time: audio_start_time,
+                                                end_time: audio_end_time,
+                                            });
 
-                                        if let Err(e) = app_clone.emit("transcript-update", &update)
-                                        {
-                                            error!(
-                                                "Worker {}: Failed to emit transcript update: {}",
-                                                worker_id, e
-                                            );
+                                            let update = TranscriptUpdate {
+                                                text: transcript,
+                                                timestamp: format_current_timestamp(), // Wall-clock for reference
+                                                source: transcript_source,
+                                                sequence_id,
+                                                chunk_start_time: chunk_timestamp, // Legacy compatibility
+                                                is_partial,
+                                                confidence: confidence_opt.unwrap_or(0.85), // Default for providers without confidence
+                                                // NEW: Recording-relative timestamps for sync
+                                                audio_start_time,
+                                                audio_end_time,
+                                                duration: chunk_duration,
+                                            };
+
+                                            if let Err(e) = app_clone.emit("transcript-update", &update)
+                                            {
+                                                error!(
+                                                    "Worker {}: Failed to emit transcript update: {}",
+                                                    worker_id, e
+                                                );
+                                            }
                                         }
                                         // PERFORMANCE: Removed verbose logging of every emission
                                     }
@@ -584,21 +728,118 @@ fn format_recording_time(seconds: f64) -> String {
     let secs = total_seconds % 60;
 
     format!("[{:02}:{:02}]", minutes, secs)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn keeps_short_acknowledgements() {
+        assert!(should_emit_transcript("Yes"));
+        assert!(should_emit_transcript("ok"));
     }
 
-    #[cfg(test)]
-    mod tests {
-        use super::*;
-
-        #[test]
-        fn keeps_short_acknowledgements() {
-            assert!(should_emit_transcript("Yes"));
-            assert!(should_emit_transcript("ok"));
-        }
-
-        #[test]
-        fn drops_empty_and_whitespace_only() {
-            assert!(!should_emit_transcript(""));
-            assert!(!should_emit_transcript("   "));
-        }
+    #[test]
+    fn drops_empty_and_whitespace_only() {
+        assert!(!should_emit_transcript(""));
+        assert!(!should_emit_transcript("   "));
     }
+
+    fn recent(source: TranscriptSource) -> VecDeque<RecentTranscript> {
+        VecDeque::from([RecentTranscript {
+            text: "现在开始讨论发布计划".to_string(),
+            source,
+            sequence_id: 7,
+            start_time: 10.0,
+            end_time: 13.0,
+        }])
+    }
+
+    #[test]
+    fn transcript_source_uses_stable_wire_values() {
+        assert_eq!(
+            serde_json::to_string(&TranscriptSource::Microphone).unwrap(),
+            "\"mic\""
+        );
+        assert_eq!(
+            serde_json::to_string(&TranscriptSource::SystemAudio).unwrap(),
+            "\"system\""
+        );
+    }
+
+    #[test]
+    fn system_audio_replaces_overlapping_microphone_echo() {
+        assert_eq!(
+            deduplication_decision(
+                &recent(TranscriptSource::Microphone),
+                "现在开始讨论，发布计划。",
+                TranscriptSource::SystemAudio,
+                10.1,
+                12.9,
+            ),
+            DeduplicationDecision::ReplaceMicrophone(7)
+        );
+    }
+
+    #[test]
+    fn microphone_echo_is_suppressed_after_system_audio() {
+        assert_eq!(
+            deduplication_decision(
+                &recent(TranscriptSource::SystemAudio),
+                "现在开始讨论发布计划",
+                TranscriptSource::Microphone,
+                10.2,
+                13.1,
+            ),
+            DeduplicationDecision::SuppressMicrophone
+        );
+    }
+
+    #[test]
+    fn different_or_non_overlapping_speech_is_preserved() {
+        assert_eq!(
+            deduplication_decision(
+                &recent(TranscriptSource::SystemAudio),
+                "我补充一个现场问题",
+                TranscriptSource::Microphone,
+                10.2,
+                13.1,
+            ),
+            DeduplicationDecision::EmitNew
+        );
+        assert_eq!(
+            deduplication_decision(
+                &recent(TranscriptSource::SystemAudio),
+                "现在开始讨论发布计划",
+                TranscriptSource::Microphone,
+                15.0,
+                18.0,
+            ),
+            DeduplicationDecision::EmitNew
+        );
+    }
+
+    #[test]
+    fn source_deduplication_tolerates_out_of_order_vad_completion() {
+        let mut history = recent(TranscriptSource::SystemAudio);
+        history.push_back(RecentTranscript {
+            text: "later unrelated microphone segment".to_string(),
+            source: TranscriptSource::Microphone,
+            sequence_id: 8,
+            start_time: 30.0,
+            end_time: 35.0,
+        });
+
+        assert_eq!(
+            deduplication_decision(
+                &history,
+                "现在开始讨论发布计划",
+                TranscriptSource::Microphone,
+                10.1,
+                13.1,
+            ),
+            DeduplicationDecision::SuppressMicrophone
+        );
+    }
+}

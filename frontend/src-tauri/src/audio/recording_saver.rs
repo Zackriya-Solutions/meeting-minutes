@@ -8,6 +8,7 @@ use serde::{Serialize, Deserialize};
 use std::path::PathBuf;
 
 use super::recording_state::AudioChunk;
+use super::recording_state::TranscriptSource;
 use super::audio_processing::create_meeting_folder;
 use super::incremental_saver::IncrementalAudioSaver;
 
@@ -22,6 +23,8 @@ pub struct TranscriptSegment {
     pub display_time: String,   // Formatted time for display like "[02:15]"
     pub confidence: f32,
     pub sequence_id: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<TranscriptSource>,
 }
 
 /// Meeting metadata structure
@@ -129,6 +132,7 @@ impl RecordingSaver {
             display_time: "[00:00]".to_string(),
             confidence: 1.0,
             sequence_id: 0,
+            source: None,
         };
         self.add_transcript_segment(segment);
     }
@@ -481,5 +485,43 @@ impl RecordingSaver {
 impl Default for RecordingSaver {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn transcript_source_is_backward_compatible_in_recording_json() {
+        let legacy = r#"{
+            "id":"seg_1",
+            "text":"legacy",
+            "audio_start_time":0.0,
+            "audio_end_time":1.0,
+            "duration":1.0,
+            "display_time":"[00:00]",
+            "confidence":0.9,
+            "sequence_id":1
+        }"#;
+        let segment: TranscriptSegment = serde_json::from_str(legacy).unwrap();
+        assert_eq!(segment.source, None);
+        assert!(serde_json::to_value(segment).unwrap().get("source").is_none());
+
+        let sourced = TranscriptSegment {
+            id: "seg_2".to_string(),
+            text: "system".to_string(),
+            audio_start_time: 1.0,
+            audio_end_time: 2.0,
+            duration: 1.0,
+            display_time: "[00:01]".to_string(),
+            confidence: 0.9,
+            sequence_id: 2,
+            source: Some(TranscriptSource::SystemAudio),
+        };
+        assert_eq!(
+            serde_json::to_value(sourced).unwrap()["source"],
+            "system"
+        );
     }
 }

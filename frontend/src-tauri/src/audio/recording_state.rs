@@ -3,15 +3,33 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use tokio::sync::mpsc;
 use anyhow::Result;
+use serde::{Deserialize, Serialize};
 
 use super::devices::AudioDevice;
 use super::buffer_pool::AudioBufferPool;
 
 /// Device type for audio chunks
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DeviceType {
     Microphone,
     System,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TranscriptSource {
+    #[serde(rename = "mic")]
+    Microphone,
+    #[serde(rename = "system")]
+    SystemAudio,
+}
+
+impl From<DeviceType> for TranscriptSource {
+    fn from(device_type: DeviceType) -> Self {
+        match device_type {
+            DeviceType::Microphone => Self::Microphone,
+            DeviceType::System => Self::SystemAudio,
+        }
+    }
 }
 
 /// Audio chunk with metadata for processing

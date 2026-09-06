@@ -47,8 +47,8 @@ impl TranscriptsRepository {
         for segment in transcripts {
             let transcript_id = format!("transcript-{}", Uuid::new_v4());
             let result = sqlx::query(
-                "INSERT INTO transcripts (id, meeting_id, transcript, timestamp, audio_start_time, audio_end_time, duration)
-                 VALUES (?, ?, ?, ?, ?, ?, ?)"
+                "INSERT INTO transcripts (id, meeting_id, transcript, timestamp, audio_start_time, audio_end_time, duration, speaker)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
             )
             .bind(&transcript_id)
             .bind(&meeting_id)
@@ -57,6 +57,7 @@ impl TranscriptsRepository {
             .bind(segment.audio_start_time)
             .bind(segment.audio_end_time)
             .bind(segment.duration)
+            .bind(&segment.source)
             .execute(&mut *transaction)
             .await;
 
@@ -142,5 +143,43 @@ impl TranscriptsRepository {
             }
             None => transcript.chars().take(200).collect(), // Fallback to the start of the transcript
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn saves_transcript_source_in_existing_speaker_column() {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+        let segments = vec![TranscriptSegment {
+            id: "source-test".to_string(),
+            text: "system audio".to_string(),
+            timestamp: "2026-07-17T00:00:00Z".to_string(),
+            audio_start_time: Some(1.0),
+            audio_end_time: Some(2.0),
+            duration: Some(1.0),
+            source: Some("system".to_string()),
+        }];
+
+        let meeting_id = TranscriptsRepository::save_transcript(
+            &pool,
+            "source test",
+            &segments,
+            None,
+        )
+        .await
+        .unwrap();
+        let speaker: Option<String> = sqlx::query_scalar(
+            "SELECT speaker FROM transcripts WHERE meeting_id = ?",
+        )
+        .bind(meeting_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        assert_eq!(speaker.as_deref(), Some("system"));
     }
 }
