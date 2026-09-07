@@ -135,10 +135,26 @@ pub async fn validate_transcription_model_ready<R: Runtime>(app: &AppHandle<R>) 
                 }
             }
         }
+        "remoteWhisper" => {
+            // The "model" field is repurposed to hold the remote server's base URL
+            // (e.g. "http://192.168.1.100:8093") — see RemoteWhisperProvider.
+            let base_url = config.model.clone();
+            info!("🔍 Validating remote Whisper server at {}...", base_url);
+            let provider = crate::audio::transcription::RemoteWhisperProvider::new(base_url.clone());
+            if provider.is_model_loaded().await {
+                info!("✅ Remote Whisper server at {} is reachable", base_url);
+                Ok(())
+            } else {
+                Err(format!(
+                    "Cannot reach remote Whisper server at {}. Check it is running and reachable from this machine.",
+                    base_url
+                ))
+            }
+        }
         other => {
             warn!("❌ Unsupported transcription provider for local recording: {}", other);
             Err(format!(
-                "Provider '{}' is not supported for local transcription. Please select 'localWhisper' or 'parakeet'.",
+                "Provider '{}' is not supported for local transcription. Please select 'localWhisper', 'parakeet' or 'remoteWhisper'.",
                 other
             ))
         }
@@ -211,6 +227,13 @@ pub async fn get_or_init_transcription_engine<R: Runtime>(
                     Err("Parakeet engine not initialized. This should not happen after validation.".to_string())
                 }
             }
+        }
+        "remoteWhisper" => {
+            // The "model" field is repurposed to hold the remote server's base URL.
+            let base_url = config.model.clone();
+            info!("🌐 Initializing remote Whisper provider ({})", base_url);
+            let provider = crate::audio::transcription::RemoteWhisperProvider::new(base_url);
+            Ok(TranscriptionEngine::Provider(std::sync::Arc::new(provider)))
         }
         "localWhisper" | _ => {
             info!("🎤 Initializing Whisper transcription engine");

@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { Mic, Sparkles, Check, Loader2, Download } from 'lucide-react';
+import { Mic, Sparkles, Check, Loader2, Download, Server, Settings2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { OnboardingContainer } from '../OnboardingContainer';
 import { useOnboarding } from '@/contexts/OnboardingContext';
@@ -34,7 +34,16 @@ export function DownloadProgressStep() {
     setSummaryModelDownloaded,
     startBackgroundDownloads,
     completeOnboarding,
+    transcriptionMode,
+    remoteTranscriptionUrl,
+    summaryMode,
   } = useOnboarding();
+
+  // Backends the user delegated to their own infrastructure: this step must not
+  // download for them, must not render a progress bar, and must not gate on them.
+  const usesRemoteTranscription = transcriptionMode === 'remote';
+  const usesExternalSummary = summaryMode === 'external';
+  const transcriptionReady = usesRemoteTranscription || parakeetDownloaded;
 
   const [isMac, setIsMac] = useState(false);
 
@@ -167,6 +176,7 @@ export function DownloadProgressStep() {
 
   // Start the required transcription model immediately; summary readiness must not block it.
   useEffect(() => {
+    if (usesRemoteTranscription) return;
     if (parakeetDownloadStartedRef.current) return;
     parakeetDownloadStartedRef.current = true;
 
@@ -187,12 +197,13 @@ export function DownloadProgressStep() {
 
   // Start the selected summary model only after the backend recommendation is known.
   useEffect(() => {
+    if (usesExternalSummary) return;
     if (summaryDownloadStartedRef.current) return;
     if (!selectedSummaryModel) return;
     summaryDownloadStartedRef.current = true;
 
     startSummaryDownload();
-  }, [selectedSummaryModel]);
+  }, [selectedSummaryModel, usesExternalSummary]);
 
   // Listen to Parakeet download progress
   useEffect(() => {
@@ -337,8 +348,12 @@ export function DownloadProgressStep() {
     }
   };
 
-  const handleContinue = async () => {
-    // Verify actual model availability (catches state drift)
+  /**
+   * Reconcile UI state with what is actually on disk (catches state drift).
+   * Returns false when the local engine is genuinely missing and the user
+   * should stay on this step.
+   */
+  const verifyLocalTranscriptionEngine = async (): Promise<boolean> => {
     try {
       await invoke('parakeet_init');
       const actuallyAvailable = await invoke<boolean>('parakeet_has_available_models');
@@ -358,15 +373,27 @@ export function DownloadProgressStep() {
         toast.error('Transcription engine required', {
           description: 'Please retry the download before continuing.',
         });
-        return;
+        return false;
       }
     } catch (error) {
       console.warn('[DownloadProgressStep] Failed to verify model:', error);
     }
+    return true;
+  };
 
-    // Check if downloads are complete for toast notification
-    const downloadsComplete = parakeetState.status === 'completed' &&
-      summaryState.status === 'completed';
+  const handleContinue = async () => {
+    // Remote transcription has no local model to verify, and `parakeet_init`
+    // would spin up an engine the user explicitly opted out of.
+    if (!usesRemoteTranscription) {
+      const ok = await verifyLocalTranscriptionEngine();
+      if (!ok) return;
+    }
+
+    // Check if downloads are complete for toast notification.
+    // Delegated backends count as complete — nothing is downloading for them.
+    const downloadsComplete =
+      (usesRemoteTranscription || parakeetState.status === 'completed') &&
+      (usesExternalSummary || summaryState.status === 'completed');
 
     // Show toast if downloads still in progress
     if (!downloadsComplete) {
@@ -398,6 +425,32 @@ export function DownloadProgressStep() {
       }
     }
   };
+
+  // A backend the user delegated elsewhere: no size, no progress, no retry —
+  // just a statement of where it runs.
+  const renderDelegatedCard = (
+    title: string,
+    icon: React.ReactNode,
+    detail: string,
+    badge: string
+  ) => (
+    <div className="bg-white rounded-xl border border-gray-200 p-5">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center shrink-0">
+            {icon}
+          </div>
+          <div className="min-w-0">
+            <h3 className="font-medium text-gray-900">{title}</h3>
+            <p className="text-sm text-gray-500 truncate" title={detail}>{detail}</p>
+          </div>
+        </div>
+        <span className="text-xs text-gray-600 bg-gray-100 rounded-full px-2.5 py-1 shrink-0">
+          {badge}
+        </span>
+      </div>
+    </div>
+  );
 
   const renderDownloadCard = (
     title: string,
@@ -491,32 +544,50 @@ export function DownloadProgressStep() {
   return (
     <OnboardingContainer
       title="Getting things ready"
-      description="You can start using Meetily after downloading the Transcription Engine."
+      description={
+        usesRemoteTranscription
+          ? 'Your remote transcription server is configured. You can start using Meetily right away.'
+          : 'You can start using Meetily after downloading the Transcription Engine.'
+      }
       step={3}
       totalSteps={isMac ? 4 : 3}
     >
       <div className="flex flex-col items-center space-y-6">
         {/* Download Cards */}
         <div className="w-full max-w-lg space-y-4">
-          {renderDownloadCard(
-            'Transcription Engine',
-            <Mic className="w-5 h-5 text-gray-600" />,
-            parakeetState,
-            '~670 MB'
-          )}
+          {usesRemoteTranscription
+            ? renderDelegatedCard(
+                'Transcription Engine',
+                <Server className="w-5 h-5 text-gray-600" />,
+                remoteTranscriptionUrl,
+                'Remote'
+              )
+            : renderDownloadCard(
+                'Transcription Engine',
+                <Mic className="w-5 h-5 text-gray-600" />,
+                parakeetState,
+                '~670 MB'
+              )}
 
-          {renderDownloadCard(
-            'Summary Engine',
-            <Sparkles className="w-5 h-5 text-gray-600" />,
-            summaryState,
-            getSummaryModelSizeLabel(selectedSummaryModel || recommendedSummaryModel),
-            'MiB'
-          )}
+          {usesExternalSummary
+            ? renderDelegatedCard(
+                'Summary Engine',
+                <Settings2 className="w-5 h-5 text-gray-600" />,
+                'Choose a provider in Settings → Summarization',
+                'Later'
+              )
+            : renderDownloadCard(
+                'Summary Engine',
+                <Sparkles className="w-5 h-5 text-gray-600" />,
+                summaryState,
+                getSummaryModelSizeLabel(selectedSummaryModel || recommendedSummaryModel),
+                'MiB'
+              )}
         </div>
 
         {/* Info Message - Only show when Parakeet is downloaded */}
         <AnimatePresence>
-          {parakeetDownloaded && !summaryModelDownloaded && (
+          {!usesRemoteTranscription && !usesExternalSummary && parakeetDownloaded && !summaryModelDownloaded && (
             <motion.div
               initial={{ opacity: 0, y: -10 }}
               animate={{ opacity: 1, y: 0 }}
@@ -541,10 +612,10 @@ export function DownloadProgressStep() {
         <div className="w-full max-w-xs">
           <Button
             onClick={handleContinue}
-            disabled={!parakeetDownloaded || isCompleting}
+            disabled={!transcriptionReady || isCompleting}
             className="w-full h-11 bg-gray-900 hover:bg-gray-800 text-white disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {(isCompleting || !parakeetDownloaded) ? (
+            {(isCompleting || !transcriptionReady) ? (
               <Loader2 className="w-4 h-4 mr-2 animate-spin" />
             ) : (
               'Continue'

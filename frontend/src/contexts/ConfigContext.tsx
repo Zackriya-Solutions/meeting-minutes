@@ -97,6 +97,25 @@ interface ConfigContextType {
 const ConfigContext = createContext<ConfigContextType | undefined>(undefined);
 
 
+/**
+ * Not every backend supports every language option. `auto-translate` asks for
+ * translation to English, which a remote OpenAI-compatible Whisper server cannot
+ * deliver — translation lives behind a separate `/v1/audio/translations` endpoint
+ * this app does not call.
+ *
+ * Rust owns the value transcription actually reads (`LANGUAGE_PREFERENCE`, whose
+ * own default is `auto-translate`), and it is written from this context. So the
+ * coercion belongs here, not in a settings panel that only exists while its modal
+ * is open — otherwise a user who switches provider without visiting that panel
+ * keeps requesting a translation that silently never happens.
+ */
+function resolveLanguageForProvider(language: string, provider: string): string {
+  if (provider === 'remoteWhisper' && language === 'auto-translate') {
+    return 'auto';
+  }
+  return language;
+}
+
 export function ConfigProvider({ children }: { children: ReactNode }) {
   // Model configuration state
   const [modelConfig, setModelConfig] = useState<ModelConfig>({
@@ -214,18 +233,25 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     loadTranscriptConfig();
   }, []);
 
-  // Sync language preference to Rust on mount (fixes startup desync bug)
+  // Sync language preference to Rust (fixes startup desync bug).
+  // Re-runs on provider change too: a preference that is valid for one backend can
+  // be unsupported by another, and this is the only write path that always runs.
   useEffect(() => {
-    if (selectedLanguage) {
-      invoke('set_language_preference', { language: selectedLanguage })
-        .then(() => {
-          console.log('[ConfigContext] Synced language preference to Rust on startup:', selectedLanguage);
-        })
-        .catch(err => {
-          console.error('[ConfigContext] Failed to sync language preference to Rust on startup:', err);
-        });
-    }
-  }, []); 
+    if (!selectedLanguage) return;
+
+    const effectiveLanguage = resolveLanguageForProvider(
+      selectedLanguage,
+      transcriptModelConfig.provider
+    );
+
+    invoke('set_language_preference', { language: effectiveLanguage })
+      .then(() => {
+        console.log('[ConfigContext] Synced language preference to Rust:', effectiveLanguage);
+      })
+      .catch(err => {
+        console.error('[ConfigContext] Failed to sync language preference to Rust:', err);
+      });
+  }, [selectedLanguage, transcriptModelConfig.provider]); 
 
   // Load model configuration on mount
   useEffect(() => {
@@ -479,12 +505,13 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
   const handleSetSelectedLanguage = useCallback((lang: string) => {
     setSelectedLanguage(lang);
     if (typeof window !== 'undefined') {
+      // Persist the user's actual preference; the provider-specific coercion is
+      // applied when syncing to Rust, so switching back to a capable provider
+      // restores their choice instead of having silently overwritten it.
       localStorage.setItem('primaryLanguage', lang);
     }
-    // Sync with Rust in-memory state for live recording
-    invoke('set_language_preference', { language: lang }).catch(err =>
-      console.error('Failed to sync language preference to Rust:', err)
-    );
+    // The sync effect above pushes this to Rust once state settles — doing it here
+    // as well would fire a second, provider-unaware write that could race it.
   }, []);
 
   const value: ConfigContextType = useMemo(() => ({

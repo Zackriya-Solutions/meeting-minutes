@@ -19,7 +19,26 @@ interface UseRecordingStartReturn {
   isAutoStarting: boolean;
 }
 
+/** Provider id for a self-hosted, OpenAI-compatible Whisper server. */
+const REMOTE_WHISPER_PROVIDER = 'remoteWhisper';
+
+/** Local engine assumed when the stored config cannot be read. */
+const DEFAULT_PROVIDER = 'parakeet';
+
 interface TranscriptConfig {
+  provider?: string;
+  /** For `remoteWhisper` this carries the server base URL, not a model name. */
+  model?: string;
+}
+
+interface TranscriptionReadiness {
+  ready: boolean;
+  reason?:
+    | 'downloading'
+    | 'missing-local-model'
+    | 'remote-unreachable'
+    | 'unsupported-provider';
+  serverUrl?: string;
   provider?: string;
 }
 
@@ -62,52 +81,151 @@ export function useRecordingStart(
     return `Meeting ${day}_${month}_${year}_${hours}_${minutes}_${seconds}`;
   }, []);
 
-  const getTranscriptionProvider = useCallback(async (): Promise<string> => {
+  // Read provider and model together: the remote path needs both, and one read
+  // keeps the two halves of the decision from disagreeing.
+  const getTranscriptConfig = useCallback(async (): Promise<TranscriptConfig> => {
     try {
       const config = await invoke<TranscriptConfig | null>('api_get_transcript_config');
-      return config?.provider || 'parakeet';
+      return {
+        provider: config?.provider || DEFAULT_PROVIDER,
+        model: config?.model ?? '',
+      };
     } catch (error) {
+      // Fall back to the local engine: a config read failure must not silently
+      // grant access to a backend we could not confirm.
       console.error('Failed to load transcription provider:', error);
-      return 'parakeet';
+      return { provider: DEFAULT_PROVIDER, model: '' };
     }
   }, []);
 
-  // Check the selected local transcription provider, not a hardcoded engine.
-  const checkTranscriptionModelReady = useCallback(async (): Promise<boolean> => {
-    try {
-      const provider = await getTranscriptionProvider();
-      const commands = getProviderCommands(provider);
-
-      if (commands) {
-        await invoke(commands.initialize);
-        return await invoke<boolean>(commands.hasAvailableModels);
+  /**
+   * A remote server owns its own model lifecycle, so "ready" means reachable —
+   * there is nothing on disk to check.
+   */
+  const checkRemoteServerReady = useCallback(
+    async (serverUrl: string): Promise<TranscriptionReadiness> => {
+      if (!serverUrl) {
+        return { ready: false, reason: 'remote-unreachable', serverUrl: '' };
       }
 
-      console.error(`Unsupported transcription provider: ${provider}`);
-      return false;
-    } catch (error) {
-      console.error('Failed to check transcription model status:', error);
-      return false;
-    }
-  }, [getTranscriptionProvider]);
+      try {
+        const reachable = await invoke<boolean>('remote_whisper_check_health', {
+          baseUrl: serverUrl,
+        });
+        return reachable
+          ? { ready: true }
+          : { ready: false, reason: 'remote-unreachable', serverUrl };
+      } catch (error) {
+        console.error('Remote transcription server health check failed:', error);
+        return { ready: false, reason: 'remote-unreachable', serverUrl };
+      }
+    },
+    []
+  );
 
-  // Check download status for the selected local transcription provider.
-  const checkIfModelDownloading = useCallback(async (): Promise<boolean> => {
-    try {
-      const provider = await getTranscriptionProvider();
+  /**
+   * Check the *selected* local engine, never a hardcoded one: a Whisper user
+   * must not be blocked by a missing Parakeet model, and vice versa.
+   */
+  const checkLocalModelReady = useCallback(
+    async (provider: string): Promise<TranscriptionReadiness> => {
       const commands = getProviderCommands(provider);
-      if (!commands) return false;
+      if (!commands) {
+        console.error(`Unsupported transcription provider: ${provider}`);
+        return { ready: false, reason: 'unsupported-provider', provider };
+      }
 
-      const models = await invoke<ModelWithStatus[]>(commands.getAvailableModels);
-      return hasDownloadingModel(models);
-    } catch (error) {
-      console.error('Failed to check model download status:', error);
-      return false; // Default to not downloading (will show error + modal)
+      try {
+        await invoke(commands.initialize);
+        if (await invoke<boolean>(commands.hasAvailableModels)) {
+          return { ready: true };
+        }
+      } catch (error) {
+        console.error('Failed to check transcription model status:', error);
+      }
+
+      try {
+        const models = await invoke<ModelWithStatus[]>(commands.getAvailableModels);
+        if (hasDownloadingModel(models)) {
+          return { ready: false, reason: 'downloading' };
+        }
+      } catch (error) {
+        // Default to "not downloading" so the user gets the model selector
+        // rather than a wait-for-it toast that would never resolve.
+        console.error('Failed to check model download status:', error);
+      }
+
+      return { ready: false, reason: 'missing-local-model' };
+    },
+    []
+  );
+
+  /**
+   * Is transcription ready to record?
+   *
+   * The answer depends on the configured provider: a local engine needs a model
+   * on disk, a remote server only needs to be reachable. The Rust recording
+   * command validates the same provider again before capture.
+   */
+  const checkTranscriptionReady = useCallback(async (): Promise<TranscriptionReadiness> => {
+    const { provider = DEFAULT_PROVIDER, model = '' } = await getTranscriptConfig();
+
+    if (provider === REMOTE_WHISPER_PROVIDER) {
+      // The `model` column carries the server base URL for this provider.
+      return checkRemoteServerReady(model.trim());
     }
-  }, [getTranscriptionProvider]);
 
-  // The Rust recording command validates the same provider again before capture.
-  const checkModelReady = checkTranscriptionModelReady;
+    return checkLocalModelReady(provider);
+  }, [getTranscriptConfig, checkRemoteServerReady, checkLocalModelReady]);
+
+  /**
+   * Single place that turns a blocked start into user-facing feedback, so the
+   * three entry points (button, auto-start, sidebar) cannot drift apart.
+   */
+  const reportTranscriptionNotReady = useCallback(
+    (readiness: TranscriptionReadiness, source: string) => {
+      if (readiness.reason === 'downloading') {
+        toast.info('Model download in progress', {
+          description: 'Please wait for the transcription model to finish downloading before recording.',
+          duration: 5000,
+        });
+        Analytics.trackButtonClick('start_recording_blocked_downloading', source);
+        return;
+      }
+
+      if (readiness.reason === 'remote-unreachable') {
+        // Downloading a local model would not fix this, so the model selector
+        // stays closed — it would point the user at the wrong remedy.
+        toast.error('Transcription server unreachable', {
+          description: readiness.serverUrl
+            ? `Could not reach ${readiness.serverUrl}. Check that the server is running, or switch provider in Settings.`
+            : 'No server URL is configured. Set one in Settings > Transcription.',
+          duration: 6000,
+        });
+        Analytics.trackButtonClick('start_recording_blocked_remote_unreachable', source);
+        return;
+      }
+
+      if (readiness.reason === 'unsupported-provider') {
+        // Same reasoning: no local download fixes a provider this build cannot
+        // drive, so send the user to Settings instead of the model selector.
+        toast.error('Transcription provider not supported', {
+          description: `"${readiness.provider}" cannot be used for recording. Pick another provider in Settings > Transcription.`,
+          duration: 6000,
+        });
+        Analytics.trackButtonClick('start_recording_blocked_unsupported', source);
+        return;
+      }
+
+      toast.error('Transcription model not ready', {
+        description: 'Please download a transcription model before recording.',
+        duration: 5000,
+      });
+      showModal?.('modelSelector', 'Transcription model setup required');
+      Analytics.trackButtonClick('start_recording_blocked_missing', source);
+    },
+    [showModal]
+  );
 
   // Handle manual recording start (from button click)
   const handleRecordingStart = useCallback(async () => {
@@ -117,31 +235,17 @@ export function useRecordingStart(
     }
     isStartingRef.current = true;
     try {
-      console.log('handleRecordingStart called - checking selected transcription model status');
+      console.log('handleRecordingStart called - checking transcription readiness');
 
-      // Check the selected transcription model before starting.
-      const modelReady = await checkModelReady();
-      if (!modelReady) {
-        const isDownloading = await checkIfModelDownloading();
-        if (isDownloading) {
-          toast.info('Model download in progress', {
-            description: 'Please wait for the transcription model to finish downloading before recording.',
-            duration: 5000,
-          });
-          Analytics.trackButtonClick('start_recording_blocked_downloading', 'home_page');
-        } else {
-          toast.error('Transcription model not ready', {
-            description: 'Please download a transcription model before recording.',
-            duration: 5000,
-          });
-          showModal?.('modelSelector', 'Transcription model setup required');
-          Analytics.trackButtonClick('start_recording_blocked_missing', 'home_page');
-        }
+      // Transcription must be ready — local model on disk, or remote server reachable
+      const readiness = await checkTranscriptionReady();
+      if (!readiness.ready) {
+        reportTranscriptionNotReady(readiness, 'home_page');
         setStatus(RecordingStatus.IDLE);
         return;
       }
 
-      console.log('Selected transcription model ready - setting up meeting title and state');
+      console.log('Transcription ready - setting up meeting title and state');
 
       const randomTitle = generateMeetingTitle();
       setMeetingTitle(randomTitle);
@@ -195,7 +299,7 @@ export function useRecordingStart(
     } finally {
       isStartingRef.current = false;
     }
-  }, [generateMeetingTitle, setMeetingTitle, setIsRecording, clearTranscripts, setIsMeetingActive, checkModelReady, checkIfModelDownloading, selectedDevices, showModal, setStatus]);
+  }, [generateMeetingTitle, setMeetingTitle, setIsRecording, clearTranscripts, setIsMeetingActive, checkTranscriptionReady, reportTranscriptionNotReady, selectedDevices, showModal, setStatus]);
 
   // Check for autoStartRecording flag and start recording automatically
   useEffect(() => {
@@ -207,24 +311,10 @@ export function useRecordingStart(
           setIsAutoStarting(true);
           sessionStorage.removeItem('autoStartRecording'); // Clear the flag
 
-          // Check the selected transcription model before starting.
-          const modelReady = await checkModelReady();
-          if (!modelReady) {
-            const isDownloading = await checkIfModelDownloading();
-            if (isDownloading) {
-              toast.info('Model download in progress', {
-                description: 'Please wait for the transcription model to finish downloading before recording.',
-                duration: 5000,
-              });
-              Analytics.trackButtonClick('start_recording_blocked_downloading', 'sidebar_auto');
-            } else {
-              toast.error('Transcription model not ready', {
-                description: 'Please download a transcription model before recording.',
-                duration: 5000,
-              });
-              showModal?.('modelSelector', 'Transcription model setup required');
-              Analytics.trackButtonClick('start_recording_blocked_missing', 'sidebar_auto');
-            }
+          // Transcription must be ready — local model on disk, or remote server reachable
+          const readiness = await checkTranscriptionReady();
+          if (!readiness.ready) {
+            reportTranscriptionNotReady(readiness, 'sidebar_auto');
             setStatus(RecordingStatus.IDLE);
             setIsAutoStarting(false);
             return;
@@ -285,8 +375,8 @@ export function useRecordingStart(
     setIsRecording,
     clearTranscripts,
     setIsMeetingActive,
-    checkModelReady,
-    checkIfModelDownloading,
+    checkTranscriptionReady,
+    reportTranscriptionNotReady,
     showModal,
     setStatus,
   ]);
@@ -299,27 +389,13 @@ export function useRecordingStart(
         return;
       }
 
-      console.log('Direct start from sidebar - checking selected transcription model status');
+      console.log('Direct start from sidebar - checking transcription readiness');
       setIsAutoStarting(true);
 
-      // Check the selected transcription model before starting.
-      const modelReady = await checkModelReady();
-      if (!modelReady) {
-        const isDownloading = await checkIfModelDownloading();
-        if (isDownloading) {
-          toast.info('Model download in progress', {
-            description: 'Please wait for the transcription model to finish downloading before recording.',
-            duration: 5000,
-          });
-          Analytics.trackButtonClick('start_recording_blocked_downloading', 'sidebar_direct');
-        } else {
-          toast.error('Transcription model not ready', {
-            description: 'Please download a transcription model before recording.',
-            duration: 5000,
-          });
-          showModal?.('modelSelector', 'Transcription model setup required');
-          Analytics.trackButtonClick('start_recording_blocked_missing', 'sidebar_direct');
-        }
+      // Transcription must be ready — local model on disk, or remote server reachable
+      const readiness = await checkTranscriptionReady();
+      if (!readiness.ready) {
+        reportTranscriptionNotReady(readiness, 'sidebar_direct');
         setStatus(RecordingStatus.IDLE);
         setIsAutoStarting(false);
         return;
@@ -381,8 +457,8 @@ export function useRecordingStart(
     setIsRecording,
     clearTranscripts,
     setIsMeetingActive,
-    checkModelReady,
-    checkIfModelDownloading,
+    checkTranscriptionReady,
+    reportTranscriptionNotReady,
     showModal,
     setStatus,
   ]);
