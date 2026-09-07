@@ -105,8 +105,13 @@ if [ -n "$TAURI_GPU_FEATURE" ] && [ "$TAURI_GPU_FEATURE" != "none" ]; then
     if [ "$LLAMA_FEATURE" = "coreml" ]; then
         LLAMA_FEATURE="metal"
         echo -e "${YELLOW}   Note: llama-cpp-2 doesn't support CoreML, using Metal instead${NC}"
+    elif [ "$LLAMA_FEATURE" = "hipblas" ] || [ "$LLAMA_FEATURE" = "openblas" ]; then
+        LLAMA_FEATURE=""
+        echo -e "${YELLOW}   Note: llama-helper doesn't support '$TAURI_GPU_FEATURE', building helper in CPU mode${NC}"
     fi
-    HELPER_FEATURES="--features $LLAMA_FEATURE"
+    if [ -n "$LLAMA_FEATURE" ]; then
+        HELPER_FEATURES="--features $LLAMA_FEATURE"
+    fi
 fi
 
 echo -e "   Building in $HELPER_DIR with features: ${HELPER_FEATURES:-none}"

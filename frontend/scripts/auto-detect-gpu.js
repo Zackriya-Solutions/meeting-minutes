@@ -16,6 +16,17 @@ function commandExists(cmd) {
   }
 }
 
+function getHipccMajorVersion() {
+  try {
+    const output = execSync('hipcc --version', { encoding: 'utf8' });
+    const match = output.match(/HIP version:\s*(\d+)\./i) || output.match(/HIP\s+version\s+(\d+)\./i);
+    if (!match) return null;
+    return Number.parseInt(match[1], 10);
+  } catch {
+    return null;
+  }
+}
+
 function detectGPU() {
   const platform = os.platform();
 
@@ -40,8 +51,7 @@ function detectGPU() {
         console.log('🟢 NVIDIA GPU detected with CUDA - using CUDA acceleration');
         return 'cuda';
       } else {
-        console.log('⚠️  NVIDIA GPU detected but CUDA not installed - falling back to CPU');
-        return null;
+        console.log('⚠️  NVIDIA GPU detected but CUDA not installed - checking other acceleration options');
       }
     }
 
@@ -49,8 +59,14 @@ function detectGPU() {
     if (platform === 'linux' && commandExists('rocm-smi')) {
       const rocmPath = process.env.ROCM_PATH;
       if (rocmPath || commandExists('hipcc')) {
+        const hipccMajor = getHipccMajorVersion();
+        if (hipccMajor !== null && hipccMajor >= 6) {
+          console.log(`⚠️  AMD GPU + ROCm ${hipccMajor}.x detected, but current HIPBlas backend may be incompatible - checking other acceleration options`);
+          console.log('   Tip: set TAURI_GPU_FEATURE=hipblas to force and test manually');
+        } else {
         console.log('🔴 AMD GPU detected with ROCm - using HIPBlas acceleration');
         return 'hipblas';
+        }
       } else {
         console.log('⚠️  AMD GPU detected but ROCm not installed - falling back to CPU');
         return null;
