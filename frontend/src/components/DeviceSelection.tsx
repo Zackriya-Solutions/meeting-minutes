@@ -44,7 +44,6 @@ export function DeviceSelection({ selectedDevices, onDeviceChange, disabled = fa
   const [refreshing, setRefreshing] = useState(false);
   const [audioLevels, setAudioLevels] = useState<Map<string, AudioLevelData>>(new Map());
   const [isMonitoring, setIsMonitoring] = useState(false);
-  const [showLevels, setShowLevels] = useState(false);
 
   // Filter devices by type
   const inputDevices = devices.filter(device => device.device_type === 'Input');
@@ -236,7 +235,6 @@ export function DeviceSelection({ selectedDevices, onDeviceChange, disabled = fa
 
       await invoke('start_audio_level_monitoring', { deviceNames });
       setIsMonitoring(true);
-      setShowLevels(true);
       console.log('Started audio level monitoring for input devices:', deviceNames);
     } catch (err) {
       console.error('Failed to start audio level monitoring:', err);
@@ -282,19 +280,18 @@ export function DeviceSelection({ selectedDevices, onDeviceChange, disabled = fa
       <div className="flex items-center justify-between">
         <h4 className="text-sm font-medium text-gray-900">Audio Devices</h4>
         <div className="flex items-center space-x-2">
-          {/* TODO: Monitoring */}
-          {/* <button */}
-          {/*   onClick={toggleAudioLevelMonitoring} */}
-          {/*   disabled={disabled || inputDevices.length === 0} */}
-          {/*   className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${ */}
-          {/*     isMonitoring */}
-          {/*       ? 'bg-red-100 text-red-700 hover:bg-red-200' */}
-          {/*       : 'bg-green-100 text-green-700 hover:bg-green-200' */}
-          {/*   } disabled:pointer-events-none disabled:opacity-50`} */}
-          {/*   title={inputDevices.length === 0 ? 'No microphones available to test' : ''} */}
-          {/* > */}
-          {/*   {isMonitoring ? 'Stop Test' : 'Test Mic'} */}
-          {/* </button> */}
+          <button
+            onClick={toggleAudioLevelMonitoring}
+            disabled={disabled || inputDevices.length === 0}
+            className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors border ${
+              isMonitoring
+                ? 'bg-red-500 text-white hover:bg-red-600 border-red-500'
+                : 'bg-blue-500 text-white hover:bg-blue-600 border-blue-500'
+            } disabled:pointer-events-none disabled:opacity-50`}
+            title={inputDevices.length === 0 ? 'No microphones available to test' : 'Test your audio devices'}
+          >
+            {isMonitoring ? 'Stop Test' : 'Test Mic'}
+          </button>
           <button
             onClick={handleRefresh}
             disabled={refreshing || disabled}
@@ -345,7 +342,7 @@ export function DeviceSelection({ selectedDevices, onDeviceChange, disabled = fa
           )}
 
           {/* Audio Level Meters for Input Devices */}
-          {showLevels && inputDevices.length > 0 && (
+          {isMonitoring && inputDevices.length > 0 && (
             <div className="space-y-2 pt-2 border-t border-gray-100">
               <p className="text-xs text-gray-600 font-medium">Microphone Levels:</p>
               {inputDevices.map((device) => {
@@ -413,6 +410,18 @@ export function DeviceSelection({ selectedDevices, onDeviceChange, disabled = fa
           {outputDevices.length === 0 && (
             <p className="text-xs text-gray-500">No system audio devices found</p>
           )}
+
+          {/* System audio info */}
+          <div className="mt-2 p-2 bg-gray-50 rounded-md border border-gray-200">
+            <div className="flex items-center gap-2">
+              <div className="w-2 h-2 rounded-full bg-gray-300" />
+              <div className="flex-1 h-2 bg-gray-200 rounded-sm overflow-hidden" />
+              <span className="text-xs text-gray-400 font-mono min-w-[3rem] text-right">--</span>
+            </div>
+            <p className="text-xs text-gray-400 mt-1.5 text-center">
+              System audio levels are captured during recording
+            </p>
+          </div>
 
           {/* Backend Selection - available on all platforms */}
           {!disabled && (
