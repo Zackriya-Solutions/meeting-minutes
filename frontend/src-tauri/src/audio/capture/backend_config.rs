@@ -16,6 +16,13 @@ pub enum AudioCaptureBackend {
     /// Uses direct Core Audio API with aggregate device + tap
     #[cfg(target_os = "macos")]
     CoreAudio,
+
+    /// PocketStation system-audio capture on Windows and Linux.
+    #[cfg(all(
+        feature = "pocketstation-capture",
+        any(target_os = "windows", target_os = "linux")
+    ))]
+    PocketStation,
 }
 
 impl AudioCaptureBackend {
@@ -25,6 +32,11 @@ impl AudioCaptureBackend {
             AudioCaptureBackend::ScreenCaptureKit => "ScreenCaptureKit",
             #[cfg(target_os = "macos")]
             AudioCaptureBackend::CoreAudio => "Core Audio",
+            #[cfg(all(
+                feature = "pocketstation-capture",
+                any(target_os = "windows", target_os = "linux")
+            ))]
+            AudioCaptureBackend::PocketStation => "PocketStation",
         }
     }
 
@@ -38,6 +50,13 @@ impl AudioCaptureBackend {
             AudioCaptureBackend::CoreAudio => {
                 "Direct Core Audio API - Lower latency, more control over audio pipeline"
             }
+            #[cfg(all(
+                feature = "pocketstation-capture",
+                any(target_os = "windows", target_os = "linux")
+            ))]
+            AudioCaptureBackend::PocketStation => {
+                "Capture system audio with PocketStation on Windows and Linux"
+            }
         }
     }
 
@@ -47,6 +66,11 @@ impl AudioCaptureBackend {
             "screencapturekit" => Some(AudioCaptureBackend::ScreenCaptureKit),
             #[cfg(target_os = "macos")]
             "coreaudio" | "core_audio" => Some(AudioCaptureBackend::CoreAudio),
+            #[cfg(all(
+                feature = "pocketstation-capture",
+                any(target_os = "windows", target_os = "linux")
+            ))]
+            "pocketstation" => Some(AudioCaptureBackend::PocketStation),
             _ => None,
         }
     }
@@ -57,6 +81,11 @@ impl AudioCaptureBackend {
             AudioCaptureBackend::ScreenCaptureKit => "screencapturekit".to_string(),
             #[cfg(target_os = "macos")]
             AudioCaptureBackend::CoreAudio => "coreaudio".to_string(),
+            #[cfg(all(
+                feature = "pocketstation-capture",
+                any(target_os = "windows", target_os = "linux")
+            ))]
+            AudioCaptureBackend::PocketStation => "pocketstation".to_string(),
         }
     }
 
@@ -69,7 +98,13 @@ impl AudioCaptureBackend {
 
         #[cfg(not(target_os = "macos"))]
         {
-            vec![AudioCaptureBackend::ScreenCaptureKit]
+            let mut backends = vec![AudioCaptureBackend::ScreenCaptureKit];
+            #[cfg(all(
+                feature = "pocketstation-capture",
+                any(target_os = "windows", target_os = "linux")
+            ))]
+            backends.push(AudioCaptureBackend::PocketStation);
+            backends
         }
     }
 
@@ -158,6 +193,11 @@ mod tests {
         assert_eq!(AudioCaptureBackend::ScreenCaptureKit.to_string(), "screencapturekit");
         #[cfg(target_os = "macos")]
         assert_eq!(AudioCaptureBackend::CoreAudio.to_string(), "coreaudio");
+        #[cfg(all(
+            feature = "pocketstation-capture",
+            any(target_os = "windows", target_os = "linux")
+        ))]
+        assert_eq!(AudioCaptureBackend::PocketStation.to_string(), "pocketstation");
     }
 
     #[test]
@@ -177,6 +217,14 @@ mod tests {
                 Some(AudioCaptureBackend::CoreAudio)
             );
         }
+        #[cfg(all(
+            feature = "pocketstation-capture",
+            any(target_os = "windows", target_os = "linux")
+        ))]
+        assert_eq!(
+            AudioCaptureBackend::from_string("pocketstation"),
+            Some(AudioCaptureBackend::PocketStation)
+        );
     }
 
     #[test]
@@ -186,6 +234,11 @@ mod tests {
 
         #[cfg(target_os = "macos")]
         assert!(backends.contains(&AudioCaptureBackend::CoreAudio));
+        #[cfg(all(
+            feature = "pocketstation-capture",
+            any(target_os = "windows", target_os = "linux")
+        ))]
+        assert!(backends.contains(&AudioCaptureBackend::PocketStation));
     }
 
     #[test]

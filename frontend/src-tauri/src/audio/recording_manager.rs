@@ -14,6 +14,11 @@ use super::pipeline::AudioPipelineManager;
 use super::stream::AudioStreamManager;
 use super::recording_saver::RecordingSaver;
 use super::device_monitor::{AudioDeviceMonitor, DeviceEvent};
+#[cfg(all(
+    feature = "pocketstation-capture",
+    any(target_os = "windows", target_os = "linux")
+))]
+use super::capture::{get_current_backend, AudioCaptureBackend};
 
 /// Stream manager type enumeration
 pub enum StreamManagerType {
@@ -230,6 +235,18 @@ impl RecordingManager {
         // Pass auto_save to control whether audio checkpoints are created
         let recording_sender = self.recording_saver.start_accumulation(auto_save);
 
+        #[cfg(all(
+            feature = "pocketstation-capture",
+            any(target_os = "windows", target_os = "linux")
+        ))]
+        let uses_pocketstation_system_audio =
+            get_current_backend() == AudioCaptureBackend::PocketStation;
+        #[cfg(not(all(
+            feature = "pocketstation-capture",
+            any(target_os = "windows", target_os = "linux")
+        )))]
+        let uses_pocketstation_system_audio = false;
+
         // Start recording state first
         self.state.start_recording()?;
 
@@ -244,7 +261,12 @@ impl RecordingManager {
             ("No Microphone".to_string(), super::device_detection::InputDeviceKind::Unknown)
         };
 
-        let (sys_name, sys_kind) = if let Some(ref sys) = system_device {
+        let (sys_name, sys_kind) = if uses_pocketstation_system_audio {
+            (
+                "PocketStation system audio".to_string(),
+                super::device_detection::InputDeviceKind::Unknown,
+            )
+        } else if let Some(ref sys) = system_device {
             let device_kind = super::device_detection::InputDeviceKind::detect(&sys.name, 512, 48000);
             (sys.name.clone(), device_kind)
         } else {
@@ -254,7 +276,11 @@ impl RecordingManager {
         // Update recording metadata with device information
         self.recording_saver.set_device_info(
             microphone_device.as_ref().map(|d| d.name.clone()),
-            system_device.as_ref().map(|d| d.name.clone())
+            if uses_pocketstation_system_audio {
+                Some("PocketStation system audio".to_string())
+            } else {
+                system_device.as_ref().map(|d| d.name.clone())
+            }
         );
 
         // Start the audio processing pipeline with FFmpeg adaptive mixer
@@ -301,7 +327,12 @@ impl RecordingManager {
 
         // Start device monitoring to detect disconnects
         if let Some(ref mut monitor) = self.device_monitor {
-            if let Err(e) = monitor.start_monitoring(microphone_device, system_device) {
+            let monitored_system_device = if uses_pocketstation_system_audio {
+                None
+            } else {
+                system_device
+            };
+            if let Err(e) = monitor.start_monitoring(microphone_device, monitored_system_device) {
                 warn!("Failed to start device monitoring: {}", e);
                 // Non-fatal - continue without monitoring
             } else {

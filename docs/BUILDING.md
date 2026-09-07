@@ -2,6 +2,49 @@
 
 This guide provides detailed instructions for building Meetily from source on different operating systems.
 
+## PocketStation capture
+
+PocketStation is an optional system-audio method for Windows and Linux. It
+feeds 48 kHz mono audio into Meetily's existing `AudioChunk` processing.
+Meetily continues to capture the selected microphone and own mixing, VAD,
+transcription, storage, and the interface. The existing macOS capture methods
+are unchanged.
+
+PocketStation is disabled in normal builds. Prepare the `llama-helper` sidecar
+with the normal Meetily build script, and set the capture option before starting
+Tauri:
+
+```bash
+cd frontend
+MEETILY_CAPTURE=pocketstation ./dev-gpu.sh
+```
+
+In PowerShell:
+
+```powershell
+cd frontend
+$env:MEETILY_CAPTURE = "pocketstation"
+pnpm run tauri:dev
+```
+
+You can also compile the Rust application directly after preparing its
+sidecar:
+
+```bash
+cargo check -p meetily --features pocketstation-capture
+```
+
+Choose **PocketStation** under **System Audio Backend**. The selected microphone
+continues through Meetily's current capture code. The system-audio choice
+captures the complete output mix; it can include notifications and unrelated
+applications. Capture failures are reported through Meetily's existing
+recording error event, and stopping a recording joins the PocketStation Session
+before Meetily finishes the audio pipeline.
+
+Use the current Meetily methods when testing a specific output device. The
+PocketStation system-audio Source follows the host's current output mix rather
+than Meetily's output-device name.
+
 <details>
 <summary>Linux</summary>
 

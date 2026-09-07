@@ -206,6 +206,25 @@ For more details, see the [Architecture documentation](docs/architecture.md).
 
 If you want to contribute to Meetily or build it from source, you'll need to have Rust and Node.js installed. For detailed build instructions, please see the [Building from Source guide](docs/BUILDING.md).
 
+### Try PocketStation capture
+
+Meetily can use [PocketStation](https://github.com/pocketstation-io/pocketstation)
+for system-audio capture on Windows and Linux. This is an optional build;
+Meetily's current capture methods remain the default, including its microphone
+capture and macOS implementation.
+
+```bash
+cd frontend
+MEETILY_CAPTURE=pocketstation ./dev-gpu.sh
+```
+
+Open Meetily's audio settings and choose **PocketStation** under **System Audio
+Backend**. The system-audio choice enters Meetily's existing mixing, VAD,
+transcription, and recording code. Use Meetily's current Rust toolchain.
+
+See the [build guide](docs/BUILDING.md#pocketstation-capture) for Windows and
+manual build commands.
+
 ## Meetily Pro
 
 <p align="center">

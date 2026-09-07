@@ -4,6 +4,12 @@ pub mod microphone;
 pub mod system;
 pub mod backend_config;
 
+#[cfg(all(
+    feature = "pocketstation-capture",
+    any(target_os = "windows", target_os = "linux")
+))]
+pub mod pocketstation;
+
 #[cfg(target_os = "macos")]
 pub mod core_audio;
 
