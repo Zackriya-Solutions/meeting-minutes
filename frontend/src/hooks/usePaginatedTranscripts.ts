@@ -53,12 +53,21 @@ export function usePaginatedTranscripts({
     const [error, setError] = useState<string | null>(null);
 
     const offsetRef = useRef(0);
-    const loadedMeetingIdRef = useRef<string | null>(null);
+    const activeMeetingIdRef = useRef<string | null>(null);
+    const requestIdRef = useRef(0);
     const isLoadingRef = useRef(false);
     const lastLoadTimeRef = useRef(0); // Debounce protection
 
-    // Reset state when meeting changes
+    const isCurrentRequest = useCallback((requestId: number) =>
+        requestIdRef.current === requestId && activeMeetingIdRef.current === meetingId,
+        [meetingId]
+    );
+
+    // Reset invalidates pending reads, including same-meeting refetches.
     const reset = useCallback(() => {
+        requestIdRef.current += 1;
+        isLoadingRef.current = false;
+        lastLoadTimeRef.current = 0;
         setMetadata(null);
         setTranscripts([]);
         setTotalCount(0);
@@ -70,28 +79,31 @@ export function usePaginatedTranscripts({
     }, []);
 
     // Load meeting metadata
-    const loadMetadata = useCallback(async (): Promise<MeetingMetadata | null> => {
-        if (!meetingId) return null;
+    const loadMetadata = useCallback(async (requestId: number): Promise<MeetingMetadata | null> => {
+        if (!meetingId || !isCurrentRequest(requestId)) return null;
 
         try {
             const data = await invoke<MeetingMetadata>('api_get_meeting_metadata', {
                 meetingId,
             });
+            if (!isCurrentRequest(requestId)) return null;
             setMetadata(data);
             return data;
         } catch (err) {
+            if (!isCurrentRequest(requestId)) return null;
             console.error('Failed to load meeting metadata:', err);
             setError('Failed to load meeting details');
             return null;
         }
-    }, [meetingId]);
+    }, [meetingId, isCurrentRequest]);
 
     // Load transcripts at specific offset
     const loadTranscriptsAtOffset = useCallback(async (
+        requestId: number,
         offset: number,
         append: boolean = true
     ): Promise<Transcript[]> => {
-        if (!meetingId) return [];
+        if (!meetingId || !isCurrentRequest(requestId)) return [];
 
         try {
             const response = await invoke<PaginatedTranscriptsResponse>(
@@ -103,10 +115,12 @@ export function usePaginatedTranscripts({
                 }
             );
 
+            if (!isCurrentRequest(requestId)) return [];
             const newTranscripts = response.transcripts;
 
             if (append) {
                 setTranscripts(prev => {
+                    if (!isCurrentRequest(requestId)) return prev;
                     // Deduplicate by id
                     const existingIds = new Set(prev.map(t => t.id));
                     const uniqueNew = newTranscripts.filter(t => !existingIds.has(t.id));
@@ -125,14 +139,17 @@ export function usePaginatedTranscripts({
 
             return newTranscripts;
         } catch (err) {
+            if (!isCurrentRequest(requestId)) return [];
             console.error('Failed to load transcripts:', err);
             setError('Failed to load transcripts');
             return [];
         }
-    }, [meetingId]);
+    }, [meetingId, isCurrentRequest]);
 
     // Load next page with debounce protection
     const loadMore = useCallback(async () => {
+        const requestId = requestIdRef.current;
+        if (!isCurrentRequest(requestId)) return;
         const now = Date.now();
         // Debounce: require at least 100ms between calls
         if (now - lastLoadTimeRef.current < 100) {
@@ -145,52 +162,43 @@ export function usePaginatedTranscripts({
         isLoadingRef.current = true;
         setIsLoadingMore(true);
         try {
-            await loadTranscriptsAtOffset(offsetRef.current, true);
+            await loadTranscriptsAtOffset(requestId, offsetRef.current, true);
         } finally {
-            setIsLoadingMore(false);
-            isLoadingRef.current = false;
+            if (isCurrentRequest(requestId)) {
+                setIsLoadingMore(false);
+                isLoadingRef.current = false;
+            }
         }
-    }, [hasMore, meetingId, loadTranscriptsAtOffset, isLoading]);
+    }, [hasMore, meetingId, loadTranscriptsAtOffset, isLoading, isCurrentRequest]);
 
     // Force refetch of data (e.g., after retranscription)
     const refetch = useCallback(async () => {
-        if (!meetingId) return;
+        if (!meetingId || activeMeetingIdRef.current !== meetingId) return;
 
         reset();
-        setIsLoading(true);
+        const requestId = requestIdRef.current;
         try {
-            await loadMetadata();
-            await loadTranscriptsAtOffset(0, false);
+            await loadMetadata(requestId);
+            await loadTranscriptsAtOffset(requestId, 0, false);
         } finally {
-            setIsLoading(false);
+            if (isCurrentRequest(requestId)) setIsLoading(false);
         }
-    }, [meetingId, reset, loadMetadata, loadTranscriptsAtOffset]);
+    }, [meetingId, reset, loadMetadata, loadTranscriptsAtOffset, isCurrentRequest]);
 
-    // Initial load
+    // A new meeting or effect lifetime owns its own requests.
     useEffect(() => {
-        if (!meetingId) {
+        activeMeetingIdRef.current = meetingId;
+        if (meetingId) {
+            void refetch();
+        } else {
             reset();
-            return;
         }
 
-        // Avoid reloading the same meeting
-        if (loadedMeetingIdRef.current === meetingId) return;
-        loadedMeetingIdRef.current = meetingId;
-
-        reset();
-
-        const loadInitial = async () => {
-            setIsLoading(true);
-            try {
-                await loadMetadata();
-                await loadTranscriptsAtOffset(0, false);
-            } finally {
-                setIsLoading(false);
-            }
+        return () => {
+            requestIdRef.current += 1;
+            activeMeetingIdRef.current = null;
         };
-
-        loadInitial();
-    }, [meetingId, reset, loadMetadata, loadTranscriptsAtOffset]);
+    }, [meetingId, reset, refetch]);
 
     // Convert to segments (memoized)
     const segments = useMemo(() =>
