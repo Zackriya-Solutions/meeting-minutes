@@ -13,6 +13,10 @@ use llama_cpp_2::llama_backend::LlamaBackend;
 use llama_cpp_2::llama_batch::LlamaBatch;
 use llama_cpp_2::model::params::LlamaModelParams;
 use llama_cpp_2::model::{AddBos, LlamaModel};
+#[cfg(feature = "vulkan")]
+use llama_cpp_2::list_llama_ggml_backend_devices;
+#[cfg(any(feature = "vulkan", test))]
+use llama_cpp_2::{LlamaBackendDevice, LlamaBackendDeviceType};
 use serde::{Deserialize, Serialize};
 
 // ============================================================================
@@ -147,7 +151,13 @@ fn detect_vram_gb() -> f32 {
         }
     }
 
-    /// TODO: Vulkan VRAM detection
+    #[cfg(feature = "vulkan")]
+    {
+        if let Some(vram) = detect_vulkan_vram() {
+            eprintln!("Vulkan VRAM detected: {:.2} GB", vram);
+            return vram;
+        }
+    }
 
     eprintln!("VRAM detection not available, using conservative estimate");
     4.0 // Conservative fallback
@@ -186,6 +196,60 @@ fn detect_cuda_vram() -> Option<f32> {
         }
     }
     None
+}
+
+#[cfg(any(feature = "vulkan", test))]
+fn usable_vulkan_free_bytes(device: &LlamaBackendDevice) -> Option<usize> {
+    if !device.backend.eq_ignore_ascii_case("vulkan") {
+        return None;
+    }
+
+    // 部分驱动或 memory-budget 实现可能报告 free > total；已知上限存在时先钳制，
+    // 避免异常值让层数估算过度激进并触发显存 OOM。
+    let memory_free = if device.memory_total > 0 {
+        device.memory_free.min(device.memory_total)
+    } else {
+        device.memory_free
+    };
+
+    (memory_free > 0).then_some(memory_free)
+}
+
+/// 从 llama.cpp 已注册的 Vulkan 设备中选择保守的可用显存下界。
+#[cfg(any(feature = "vulkan", test))]
+fn select_vulkan_vram_bytes(devices: &[LlamaBackendDevice]) -> Option<usize> {
+    // llama.cpp 默认在存在 dGPU 时忽略 iGPU，因此这里同步采用 dGPU 优先级；
+    // 多 dGPU 只取最大单卡值，宁可少卸载一些层，也不把逐卡安全余量错误地相加。
+    let has_discrete = devices.iter().any(|device| {
+        device.backend.eq_ignore_ascii_case("vulkan")
+            && matches!(device.device_type, LlamaBackendDeviceType::Gpu)
+    });
+
+    if has_discrete {
+        return devices
+            .iter()
+            .filter(|device| matches!(device.device_type, LlamaBackendDeviceType::Gpu))
+            .filter_map(usable_vulkan_free_bytes)
+            .max();
+    }
+
+    devices
+        .iter()
+        .filter(|device| matches!(device.device_type, LlamaBackendDeviceType::IntegratedGpu))
+        .filter_map(usable_vulkan_free_bytes)
+        .max()
+}
+
+#[cfg(any(feature = "vulkan", test))]
+fn bytes_to_gib(bytes: usize) -> f32 {
+    bytes as f32 / (1024.0 * 1024.0 * 1024.0)
+}
+
+#[cfg(feature = "vulkan")]
+fn detect_vulkan_vram() -> Option<f32> {
+    // 设备枚举依赖 LlamaBackend 已初始化；当前调用链由 ModelState::new() 保证这一顺序。
+    let devices = list_llama_ggml_backend_devices();
+    select_vulkan_vram_bytes(&devices).map(bytes_to_gib)
 }
 
 /// Calculate safe GPU layer count based on VRAM, model file size, and context size
@@ -676,6 +740,117 @@ fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn backend_device(
+        backend: &str,
+        device_type: LlamaBackendDeviceType,
+        memory_total: usize,
+        memory_free: usize,
+    ) -> LlamaBackendDevice {
+        LlamaBackendDevice {
+            index: 0,
+            name: format!("{backend}0"),
+            description: "test device".to_string(),
+            backend: backend.to_string(),
+            memory_total,
+            memory_free,
+            device_type,
+        }
+    }
+
+    #[test]
+    fn vulkan_vram_uses_reported_free_memory() {
+        let devices = [backend_device(
+            "Vulkan",
+            LlamaBackendDeviceType::Gpu,
+            16,
+            15,
+        )];
+
+        assert_eq!(select_vulkan_vram_bytes(&devices), Some(15));
+    }
+
+    #[test]
+    fn vulkan_vram_prefers_discrete_gpu_over_larger_integrated_gpu() {
+        let devices = [
+            backend_device("Vulkan", LlamaBackendDeviceType::Gpu, 16, 12),
+            backend_device("Vulkan", LlamaBackendDeviceType::IntegratedGpu, 64, 32),
+        ];
+
+        assert_eq!(select_vulkan_vram_bytes(&devices), Some(12));
+    }
+
+    #[test]
+    fn vulkan_vram_uses_integrated_gpu_when_no_discrete_gpu_exists() {
+        let devices = [
+            backend_device("Vulkan", LlamaBackendDeviceType::IntegratedGpu, 8, 6),
+            backend_device("Vulkan", LlamaBackendDeviceType::IntegratedGpu, 16, 10),
+        ];
+
+        assert_eq!(select_vulkan_vram_bytes(&devices), Some(10));
+    }
+
+    #[test]
+    fn vulkan_vram_does_not_use_integrated_gpu_when_discrete_report_is_unusable() {
+        let devices = [
+            backend_device("Vulkan", LlamaBackendDeviceType::Gpu, 16, 0),
+            backend_device("Vulkan", LlamaBackendDeviceType::IntegratedGpu, 64, 32),
+        ];
+
+        assert_eq!(select_vulkan_vram_bytes(&devices), None);
+    }
+
+    #[test]
+    fn vulkan_vram_uses_largest_discrete_gpu_as_safe_lower_bound() {
+        let devices = [
+            backend_device("Vulkan", LlamaBackendDeviceType::Gpu, 8, 7),
+            backend_device("Vulkan", LlamaBackendDeviceType::Gpu, 16, 13),
+        ];
+
+        assert_eq!(select_vulkan_vram_bytes(&devices), Some(13));
+    }
+
+    #[test]
+    fn vulkan_vram_ignores_other_backends_and_zero_free_memory() {
+        let devices = [
+            backend_device("CUDA", LlamaBackendDeviceType::Gpu, 24, 20),
+            backend_device("CPU", LlamaBackendDeviceType::Cpu, 64, 48),
+            backend_device("Vulkan", LlamaBackendDeviceType::Gpu, 16, 0),
+        ];
+
+        assert_eq!(select_vulkan_vram_bytes(&devices), None);
+    }
+
+    #[test]
+    fn vulkan_vram_clamps_invalid_free_memory_to_total() {
+        let devices = [backend_device(
+            "Vulkan",
+            LlamaBackendDeviceType::Gpu,
+            8,
+            16,
+        )];
+
+        assert_eq!(select_vulkan_vram_bytes(&devices), Some(8));
+    }
+
+    #[test]
+    fn vulkan_vram_keeps_free_memory_when_total_is_unknown() {
+        let devices = [backend_device(
+            "Vulkan",
+            LlamaBackendDeviceType::Gpu,
+            0,
+            6,
+        )];
+
+        assert_eq!(select_vulkan_vram_bytes(&devices), Some(6));
+    }
+
+    #[test]
+    fn vulkan_vram_converts_bytes_to_binary_gibibytes() {
+        let one_and_a_half_gib = (3 * 1024 * 1024 * 1024usize) / 2;
+
+        assert_eq!(bytes_to_gib(one_and_a_half_gib), 1.5);
+    }
 
     #[test]
     fn generate_request_defaults_penalties_when_omitted() {
