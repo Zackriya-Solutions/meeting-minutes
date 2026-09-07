@@ -116,9 +116,11 @@ pub async fn verify_microphone_access() -> anyhow::Result<()> {
 
     tokio::task::spawn_blocking(|| {
         let host = cpal::default_host();
-        let device = host
-            .default_input_device()
-            .ok_or_else(|| anyhow::anyhow!("No microphone device found"))?;
+        let Some(device) = host.default_input_device() else {
+            // Let device resolution handle the existing system-audio-only fallback.
+            info!("[verify_microphone_access] No microphone device found; skipping access check");
+            return Ok(());
+        };
 
         let config = device
             .default_input_config()
