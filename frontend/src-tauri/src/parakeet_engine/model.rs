@@ -112,8 +112,14 @@ impl ParakeetModel {
             regular_name
         };
 
+        #[cfg(target_os = "macos")]
+        let optimization_level = GraphOptimizationLevel::Level3;
+
+        #[cfg(not(target_os = "macos"))]
+        let optimization_level = GraphOptimizationLevel::Level1;
+
         let mut builder = Session::builder()?
-            .with_optimization_level(GraphOptimizationLevel::Level3)?
+            .with_optimization_level(optimization_level)?
             .with_execution_providers(providers)?
             .with_parallel_execution(true)?;
 
