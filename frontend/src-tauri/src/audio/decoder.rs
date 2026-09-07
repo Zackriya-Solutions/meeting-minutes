@@ -398,6 +398,14 @@ pub fn decode_audio_file_with_progress(
     path: &Path,
     progress_callback: Option<ProgressCallback>,
 ) -> Result<DecodedAudio> {
+    decode_audio_file_impl(path, progress_callback, true)
+}
+
+fn decode_audio_file_impl(
+    path: &Path,
+    progress_callback: Option<ProgressCallback>,
+    allow_ffmpeg_fallback: bool,
+) -> Result<DecodedAudio> {
     info!("Decoding audio file: {}", path.display());
 
     // FFmpeg pre-conversion for unsupported formats (MKV, WebM, WMA).
@@ -470,10 +478,23 @@ pub fn decode_audio_file_with_progress(
         sample_rate, channels
     );
 
-    // Create the decoder
-    let mut decoder = symphonia::default::get_codecs()
+    // Create the decoder. Symphonia lacks decoders for some codecs that can
+    // appear inside supported containers (e.g. Opus in .ogg, ALAC in .m4a);
+    // for those, retry once through the ffmpeg WAV conversion path.
+    let mut decoder = match symphonia::default::get_codecs()
         .make(&track.codec_params, &DecoderOptions::default())
-        .map_err(|e| anyhow!("Failed to create decoder: {}", e))?;
+    {
+        Ok(decoder) => decoder,
+        Err(e) if allow_ffmpeg_fallback && find_ffmpeg_path().is_some() => {
+            warn!(
+                "Symphonia cannot decode this codec ({}), retrying via ffmpeg conversion",
+                e
+            );
+            let temp_wav = convert_to_wav_with_ffmpeg(path, progress_callback.as_ref())?;
+            return decode_audio_file_impl(&temp_wav, progress_callback, false);
+        }
+        Err(e) => return Err(anyhow!("Failed to create decoder: {}", e)),
+    };
 
     // Decode all packets
     let mut all_samples: Vec<f32> = Vec::new();
@@ -622,6 +643,30 @@ mod tests {
             (duration_16k - 5.16).abs() < 0.5,
             "whisper-format duration must be ~5s, got {:.2}s",
             duration_16k
+        );
+    }
+
+    #[test]
+    fn test_decode_opus_in_ogg_via_ffmpeg_fallback() {
+        // Opus-in-Ogg fixture (e.g. WhatsApp voice notes): Symphonia probes the
+        // Ogg container fine but has no Opus decoder, so decoder creation fails
+        // with "unsupported codec". The fallback must convert through ffmpeg
+        // and decode the resulting WAV instead of surfacing the error.
+        if find_ffmpeg_path().is_none() {
+            eprintln!("skipping: ffmpeg not available in this environment");
+            return;
+        }
+
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/opus_48k_2s.ogg");
+        let decoded = decode_audio_file(&path).expect("failed to decode Opus fixture");
+
+        assert!(decoded.sample_rate > 0);
+        assert!(!decoded.samples.is_empty());
+        assert!(
+            (decoded.duration_seconds - 2.0).abs() < 0.5,
+            "duration must be ~2s, got {:.2}s",
+            decoded.duration_seconds
         );
     }
 
