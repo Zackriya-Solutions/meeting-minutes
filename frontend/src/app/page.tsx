@@ -21,6 +21,7 @@ import { TranscriptRecovery } from '@/components/TranscriptRecovery';
 import { indexedDBService } from '@/services/indexedDBService';
 import { toast } from 'sonner';
 import { useRouter } from 'next/navigation';
+import { VideoCaptureSelector } from '@/components/VideoCaptureSelector';
 
 export default function Home() {
   // Local page state (not moved to contexts)
@@ -232,6 +233,7 @@ export default function Home() {
               >
                 <div className="w-2/3 max-w-[750px] flex justify-center">
                   <div className="bg-white rounded-full shadow-lg flex items-center">
+                    <VideoCaptureSelector disabled={recordingState.isRecording || isProcessingStop} />
                     <RecordingControls
                       isRecording={recordingState.isRecording}
                       onRecordingStop={(callApi = true) => handleRecordingStop(callApi)}

@@ -1,0 +1,168 @@
+:root {
+  color-scheme: light dark;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: #f8fafc;
+  color: #0f172a;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  width: 320px;
+  margin: 0;
+  background: #f8fafc;
+}
+
+main {
+  padding: 16px;
+}
+
+header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+h1 {
+  margin: 0;
+  font-size: 16px;
+  line-height: 1.3;
+}
+
+header p,
+.footnote,
+#result {
+  margin: 4px 0 0;
+  color: #64748b;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+#status-dot {
+  width: 9px;
+  height: 9px;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: #f59e0b;
+}
+
+#status-dot.connected {
+  background: #10b981;
+}
+
+.tab-card {
+  display: grid;
+  gap: 7px;
+  padding: 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.eyebrow {
+  color: #64748b;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+#tab-title {
+  overflow: hidden;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.controls {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+button {
+  min-height: 34px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #fff;
+  color: #1e293b;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+button:hover:not(:disabled) {
+  background: #f1f5f9;
+}
+
+button:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+
+button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+button.primary {
+  border-color: #2563eb;
+  background: #2563eb;
+  color: #fff;
+}
+
+button.primary:hover:not(:disabled) {
+  background: #1d4ed8;
+}
+
+button.danger {
+  grid-column: 1 / -1;
+  border-color: #fecaca;
+  color: #b91c1c;
+}
+
+#result {
+  min-height: 31px;
+  margin-top: 10px;
+}
+
+.footnote {
+  padding-top: 10px;
+  border-top: 1px solid #e2e8f0;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root,
+  body {
+    background: #0f172a;
+    color: #f8fafc;
+  }
+
+  .tab-card,
+  button {
+    border-color: #334155;
+    background: #1e293b;
+    color: #f8fafc;
+  }
+
+  button:hover:not(:disabled) {
+    background: #334155;
+  }
+
+  header p,
+  .footnote,
+  #result,
+  .eyebrow {
+    color: #94a3b8;
+  }
+
+  .footnote {
+    border-color: #334155;
+  }
+}
