@@ -1,5 +1,5 @@
 import { afterAll, afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { parseSummaryContent } from '../../src/lib/summary-content';
 import type { MeetingSummary, SummaryProcessResponse } from '../../src/types';
@@ -40,7 +40,7 @@ mock.module('../../src/lib/summary-language-preferences', () => ({
   detectAndCacheSummaryLanguage: async () => ({ language: 'en' }),
   readMeetingSummaryLanguage: async () => ({ language: 'en', storage: 'metadata' }),
 }));
-const { SidebarProvider } = await import('../../src/components/Sidebar/SidebarProvider');
+const { SidebarProvider, useSidebar } = await import('../../src/components/Sidebar/SidebarProvider');
 const { useSummaryGeneration } = await import('../../src/hooks/meeting-details/useSummaryGeneration');
 
 const response = (overrides: Partial<SummaryProcessResponse> = {}): SummaryProcessResponse => ({
@@ -96,6 +96,50 @@ async function tick() {
 }
 
 describe('summary state restored when returning to a meeting', () => {
+  test('repeated recovery read failures end regeneration and retain visible notes', async () => {
+    await show(response({ data: { markdown: 'Previous summary' } }));
+    getSummary = async () => { throw new Error('Database unavailable'); };
+    await tick();
+    expect(state.summaryStatus).toBe('error');
+    expect(state.summaryError).toContain('Database unavailable');
+    expect(text()).toContain('Previous summary');
+    expect(timers.size).toBe(0);
+  });
+
+  test('failed cancellation recovery ends loading without discarding visible notes', async () => {
+    await show(response({ data: { markdown: 'Previous summary' } }));
+    let reads = 0;
+    getSummary = async () => {
+      if (++reads === 1) return response({ status: 'cancelled' });
+      throw new Error('Database unavailable');
+    };
+    await tick();
+    expect(state.summaryStatus).toBe('error');
+    expect(text()).toContain('Previous summary');
+    expect(timers.size).toBe(0);
+  });
+
+  test.each(['read', 'callback'])('polling stops when %s fails and its error callback also rejects', async (failure) => {
+    function RejectingConsumer() {
+      const { startSummaryPolling } = useSidebar();
+      useEffect(() => {
+        startSummaryPolling('meeting-a', 'attempt-a', async () => {
+          throw new Error('Consumer failed');
+        });
+      }, [startSummaryPolling]);
+      return null;
+    }
+    await act(async () => {
+      renderer = create(<SidebarProvider><RejectingConsumer /></SidebarProvider>);
+    });
+    getSummary = async () => {
+      if (failure === 'read') throw new Error('Database unavailable');
+      return response({ status: 'completed', data: { markdown: 'Finished summary' } });
+    };
+    await tick();
+    expect(timers.size).toBe(0);
+  });
+
   test('resumes pending generation after leaving and returning, then displays completion', async () => {
     await show(response());
     expect(text()).toContain('processing');

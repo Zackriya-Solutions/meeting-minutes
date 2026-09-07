@@ -176,9 +176,17 @@ export function useSummaryGeneration({
       return;
     }
     if (pollingResult.status === 'cancelled') {
-      const existing = await invokeTauri<SummaryProcessResponse>('api_get_summary', {
-        meetingId: meeting.id,
-      });
+      let existing: SummaryProcessResponse;
+      try {
+        existing = await invokeTauri<SummaryProcessResponse>('api_get_summary', {
+          meetingId: meeting.id,
+        });
+      } catch (error) {
+        console.error('Failed to reload summary after cancellation:', error);
+        await failGeneration(generationId, isRegeneration,
+          'Summary generation was cancelled, but the saved summary could not be reloaded. Please reopen this meeting.');
+        return;
+      }
       if (!mountedRef.current || visibleMeetingIdRef.current !== meeting.id || generationId !== generationIdRef.current) {
         return;
       }
@@ -195,9 +203,17 @@ export function useSummaryGeneration({
       const errorMessage = pollingResult.error
         || `Summary ${isRegeneration ? 'regeneration' : 'generation'} failed`;
       if (isRegeneration) {
-        const existing = await invokeTauri<SummaryProcessResponse>('api_get_summary', {
-          meetingId: meeting.id,
-        });
+        let existing: SummaryProcessResponse;
+        try {
+          existing = await invokeTauri<SummaryProcessResponse>('api_get_summary', {
+            meetingId: meeting.id,
+          });
+        } catch (error) {
+          console.error('Failed to reload previous summary after generation failure:', error);
+          await failGeneration(generationId, isRegeneration,
+            `${errorMessage}. The saved summary could not be reloaded. Please reopen this meeting.`);
+          return;
+        }
         if (!mountedRef.current || visibleMeetingIdRef.current !== meeting.id || generationId !== generationIdRef.current) {
           return;
         }

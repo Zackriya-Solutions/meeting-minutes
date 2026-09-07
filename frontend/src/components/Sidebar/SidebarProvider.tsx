@@ -258,17 +258,22 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
         if (current !== entry) {
           return;
         }
-        await onUpdate({
-          status: 'error',
-          meetingName: null,
-          meeting_id: meetingId,
-          start: processId,
-          end: null,
-          data: null,
-          error: error instanceof Error ? error.message : 'Unknown error',
-        });
-        if (summaryPollsRef.current.get(meetingId) === entry) {
-          stopSummaryPolling(meetingId, processId);
+        try {
+          await onUpdate({
+            status: 'error',
+            meetingName: null,
+            meeting_id: meetingId,
+            start: processId,
+            end: null,
+            data: null,
+            error: error instanceof Error ? error.message : 'Unknown error',
+          });
+        } catch (callbackError) {
+          console.error('Failed to handle summary polling error:', callbackError);
+        } finally {
+          if (summaryPollsRef.current.get(meetingId) === entry) {
+            stopSummaryPolling(meetingId, processId);
+          }
         }
       } finally {
         const current = summaryPollsRef.current.get(meetingId);
