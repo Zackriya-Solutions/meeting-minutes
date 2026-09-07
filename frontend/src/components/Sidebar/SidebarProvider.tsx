@@ -231,16 +231,19 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
             data: null,
             error: 'Summary generation timed out after 15 minutes. Please try again or check your model configuration.',
           });
-          stopSummaryPolling(meetingId, processId);
+          if (summaryPollsRef.current.get(meetingId) === entry) {
+            stopSummaryPolling(meetingId, processId);
+          }
           return;
         }
 
         const result = await invoke<SummaryProcessResponse>('api_get_summary', { meetingId });
         const current = summaryPollsRef.current.get(meetingId);
-        if (!current || current.processId !== processId || result.start !== processId) {
+        if (current !== entry || result.start !== processId) {
           return;
         }
         await onUpdate(result);
+        if (summaryPollsRef.current.get(meetingId) !== entry) return;
         if (
           result.status === 'completed'
           || result.status === 'error'
@@ -252,22 +255,29 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
         }
       } catch (error) {
         const current = summaryPollsRef.current.get(meetingId);
-        if (!current || current.processId !== processId) {
+        if (current !== entry) {
           return;
         }
-        await onUpdate({
-          status: 'error',
-          meetingName: null,
-          meeting_id: meetingId,
-          start: processId,
-          end: null,
-          data: null,
-          error: error instanceof Error ? error.message : 'Unknown error',
-        });
-        stopSummaryPolling(meetingId, processId);
+        try {
+          await onUpdate({
+            status: 'error',
+            meetingName: null,
+            meeting_id: meetingId,
+            start: processId,
+            end: null,
+            data: null,
+            error: error instanceof Error ? error.message : 'Unknown error',
+          });
+        } catch (callbackError) {
+          console.error('Failed to handle summary polling error:', callbackError);
+        } finally {
+          if (summaryPollsRef.current.get(meetingId) === entry) {
+            stopSummaryPolling(meetingId, processId);
+          }
+        }
       } finally {
         const current = summaryPollsRef.current.get(meetingId);
-        if (current?.processId === processId) {
+        if (current === entry) {
           current.inFlight = false;
         }
       }

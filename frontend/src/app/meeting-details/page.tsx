@@ -24,10 +24,11 @@ function MeetingDetailsContent() {
   const searchParams = useSearchParams();
   const meetingId = searchParams.get('id');
   const source = searchParams.get('source'); // Check if navigated from recording
-  const { setCurrentMeeting, refetchMeetings, stopSummaryPolling } = useSidebar();
+  const { setCurrentMeeting, refetchMeetings } = useSidebar();
   const { isAutoSummary } = useConfig(); // Get auto-summary toggle state
   const router = useRouter();
   const [meetingDetails, setMeetingDetails] = useState<MeetingDetailsResponse | null>(null);
+  const [summaryResponse, setSummaryResponse] = useState<SummaryProcessResponse | null>(null);
   const [meetingSummary, setMeetingSummary] = useState<MeetingSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
@@ -119,8 +120,8 @@ function MeetingDetailsContent() {
 
   // Sync meeting metadata from pagination hook to meeting details state
   useEffect(() => {
-    if (metadata && (!meetingId || meetingId === 'intro-call')) {
-      // If invalid meeting ID, don't sync
+    if (isLoadingTranscripts || !meetingId || meetingId === 'intro-call' || metadata?.id !== meetingId) {
+      // Keep the current view until the selected meeting's first transcript page is ready.
       return;
     }
 
@@ -140,7 +141,7 @@ function MeetingDetailsContent() {
       // Sync with sidebar context
       setCurrentMeeting({ id: metadata.id, title: metadata.title });
     }
-  }, [metadata, transcripts, meetingId, setCurrentMeeting]);
+  }, [metadata, transcripts, meetingId, isLoadingTranscripts, setCurrentMeeting]);
 
   // Handle transcript loading errors
   useEffect(() => {
@@ -165,22 +166,13 @@ function MeetingDetailsContent() {
   useEffect(() => {
     setMeetingDetails(null);
     setMeetingSummary(null);
+    setSummaryResponse(null);
     setError(null);
     setIsLoading(true);
     // Reset auto-generation state to allow new meeting to be checked
     setHasCheckedAutoGen(false);
     setShouldAutoGenerate(false);
   }, [meetingId]);
-
-  // Cleanup: Stop polling when navigating away from a meeting
-  useEffect(() => {
-    return () => {
-      if (meetingId) {
-        console.log('Cleaning up: Stopping summary polling for meeting:', meetingId);
-        stopSummaryPolling(meetingId);
-      }
-    };
-  }, [meetingId, stopSummaryPolling]);
 
   useEffect(() => {
     console.log('MeetingDetails useEffect triggered - meetingId:', meetingId);
@@ -197,17 +189,22 @@ function MeetingDetailsContent() {
 
     setMeetingDetails(null);
     setMeetingSummary(null);
+    setSummaryResponse(null);
     setError(null);
     setIsLoading(true);
 
+    let cancelled = false;
     const fetchMeetingSummary = async () => {
       try {
         const response = await invoke<SummaryProcessResponse>('api_get_summary', {
           meetingId,
         });
+        if (cancelled) return;
+        setSummaryResponse(response);
         const summary = parseSummaryContent(response.data);
         setMeetingSummary(response.status === 'idle' ? null : summary);
       } catch (error) {
+        if (cancelled) return;
         console.error('FETCH SUMMARY: Error fetching meeting summary:', error);
         setMeetingSummary(null);
       }
@@ -217,11 +214,12 @@ function MeetingDetailsContent() {
       try {
         await fetchMeetingSummary();
       } finally {
-        setIsLoading(false);
+        if (!cancelled) setIsLoading(false);
       }
     };
 
     loadData();
+    return () => { cancelled = true; };
   }, [meetingId]);
 
   // Auto-generation check: runs when meeting is loaded with no summary
@@ -234,6 +232,8 @@ function MeetingDetailsContent() {
       // 4. Haven't checked yet
       if (
         meetingDetails &&
+        !isLoading &&
+        summaryResponse?.status === 'idle' &&
         meetingSummary === null &&
         meetingDetails.transcripts &&
         meetingDetails.transcripts.length > 0 &&
@@ -245,7 +245,7 @@ function MeetingDetailsContent() {
     };
 
     checkAutoGen();
-  }, [meetingDetails, meetingSummary, hasCheckedAutoGen, setupAutoGeneration]);
+  }, [meetingDetails, meetingSummary, summaryResponse, isLoading, hasCheckedAutoGen, setupAutoGeneration]);
 
   if (error) {
     return (
@@ -264,13 +264,15 @@ function MeetingDetailsContent() {
   }
 
   // Show loading spinner while initial data loads
-  if ((isLoading || isLoadingTranscripts) || !meetingDetails) {
+  if (isLoading || !meetingDetails || meetingDetails.id !== meetingId) {
     return <div className="flex items-center justify-center h-screen">
       <LoaderIcon className="animate-spin size-6 " />
     </div>;
   }
 
   return <PageContent
+    key={meetingId}
+    initialSummary={summaryResponse}
     meeting={meetingDetails}
     summaryData={meetingSummary}
     shouldAutoGenerate={shouldAutoGenerate}

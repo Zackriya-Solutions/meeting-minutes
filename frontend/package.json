@@ -103,9 +103,11 @@
         "@types/node": "^20",
         "@types/react": "^18.3.18",
         "@types/react-dom": "^18.3.5",
+        "@types/react-test-renderer": "18.3.1",
         "autoprefixer": "^10.0.1",
         "concurrently": "^8.2.2",
         "postcss": "^8",
+        "react-test-renderer": "18.3.1",
         "tailwindcss": "^3.4.1",
         "typescript": "^5.7.2",
         "wait-on": "^7.2.0"
