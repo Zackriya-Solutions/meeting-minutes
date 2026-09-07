@@ -13,13 +13,41 @@ If you're new to building on Linux, start here. These simple commands work for m
 ```bash
 # Ubuntu/Debian
 sudo apt update
-sudo apt install build-essential cmake git
+sudo apt install build-essential cmake git \
+  libglib2.0-dev libgtk-3-dev libwebkit2gtk-4.1-dev \
+  libsoup-3.0-dev libjavascriptcoregtk-4.1-dev \
+  librsvg2-dev libssl-dev libayatana-appindicator3-dev \
+  patchelf pkg-config
 
 # Fedora/RHEL
-sudo dnf install gcc-c++ cmake git
+sudo dnf install gcc-c++ cmake git \
+  glib2-devel gtk3-devel webkit2gtk4.1-devel \
+  libsoup3-devel javascriptcoregtk4.1-devel \
+  librsvg2-devel openssl-devel libappindicator-gtk3-devel \
+  patchelf pkg-config
 
 # Arch Linux
-sudo pacman -S base-devel cmake git
+sudo pacman -S base-devel cmake git \
+  glib2 gtk3 webkit2gtk-4.1 \
+  libsoup3 librsvg openssl libappindicator-gtk3 \
+  patchelf pkg-config
+```
+
+> **Why so many libraries?** Tauri requires GTK and WebKit to render the app window. The packages above are the *development* versions (headers + `.pc` files) needed at compile time — the runtime-only packages are not sufficient.
+
+### 1a. Enable pnpm (if using nvm)
+
+If you manage Node.js via [nvm](https://github.com/nvm-sh/nvm), pnpm is not automatically on your PATH. Enable it once via corepack:
+
+```bash
+corepack enable pnpm
+```
+
+Then install Node dependencies before building:
+
+```bash
+cd frontend
+pnpm install
 ```
 
 ### 2. Build and Run
@@ -40,7 +68,7 @@ sudo pacman -S base-devel cmake git
 - ✅ **AMD GPU** → ROCm acceleration (if ROCm installed)
 - ✅ **No GPU** → Optimized CPU mode (still works great!)
 
-> 💡 **Tip:** If you have an NVIDIA or AMD GPU but want better performance, jump to the [GPU Setup](#-gpu-setup-guides-intermediate) section below.
+> 💡 **Tip:** If you have an NVIDIA or AMD GPU but want better performance, jump to the [GPU Setup](#-gpu-setup-guides-intermediate) section below. NVIDIA users on Ubuntu who installed CUDA via apt should also follow [Step 1a under CUDA Setup](#step-1a-fix-linker-path-ubuntudebian-apt-installs-only) before building.
 
 ---
 
@@ -91,6 +119,17 @@ sudo apt install nvidia-driver-550 nvidia-cuda-toolkit
 nvidia-smi          # Shows GPU info
 nvcc --version      # Shows CUDA version
 ```
+
+#### Step 1a: Fix linker path (Ubuntu/Debian apt installs only)
+
+Ubuntu installs CUDA static libraries to `/usr/lib/x86_64-linux-gnu/` rather than the `/usr/local/cuda/lib64/` layout that the build system expects. Add this to `.cargo/config.toml` at the workspace root (create the file if it doesn't exist):
+
+```toml
+[target.x86_64-unknown-linux-gnu]
+rustflags = ["-L", "/usr/lib/x86_64-linux-gnu"]
+```
+
+> This is not needed if you install CUDA via the [NVIDIA runfile installer](https://developer.nvidia.com/cuda-downloads), which creates the standard `/usr/local/cuda` layout.
 
 #### Step 2: Build with CUDA
 
@@ -221,10 +260,29 @@ src-tauri/target/release/bundle/appimage/Meetily_<version>_amd64.AppImage
 
 ## 🧭 Troubleshooting
 
+### "could not find native static library `cudart_static`"
+
+- **Cause:** CUDA is installed via apt, which places static libraries in `/usr/lib/x86_64-linux-gnu/` instead of the expected `/usr/local/cuda/lib64/` layout.
+- **Fix:** Add the linker path to `.cargo/config.toml` at the workspace root:
+  ```toml
+  [target.x86_64-unknown-linux-gnu]
+  rustflags = ["-L", "/usr/lib/x86_64-linux-gnu"]
+  ```
+
+### "system library `glib-2.0` (or similar) was not found"
+
+- **Cause:** Tauri requires GTK/WebKit *development* packages, not just the runtime libraries.
+- **Fix:** Install the dev packages listed in Step 1 above. The runtime packages (e.g. `libglib2.0-0`) are already present on most desktops but the `-dev` variants with headers and `.pc` files are needed to compile.
+
 ### "CUDA toolkit not found"
 
 - **Fix:** Install `nvidia-cuda-toolkit` or set `CUDA_PATH` environment variable
 - **Check:** `nvcc --version` should work
+
+### "`pnpm`: command not found" during build
+
+- **Cause:** nvm manages Node.js, but pnpm is not automatically on PATH.
+- **Fix:** Run `corepack enable pnpm` once, then retry.
 
 ### "Vulkan detected but missing dependencies"
 
