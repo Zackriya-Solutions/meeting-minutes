@@ -37,6 +37,7 @@ import { useRouter } from 'next/navigation';
 import { useSidebar } from '../Sidebar/SidebarProvider';
 import { LANGUAGES } from '@/constants/languages';
 import { useTranscriptionModels, ModelOption } from '@/hooks/useTranscriptionModels';
+import { getImportAudioDialogLayoutClasses } from './importDialogLayout';
 
 
 interface ImportAudioDialogProps {
@@ -161,6 +162,8 @@ export function ImportAudioDialog({
     }
   }, [fileInfo, title, titleModifiedByUser]);
 
+  const layoutClasses = useMemo(() => getImportAudioDialogLayoutClasses(), []);
+
   const selectedModel = useMemo((): ModelOption | undefined => {
     if (!selectedModelKey) return undefined;
     const colonIndex = selectedModelKey.indexOf(':');
@@ -227,7 +230,7 @@ export function ImportAudioDialog({
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent
-        className="sm:max-w-[500px]"
+        className={layoutClasses.dialogContentClassName}
         onEscapeKeyDown={handleEscapeKeyDown}
         onInteractOutside={handleInteractOutside}
       >
@@ -264,7 +267,7 @@ export function ImportAudioDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4 py-4">
+        <div className={layoutClasses.contentClassName}>
           {/* File selection / info */}
           {!isProcessing && !error && (
             <>
@@ -273,8 +276,10 @@ export function ImportAudioDialog({
                   <div className="flex items-start gap-3">
                     <FileAudio className="h-8 w-8 text-blue-600 flex-shrink-0" />
                     <div className="flex-1 min-w-0">
-                      <p className="font-medium text-gray-900 truncate">{fileInfo.filename}</p>
-                      <div className="flex items-center gap-4 text-sm text-gray-500 mt-1">
+                      <p className={layoutClasses.filenameClassName}>
+                        {fileInfo.filename}
+                      </p>
+                      <div className="flex items-center gap-4 text-sm text-gray-500 mt-1 min-w-0">
                         <span className="flex items-center gap-1">
                           <Clock className="h-3.5 w-3.5" />
                           {formatDuration(fileInfo.duration_seconds)}
@@ -298,6 +303,7 @@ export function ImportAudioDialog({
                         setTitleModifiedByUser(true);
                       }}
                       placeholder="Enter meeting title"
+                      className={layoutClasses.titleInputClassName}
                     />
                   </div>
 
@@ -436,7 +442,7 @@ export function ImportAudioDialog({
           )}
         </div>
 
-        <DialogFooter>
+        <DialogFooter className={layoutClasses.footerClassName}>
           {!isProcessing && !error && (
             <>
               <Button variant="outline" onClick={() => onOpenChange(false)}>
