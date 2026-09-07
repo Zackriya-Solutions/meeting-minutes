@@ -80,6 +80,11 @@ impl SamplingParams {
         }
     }
 
+    /// Gemma 4 instruct preset, matching the Gemma 3 sampling behavior.
+    pub fn gemma4_instruct(stop_tokens: Vec<String>) -> Self {
+        Self::gemma3_instruct(stop_tokens)
+    }
+
     /// Normalize built-in presets to the subset supported by llama-helper.
     pub fn sanitize_for_llama_helper(&self) -> Self {
         let temperature = if self.temperature.is_finite() {
@@ -189,6 +194,32 @@ pub fn get_available_models() -> Vec<ModelDef> {
             sampling: SamplingParams::qwen35_summary(vec!["<|im_end|>".to_string()]),
             description: "High-quality Qwen 3.5 model for built-in summaries. Best local Qwen option in the current lineup.".to_string(),
         },
+        // Gemma 4 E2B - Enhanced Gemma tier with pinned model artifact.
+        ModelDef {
+            name: "gemma4:e2b".to_string(),
+            display_name: "Gemma 4 E2B (Enhanced)".to_string(),
+            gguf_file: "gemma-4-E2B-it-Q4_K_M.gguf".to_string(),
+            template: "gemma4".to_string(),
+            download_url: "https://huggingface.co/unsloth/gemma-4-E2B-it-GGUF/resolve/90f9618340396838ee7ff5b0ba2da27da62953d3/gemma-4-E2B-it-Q4_K_M.gguf".to_string(),
+            size_mb: 2963,
+            context_size: 32768,
+            layer_count: 35,
+            sampling: SamplingParams::gemma4_instruct(vec!["<turn|>".to_string()]),
+            description: "Enhanced Gemma 4 model for built-in summaries. Strong quality with moderate local requirements.".to_string(),
+        },
+        // Gemma 4 E4B - High quality Gemma tier with pinned model artifact.
+        ModelDef {
+            name: "gemma4:e4b".to_string(),
+            display_name: "Gemma 4 E4B (High Quality)".to_string(),
+            gguf_file: "gemma-4-E4B-it-Q4_K_M.gguf".to_string(),
+            template: "gemma4".to_string(),
+            download_url: "https://huggingface.co/ggml-org/gemma-4-E4B-it-GGUF/resolve/2714b5519c6c3516b1000e7c5e1eba998dfe1fe8/gemma-4-E4B-it-Q4_K_M.gguf".to_string(),
+            size_mb: 5088,
+            context_size: 32768,
+            layer_count: 42,
+            sampling: SamplingParams::gemma4_instruct(vec!["<turn|>".to_string()]),
+            description: "High-quality Gemma 4 model for built-in summaries. Best Gemma option in the current lineup.".to_string(),
+        },
         // Gemma 3 4B - Legacy alternative retained for users who prefer Gemma output.
         ModelDef {
             name: "gemma3:4b".to_string(),
@@ -260,6 +291,15 @@ pub const GEMMA3_TEMPLATE: &str = "\
 <start_of_turn>model
 ";
 
+/// Gemma 4 chat template format with native system-role support.
+pub const GEMMA4_TEMPLATE: &str = "\
+<|turn>system
+{system_prompt}<turn|>
+<|turn>user
+{user_prompt}<turn|>
+<|turn>model
+";
+
 /// Qwen 3.5 non-thinking chat template format.
 /// This starts the assistant turn with an empty think block so generation begins
 /// in direct-response mode for summaries.
@@ -279,6 +319,14 @@ fn escape_user_prompt_control_markers(user_prompt: &str) -> String {
     user_prompt
         .replace("<|im_start|>", "< |im_start| >")
         .replace("<|im_end|>", "< |im_end| >")
+        .replace("<|turn>", "< |turn >")
+        .replace("<turn|>", "< turn| >")
+        .replace("<|tool_call>", "< |tool_call >")
+        .replace("<tool_call|>", "< tool_call| >")
+        .replace("<|tool_response>", "< |tool_response >")
+        .replace("<tool_response|>", "< tool_response| >")
+        .replace("<|channel>", "< |channel >")
+        .replace("<channel|>", "< channel| >")
         .replace("<start_of_turn>", "< start_of_turn >")
         .replace("<end_of_turn>", "< end_of_turn >")
         .replace("<think>", "< think >")
@@ -301,6 +349,7 @@ pub fn format_prompt(
 ) -> Result<String> {
     let template = match template_name {
         "gemma3" => GEMMA3_TEMPLATE,
+        "gemma4" => GEMMA4_TEMPLATE,
         "qwen3.5_nonthinking" => QWEN35_NONTHINKING_TEMPLATE,
         _ => return Err(anyhow!("Unknown template: {}", template_name)),
     };
@@ -393,6 +442,37 @@ mod tests {
     }
 
     #[test]
+    fn gemma4_models_use_pinned_download_urls_and_verified_metadata() {
+        let gemma_e2b = get_model_by_name("gemma4:e2b").expect("gemma 4 e2b model should exist");
+        assert_eq!(gemma_e2b.display_name, "Gemma 4 E2B (Enhanced)");
+        assert_eq!(gemma_e2b.gguf_file, "gemma-4-E2B-it-Q4_K_M.gguf");
+        assert_eq!(gemma_e2b.template, "gemma4");
+        assert_eq!(
+            gemma_e2b.download_url,
+            "https://huggingface.co/unsloth/gemma-4-E2B-it-GGUF/resolve/90f9618340396838ee7ff5b0ba2da27da62953d3/gemma-4-E2B-it-Q4_K_M.gguf"
+        );
+        assert!(!gemma_e2b.download_url.contains("/resolve/main/"));
+        assert_eq!(gemma_e2b.size_mb, 2963);
+        assert_eq!(gemma_e2b.context_size, 32768);
+        assert_eq!(gemma_e2b.layer_count, 35);
+        assert_eq!(gemma_e2b.sampling.stop_tokens, vec!["<turn|>".to_string()]);
+
+        let gemma_e4b = get_model_by_name("gemma4:e4b").expect("gemma 4 e4b model should exist");
+        assert_eq!(gemma_e4b.display_name, "Gemma 4 E4B (High Quality)");
+        assert_eq!(gemma_e4b.gguf_file, "gemma-4-E4B-it-Q4_K_M.gguf");
+        assert_eq!(gemma_e4b.template, "gemma4");
+        assert_eq!(
+            gemma_e4b.download_url,
+            "https://huggingface.co/ggml-org/gemma-4-E4B-it-GGUF/resolve/2714b5519c6c3516b1000e7c5e1eba998dfe1fe8/gemma-4-E4B-it-Q4_K_M.gguf"
+        );
+        assert!(!gemma_e4b.download_url.contains("/resolve/main/"));
+        assert_eq!(gemma_e4b.size_mb, 5088);
+        assert_eq!(gemma_e4b.context_size, 32768);
+        assert_eq!(gemma_e4b.layer_count, 42);
+        assert_eq!(gemma_e4b.sampling.stop_tokens, vec!["<turn|>".to_string()]);
+    }
+
+    #[test]
     fn qwen35_nonthinking_template_formats_prompt() {
         let formatted = format_prompt("qwen3.5_nonthinking", "system rules", "summarize this").unwrap();
 
@@ -432,6 +512,24 @@ mod tests {
         assert!(formatted.contains("literal < start_of_turn > and < end_of_turn >"));
         assert_eq!(formatted.matches("<start_of_turn>").count(), 3);
         assert_eq!(formatted.matches("<end_of_turn>").count(), 2);
+    }
+
+    #[test]
+    fn gemma4_template_formats_turns_and_escapes_user_supplied_control_markers() {
+        let formatted = format_prompt(
+            "gemma4",
+            "system rules",
+            "literal <|turn> and <turn|> plus <start_of_turn> and <end_of_turn> plus <|im_start|> and <|im_end|>",
+        )
+        .unwrap();
+
+        assert!(formatted.contains("<|turn>system\nsystem rules<turn|>"));
+        assert!(formatted.contains(
+            "literal < |turn > and < turn| > plus < start_of_turn > and < end_of_turn > plus < |im_start| > and < |im_end| >"
+        ));
+        assert_eq!(formatted.matches("<|turn>").count(), 3);
+        assert_eq!(formatted.matches("<turn|>").count(), 2);
+        assert!(formatted.ends_with("<|turn>model\n"));
     }
 
     #[test]
