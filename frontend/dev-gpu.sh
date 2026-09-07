@@ -162,10 +162,14 @@ else
     exit 1
 fi
 
-# Run tauri dev using npm scripts
-echo ""
-echo -e "${CYAN}Starting complete Tauri application...${NC}"
-echo ""
+# Ensure port 3118 is free and stale build cache is cleared
+# Ensure port 3118 is free, stale build cache is cleared, and any lingering meetily instances are stopped
+if command_exists lsof; then
+    lsof -ti :3118 | xargs kill -9 2>/dev/null || true
+fi
+killall meetily 2>/dev/null || true
+pkill -f "target/debug/meetily" 2>/dev/null || true
+rm -rf .next
 
 $PKG_MGR run tauri:dev
 
