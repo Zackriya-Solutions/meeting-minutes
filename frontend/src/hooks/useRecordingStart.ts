@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useTranscripts } from '@/contexts/TranscriptContext';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
@@ -46,6 +46,10 @@ export function useRecordingStart(
   showModal?: (name: 'modelSelector', message?: string) => void
 ): UseRecordingStartReturn {
   const [isAutoStarting, setIsAutoStarting] = useState(false);
+
+  // Synchronous latch: a rapid double-click re-enters handleRecordingStart
+  // before any state update lands, so an async/state guard can't stop it.
+  const isStartingRef = useRef(false);
 
   const { clearTranscripts, setMeetingTitle } = useTranscripts();
   const { setIsMeetingActive } = useSidebar();
@@ -113,6 +117,11 @@ export function useRecordingStart(
 
   // Handle manual recording start (from button click)
   const handleRecordingStart = useCallback(async () => {
+    if (isStartingRef.current) {
+      console.log('handleRecordingStart ignored - start already in progress');
+      return;
+    }
+    isStartingRef.current = true;
     try {
       console.log('handleRecordingStart called - checking selected transcription model status');
 
@@ -167,15 +176,34 @@ export function useRecordingStart(
       await showRecordingNotification();
     } catch (error) {
       console.error('Failed to start recording:', error);
+      const errorMsg = error instanceof Error ? error.message : String(error);
+
+      // A racing second start that lost to a live recording must not clobber
+      // the running recording's state. The winning start is live, so reflect
+      // RECORDING here — leaving STARTING latched would keep the Stop button
+      // disabled forever, since it's gated on isStartingRecording.
+      if (errorMsg.includes('already in progress')) {
+        console.warn('Start rejected because recording is already active - leaving live recording state untouched');
+        setStatus(RecordingStatus.RECORDING);
+        Analytics.trackButtonClick('start_recording_error', 'home_page');
+        return;
+      }
+
       const isRuntimeError = isTranscriptionRuntimeStartError(error);
+      if (errorMsg.includes('Recording start timed out')) {
+        toast.error('Recording start timed out — please try again');
+      }
+
       setStatus(RecordingStatus.ERROR, isRuntimeError
         ? TRANSCRIPTION_RUNTIME_USER_MESSAGE
-        : error instanceof Error ? error.message : 'Failed to start recording');
+        : errorMsg);
       setIsRecording(false); // Reset state on error
       Analytics.trackButtonClick('start_recording_error', 'home_page');
       if (isRuntimeError) return;
       // Re-throw so RecordingControls can handle device-specific errors
       throw error;
+    } finally {
+      isStartingRef.current = false;
     }
   }, [generateMeetingTitle, setMeetingTitle, setIsRecording, clearTranscripts, setIsMeetingActive, checkModelReady, checkIfModelDownloading, selectedDevices, showModal, setStatus]);
 
@@ -240,12 +268,18 @@ export function useRecordingStart(
             await showRecordingNotification();
           } catch (error) {
             console.error('Failed to auto-start recording:', error);
-            const isRuntimeError = isTranscriptionRuntimeStartError(error);
-            setStatus(RecordingStatus.ERROR, isRuntimeError
-              ? TRANSCRIPTION_RUNTIME_USER_MESSAGE
-              : error instanceof Error ? error.message : 'Failed to auto-start recording');
-            if (!isRuntimeError) {
-              alert('Failed to start recording. Check console for details.');
+            const errorMsg = error instanceof Error ? error.message : String(error);
+            if (errorMsg.includes('already in progress')) {
+              // Benign race — another start won and is live; skip ERROR/alert.
+              setStatus(RecordingStatus.RECORDING);
+            } else {
+              const isRuntimeError = isTranscriptionRuntimeStartError(error);
+              setStatus(RecordingStatus.ERROR, isRuntimeError
+                ? TRANSCRIPTION_RUNTIME_USER_MESSAGE
+                : errorMsg);
+              if (!isRuntimeError) {
+                alert('Failed to start recording. Check console for details.');
+              }
             }
             Analytics.trackButtonClick('start_recording_error', 'sidebar_auto');
           } finally {
@@ -332,12 +366,18 @@ export function useRecordingStart(
         await showRecordingNotification();
       } catch (error) {
         console.error('Failed to start recording from sidebar:', error);
-        const isRuntimeError = isTranscriptionRuntimeStartError(error);
-        setStatus(RecordingStatus.ERROR, isRuntimeError
-          ? TRANSCRIPTION_RUNTIME_USER_MESSAGE
-          : error instanceof Error ? error.message : 'Failed to start recording from sidebar');
-        if (!isRuntimeError) {
-          alert('Failed to start recording. Check console for details.');
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        if (errorMsg.includes('already in progress')) {
+          // Benign race — another start won and is live; skip ERROR/alert.
+          setStatus(RecordingStatus.RECORDING);
+        } else {
+          const isRuntimeError = isTranscriptionRuntimeStartError(error);
+          setStatus(RecordingStatus.ERROR, isRuntimeError
+            ? TRANSCRIPTION_RUNTIME_USER_MESSAGE
+            : errorMsg);
+          if (!isRuntimeError) {
+            alert('Failed to start recording. Check console for details.');
+          }
         }
         Analytics.trackButtonClick('start_recording_error', 'sidebar_direct');
       } finally {
