@@ -475,7 +475,7 @@ interface ModelCardProps {
   isCancelling: boolean;
 }
 
-function ModelCard({
+export function ModelCard({
   model,
   isSelected,
   isRecommended,
