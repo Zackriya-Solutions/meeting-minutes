@@ -132,6 +132,11 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
   // Ollama models list and error state
   const [models, setModels] = useState<OllamaModel[]>([]);
   const [error, setError] = useState<string>('');
+  const [apiProviderModels, setApiProviderModels] = useState<Pick<Record<ModelConfig['provider'], string[]>, 'claude' | 'groq' | 'openai'>>({
+    claude: [],
+    groq: [],
+    openai: [],
+  });
 
   // Device configuration state
   const [selectedDevices, setSelectedDevices] = useState<SelectedDevices>({
@@ -347,6 +352,29 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  // Load configured API provider model fallbacks on mount
+  useEffect(() => {
+    const loadApiProviderModels = async () => {
+      try {
+        const [claude, groq, openai] = await Promise.all([
+          invoke<Array<{ id: string }>>('get_anthropic_models', { apiKey: null }),
+          invoke<Array<{ id: string }>>('get_groq_models', { apiKey: null }),
+          invoke<Array<{ id: string }>>('get_openai_models', { apiKey: null }),
+        ]);
+
+        setApiProviderModels({
+          claude: claude.map(model => model.id),
+          groq: groq.map(model => model.id),
+          openai: openai.map(model => model.id),
+        });
+      } catch (error) {
+        console.error('Failed to load API provider model options:', error);
+      }
+    };
+
+    loadApiProviderModels();
+  }, []);
+
   // Load device preferences on mount
   useEffect(() => {
     const loadDevicePreferences = async () => {
@@ -369,10 +397,10 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
   // Calculate model options based on available models
   const modelOptions: Record<ModelConfig['provider'], string[]> = {
     ollama: models.map(model => model.name),
-    claude: ['claude-3-5-sonnet-latest'],
-    groq: ['llama-3.3-70b-versatile'],
+    claude: apiProviderModels.claude,
+    groq: apiProviderModels.groq,
     openrouter: [],
-    openai: ['gpt-4', 'gpt-4-turbo', 'gpt-3.5-turbo'],
+    openai: apiProviderModels.openai,
     'builtin-ai': [],
     'custom-openai': [],
   };
