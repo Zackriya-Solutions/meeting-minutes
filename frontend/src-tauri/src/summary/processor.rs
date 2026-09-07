@@ -173,6 +173,7 @@ pub(crate) fn language_name_from_code(code: &str) -> Option<&'static str> {
         "zh" => Some("Chinese"),
         "de" => Some("German"),
         "es" => Some("Spanish"),
+        "ca" => Some("Catalan"),
         "ru" => Some("Russian"),
         "ko" => Some("Korean"),
         "fr" => Some("French"),

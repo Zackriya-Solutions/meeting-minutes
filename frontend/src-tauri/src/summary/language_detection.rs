@@ -124,6 +124,7 @@ fn summary_code_from_whatlang(lang: Lang) -> Option<&'static str> {
         Lang::Cmn => Some("zh"),
         Lang::Deu => Some("de"),
         Lang::Spa => Some("es"),
+        Lang::Cat => Some("ca"),
         Lang::Rus => Some("ru"),
         Lang::Kor => Some("ko"),
         Lang::Fra => Some("fr"),
