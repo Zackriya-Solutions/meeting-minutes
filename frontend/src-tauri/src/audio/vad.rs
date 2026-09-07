@@ -187,15 +187,36 @@ impl ContinuousVadProcessor {
 
         // Force end any ongoing speech
         if self.in_speech && !self.current_speech.is_empty() {
+            let real_sample_count = real_end_sample
+                .checked_sub(self.speech_start_sample)
+                .filter(|count| *count > 0)
+                .ok_or_else(|| {
+                    anyhow!(
+                        "VAD flush invariant violated: active speech interval [{}, {}) is empty or reversed",
+                        self.speech_start_sample,
+                        real_end_sample
+                    )
+                })?;
+            let active_speech = self.session.get_current_speech();
+            if active_speech.len() < real_sample_count {
+                return Err(anyhow!(
+                    "VAD flush invariant violated: Silero active speech buffer has {} samples, but [{}, {}) requires {}",
+                    active_speech.len(),
+                    self.speech_start_sample,
+                    real_end_sample,
+                    real_sample_count
+                ));
+            }
+            let samples = active_speech[..real_sample_count].to_vec();
             let start_ms =
                 (self.speech_start_sample as f64 / VAD_SAMPLE_RATE as f64) * 1000.0;
             let end_ms = (real_end_sample as f64 / VAD_SAMPLE_RATE as f64) * 1000.0;
 
             debug!("VAD flush: Force-ending speech - start={}ms, end={}ms, duration={}ms, samples={}",
-                  start_ms, end_ms, end_ms - start_ms, self.current_speech.len());
+                  start_ms, end_ms, end_ms - start_ms, samples.len());
 
             let segment = SpeechSegment {
-                samples: self.current_speech.clone(),
+                samples,
                 start_timestamp_ms: start_ms,
                 end_timestamp_ms: end_ms,
                 confidence: 0.8, // Estimated confidence for forced end
@@ -660,44 +681,97 @@ mod tests {
         );
     }
 
-    /// Whatever `flush()` emits must also lie inside the audio that was supplied.
+    /// A forced segment's timestamps and samples must describe the same real audio interval.
     #[test]
     fn test_flush_segment_timestamps_stay_within_audio_duration() {
         let audio = generate_late_speech_audio(20.0, 3.0, 16000);
-        let audio_duration_ms = (audio.len() as f64 / 16000.0) * 1000.0;
+        let audio_duration_ms = (audio.len() as f64 / VAD_SAMPLE_RATE as f64) * 1000.0;
+
+        assert_eq!(audio.len(), 368_000);
+        assert_eq!(
+            audio.len() % 480,
+            320,
+            "fixture must require 160 samples of terminal VAD padding"
+        );
 
         let mut processor =
             ContinuousVadProcessor::new(16000, 2000).expect("Failed to create processor");
 
-        let mut segments = processor
+        let segments = processor
             .process_audio(&audio)
             .expect("process_audio failed");
-        let flushed = processor.flush().expect("flush failed");
         assert!(
-            !flushed.is_empty(),
-            "flush() emitted nothing, so the force-end path under test never ran"
+            segments.is_empty(),
+            "process_audio completed a segment, so flush() would not exercise force-end"
         );
-        segments.extend(flushed);
+        assert!(
+            processor.in_speech,
+            "expected to still be mid-speech before flush()"
+        );
 
-        for (i, seg) in segments.iter().enumerate() {
-            assert!(
-                seg.start_timestamp_ms <= audio_duration_ms,
-                "Segment {i} starts at {:.0}ms, beyond the {:.0}ms of audio supplied",
-                seg.start_timestamp_ms,
-                audio_duration_ms
-            );
-            assert!(
-                seg.end_timestamp_ms <= audio_duration_ms,
-                "Segment {i} ends at {:.0}ms, beyond the {:.0}ms of audio supplied",
-                seg.end_timestamp_ms,
-                audio_duration_ms
-            );
-            assert!(
-                seg.end_timestamp_ms >= seg.start_timestamp_ms,
-                "Segment {i} ends before it starts: {:.0}ms -> {:.0}ms",
-                seg.start_timestamp_ms,
-                seg.end_timestamp_ms
-            );
-        }
+        let flushed = processor.flush().expect("flush failed");
+        assert_eq!(
+            flushed.len(),
+            1,
+            "force-end must emit exactly one segment"
+        );
+
+        let segment = &flushed[0];
+        let start_sample = ((segment.start_timestamp_ms / 1000.0)
+            * VAD_SAMPLE_RATE as f64)
+            .round() as usize;
+
+        assert!(
+            segment.start_timestamp_ms <= audio_duration_ms,
+            "segment starts at {:.0}ms, beyond the {:.0}ms of audio supplied",
+            segment.start_timestamp_ms,
+            audio_duration_ms
+        );
+        assert_eq!(
+            segment.end_timestamp_ms, 23_000.0,
+            "forced segment must end at the real audio endpoint"
+        );
+        assert!(
+            segment.end_timestamp_ms <= audio_duration_ms,
+            "segment ends at {:.0}ms, beyond the {:.0}ms of audio supplied",
+            segment.end_timestamp_ms,
+            audio_duration_ms
+        );
+        assert!(
+            segment.end_timestamp_ms >= segment.start_timestamp_ms,
+            "segment ends before it starts: {:.0}ms -> {:.0}ms",
+            segment.start_timestamp_ms,
+            segment.end_timestamp_ms
+        );
+        assert_eq!(
+            segment.samples.as_slice(),
+            &audio[start_sample..],
+            "forced payload must contain the exact real audio interval named by its timestamps"
+        );
+        assert_eq!(segment.samples.len(), audio.len() - start_sample);
+
+        let timestamp_sample_count = (((segment.end_timestamp_ms
+            - segment.start_timestamp_ms)
+            / 1000.0)
+            * VAD_SAMPLE_RATE as f64)
+            .round() as usize;
+        assert_eq!(
+            timestamp_sample_count,
+            segment.samples.len(),
+            "timestamp duration and payload length must describe the same sample interval"
+        );
+
+        let payload_end_ms = segment.start_timestamp_ms
+            + (segment.samples.len() as f64 / VAD_SAMPLE_RATE as f64) * 1000.0;
+        assert!(
+            (payload_end_ms - segment.end_timestamp_ms).abs() < 0.001,
+            "payload ends at {payload_end_ms:.3}ms, timestamp ends at {:.3}ms",
+            segment.end_timestamp_ms
+        );
+
+        assert!(
+            processor.flush().expect("second flush failed").is_empty(),
+            "flush() must not emit the same forced segment twice"
+        );
     }
 }
