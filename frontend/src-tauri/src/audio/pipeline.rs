@@ -1116,9 +1116,9 @@ mod tests {
 
     #[test]
     fn test_live_vad_redemption_matches_pro_policy() {
-        // Live path uses 500ms (Meetily Pro live policy) so transcript
-        // emission stays bounded under continuous audio; the batch paths
-        // (import.rs / retranscription.rs) use 2000ms. See #679 and #756.
+        // Live uses the established 500ms pause policy; it does not bound
+        // uninterrupted speech. Batch import/retranscription use 2000ms.
+        // See #679 and #756.
         assert_eq!(VAD_REDEMPTION_TIME_MS, 500);
     }
 }

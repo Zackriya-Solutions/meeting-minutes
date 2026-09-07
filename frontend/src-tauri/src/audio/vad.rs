@@ -44,11 +44,11 @@ impl ContinuousVadProcessor {
         config.positive_speech_threshold = 0.50;  // Silero default - good for continuous speech
         config.negative_speech_threshold = 0.35;  // Silero default - allows natural pauses
 
-        // Use the caller's redemption_time uncapped, so long continuous speech stays
-        // in one segment. The batch paths (`import.rs`, `retranscription.rs`) pass
-        // 2000ms; the live path (`pipeline.rs`) passes 500ms because it must keep
-        // emitting transcript segments during continuous audio. Values well below
-        // that fragment natural speech at every mid-sentence breath.
+        // Use the caller's redemption time without additional capping. The batch
+        // paths (`import.rs`, `retranscription.rs`) pass 2000ms to bridge natural
+        // pauses; the live path (`pipeline.rs`) passes 500ms to reduce pause-induced
+        // latency. A qualifying silence is still required; bounded uninterrupted-
+        // speech delivery is tracked in #756.
         config.redemption_time = Duration::from_millis(redemption_time_ms as u64);
         config.pre_speech_pad = Duration::from_millis(300);   // Pre-speech padding for context
         config.post_speech_pad = Duration::from_millis(400);  // Increased: more context at end
@@ -168,6 +168,8 @@ impl ContinuousVadProcessor {
               self.in_speech, self.current_speech.len(), self.buffer.len(), self.speech_segments.len());
 
         let mut completed_segments = Vec::new();
+        // Preserve the real post-resampling endpoint before padding the final VAD frame.
+        let real_end_sample = self.processed_samples + self.buffer.len();
 
         // Process any remaining buffered audio
         if !self.buffer.is_empty() {
@@ -185,9 +187,9 @@ impl ContinuousVadProcessor {
 
         // Force end any ongoing speech
         if self.in_speech && !self.current_speech.is_empty() {
-            // processed_samples and speech_start_sample always count 16kHz samples (post-resampling)
-            let start_ms = (self.speech_start_sample as f64 / 16000.0) * 1000.0;
-            let end_ms = (self.processed_samples as f64 / 16000.0) * 1000.0;
+            let start_ms =
+                (self.speech_start_sample as f64 / VAD_SAMPLE_RATE as f64) * 1000.0;
+            let end_ms = (real_end_sample as f64 / VAD_SAMPLE_RATE as f64) * 1000.0;
 
             debug!("VAD flush: Force-ending speech - start={}ms, end={}ms, duration={}ms, samples={}",
                   start_ms, end_ms, end_ms - start_ms, self.current_speech.len());
@@ -682,6 +684,12 @@ mod tests {
                 seg.start_timestamp_ms <= audio_duration_ms,
                 "Segment {i} starts at {:.0}ms, beyond the {:.0}ms of audio supplied",
                 seg.start_timestamp_ms,
+                audio_duration_ms
+            );
+            assert!(
+                seg.end_timestamp_ms <= audio_duration_ms,
+                "Segment {i} ends at {:.0}ms, beyond the {:.0}ms of audio supplied",
+                seg.end_timestamp_ms,
                 audio_duration_ms
             );
             assert!(
