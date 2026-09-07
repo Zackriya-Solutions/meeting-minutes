@@ -47,6 +47,7 @@ pub fn ensure_onnxruntime_runtime() {
     if env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") {
         return;
     }
+    println!("cargo:rerun-if-changed=binaries/onnxruntime");
 
     let target = env::var("TARGET").expect("TARGET environment variable not set");
     if target != WINDOWS_X64_TARGET {

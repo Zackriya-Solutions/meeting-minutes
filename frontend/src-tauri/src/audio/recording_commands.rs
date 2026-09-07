@@ -130,6 +130,8 @@ fn map_recording_start_error<R: Runtime>(
     app: &AppHandle<R>,
     error: RecordingStartError,
 ) -> String {
+    crate::tray::update_tray_menu(app);
+
     match error {
         RecordingStartError::TranscriptionRuntime(source) => {
             error!("Failed to initialize speech recognition: {source:#}");
@@ -137,7 +139,8 @@ fn map_recording_start_error<R: Runtime>(
             if let Err(emit_error) = app.emit("transcription-error", serde_json::json!({
                 "error": error.to_string(),
                 "userMessage": TRANSCRIPTION_RUNTIME_USER_MESSAGE,
-                "actionable": false
+                "actionable": false,
+                "phase": "startup"
             })) {
                 error!("Failed to emit transcription runtime startup error: {emit_error}");
             }
@@ -291,6 +294,13 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
         return Err("Recording already in progress".to_string());
     }
 
+    if let Err(error) = crate::ensure_onnx_runtime_available() {
+        return Err(map_recording_start_error(
+            &app,
+            RecordingStartError::TranscriptionRuntime(error),
+        ));
+    }
+
     // Validate that transcription models are available before starting recording
     info!("🔍 Validating transcription model availability before starting recording...");
     if let Err(validation_error) = transcription::validate_transcription_model_ready(&app).await {
@@ -301,7 +311,8 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
         let _ = app.emit("transcription-error", serde_json::json!({
             "error": validation_error,
             "userMessage": format!("Recording cannot start: {}", validation_error),
-            "actionable": false
+            "actionable": false,
+            "phase": "startup"
         }));
 
         return Err(validation_error);
@@ -466,6 +477,13 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
         return Err("Recording already in progress".to_string());
     }
 
+    if let Err(error) = crate::ensure_onnx_runtime_available() {
+        return Err(map_recording_start_error(
+            &app,
+            RecordingStartError::TranscriptionRuntime(error),
+        ));
+    }
+
     // Validate that transcription models are available before starting recording
     info!("🔍 Validating transcription model availability before starting recording...");
     if let Err(validation_error) = transcription::validate_transcription_model_ready(&app).await {
@@ -476,7 +494,8 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
         let _ = app.emit("transcription-error", serde_json::json!({
             "error": validation_error,
             "userMessage": format!("Recording cannot start: {}", validation_error),
-            "actionable": false
+            "actionable": false,
+            "phase": "startup"
         }));
 
         return Err(validation_error);
