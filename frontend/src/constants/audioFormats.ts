@@ -1,13 +1,14 @@
 /**
- * Supported audio file extensions for import and retranscription.
+ * Supported audio & video file extensions for import and retranscription.
  * IMPORTANT: Keep in sync with Rust constant in src-tauri/src/audio/constants.rs
  *
  * Includes:
  * - Native formats: MP4, M4A, WAV, MP3, FLAC, OGG, AAC
- * - FFmpeg-backed: MKV, WebM, WMA
+ * - Video & FFmpeg-backed formats: MKV, WebM, WMA, MOV, AVI, WMV, M4V, FLV, 3GP, TS, MTS, M2TS, OGV, OPUS, AIFF
  */
 export const AUDIO_EXTENSIONS = [
-  'mp4', 'm4a', 'wav', 'mp3', 'flac', 'ogg', 'aac', 'mkv', 'webm', 'wma'
+  'mp4', 'm4a', 'wav', 'mp3', 'flac', 'ogg', 'aac', 'mkv', 'webm', 'wma',
+  'mov', 'avi', 'wmv', 'm4v', 'flv', '3gp', 'ts', 'mts', 'm2ts', 'ogv', 'opus', 'aiff'
 ] as const;
 
 export type AudioExtension = typeof AUDIO_EXTENSIONS[number];
@@ -30,12 +31,24 @@ export const AUDIO_FORMAT_DISPLAY_NAMES: Record<AudioExtension, string> = {
   mkv: 'MKV',
   webm: 'WebM',
   wma: 'WMA',
+  mov: 'MOV',
+  avi: 'AVI',
+  wmv: 'WMV',
+  m4v: 'M4V',
+  flv: 'FLV',
+  '3gp': '3GP',
+  ts: 'TS',
+  mts: 'MTS',
+  m2ts: 'M2TS',
+  ogv: 'OGV',
+  opus: 'OPUS',
+  aiff: 'AIFF',
 };
 
 /**
  * Get comma-separated list for UI display
- * Example: "MP4, M4A, WAV, MP3, FLAC, OGG, AAC, MKV, WebM, WMA"
+ * Example: "MP4, MOV, MKV, MP3, WAV, WebM, M4A, etc."
  */
 export function getAudioFormatsDisplayList(): string {
-  return AUDIO_EXTENSIONS.map(ext => AUDIO_FORMAT_DISPLAY_NAMES[ext]).join(', ');
+  return 'MP4, MOV, MKV, WebM, AVI, WAV, MP3, M4A, AAC, FLAC';
 }

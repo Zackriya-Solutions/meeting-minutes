@@ -45,13 +45,6 @@ function ConditionalImportDialog({
   handleImportDialogClose: (open: boolean) => void;
   importFilePath: string | null;
 }) {
-  const { betaFeatures } = useConfig();
-
-  // Only mount ImportAudioDialog (and its hooks/listeners) when feature is enabled
-  if (!betaFeatures.importAndRetranscribe) {
-    return null;
-  }
-
   return (
     <ImportAudioDialog
       open={showImportDialog}
@@ -127,30 +120,20 @@ export default function RootLayout({
     };
   }, [showOnboarding]);
 
-  // Handle file drop for audio import
+  // Handle file drop for audio and video import
   const handleFileDrop = useCallback((paths: string[]) => {
-    // Check if beta features are enabled (read from localStorage directly since we're outside ConfigProvider)
-    const betaFeatures = loadBetaFeatures();
-
-    if (!betaFeatures.importAndRetranscribe) {
-      toast.error('Beta feature disabled', {
-        description: 'Enable "Import Audio & Retranscribe" in Settings > Beta to use this feature.'
-      });
-      return;
-    }
-
-    // Find the first audio file
+    // Find the first audio or video file
     const audioFile = paths.find(p => {
       const ext = p.split('.').pop()?.toLowerCase();
       return !!ext && isAudioExtension(ext);
     });
 
     if (audioFile) {
-      console.log('[Layout] Audio file dropped:', audioFile);
+      console.log('[Layout] Audio/video file dropped:', audioFile);
       setImportFilePath(audioFile);
       setShowImportDialog(true);
     } else if (paths.length > 0) {
-      toast.error('Please drop an audio file', {
+      toast.error('Please drop an audio or video file', {
         description: `Supported formats: ${getAudioFormatsDisplayList()}`
       });
     }
@@ -164,11 +147,9 @@ export default function RootLayout({
     const cleanedUpRef = { current: false };
 
     const setupListeners = async () => {
-      // Drag enter/over - show overlay only if beta feature is enabled
+      // Drag enter/over - show overlay
       const unlistenDragEnter = await listen('tauri://drag-enter', () => {
-        if (loadBetaFeatures().importAndRetranscribe) {
-          setShowDropOverlay(true);
-        }
+        setShowDropOverlay(true);
       });
       if (cleanedUpRef.current) {
         unlistenDragEnter();

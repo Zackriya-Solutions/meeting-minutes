@@ -19,8 +19,10 @@ use symphonia::core::probe::Hint;
 use super::audio_processing::{audio_to_mono, resample, resample_audio};
 use super::ffmpeg::find_ffmpeg_path;
 
-/// Extensions requiring ffmpeg pre-conversion (Symphonia lacks these demuxers/codecs)
-const FFMPEG_ONLY_EXTENSIONS: &[&str] = &["mkv", "webm", "wma"];
+/// Extensions requiring ffmpeg pre-conversion (Symphonia lacks these demuxers/codecs or video containers)
+const FFMPEG_ONLY_EXTENSIONS: &[&str] = &[
+    "mkv", "webm", "wma", "mov", "avi", "wmv", "m4v", "flv", "3gp", "ts", "mts", "m2ts", "ogv", "opus"
+];
 
 /// Progress callback for long-running operations
 /// Returns current progress (0-100) and a message
