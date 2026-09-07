@@ -47,8 +47,16 @@ if (platform === 'linux' && feature === 'cuda') {
   env.CMAKE_POSITION_INDEPENDENT_CODE = 'ON';
 }
 
+// Ensure node_modules/.bin is in PATH for spawned processes
+const binDir = path.resolve(__dirname, '..', 'node_modules', '.bin');
+env.PATH = `${binDir}${path.delimiter}${env.PATH || ''}`;
+
+// Resolve local tauri CLI binary
+const localTauri = path.join(binDir, os.platform() === 'win32' ? 'tauri.cmd' : 'tauri');
+const tauriBin = fs.existsSync(localTauri) ? `"${localTauri}"` : 'tauri';
+
 // Build the tauri command
-let tauriCmd = `tauri ${command}`;
+let tauriCmd = `${tauriBin} ${command}`;
 if (feature && feature !== 'none') {
   tauriCmd += ` -- --features ${feature}`;
   console.log(`🚀 Running: tauri ${command} with features: ${feature}`);

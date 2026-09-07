@@ -1,8 +1,8 @@
 'use client';
 
-import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef, Suspense } from 'react';
 import { ArrowLeft, Settings2, Mic, Database as DatabaseIcon, SparkleIcon, FlaskConical } from 'lucide-react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { invoke } from '@tauri-apps/api/core';
 import { motion } from 'framer-motion';
 import { TranscriptSettings } from '@/components/TranscriptSettings';
@@ -22,14 +22,31 @@ const TABS = [
   { value: 'beta', label: 'Beta', icon: FlaskConical }
 ] as const;
 
-export default function SettingsPage() {
+function SettingsContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { transcriptModelConfig, setTranscriptModelConfig } = useConfig();
 
   // Animation state for tabs
   const [activeTab, setActiveTab] = useState('general');
   const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const [underlineStyle, setUnderlineStyle] = useState({ left: 0, width: 0 });
+
+  // Sync tab with URL search params (e.g. ?tab=summary)
+  useEffect(() => {
+    const tabParam = searchParams.get('tab');
+    if (tabParam === 'summary' || tabParam === 'summaryModels') {
+      setActiveTab('summaryModels');
+    } else if (tabParam === 'transcription' || tabParam === 'Transcriptionmodels') {
+      setActiveTab('Transcriptionmodels');
+    } else if (tabParam === 'recording') {
+      setActiveTab('recording');
+    } else if (tabParam === 'general') {
+      setActiveTab('general');
+    } else if (tabParam === 'beta') {
+      setActiveTab('beta');
+    }
+  }, [searchParams]);
 
   // Load saved transcript configuration on mount
   useEffect(() => {
@@ -132,4 +149,18 @@ export default function SettingsPage() {
       </div>
     </div>
   );
-};
+}
+
+export default function SettingsPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="h-screen bg-gray-50 flex items-center justify-center text-gray-500">
+          Loading settings...
+        </div>
+      }
+    >
+      <SettingsContent />
+    </Suspense>
+  );
+}

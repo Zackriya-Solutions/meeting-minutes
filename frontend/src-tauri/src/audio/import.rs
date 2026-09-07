@@ -19,7 +19,7 @@ use uuid::Uuid;
 
 use super::audio_processing::create_meeting_folder;
 use super::common::{create_transcript_segments, split_segment_at_silence, write_transcripts_json};
-use super::constants::AUDIO_EXTENSIONS;
+use super::constants::{AUDIO_EXTENSIONS, VIDEO_EXTENSIONS};
 use super::recording_preferences::get_default_recordings_folder;
 
 /// Global flag to track if import is in progress
@@ -117,7 +117,153 @@ pub fn cancel_import() {
 }
 
 /// Validate an audio file and return its info using metadata-only approach
-/// Falls back to full decode if metadata is unavailable
+/// Check if a file is a video or contains a video stream
+pub fn has_video_stream(path: &Path) -> bool {
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_lowercase())
+        .unwrap_or_default();
+
+    if VIDEO_EXTENSIONS.contains(&ext.as_str()) {
+        return true;
+    }
+
+    // For .mp4 or other dual-use extensions, probe with FFmpeg for a Video: stream
+    if ext == "mp4" {
+        if let Some(ffmpeg_path) = crate::audio::ffmpeg::find_ffmpeg_path() {
+            if let Some(path_str) = path.to_str() {
+                let mut cmd = std::process::Command::new(ffmpeg_path);
+                cmd.args(["-i", path_str])
+                    .stdin(std::process::Stdio::null())
+                    .stdout(std::process::Stdio::piped())
+                    .stderr(std::process::Stdio::piped());
+
+                #[cfg(target_os = "windows")]
+                {
+                    use std::os::windows::process::CommandExt;
+                    cmd.creation_flags(0x08000000);
+                }
+
+                if let Ok(output) = cmd.output() {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    if stderr.contains("Video:") {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+
+    false
+}
+
+/// Extract media duration using FFmpeg (quick metadata probe, takes ~10ms for any audio/video file)
+pub fn extract_duration_with_ffmpeg(path: &Path) -> Result<f64> {
+    let ffmpeg_path = crate::audio::ffmpeg::find_ffmpeg_path()
+        .ok_or_else(|| anyhow!("FFmpeg not found"))?;
+
+    let path_str = path.to_str().ok_or_else(|| anyhow!("Invalid path"))?;
+    let mut cmd = std::process::Command::new(ffmpeg_path);
+    cmd.args(["-i", path_str])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000);
+    }
+
+    let output = cmd
+        .output()
+        .map_err(|e| anyhow!("Failed to execute FFmpeg probe: {}", e))?;
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    if let Some(pos) = stderr.find("Duration: ") {
+        let after = &stderr[pos + 10..];
+        if let Some(comma_pos) = after.find(',') {
+            let dur_str = after[..comma_pos].trim();
+            let parts: Vec<&str> = dur_str.split(':').collect();
+            if parts.len() == 3 {
+                let hours: f64 = parts[0].parse().unwrap_or(0.0);
+                let mins: f64 = parts[1].parse().unwrap_or(0.0);
+                let secs: f64 = parts[2].parse().unwrap_or(0.0);
+                let total = hours * 3600.0 + mins * 60.0 + secs;
+                if total > 0.0 {
+                    return Ok(total);
+                }
+            }
+        }
+    }
+
+    Err(anyhow!("Could not extract duration from FFmpeg output"))
+}
+
+/// Extract clean audio from video file to high-compatibility AAC audio (silent and seamless)
+pub fn extract_audio_from_video(source_path: &Path, dest_audio_path: &Path) -> Result<()> {
+    let ffmpeg_path = crate::audio::ffmpeg::find_ffmpeg_path()
+        .ok_or_else(|| anyhow!("FFmpeg not found. Required to convert video to audio."))?;
+
+    let source_str = source_path
+        .to_str()
+        .ok_or_else(|| anyhow!("Invalid source path"))?;
+    let dest_str = dest_audio_path
+        .to_str()
+        .ok_or_else(|| anyhow!("Invalid destination path"))?;
+
+    info!(
+        "Converting video to audio track: {} -> {}",
+        source_path.display(),
+        dest_audio_path.display()
+    );
+
+    let mut cmd = std::process::Command::new(ffmpeg_path);
+    cmd.args([
+        "-i", source_str,
+        "-vn", // Strip all video tracks
+        "-c:a", "aac", // Clean 16-bit 44.1kHz AAC audio
+        "-b:a", "192k",
+        "-ar", "44100",
+        "-y", // Overwrite output if exists
+        dest_str,
+    ])
+    .stdin(std::process::Stdio::null())
+    .stdout(std::process::Stdio::piped())
+    .stderr(std::process::Stdio::piped());
+
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000);
+    }
+
+    let output = cmd
+        .output()
+        .map_err(|e| anyhow!("Failed to execute FFmpeg for video audio extraction: {}", e))?;
+
+    if !output.status.success() {
+        let err_msg = String::from_utf8_lossy(&output.stderr);
+        error!("FFmpeg audio extraction failed: {}", err_msg);
+        return Err(anyhow!("Failed to convert video to audio: {}", err_msg));
+    }
+
+    if !dest_audio_path.exists() || std::fs::metadata(dest_audio_path)?.len() == 0 {
+        return Err(anyhow!(
+            "Video conversion resulted in an empty audio file. Please check if the video file contains an audio track."
+        ));
+    }
+
+    info!(
+        "Extracted audio from video successfully ({} bytes)",
+        std::fs::metadata(dest_audio_path)?.len()
+    );
+    Ok(())
+}
+
+/// Validate an audio or video file and return its info using metadata-only approach
+/// Falls back to FFmpeg probe then full decode if metadata is unavailable
 pub fn validate_audio_file(path: &Path) -> Result<AudioFileInfo> {
     // Check file exists
     if !path.exists() {
@@ -133,7 +279,7 @@ pub fn validate_audio_file(path: &Path) -> Result<AudioFileInfo> {
 
     if !AUDIO_EXTENSIONS.contains(&extension.as_str()) {
         return Err(anyhow!(
-            "Unsupported format: .{}. Supported: {}",
+            "Unsupported format: .{}. Supported formats: {}",
             extension,
             AUDIO_EXTENSIONS.join(", ")
         ));
@@ -157,26 +303,33 @@ pub fn validate_audio_file(path: &Path) -> Result<AudioFileInfo> {
     let filename = path
         .file_stem()
         .and_then(|s| s.to_str())
-        .unwrap_or("Imported Audio")
+        .unwrap_or("Imported Media")
         .to_string();
 
-    // Try fast metadata-only validation first
-    let duration_seconds = match extract_duration_from_metadata(path) {
-        Ok(duration) => {
-            debug!(
-                "Got duration from metadata: {:.2}s (fast path)",
-                duration
-            );
-            duration
+    // Try fast metadata-only validation first (FFmpeg for video, Symphonia with FFmpeg fallback for audio)
+    let duration_seconds = if has_video_stream(path) {
+        match extract_duration_with_ffmpeg(path) {
+            Ok(dur) => dur,
+            Err(_) => match extract_duration_from_metadata(path) {
+                Ok(dur) => dur,
+                Err(e) => {
+                    warn!("Video metadata extraction failed ({}), falling back to full decode", e);
+                    let decoded = decode_audio_file(path)?;
+                    decoded.duration_seconds
+                }
+            },
         }
-        Err(e) => {
-            // Fallback to full decode if metadata unavailable
-            warn!(
-                "Metadata extraction failed: {}, falling back to full decode",
-                e
-            );
-            let decoded = decode_audio_file(path)?;
-            decoded.duration_seconds
+    } else {
+        match extract_duration_from_metadata(path) {
+            Ok(duration) => duration,
+            Err(_) => match extract_duration_with_ffmpeg(path) {
+                Ok(dur) => dur,
+                Err(e) => {
+                    warn!("Audio metadata extraction failed ({}), falling back to full decode", e);
+                    let decoded = decode_audio_file(path)?;
+                    decoded.duration_seconds
+                }
+            },
         }
     };
 
@@ -342,26 +495,40 @@ async fn run_import<R: Runtime>(
     let base_folder = get_default_recordings_folder();
     let meeting_folder = create_meeting_folder(&base_folder, &title, false)?;
 
-    // Copy audio file to meeting folder
-    emit_progress(&app, "copying", 10, "Copying audio file...");
-
-    let dest_filename = format!(
-        "audio.{}",
-        source
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("mp4")
-    );
+    // Copy audio file to meeting folder (or extract audio seamlessly if it is a video file)
+    let is_video = has_video_stream(&source);
+    let dest_filename = if is_video {
+        "audio.mp4".to_string()
+    } else {
+        format!(
+            "audio.{}",
+            source
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("mp4")
+        )
+    };
     let dest_path = meeting_folder.join(&dest_filename);
 
-    let src = source.clone();
-    let dst = dest_path.clone();
-    tokio::task::spawn_blocking(move || std::fs::copy(&src, &dst))
-        .await
-        .map_err(|e| anyhow!("Copy task join error: {}", e))?
-        .map_err(|e| anyhow!("Failed to copy audio file: {}", e))?;
-
-    info!("Copied audio to: {}", dest_path.display());
+    if is_video {
+        emit_progress(&app, "copying", 10, "Preparing audio...");
+        let src = source.clone();
+        let dst = dest_path.clone();
+        tokio::task::spawn_blocking(move || extract_audio_from_video(&src, &dst))
+            .await
+            .map_err(|e| anyhow!("Video conversion task join error: {}", e))?
+            .map_err(|e| anyhow!("Failed to extract audio from video: {}", e))?;
+        info!("Extracted audio from video to: {}", dest_path.display());
+    } else {
+        emit_progress(&app, "copying", 10, "Copying audio file...");
+        let src = source.clone();
+        let dst = dest_path.clone();
+        tokio::task::spawn_blocking(move || std::fs::copy(&src, &dst))
+            .await
+            .map_err(|e| anyhow!("Copy task join error: {}", e))?
+            .map_err(|e| anyhow!("Failed to copy audio file: {}", e))?;
+        info!("Copied audio to: {}", dest_path.display());
+    }
 
     // Check for cancellation
     if IMPORT_CANCELLED.load(Ordering::SeqCst) {
@@ -926,7 +1093,9 @@ pub async fn select_and_validate_audio_command<R: Runtime>(
         app_clone
             .dialog()
             .file()
-            .add_filter("Audio Files", &AUDIO_EXTENSIONS.iter().map(|s| *s).collect::<Vec<_>>())
+            .add_filter("Audio & Video Files", &AUDIO_EXTENSIONS.iter().map(|s| *s).collect::<Vec<_>>())
+            .add_filter("Audio Files", &["mp4", "m4a", "wav", "mp3", "flac", "ogg", "aac", "opus", "aiff", "wma"])
+            .add_filter("Video Files", &["mp4", "mov", "mkv", "webm", "avi", "wmv", "m4v", "flv", "3gp", "ts", "mts", "m2ts", "ogv"])
             .blocking_pick_file()
     })
     .await

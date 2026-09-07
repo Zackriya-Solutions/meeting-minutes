@@ -16,7 +16,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Sparkles, Settings, Loader2, FileText, Check, Square } from 'lucide-react';
+import { Sparkles, Settings, Loader2, FileText, Check, Square, MessageSquareText } from 'lucide-react';
 import Analytics from '@/lib/analytics';
 import { invoke } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
@@ -355,6 +355,22 @@ export function SummaryGeneratorButtonGroup({
           </DropdownMenuContent>
         </DropdownMenu>
       )}
+
+      {/* Ask AI Chat button */}
+      <Button
+        variant="outline"
+        size="sm"
+        className="bg-indigo-50/50 hover:bg-indigo-100/70 border-indigo-200 text-indigo-700"
+        onClick={() => {
+          if (typeof window !== 'undefined' && (window as any).openAskMeetingsAI) {
+            (window as any).openAskMeetingsAI();
+          }
+        }}
+        title="Ask questions about this meeting with AI"
+      >
+        <MessageSquareText className="xl:mr-1.5 text-indigo-600" size={16} />
+        <span className="hidden lg:inline font-medium">Ask AI</span>
+      </Button>
     </ButtonGroup>
   );
 }

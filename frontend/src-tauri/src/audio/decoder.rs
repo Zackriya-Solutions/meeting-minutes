@@ -19,8 +19,10 @@ use symphonia::core::probe::Hint;
 use super::audio_processing::{audio_to_mono, resample, resample_audio};
 use super::ffmpeg::find_ffmpeg_path;
 
-/// Extensions requiring ffmpeg pre-conversion (Symphonia lacks these demuxers/codecs)
-const FFMPEG_ONLY_EXTENSIONS: &[&str] = &["mkv", "webm", "wma"];
+/// Extensions requiring ffmpeg pre-conversion (Symphonia lacks these demuxers/codecs or video containers)
+const FFMPEG_ONLY_EXTENSIONS: &[&str] = &[
+    "mkv", "webm", "wma", "mov", "avi", "wmv", "m4v", "flv", "3gp", "ts", "mts", "m2ts", "ogv", "opus"
+];
 
 /// Progress callback for long-running operations
 /// Returns current progress (0-100) and a message
@@ -652,7 +654,7 @@ mod tests {
     #[test]
     fn test_chunked_resample_downsamples_correctly() {
         // 48kHz to 16kHz = 3x downsampling with a 2-second signal
-        let input: Vec<f32> = (0..96000).map(|i| (i as f32 / 96000.0)).collect();
+        let input: Vec<f32> = (0..96000).map(|i| i as f32 / 96000.0).collect();
         let result = chunked_resample_with_progress(&input, 48000, 16000, None);
 
         // Output should be approximately 1/3 the length

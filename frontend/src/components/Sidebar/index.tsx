@@ -1,11 +1,12 @@
 'use client';
 
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
-import { ChevronDown, ChevronRight, File, Settings, ChevronLeftCircle, ChevronRightCircle, Calendar, StickyNote, Home, Trash2, Mic, Square, Plus, Search, Pencil, NotebookPen, SearchIcon, X, Upload } from 'lucide-react';
+import { ChevronDown, ChevronRight, File, Settings, ChevronLeftCircle, ChevronRightCircle, Calendar, StickyNote, Home, Trash2, Mic, Square, Plus, Search, Pencil, NotebookPen, SearchIcon, X, Upload, MessageSquare, Bot } from 'lucide-react';
 import { useRouter, usePathname } from 'next/navigation';
 import { useSidebar } from './SidebarProvider';
 import type { CurrentMeeting } from '@/components/Sidebar/SidebarProvider';
 import { ConfirmationModal } from '../ConfirmationModel/confirmation-modal';
+import { AskMeetingsModal } from '../AskMeetingsModal';
 import { ModelConfig } from '@/components/ModelSettingsModal';
 import { SettingTabs } from '../SettingTabs';
 import { TranscriptModelProps } from '@/components/TranscriptSettings';
@@ -64,6 +65,7 @@ const Sidebar: React.FC = () => {
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set(['meetings']));
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [showModelSettings, setShowModelSettings] = useState(false);
+  const [showAskMeetingsAI, setShowAskMeetingsAI] = useState(false);
   const [modelConfig, setModelConfig] = useState<ModelConfig>({
     provider: 'ollama',
     model: '',
@@ -438,9 +440,14 @@ const Sidebar: React.FC = () => {
       setShowModelSettings(true);
     };
 
+    (window as any).openAskMeetingsAI = () => {
+      setShowAskMeetingsAI(true);
+    };
+
     // Cleanup on unmount
     return () => {
       delete (window as any).openSettings;
+      delete (window as any).openAskMeetingsAI;
     };
   }, []);
 
@@ -490,21 +497,33 @@ const Sidebar: React.FC = () => {
             </TooltipContent>
           </Tooltip>
 
-          {betaFeatures.importAndRetranscribe && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  onClick={() => openImportDialog()}
-                  className="p-2 rounded-lg transition-colors duration-150 hover:bg-blue-100 bg-blue-50"
-                >
-                  <Upload className="w-5 h-5 text-blue-600" />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent side="right">
-                <p>Import Audio</p>
-              </TooltipContent>
-            </Tooltip>
-          )}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={() => openImportDialog()}
+                className="p-2 rounded-lg transition-colors duration-150 hover:bg-blue-100 bg-blue-50"
+              >
+                <Upload className="w-5 h-5 text-blue-600" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="right">
+              <p>Import Audio / Video</p>
+            </TooltipContent>
+          </Tooltip>
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={() => setShowAskMeetingsAI(true)}
+                className="p-2 rounded-lg transition-colors duration-150 hover:bg-blue-100 bg-blue-50"
+              >
+                <Bot className="w-5 h-5 text-blue-600" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="right">
+              <p>Ask Your Meetings</p>
+            </TooltipContent>
+          </Tooltip>
 
           <Tooltip>
             <TooltipTrigger asChild>
@@ -725,9 +744,9 @@ const Sidebar: React.FC = () => {
             {!isCollapsed && (
               <div
                 onClick={() => router.push('/')}
-                className="p-3  text-lg font-semibold items-center hover:bg-gray-100 h-10   flex mx-3 mt-3 rounded-lg cursor-pointer"
+                className="p-3 text-sm font-semibold items-center hover:bg-gray-100 h-10 flex mx-3 mt-3 rounded-lg cursor-pointer"
               >
-                <Home className="w-4 h-4 mr-2" />
+                <Home className="w-4 h-4 mr-2 text-gray-600" />
                 <span>Home</span>
               </div>
             )}
@@ -745,7 +764,10 @@ const Sidebar: React.FC = () => {
                       className="flex items-center transition-all duration-150 p-3 text-lg font-semibold h-10 mx-3 mt-3 rounded-lg"
                     >
                       <NotebookPen className="w-4 h-4 mr-2 text-gray-600" />
-                      <span className="text-gray-700">{item.title}</span>
+                      <span className="text-gray-700 flex-1">{item.title}</span>
+                      {item.id === 'meetings' && (
+                        <span className="text-xs text-gray-400 font-normal">({meetings.length})</span>
+                      )}
                       {searchQuery && item.id === 'meetings' && isSearching && (
                         <span className="ml-2 text-xs text-blue-500 animate-pulse">Searching...</span>
                       )}
@@ -792,15 +814,21 @@ const Sidebar: React.FC = () => {
               )}
             </button>
 
-            {betaFeatures.importAndRetranscribe && (
-              <button
-                onClick={() => openImportDialog()}
-                className="w-full flex items-center justify-center px-3 py-2 mt-1 text-sm font-medium text-gray-700 bg-blue-100 hover:bg-blue-200 rounded-lg transition-colors shadow-sm"
-              >
-                <Upload className="w-4 h-4 mr-2" />
-                <span>Import Audio</span>
-              </button>
-            )}
+            <button
+              onClick={() => openImportDialog()}
+              className="w-full flex items-center justify-center px-3 py-2 mt-1 text-sm font-medium text-gray-700 bg-blue-100 hover:bg-blue-200 rounded-lg transition-colors shadow-sm"
+            >
+              <Upload className="w-4 h-4 mr-2" />
+              <span>Import Audio / Video</span>
+            </button>
+
+            <button
+              onClick={() => setShowAskMeetingsAI(true)}
+              className="w-full flex items-center justify-center px-3 py-2 mt-1 text-sm font-medium text-gray-700 bg-blue-100 hover:bg-blue-200 rounded-lg transition-colors shadow-sm"
+            >
+              <Bot className="w-4 h-4 mr-2" />
+              <span>Ask Your Meetings</span>
+            </button>
 
             <button
               onClick={() => router.push('/settings')}
@@ -875,6 +903,15 @@ const Sidebar: React.FC = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Ask Your Meetings AI Modal */}
+      <AskMeetingsModal
+        isOpen={showAskMeetingsAI}
+        onClose={() => setShowAskMeetingsAI(false)}
+        meetings={meetings.map(m => ({ id: m.id, title: m.title }))}
+        currentMeetingId={currentMeeting?.id}
+        onOpenSettings={() => router.push('/settings?tab=summary')}
+      />
     </div>
   );
 };

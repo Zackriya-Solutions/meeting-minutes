@@ -110,6 +110,22 @@ fn get_cached_model_path(app_data_dir: &PathBuf, model_name: &str) -> Result<Pat
         ));
     }
 
+    // Verify model file is complete and not corrupted
+    if let Ok(meta) = std::fs::metadata(&model_path) {
+        if let Some(model_def) = models::get_model_by_name(model_name) {
+            let file_size_mb = meta.len() / (1024 * 1024);
+            let min_expected = (model_def.size_mb as f64 * 0.85) as u64;
+            if file_size_mb < min_expected {
+                return Err(anyhow!(
+                    "Model '{}' is incomplete or corrupted ({} MB found, expected ~{} MB). Please go to Settings > Summary to delete/re-download it, or switch to an available model like Qwen 3.5 4B or Gemma 3 1B.",
+                    model_def.display_name,
+                    file_size_mb,
+                    model_def.size_mb
+                ));
+            }
+        }
+    }
+
     // Cache the validated path
     cache.insert(model_name.to_string(), model_path.clone());
     Ok(model_path)
