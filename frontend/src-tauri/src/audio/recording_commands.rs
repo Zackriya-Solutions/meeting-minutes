@@ -287,6 +287,18 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
         "message": "Recording initialization started"
     })).map_err(|e| e.to_string())?;
 
+    // T12: verify the microphone is actually delivering audio before we start.
+    // A macOS TCC denial lets the input stream be created but never fires
+    // callbacks; without this the app records dead audio silently. Fails the
+    // start loudly (mapped to a permission Alert in the UI).
+    #[cfg(target_os = "macos")]
+    {
+        if let Err(e) = super::devices::verify_microphone_access().await {
+            error!("Microphone access verification failed: {}", e);
+            return Err(format!("Microphone access required: {}", e));
+        }
+    }
+
     // Async-first approach - no more blocking operations!
     info!("🚀 Starting async recording initialization");
 
@@ -461,6 +473,16 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
     app.emit("recording-starting", serde_json::json!({
         "message": "Recording initialization started"
     })).map_err(|e| e.to_string())?;
+
+    // T12: verify the microphone is actually delivering audio before we start
+    // (see the note on the other start path above).
+    #[cfg(target_os = "macos")]
+    {
+        if let Err(e) = super::devices::verify_microphone_access().await {
+            error!("Microphone access verification failed: {}", e);
+            return Err(format!("Microphone access required: {}", e));
+        }
+    }
 
     let mic_device = resolve_mic_or_default(&app, mic_device_name.as_deref());
 
