@@ -133,6 +133,7 @@ fn summary_code_from_whatlang(lang: Lang) -> Option<&'static str> {
         Lang::Nld => Some("nl"),
         Lang::Pol => Some("pl"),
         Lang::Ara => Some("ar"),
+        Lang::Pes => Some("fa"),
         Lang::Hin => Some("hi"),
         Lang::Tam => Some("ta"),
         Lang::Tur => Some("tr"),
