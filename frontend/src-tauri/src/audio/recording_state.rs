@@ -22,6 +22,9 @@ pub struct AudioChunk {
     pub timestamp: f64,
     pub chunk_id: u64,
     pub device_type: DeviceType,
+    /// RMS of the signal before any audio enhancement (noise suppression, normalization).
+    /// Used for speaker attribution so both streams are compared on the same raw scale.
+    pub raw_rms: f32,
 }
 
 /// Processed audio chunk (post-VAD) for recording

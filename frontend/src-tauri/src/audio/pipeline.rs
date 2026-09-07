@@ -508,6 +508,15 @@ impl AudioCapture {
             }
         }
 
+        // Capture raw signal energy BEFORE any enhancement.
+        // Stored in the chunk so the pipeline can compare both streams on the same scale
+        // regardless of per-stream processing (e.g. EBU R128 normalization on mic only).
+        let raw_rms = if mono_data.is_empty() {
+            0.0_f32
+        } else {
+            (mono_data.iter().map(|&x| x * x).sum::<f32>() / mono_data.len() as f32).sqrt()
+        };
+
         // AUDIO ENHANCEMENT PIPELINE (Microphone Only)
         // Processing order is critical: high-pass → noise suppression → normalization
         // This ensures noise is removed before being amplified by the normalizer
@@ -613,6 +622,7 @@ impl AudioCapture {
             timestamp,
             chunk_id,
             device_type: self.device_type.clone(),
+            raw_rms,
         };
 
         // NOTE: Raw audio is NOT sent to recording saver to prevent echo
@@ -694,6 +704,10 @@ pub struct AudioPipeline {
     mixer: ProfessionalAudioMixer,
     // Recording sender for pre-mixed audio
     recording_sender_for_mixed: Option<mpsc::UnboundedSender<AudioChunk>>,
+    // Per-stream raw signal energy trackers (EMA of pre-processing RMS).
+    // Both streams are compared on the same scale for unbiased speaker attribution.
+    mic_raw_rms: f32,
+    sys_raw_rms: f32,
 }
 
 impl AudioPipeline {
@@ -760,6 +774,8 @@ impl AudioPipeline {
             ring_buffer,
             mixer,
             recording_sender_for_mixed: None,  // Will be set by manager
+            mic_raw_rms: 0.0,
+            sys_raw_rms: 0.0,
         }
     }
 
@@ -814,22 +830,30 @@ impl AudioPipeline {
                         self.last_summary_time = std::time::Instant::now();
                     }
 
+                    // Update per-stream raw energy tracker (EMA, α=0.3).
+                    // Uses pre-processing RMS so mic normalization doesn't inflate its score.
+                    // Both streams stay on the same amplitude scale for fair comparison.
+                    const EMA_ALPHA: f32 = 0.3;
+                    match chunk.device_type {
+                        DeviceType::Microphone => {
+                            self.mic_raw_rms = self.mic_raw_rms * (1.0 - EMA_ALPHA) + chunk.raw_rms * EMA_ALPHA;
+                        }
+                        DeviceType::System => {
+                            self.sys_raw_rms = self.sys_raw_rms * (1.0 - EMA_ALPHA) + chunk.raw_rms * EMA_ALPHA;
+                        }
+                    }
+
                     // STEP 1: Add raw audio to ring buffer for mixing
-                    // Microphone audio is already normalized at capture level (AudioCapture)
-                    // System audio remains raw
                     self.ring_buffer.add_samples(chunk.device_type.clone(), chunk.data);
 
                     // STEP 2: Mix audio in fixed windows when both streams have sufficient data
                     while self.ring_buffer.can_mix() {
                         if let Some((mic_window, sys_window)) = self.ring_buffer.extract_window() {
-                            // Determine dominant source by RMS energy for speaker attribution
-                            let mic_rms: f32 = if mic_window.is_empty() { 0.0 } else {
-                                (mic_window.iter().map(|&s| s * s).sum::<f32>() / mic_window.len() as f32).sqrt()
-                            };
-                            let sys_rms: f32 = if sys_window.is_empty() { 0.0 } else {
-                                (sys_window.iter().map(|&s| s * s).sum::<f32>() / sys_window.len() as f32).sqrt()
-                            };
-                            let dominant_device = if sys_rms > mic_rms {
+                            // Attribute to the stream with higher raw (pre-normalization) energy.
+                            // Using the EMA trackers instead of post-processing window RMS avoids
+                            // false "You" labels caused by EBU R128 normalization amplifying mic
+                            // background noise above the natural level of system audio.
+                            let dominant_device = if self.sys_raw_rms > self.mic_raw_rms {
                                 DeviceType::System
                             } else {
                                 DeviceType::Microphone
@@ -860,6 +884,7 @@ impl AudioPipeline {
                                                 timestamp: segment.start_timestamp_ms / 1000.0,
                                                 chunk_id: self.chunk_id_counter,
                                                 device_type: dominant_device.clone(),
+                                                raw_rms: 0.0,
                                             };
 
                                             if let Err(e) = self.transcription_sender.send(transcription_chunk) {
@@ -886,6 +911,7 @@ impl AudioPipeline {
                                     timestamp: chunk.timestamp,
                                     chunk_id: self.chunk_id_counter,
                                     device_type: DeviceType::Microphone,  // Mixed audio
+                                    raw_rms: 0.0,
                                 };
                                 let _ = sender.send(recording_chunk);
                             }
@@ -930,6 +956,7 @@ impl AudioPipeline {
                             timestamp: segment.start_timestamp_ms / 1000.0,
                             chunk_id: self.chunk_id_counter,
                             device_type: DeviceType::Microphone,
+                            raw_rms: 0.0,
                         };
 
                         if let Err(e) = self.transcription_sender.send(transcription_chunk) {
@@ -1052,6 +1079,7 @@ impl AudioPipelineManager {
                 timestamp: 0.0,
                 chunk_id: u64::MAX, // Special ID to indicate flush
                 device_type: super::recording_state::DeviceType::Microphone,
+                raw_rms: 0.0,
             };
 
             if let Err(e) = sender.send(flush_chunk) {
@@ -1072,6 +1100,7 @@ impl AudioPipelineManager {
                         timestamp: 0.0,
                         chunk_id: u64::MAX - (i as u64),
                         device_type: super::recording_state::DeviceType::Microphone,
+                        raw_rms: 0.0,
                     };
                     let _ = sender.send(additional_flush);
                 }
