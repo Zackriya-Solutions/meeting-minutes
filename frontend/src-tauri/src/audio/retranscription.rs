@@ -46,9 +46,10 @@ impl Drop for RetranscriptionGuard {
 }
 
 /// VAD redemption time in milliseconds - bridges natural pauses in speech
-/// Batch processing needs longer redemption (2000ms) than live pipeline (400ms)
-/// because the entire file is processed at once by VAD, and 400ms fragments
-/// speech at every natural sentence/topic pause (500ms-2s)
+/// Batch processing needs longer redemption (2000ms) than the live pipeline
+/// (500ms) because the entire file is processed at once by VAD with no
+/// latency requirement, and short redemption fragments speech at every
+/// natural sentence/topic pause (500ms-2s)
 const VAD_REDEMPTION_TIME_MS: u32 = 2000;
 
 /// Progress update emitted during retranscription
