@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
-import { MeetingSummary } from '@/types';
+import { MeetingSummary, SummaryProcessResponse } from '@/types';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
 import Analytics from '@/lib/analytics';
 import { invoke } from '@tauri-apps/api/core';
@@ -22,6 +22,7 @@ import { useConfig } from '@/contexts/ConfigContext';
 export default function PageContent({
   meeting,
   summaryData,
+  initialSummary,
   shouldAutoGenerate = false,
   onAutoGenerateComplete,
   onMeetingUpdated,
@@ -36,6 +37,7 @@ export default function PageContent({
 }: {
   meeting: any;
   summaryData: MeetingSummary | null;
+  initialSummary: SummaryProcessResponse | null;
   shouldAutoGenerate?: boolean;
   onAutoGenerateComplete?: () => void;
   onMeetingUpdated?: () => Promise<void>;
@@ -115,6 +117,7 @@ export default function PageContent({
   };
 
   const summaryGeneration = useSummaryGeneration({
+    initialSummary,
     meeting,
     transcripts: meetingData.transcripts,
     modelConfig: modelConfig,
@@ -158,6 +161,7 @@ export default function PageContent({
   useEffect(() => {
     if (
       !shouldAutoGenerate
+      || summaryGeneration.summaryStatus !== 'idle'
       || isModelConfigLoading
       || meetingData.transcripts.length === 0
       || autoGenerationStartedMeetingIdRef.current === meeting.id
@@ -177,6 +181,7 @@ export default function PageContent({
     modelConfig.provider,
     modelConfig.model,
     summaryGeneration.handleGenerateSummary,
+    summaryGeneration.summaryStatus,
     onAutoGenerateComplete,
   ]);
 
