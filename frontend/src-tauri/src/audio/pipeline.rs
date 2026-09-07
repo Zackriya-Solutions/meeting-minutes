@@ -919,11 +919,11 @@ impl AudioPipeline {
                             device_type: DeviceType::Microphone,
                         };
 
-                        if let Err(e) = self.transcription_sender.send(transcription_chunk) {
-                            warn!("Failed to send final VAD segment: {}", e);
-                        } else {
-                            self.chunk_id_counter += 1;
-                        }
+                        // A failed send means the transcript is incomplete: surface it so the
+                        // recording manager can flag the meeting rather than silently continue.
+                        self.transcription_sender.send(transcription_chunk)
+                            .map_err(|e| anyhow::anyhow!("failed to send final VAD segment: {}", e))?;
+                        self.chunk_id_counter += 1;
                     } else {
                         info!("⏭️ Skipping short final segment: {:.1}ms ({} samples < 800)",
                               duration_ms, segment.samples.len());
@@ -931,7 +931,10 @@ impl AudioPipeline {
                 }
             }
             Err(e) => {
+                // A VAD flush failure also leaves the transcript incomplete: propagate it
+                // instead of logging and continuing to report a clean flush.
                 warn!("Failed to flush VAD processor: {}", e);
+                return Err(e);
             }
         }
 
