@@ -13,6 +13,9 @@ use super::capture::{AudioCaptureBackend, get_current_backend};
 #[cfg(target_os = "macos")]
 use super::capture::CoreAudioCapture;
 
+#[cfg(target_os = "linux")]
+use super::capture::LinuxMonitorCapture;
+
 /// Stream backend implementation
 pub enum StreamBackend {
     /// CPAL-based stream (ScreenCaptureKit or default)
@@ -21,6 +24,11 @@ pub enum StreamBackend {
     #[cfg(target_os = "macos")]
     CoreAudio {
         task: Option<tokio::task::JoinHandle<()>>,
+    },
+    /// PulseAudio/PipeWire monitor source read directly via ALSA (Linux only)
+    #[cfg(target_os = "linux")]
+    LinuxMonitor {
+        capture: Option<LinuxMonitorCapture>,
     },
 }
 
@@ -87,6 +95,16 @@ impl AudioStream {
             return Self::create_core_audio_stream(device, state, device_type, recording_sender).await;
         }
 
+        // On Linux, system audio MUST come from the sound server's monitor source.
+        // CPAL cannot reach it (see capture/linux_monitor.rs) - routing system audio
+        // through CPAL silently opens the ALSA capture `default`, i.e. the microphone
+        // again, which is why system audio appeared to be "not detected".
+        #[cfg(target_os = "linux")]
+        if device_type == DeviceType::System {
+            info!("🎵 Stream: Using ALSA monitor backend for system audio");
+            return Self::create_linux_monitor_stream(device, state, device_type, recording_sender).await;
+        }
+
         // Default path: use CPAL
         #[cfg(target_os = "macos")]
         let backend_name = if backend_type == AudioCaptureBackend::ScreenCaptureKit {
@@ -137,6 +155,58 @@ impl AudioStream {
         Ok(Self {
             device,
             backend: StreamBackend::Cpal(stream),
+        })
+    }
+
+    /// Create a system audio stream from the PulseAudio/PipeWire monitor source (Linux only)
+    #[cfg(target_os = "linux")]
+    async fn create_linux_monitor_stream(
+        device: Arc<AudioDevice>,
+        state: Arc<RecordingState>,
+        device_type: DeviceType,
+        recording_sender: Option<mpsc::UnboundedSender<super::recording_state::AudioChunk>>,
+    ) -> Result<Self> {
+        info!("🔊 Stream: Creating Linux monitor stream for device: {}", device.name);
+
+        let capture_device = device.clone();
+
+        // The sound server decides the actual rate/channel count, so the pipeline
+        // processor is constructed only once the PCM has been negotiated.
+        let capture = LinuxMonitorCapture::start(&device.name, move |format| {
+            let processor = AudioCapture::new(
+                capture_device,
+                state,
+                format.sample_rate,
+                format.channels,
+                device_type,
+                recording_sender,
+            );
+
+            move |samples: &[f32]| {
+                processor.process_audio_data(samples);
+            }
+        })
+        .map_err(|e| {
+            error!("❌ Stream: Failed to start Linux monitor capture: {}", e);
+            anyhow::anyhow!(
+                "Failed to capture system audio from the monitor source: {}. \
+                 Make sure PulseAudio or PipeWire is running.",
+                e
+            )
+        })?;
+
+        info!(
+            "✅ Stream: Linux monitor stream started ({}, {} Hz, {} ch)",
+            capture.pcm_name(),
+            capture.format().sample_rate,
+            capture.format().channels
+        );
+
+        Ok(Self {
+            device,
+            backend: StreamBackend::LinuxMonitor {
+                capture: Some(capture),
+            },
         })
     }
 
@@ -341,6 +411,16 @@ impl AudioStream {
                     // This helps ensure Arc references in the closure are dropped
                     std::thread::sleep(std::time::Duration::from_millis(50));
                     info!("Core Audio task aborted");
+                }
+            }
+            #[cfg(target_os = "linux")]
+            StreamBackend::LinuxMonitor { capture } => {
+                if let Some(capture) = capture {
+                    info!("Stopping Linux monitor capture...");
+                    // Blocks until the capture thread exits, releasing the PCM
+                    // and dropping the Arc references held by its callback.
+                    capture.stop();
+                    info!("Linux monitor capture stopped");
                 }
             }
         }
