@@ -316,4 +316,43 @@ pnpm tauri:build
 
 By default, the application will be built with CPU-only processing. To enable GPU acceleration, see the [GPU Acceleration Guide](GPU_ACCELERATION.md).
 
+### NVIDIA CUDA build
+
+CUDA builds additionally require:
+
+- NVIDIA CUDA Toolkit with `nvcc` on `PATH`
+- CUDA Visual Studio/MSBuild integration
+- LLVM with `libclang.dll`
+
+After installing these prerequisites, run the local unsigned-build script from the repository root:
+
+```powershell
+.\frontend\build-cuda.ps1
+```
+
+This enables CUDA for Whisper transcription, Parakeet transcription through ONNX Runtime, and Qwen/GGUF summarization through `llama-helper`.
+
+Windows uses a dedicated CUDA script because a complete CUDA package has two independently compiled Rust targets: the Tauri application (Whisper and Parakeet) and the `llama-helper` sidecar (Qwen/GGUF). The script builds both with CUDA, stages the matching sidecar, and validates the additional CUDA, Visual Studio, and LLVM prerequisites. The existing `build-gpu.ps1` is a Vulkan-only wrapper for the Tauri application; the Vulkan instructions below build and stage the CPU `llama-helper` explicitly.
+
+This distinction is specific to the Windows PowerShell scripts. When run from the `frontend` directory, `./build-gpu.sh` already detects the backend for the Tauri application and builds and stages `llama-helper` with the corresponding supported backend on Linux and macOS. CUDA and Vulkan use the same feature in both targets; macOS CoreML is mapped to Metal for `llama-helper`, which does not support CoreML. The CUDA feature wiring is cross-platform, but this CUDA change has been runtime-tested only on Windows.
+
+The script disables updater artifacts for this local build and produces unsigned MSI and NSIS installers under `target/release/bundle`.
+
+Repository maintainers who have configured the existing DigiCert and Tauri updater signing environment can instead run `.\frontend\build-cuda.ps1 -Signed`. The script validates the required signing inputs before starting the build.
+
+### AMD/Intel Vulkan build
+
+Install the Vulkan SDK. From the repository root, build and stage the CPU `llama-helper`, then build the Tauri application with Vulkan:
+
+```powershell
+cargo build --release -p llama-helper
+New-Item -ItemType Directory -Force frontend\src-tauri\binaries | Out-Null
+Copy-Item target\release\llama-helper.exe frontend\src-tauri\binaries\llama-helper-x86_64-pc-windows-msvc.exe -Force
+Set-Location frontend
+pnpm install --frozen-lockfile
+pnpm run tauri:build:vulkan
+```
+
+This enables Vulkan for Whisper transcription. Parakeet and `llama-helper` use the CPU in this configuration.
+
 </details>

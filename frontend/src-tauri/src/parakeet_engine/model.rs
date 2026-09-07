@@ -1,6 +1,8 @@
 use ndarray::{Array, Array1, Array2, Array3, ArrayD, ArrayViewD, IxDyn};
 use once_cell::sync::Lazy;
-use ort::execution_providers::CPUExecutionProvider;
+#[cfg(feature = "cuda")]
+use ort::execution_providers::CUDAExecutionProvider;
+use ort::execution_providers::{CPUExecutionProvider, ExecutionProviderDispatch};
 use ort::inputs;
 use ort::session::builder::GraphOptimizationLevel;
 use ort::session::Session;
@@ -20,11 +22,61 @@ const TDT_DURATIONS: [usize; 5] = [0, 1, 2, 3, 4];
 static DECODE_SPACE_RE: Lazy<Result<Regex, regex::Error>> =
     Lazy::new(|| Regex::new(r"\A\s|\s\B|(\s)\b"));
 
+fn execution_provider_names() -> Vec<&'static str> {
+    #[cfg(feature = "cuda")]
+    {
+        vec!["CUDA", "CPU"]
+    }
+
+    #[cfg(not(feature = "cuda"))]
+    {
+        vec!["CPU"]
+    }
+}
+
+fn execution_providers() -> Vec<ExecutionProviderDispatch> {
+    #[cfg(feature = "cuda")]
+    {
+        vec![
+            CUDAExecutionProvider::default().build(),
+            CPUExecutionProvider::default().build(),
+        ]
+    }
+
+    #[cfg(not(feature = "cuda"))]
+    {
+        vec![CPUExecutionProvider::default().build()]
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct TimestampedResult {
     pub text: String,
     pub timestamps: Vec<f32>,
     pub tokens: Vec<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn execution_provider_policy_always_keeps_cpu_fallback_last() {
+        let names = execution_provider_names();
+        assert_eq!(names.last(), Some(&"CPU"));
+    }
+
+    #[cfg(feature = "cuda")]
+    #[test]
+    fn cuda_build_prefers_cuda_before_cpu() {
+        assert_eq!(execution_provider_names(), vec!["CUDA", "CPU"]);
+    }
+
+    #[cfg(not(feature = "cuda"))]
+    #[test]
+    fn ordinary_build_uses_cpu_only() {
+        assert_eq!(execution_provider_names(), vec!["CPU"]);
+    }
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -54,7 +106,10 @@ pub struct ParakeetModel {
 
 impl Drop for ParakeetModel {
     fn drop(&mut self) {
-        log::debug!("Dropping ParakeetModel with {} vocab tokens", self.vocab.len());
+        log::debug!(
+            "Dropping ParakeetModel with {} vocab tokens",
+            self.vocab.len()
+        );
     }
 }
 
@@ -89,14 +144,22 @@ impl ParakeetModel {
         intra_threads: Option<usize>,
         try_quantized: bool,
     ) -> Result<Session, ParakeetError> {
-        let providers = vec![CPUExecutionProvider::default().build()];
+        let provider_names = execution_provider_names();
+        log::info!(
+            "Parakeet execution provider preference: {}",
+            provider_names.join(" -> ")
+        );
+        let providers = execution_providers();
 
         // Try quantized version first if requested, fallback to regular version
         let model_filename = if try_quantized {
             let quantized_name = format!("{}.int8.onnx", model_name);
             let quantized_path = model_dir.as_ref().join(&quantized_name);
             if quantized_path.exists() {
-                log::info!("Loading quantized Parakeet model from {}...", quantized_name);
+                log::info!(
+                    "Loading quantized Parakeet model from {}...",
+                    quantized_name
+                );
                 quantized_name
             } else {
                 let regular_name = format!("{}.onnx", model_name);

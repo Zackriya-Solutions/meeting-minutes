@@ -128,13 +128,13 @@ impl SamplingConfig {
 // ============================================================================
 
 /// Detect available VRAM in GB
-fn detect_vram_gb() -> f32 {
+fn detect_vram_gb() -> Option<f32> {
     #[cfg(feature = "metal")]
     {
         // macOS Metal: Query recommended max working set size
         if let Some(vram) = detect_metal_vram() {
             eprintln!("Metal VRAM detected: {:.2} GB", vram);
-            return vram;
+            return Some(vram);
         }
     }
 
@@ -143,14 +143,13 @@ fn detect_vram_gb() -> f32 {
         // NVIDIA CUDA: Query device memory
         if let Some(vram) = detect_cuda_vram() {
             eprintln!("CUDA VRAM detected: {:.2} GB", vram);
-            return vram;
+            return Some(vram);
         }
     }
 
-    /// TODO: Vulkan VRAM detection
-
-    eprintln!("VRAM detection not available, using conservative estimate");
-    4.0 // Conservative fallback
+    // TODO: Vulkan VRAM detection
+    eprintln!("VRAM detection not available; using CPU fallback");
+    None
 }
 
 #[cfg(feature = "metal")]
@@ -199,7 +198,16 @@ fn calculate_gpu_layers(
         .map(|m| m.len() as f32 / 1024.0 / 1024.0 / 1024.0)
         .unwrap_or(0.0);
 
-    if file_size_gb == 0.0 {
+    calculate_gpu_layers_for_size(file_size_gb, model_layers, vram_gb, context_size)
+}
+
+fn calculate_gpu_layers_for_size(
+    file_size_gb: f32,
+    model_layers: u32,
+    vram_gb: f32,
+    context_size: u32,
+) -> u32 {
+    if file_size_gb <= 0.0 || model_layers == 0 || vram_gb <= 0.0 {
         eprintln!("⚠️ Could not determine model file size, using conservative default");
         return 0;
     }
@@ -258,9 +266,7 @@ fn calculate_gpu_layers(
     layers
 }
 
-/// Get default GPU layer count with smart detection
-fn get_default_gpu_layers(model_path: &PathBuf, context_size: u32) -> u32 {
-    let vram = detect_vram_gb();
+fn estimate_model_layers(model_path: &PathBuf) -> u32 {
     // TODO: Use actual model metadata instead of heuristics
     // Heuristic: Estimate total layers based on file size
     // 7B models (Q4) are ~4.1GB and have ~32-35 layers
@@ -269,9 +275,50 @@ fn get_default_gpu_layers(model_path: &PathBuf, context_size: u32) -> u32 {
         .map(|m| m.len() as f32 / 1024.0 / 1024.0 / 1024.0)
         .unwrap_or(0.0);
 
-    let estimated_layers = if file_size_gb > 2.5 { 33 } else { 28 };
+    if file_size_gb > 2.5 {
+        33
+    } else {
+        28
+    }
+}
 
-    calculate_gpu_layers(model_path, estimated_layers, vram, context_size)
+/// Get default GPU layer count and estimated total layer count with smart detection
+fn get_default_gpu_layers(model_path: &PathBuf, context_size: u32) -> (u32, u32) {
+    let estimated_layers = estimate_model_layers(model_path);
+    let Some(vram) = detect_vram_gb() else {
+        return (0, estimated_layers);
+    };
+
+    (
+        calculate_gpu_layers(model_path, estimated_layers, vram, context_size),
+        estimated_layers,
+    )
+}
+
+fn gpu_backend_label(used_gpu_layers: u32, total_model_layers: u32) -> &'static str {
+    if used_gpu_layers == 0 {
+        "CPU fallback"
+    } else if used_gpu_layers == total_model_layers {
+        "CUDA full offload"
+    } else {
+        "CUDA partial offload"
+    }
+}
+
+fn load_with_cpu_fallback<T, F>(gpu_layers: u32, mut load: F) -> Result<(T, u32)>
+where
+    F: FnMut(u32) -> Result<T>,
+{
+    match load(gpu_layers) {
+        Ok(model) => Ok((model, gpu_layers)),
+        Err(gpu_error) if gpu_layers > 0 => {
+            eprintln!("⚠️ CUDA model load failed ({gpu_error:#}); retrying with CPU fallback");
+            load(0)
+                .context("CPU fallback model load failed")
+                .map(|model| (model, 0))
+        }
+        Err(error) => Err(error),
+    }
 }
 
 // ============================================================================
@@ -327,14 +374,20 @@ impl ModelState {
         eprintln!("📥 Loading model: {}", model_path.display());
 
         // Detect GPU layers
-        let gpu_layers = get_default_gpu_layers(&model_path, context_size);
+        let (gpu_layers, total_model_layers) = get_default_gpu_layers(&model_path, context_size);
 
-        // Configure model parameters with GPU offload
-        let model_params = LlamaModelParams::default().with_n_gpu_layers(gpu_layers);
-        let model_params = pin!(model_params);
+        let (model, used_gpu_layers) = load_with_cpu_fallback(gpu_layers, |layers| {
+            let model_params = LlamaModelParams::default().with_n_gpu_layers(layers);
+            let model_params = pin!(model_params);
+            LlamaModel::load_from_file(&self.backend, model_path.clone(), &model_params)
+                .with_context(|| format!("unable to load model at {:?}", model_path))
+        })?;
 
-        let model = LlamaModel::load_from_file(&self.backend, model_path.clone(), &model_params)
-            .with_context(|| format!("unable to load model at {:?}", model_path))?;
+        let backend_label = gpu_backend_label(used_gpu_layers, total_model_layers);
+        eprintln!(
+            "Built-in AI backend: {} ({} GPU layers)",
+            backend_label, used_gpu_layers
+        );
 
         self.model = Some(model);
         self.model_path = Some(model_path);
@@ -628,12 +681,7 @@ fn main() -> Result<()> {
                         }
 
                         // Generate response with sampling parameters
-                        match state.generate(
-                            prompt,
-                            max_tokens,
-                            sampling,
-                            stop_tokens,
-                        ) {
+                        match state.generate(prompt, max_tokens, sampling, stop_tokens) {
                             Ok(text) => {
                                 send_response(&Response::Response { text, error: None })?;
                             }
@@ -678,8 +726,64 @@ mod tests {
     use super::*;
 
     #[test]
+    fn gpu_layer_policy_uses_cpu_when_no_vram_is_detected() {
+        assert_eq!(calculate_gpu_layers_for_size(2.6, 33, 0.0, 4096), 0);
+    }
+
+    #[test]
+    fn gpu_layer_policy_partially_offloads_when_vram_is_constrained() {
+        let layers = calculate_gpu_layers_for_size(2.6, 33, 2.0, 4096);
+        assert!(layers > 0);
+        assert!(layers < 33);
+    }
+
+    #[test]
+    fn gpu_layer_policy_fully_offloads_when_vram_is_sufficient() {
+        assert_eq!(calculate_gpu_layers_for_size(2.6, 33, 8.0, 4096), 33);
+    }
+
+    #[test]
+    fn backend_label_uses_total_model_layers_instead_of_arbitrary_threshold() {
+        assert_eq!(gpu_backend_label(0, 24), "CPU fallback");
+        assert_eq!(gpu_backend_label(20, 24), "CUDA partial offload");
+        assert_eq!(gpu_backend_label(24, 24), "CUDA full offload");
+        assert_eq!(gpu_backend_label(28, 33), "CUDA partial offload");
+        assert_eq!(gpu_backend_label(33, 33), "CUDA full offload");
+    }
+
+    #[test]
+    fn model_load_retries_once_on_cpu_after_gpu_failure() {
+        let mut attempted_layers = Vec::new();
+        let (model, used_layers) = load_with_cpu_fallback(20, |layers| {
+            attempted_layers.push(layers);
+            if layers > 0 {
+                anyhow::bail!("simulated CUDA load failure");
+            }
+            Ok("cpu model")
+        })
+        .unwrap();
+
+        assert_eq!(model, "cpu model");
+        assert_eq!(used_layers, 0);
+        assert_eq!(attempted_layers, vec![20, 0]);
+    }
+
+    #[test]
+    fn cpu_model_load_is_not_retried() {
+        let mut attempts = 0;
+        let result: Result<(&str, u32)> = load_with_cpu_fallback(0, |_| {
+            attempts += 1;
+            anyhow::bail!("CPU load failure")
+        });
+
+        assert!(result.is_err());
+        assert_eq!(attempts, 1);
+    }
+
+    #[test]
     fn generate_request_defaults_penalties_when_omitted() {
-        let json = r#"{"type":"generate","prompt":"summarize","temperature":0.5,"top_k":20,"top_p":0.8}"#;
+        let json =
+            r#"{"type":"generate","prompt":"summarize","temperature":0.5,"top_k":20,"top_p":0.8}"#;
         let request: Request = serde_json::from_str(json).unwrap();
         let Request::Generate {
             temperature,
@@ -690,7 +794,8 @@ mod tests {
             repeat_penalty,
             penalty_last_n,
             ..
-        } = request else {
+        } = request
+        else {
             panic!("expected generate request");
         };
 
@@ -724,7 +829,8 @@ mod tests {
             repeat_penalty,
             penalty_last_n,
             ..
-        } = request else {
+        } = request
+        else {
             panic!("expected generate request");
         };
 

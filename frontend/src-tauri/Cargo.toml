@@ -44,7 +44,7 @@ platform-default = []
 # Manual GPU acceleration options (for power users to override defaults)
 metal = ["whisper-rs/metal"]       # macOS: Apple Metal GPU (Auto-enabled on macOS)
 coreml = ["whisper-rs/coreml"]     # macOS: Apple CoreML acceleration
-cuda = ["whisper-rs/cuda"]         # Windows/Linux: NVIDIA CUDA GPU
+cuda = ["whisper-rs/cuda", "ort/cuda"] # Windows/Linux: NVIDIA CUDA GPU
 vulkan = ["whisper-rs/vulkan"]     # Windows/Linux: AMD/Intel Vulkan GPU
 hipblas = ["whisper-rs/hipblas"]   # Linux: AMD ROCm HIP
 
