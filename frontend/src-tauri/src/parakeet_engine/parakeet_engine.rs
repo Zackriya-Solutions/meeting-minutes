@@ -546,19 +546,11 @@ impl ParakeetEngine {
             .as_mut()
             .ok_or_else(|| anyhow!("No Parakeet model loaded. Please load a model first."))?;
 
-        let duration_seconds = audio_data.len() as f64 / 16000.0; // Assuming 16kHz
-        log::debug!(
-            "Parakeet transcribing {} samples ({:.1}s duration)",
-            audio_data.len(),
-            duration_seconds
-        );
 
-        // Transcribe using Parakeet model
         let result = model
             .transcribe_samples(audio_data)
             .map_err(|e| anyhow!("Parakeet transcription failed: {}", e))?;
 
-        log::debug!("Parakeet transcription result: '{}'", result.text);
 
         Ok(result.text)
     }

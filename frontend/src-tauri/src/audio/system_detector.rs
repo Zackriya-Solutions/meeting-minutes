@@ -171,18 +171,15 @@ impl MacOSSystemAudioDetector {
                                                     let cb = callback.clone();
                                                     std::thread::spawn(move || {
                                                         let apps = list_system_audio_using_apps();
-                                                        tracing::info!("detect_system_audio_listener: {:?}", apps);
 
                                                         if let Ok(guard) = cb.lock() {
                                                             let event = SystemAudioEvent::SystemAudioStarted(apps);
-                                                            tracing::info!(event = ?event, "detected");
                                                             (*guard)(event);
                                                         }
                                                     });
                                                 } else {
                                                     if let Ok(guard) = callback.lock() {
                                                         let event = SystemAudioEvent::SystemAudioStopped;
-                                                        tracing::info!(event = ?event, "detected");
                                                         (*guard)(event);
                                                     }
                                                 }
@@ -250,7 +247,6 @@ impl MacOSSystemAudioDetector {
                                                         let cb = data.0.clone();
                                                         std::thread::spawn(move || {
                                                             let apps = list_system_audio_using_apps();
-                                                            tracing::info!("detect_system_listener: {:?}", apps);
 
                                                             if let Ok(callback_guard) = cb.lock() {
                                                                 (*callback_guard)(SystemAudioEvent::SystemAudioStarted(apps));
@@ -288,9 +284,9 @@ impl MacOSSystemAudioDetector {
                         system_listener,
                         system_listener_ptr,
                     ) {
-                        tracing::error!("adding_system_listener_failed: {:?}", e);
+                        log::error!("adding_system_listener_failed: {:?}", e);
                     } else {
-                        tracing::info!("adding_system_listener_success");
+                        log::info!("adding_system_listener_success");
                     }
 
                     if let Ok(device) = ca::System::default_output_device() {
@@ -308,7 +304,7 @@ impl MacOSSystemAudioDetector {
                             )
                             .is_ok()
                         {
-                            tracing::info!("adding_device_listener_success");
+                            log::info!("adding_device_listener_success");
 
                             if let Ok(mut device_guard) = current_device.lock() {
                                 *device_guard = Some(device);
@@ -318,10 +314,10 @@ impl MacOSSystemAudioDetector {
                                 state_guard.last_state = system_audio_active;
                             }
                         } else {
-                            tracing::error!("adding_device_listener_failed");
+                            log::error!("adding_device_listener_failed");
                         }
                     } else {
-                        tracing::warn!("no_default_output_device_found");
+                        log::warn!("no_default_output_device_found");
                     }
 
                     let _ = tx.blocking_send(());
@@ -392,7 +388,7 @@ impl Default for MacOSSystemAudioDetector {
 #[cfg(not(target_os = "macos"))]
 impl MacOSSystemAudioDetector {
     pub fn start(&mut self, _callback: SystemAudioCallback) {
-        tracing::warn!("System audio detection is only supported on macOS");
+        log::warn!("System audio detection is only supported on macOS");
     }
 
     pub fn stop(&mut self) {}

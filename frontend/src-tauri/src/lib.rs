@@ -87,13 +87,16 @@ async fn start_recording<R: Runtime>(
     system_device_name: Option<String>,
     meeting_name: Option<String>,
 ) -> Result<(), String> {
-    log_info!("🔥 CALLED start_recording with meeting: {:?}", meeting_name);
     log_info!(
-        "📋 Backend received parameters - mic: {:?}, system: {:?}, meeting: {:?}",
+        "Recording start requested; microphone={:?}, system_audio={:?}, meeting_name_configured={}",
         mic_device_name,
         system_device_name,
-        meeting_name
+        meeting_name.is_some()
     );
+    #[cfg(debug_assertions)]
+    if let Some(name) = &meeting_name {
+        log::debug!("Recording meeting name={}", name);
+    }
 
     if is_recording().await {
         return Err("Recording already in progress".to_string());
@@ -388,17 +391,15 @@ pub fn get_language_preference_internal() -> Option<String> {
 }
 
 pub fn run() {
-    log::set_max_level(log::LevelFilter::Info);
-
     let mut builder = tauri::Builder::default();
 
     #[cfg(any(target_os = "macos", windows, target_os = "linux"))]
     {
         builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
             log_info!(
-                "Second app instance requested with args: {:?}, cwd: {:?}",
-                args,
-                cwd
+                "Second app instance requested; argument_count={}, cwd_present={}",
+                args.len(),
+                !cwd.is_empty()
             );
 
             tray::focus_main_window(app);
@@ -408,6 +409,79 @@ pub fn run() {
     builder
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_store::Builder::default().build())
+        .plugin({
+            let app_data_dir = dirs::data_dir()
+                .expect("failed to resolve app data dir")
+                .join("com.meetily.ai");
+            let mut log_builder = tauri_plugin_log::Builder::new()
+                .targets({
+                    #[cfg(debug_assertions)]
+                    {
+                        [
+                            tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
+                            tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Folder {
+                                path: app_data_dir.join("logs-dev"),
+                                file_name: None,
+                            }),
+                        ]
+                    }
+                    #[cfg(not(debug_assertions))]
+                    {
+                        [tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Folder {
+                            path: app_data_dir.join("logs"),
+                            file_name: None,
+                        })]
+                    }
+                })
+                .rotation_strategy({
+                    #[cfg(debug_assertions)]
+                    {
+                        tauri_plugin_log::RotationStrategy::KeepSome(10)
+                    }
+                    #[cfg(not(debug_assertions))]
+                    {
+                        tauri_plugin_log::RotationStrategy::KeepSome(5)
+                    }
+                })
+                .max_file_size(10_000_000)
+                .timezone_strategy(tauri_plugin_log::TimezoneStrategy::UseLocal)
+                .format(|out, message, record| {
+                    out.finish(format_args!(
+                        "[{}][{}][{}][{}:{}] {}",
+                        chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f"),
+                        record.level(),
+                        record.target(),
+                        record.file().unwrap_or("unknown"),
+                        record.line().unwrap_or(0),
+                        message
+                    ))
+                });
+
+            #[cfg(debug_assertions)]
+            {
+                log_builder = log_builder
+                    .level(log::LevelFilter::Info)
+                    .level_for("app_lib", log::LevelFilter::Debug);
+            }
+
+            #[cfg(not(debug_assertions))]
+            {
+                let debug_log = std::env::var("MEETILY_DEBUG_LOG")
+                    .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
+                    .unwrap_or(false);
+                log_builder = if debug_log {
+                    log_builder
+                        .level(log::LevelFilter::Info)
+                        .level_for("app_lib", log::LevelFilter::Debug)
+                } else {
+                    log_builder
+                        .level(log::LevelFilter::Warn)
+                        .level_for("app_lib", log::LevelFilter::Info)
+                };
+            }
+
+            log_builder.build()
+        })
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
@@ -418,6 +492,7 @@ pub fn run() {
         .manage(audio::init_system_audio_state())
         .manage(summary::summary_engine::ModelManagerState(Arc::new(tokio::sync::Mutex::new(None))))
         .setup(|_app| {
+            log::info!("Starting application...");
             log::info!("Application setup complete");
 
             // Initialize system tray

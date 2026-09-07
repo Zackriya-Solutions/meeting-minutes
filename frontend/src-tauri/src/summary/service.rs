@@ -19,7 +19,7 @@ use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Manager};
 use tokio_util::sync::CancellationToken;
-use tracing::{error, info, warn};
+use log::{error, info, warn};
 
 static METADATA_CACHE: LazyLock<ModelMetadataCache> =
     LazyLock::new(|| ModelMetadataCache::new(Duration::from_secs(300)));

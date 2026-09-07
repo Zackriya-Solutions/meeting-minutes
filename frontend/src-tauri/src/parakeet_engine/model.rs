@@ -180,7 +180,6 @@ impl ParakeetModel {
         waveforms: &ArrayViewD<f32>,
         waveforms_lens: &ArrayViewD<i64>,
     ) -> Result<(ArrayD<f32>, ArrayD<i64>), ParakeetError> {
-        log::trace!("Running Parakeet preprocessor inference...");
         let inputs = inputs![
             "waveforms" => TensorRef::from_array_view(waveforms.view())?,
             "waveforms_lens" => TensorRef::from_array_view(waveforms_lens.view())?,
@@ -204,7 +203,6 @@ impl ParakeetModel {
         audio_signal: &ArrayViewD<f32>,
         length: &ArrayViewD<i64>,
     ) -> Result<(ArrayD<f32>, ArrayD<i64>), ParakeetError> {
-        log::trace!("Running Parakeet encoder inference...");
         let inputs = inputs![
             "audio_signal" => TensorRef::from_array_view(audio_signal.view())?,
             "length" => TensorRef::from_array_view(length.view())?,
@@ -268,7 +266,6 @@ impl ParakeetModel {
         prev_state: &DecoderState,
         encoder_out: &ArrayViewD<f32>, // [time_steps, 1024]
     ) -> Result<(ArrayD<f32>, DecoderState), ParakeetError> {
-        log::trace!("Running Parakeet decoder inference...");
 
         // Get last token or blank_idx if empty
         let target_token = prev_tokens.last().copied().unwrap_or(self.blank_idx);
@@ -295,11 +292,6 @@ impl ParakeetModel {
             .get("outputs")
             .ok_or_else(|| ParakeetError::OutputNotFound("outputs".to_string()))?
             .try_extract_array()?;
-        log::trace!(
-            "Parakeet Logits shape: {:?}, vocab_size: {}",
-            logits.shape(),
-            self.vocab_size
-        );
         let state1 = outputs
             .get("output_states_1")
             .ok_or_else(|| ParakeetError::OutputNotFound("output_states_1".to_string()))?
@@ -420,13 +412,6 @@ impl ParakeetModel {
             }
         }
 
-        // NEW: Log if no tokens were decoded (helps debugging empty transcriptions)
-        if tokens.is_empty() {
-            log::debug!(
-                "Parakeet decoded zero tokens (all blank) for audio with {} encoding timesteps - audio may be too short or low energy",
-                encodings_len
-            );
-        }
 
         Ok((tokens, timestamps))
     }

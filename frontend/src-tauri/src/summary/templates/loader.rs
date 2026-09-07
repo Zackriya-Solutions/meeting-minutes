@@ -1,7 +1,7 @@
 use super::defaults;
 use super::types::Template;
 use std::path::PathBuf;
-use tracing::{debug, info, warn};
+use log::{debug, info, warn};
 use once_cell::sync::Lazy;
 use std::sync::RwLock;
 

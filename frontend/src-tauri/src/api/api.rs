@@ -1,4 +1,5 @@
 use log::{debug as log_debug, error as log_error, info as log_info, warn as log_warn};
+use crate::utils::url_origin_for_log;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tauri::{AppHandle, Runtime};
@@ -212,15 +213,13 @@ async fn get_auth_token<R: Runtime>(app: &AppHandle<R>) -> Option<String> {
     };
 
     match store.get("authToken") {
-        Some(token) => {
-            if let Some(token_str) = token.as_str() {
-                let truncated = token_str.chars().take(20).collect::<String>();
-                log_info!("Found auth token: {}", truncated);
-                Some(token_str.to_string())
-            } else {
-                log_warn!("Auth token is not a string");
-                None
-            }
+        Some(token) if token.as_str().is_some() => {
+            log_info!("Auth token loaded from store");
+            token.as_str().map(str::to_owned)
+        }
+        Some(_) => {
+            log_warn!("Auth token in store is not a string");
+            None
         }
         None => {
             log_warn!("No auth token found in store");
@@ -231,24 +230,45 @@ async fn get_auth_token<R: Runtime>(app: &AppHandle<R>) -> Option<String> {
 
 // Helper function to get server address - now hardcoded
 async fn get_server_address<R: Runtime>(_app: &AppHandle<R>) -> Result<String, String> {
-    log_info!("Using hardcoded server URL: {}", APP_SERVER_URL);
+    log_info!(
+        "Using configured API origin={}",
+        url_origin_for_log(APP_SERVER_URL)
+    );
     Ok(APP_SERVER_URL.to_string())
 }
 
 // Generic API call function with optional authentication
+fn reqwest_error_class(error: &reqwest::Error) -> &'static str {
+    if error.is_timeout() {
+        "timeout"
+    } else if error.is_connect() {
+        "connect"
+    } else if error.is_status() {
+        "status"
+    } else if error.is_decode() {
+        "decode"
+    } else {
+        "request"
+    }
+}
 async fn make_api_request<R: Runtime, T: for<'de> Deserialize<'de>>(
     app: &AppHandle<R>,
     endpoint: &str,
     method: &str,
     body: Option<&str>,
     additional_headers: Option<HashMap<String, String>>,
-    auth_token: Option<String>, // Pass auth token from frontend
+    auth_token: Option<String>,
 ) -> Result<T, String> {
     let client = reqwest::Client::new();
     let server_url = get_server_address(app).await?;
-
     let url = format!("{}{}", server_url, endpoint);
-    log_info!("Making {} request to: {}", method, url);
+    let origin = url_origin_for_log(&url);
+    log_info!(
+        "API request started; method={}, route={}, origin={}",
+        method,
+        endpoint.split('?').next().unwrap_or(endpoint),
+        origin
+    );
 
     let mut request = match method.to_uppercase().as_str() {
         "GET" => client.get(&url),
@@ -258,61 +278,78 @@ async fn make_api_request<R: Runtime, T: for<'de> Deserialize<'de>>(
         _ => return Err(format!("Unsupported HTTP method: {}", method)),
     };
 
-    // Add authorization header if auth token is provided
     if let Some(token) = auth_token {
-        log_info!("Adding authorization header");
         request = request.header("Authorization", format!("Bearer {}", token));
     } else {
-        log_warn!("No auth token provided, making unauthenticated request");
+        log_warn!("API request has no authorization token");
     }
 
     request = request.header("Content-Type", "application/json");
-
-    // Add additional headers if provided
     if let Some(headers) = additional_headers {
         for (key, value) in headers {
             request = request.header(&key, &value);
         }
     }
-
-    // Add body if provided
     if let Some(body_str) = body {
         request = request.body(body_str.to_string());
     }
 
-    let response = request.send().await.map_err(|e| {
-        let error_msg = format!("Request failed: {}", e);
-        log_error!("{}", error_msg);
-        error_msg
+    let response = request.send().await.map_err(|error| {
+        log_error!(
+            "API request failed; method={}, route={}, origin={}, error_class={}",
+            method,
+            endpoint.split('?').next().unwrap_or(endpoint),
+            origin,
+            reqwest_error_class(&error)
+        );
+        format!("Request failed: {}", error)
     })?;
-
     let status = response.status();
-    log_info!("Response status: {}", status);
 
     if !status.is_success() {
         let error_text = response
             .text()
             .await
             .unwrap_or_else(|_| "Unknown error".to_string());
-        let error_msg = format!("HTTP {}: {}", status, error_text);
-        log_error!("{}", error_msg);
-        return Err(error_msg);
+        log_error!(
+            "API response failed; method={}, route={}, origin={}, status={}, response_bytes={}",
+            method,
+            endpoint.split('?').next().unwrap_or(endpoint),
+            origin,
+            status,
+            error_text.len()
+        );
+        return Err(format!("HTTP {}: {}", status, error_text));
     }
 
-    let response_text = response.text().await.map_err(|e| {
-        let error_msg = format!("Failed to read response: {}", e);
-        log_error!("{}", error_msg);
-        error_msg
+    let response_text = response.text().await.map_err(|error| {
+        log_error!(
+            "API response read failed; method={}, route={}, origin={}, error_class={}",
+            method,
+            endpoint.split('?').next().unwrap_or(endpoint),
+            origin,
+            reqwest_error_class(&error)
+        );
+        format!("Failed to read response: {}", error)
     })?;
+    log_info!(
+        "API response received; method={}, route={}, origin={}, status={}, response_bytes={}",
+        method,
+        endpoint.split('?').next().unwrap_or(endpoint),
+        origin,
+        status,
+        response_text.len()
+    );
 
-    // Safely truncate response for logging, respecting UTF-8 character boundaries
-    let truncated = response_text.chars().take(200).collect::<String>();
-    log_info!("Response body: {}", truncated);
-
-    serde_json::from_str(&response_text).map_err(|e| {
-        let error_msg = format!("Failed to parse JSON: {}", e);
-        log_error!("{}", error_msg);
-        error_msg
+    serde_json::from_str(&response_text).map_err(|error| {
+        log_error!(
+            "API response parse failed; method={}, route={}, origin={}, status={}, error_class=json",
+            method,
+            endpoint.split('?').next().unwrap_or(endpoint),
+            origin,
+            status
+        );
+        format!("Failed to parse JSON: {}", error)
     })
 }
 
@@ -360,8 +397,8 @@ pub async fn api_search_transcripts<R: Runtime>(
     auth_token: Option<String>,
 ) -> Result<Vec<TranscriptSearchResult>, String> {
     log_info!(
-        "api_search_transcripts called with query: '{}', auth_token: {}",
-        query,
+        "Transcript search requested; query_chars={}, auth_present={}",
+        query.chars().count(),
         auth_token.is_some()
     );
 
@@ -376,7 +413,7 @@ pub async fn api_search_transcripts<R: Runtime>(
             Ok(results)
         }
         Err(e) => {
-            log_error!("Error searching transcripts for query '{}': {}", query, e);
+            log_error!("Transcript search failed");
             Err(format!("Failed to search transcripts: {}", e))
         }
     }
@@ -389,11 +426,7 @@ pub async fn api_get_profile<R: Runtime>(
     license_key: String,
     auth_token: Option<String>,
 ) -> Result<Profile, String> {
-    log_info!(
-        "api_get_profile called for email: {}, auth_token: {}",
-        email,
-        auth_token.is_some()
-    );
+    log_info!("Profile lookup requested; auth_present={}", auth_token.is_some());
 
     let profile_request = ProfileRequest { email, license_key };
     let body = serde_json::to_string(&profile_request).map_err(|e| e.to_string())?;
@@ -409,11 +442,7 @@ pub async fn api_save_profile<R: Runtime>(
     email: String,
     auth_token: Option<String>,
 ) -> Result<serde_json::Value, String> {
-    log_info!(
-        "api_save_profile called for email: {}, auth_token: {}",
-        email,
-        auth_token.is_some()
-    );
+    log_info!("Profile save requested; auth_present={}", auth_token.is_some());
 
     let save_request = SaveProfileRequest { id, email };
     let body = serde_json::to_string(&save_request).map_err(|e| e.to_string())?;
@@ -438,11 +467,7 @@ pub async fn api_update_profile<R: Runtime>(
     position: String,
     auth_token: Option<String>,
 ) -> Result<serde_json::Value, String> {
-    log_info!(
-        "api_update_profile called for email: {}, auth_token: {}",
-        email,
-        auth_token.is_some()
-    );
+    log_info!("Profile update requested; auth_present={}", auth_token.is_some());
 
     let update_request = UpdateProfileRequest {
         email,
@@ -475,11 +500,11 @@ pub async fn api_get_model_config<R: Runtime>(
     match SettingsRepository::get_model_config(pool).await {
         Ok(Some(config)) => {
             log_info!(
-                "✅ Found model config in database: provider={}, model={}, whisperModel={}, ollamaEndpoint={:?}",
-                &config.provider,
-                &config.model,
-                &config.whisper_model,
-                &config.ollama_endpoint
+                "Model config loaded; provider={}, model={}, whisper_model={}, endpoint_configured={}",
+                config.provider,
+                config.model,
+                config.whisper_model,
+                config.ollama_endpoint.is_some()
             );
             match SettingsRepository::get_api_key(pool, &config.provider).await {
                 Ok(api_key) => {
@@ -525,11 +550,11 @@ pub async fn api_save_model_config<R: Runtime>(
     _auth_token: Option<String>,
 ) -> Result<serde_json::Value, String> {
     log_info!(
-        "💾 api_save_model_config called (native): provider='{}', model='{}', whisperModel='{}', ollamaEndpoint={:?}",
-        &provider,
-        &model,
-        &whisper_model,
-        &ollama_endpoint
+        "Model config save requested; provider={}, model={}, whisper_model={}, endpoint_configured={}",
+        provider,
+        model,
+        whisper_model,
+        ollama_endpoint.is_some()
     );
     let pool = state.db_manager.pool();
 
@@ -656,8 +681,9 @@ pub async fn api_save_transcript_config<R: Runtime>(
     _auth_token: Option<String>,
 ) -> Result<serde_json::Value, String> {
     log_info!(
-        "api_save_transcript_config called (native) for provider '{}'",
-        &provider
+        "Transcript config save requested; provider={}, model={}",
+        provider,
+        model
     );
     let pool = state.db_manager.pool();
 
@@ -936,20 +962,11 @@ pub async fn api_save_transcript<R: Runtime>(
     auth_token: Option<String>,
 ) -> Result<serde_json::Value, String> {
     log_info!(
-        "api_save_transcript called for meeting: {}, transcripts: {}, folder_path: {:?}, auth_token: {}",
-        meeting_title,
+        "Transcript save requested; transcript_count={}, folder_configured={}, auth_present={}",
         transcripts.len(),
-        folder_path,
+        folder_path.is_some(),
         auth_token.is_some()
     );
-
-    // Log first transcript for debugging
-    if let Some(first) = transcripts.first() {
-        log_debug!(
-            "First transcript data: {}",
-            serde_json::to_string_pretty(first).unwrap_or_default()
-        );
-    }
 
     // Convert serde_json::Value to TranscriptSegment
     let transcripts_to_save: Vec<TranscriptSegment> = transcripts
@@ -961,14 +978,6 @@ pub async fn api_save_transcript<R: Runtime>(
             format!("Invalid transcript data format: {}. Please check the data structure.", e)
         })?;
 
-    // Log parsed segments count and first segment details
-    if let Some(first_seg) = transcripts_to_save.first() {
-        log_debug!("First parsed segment: text='{}', audio_start_time={:?}, audio_end_time={:?}, duration={:?}",
-                   first_seg.text.chars().take(50).collect::<String>(),
-                   first_seg.audio_start_time,
-                   first_seg.audio_end_time,
-                   first_seg.duration);
-    }
 
     let pool = state.db_manager.pool();
 
@@ -993,11 +1002,7 @@ pub async fn api_save_transcript<R: Runtime>(
             }))
         }
         Err(e) => {
-            log_error!(
-                "Error saving transcript for meeting '{}': {}",
-                meeting_title,
-                e
-            );
+            log_error!("Transcript save failed");
             Err(format!("Failed to save transcript: {}", e))
         }
     }
@@ -1026,12 +1031,12 @@ pub async fn open_meeting_folder<R: Runtime>(
     match meeting {
         Some(m) => {
             if let Some(folder_path) = m.folder_path {
-                log_info!("Opening meeting folder: {}", folder_path);
+                log_info!("Opening meeting folder; meeting_id={}", meeting_id);
 
                 // Verify folder exists
                 let path = std::path::Path::new(&folder_path);
                 if !path.exists() {
-                    log_warn!("Folder path does not exist: {}", folder_path);
+                    log_warn!("Meeting folder path does not exist; meeting_id={}", meeting_id);
                     return Err(format!("Recording folder not found: {}", folder_path));
                 }
 
@@ -1060,7 +1065,7 @@ pub async fn open_meeting_folder<R: Runtime>(
                         .map_err(|e| format!("Failed to open folder: {}", e))?;
                 }
 
-                log_info!("Successfully opened folder: {}", folder_path);
+                log_info!("Meeting folder opened; meeting_id={}", meeting_id);
                 Ok(())
             } else {
                 log_warn!("Meeting {} has no folder_path set", meeting_id);
@@ -1085,7 +1090,7 @@ pub async fn test_backend_connection<R: Runtime>(
     let client = reqwest::Client::new();
     let server_url = get_server_address(&app).await?;
 
-    log_debug!("Testing connection to: {}", server_url);
+    log_debug!("Testing connection to origin={}", url_origin_for_log(&server_url));
 
     let mut request = client.get(&format!("{}/docs", server_url));
 
@@ -1100,9 +1105,11 @@ pub async fn test_backend_connection<R: Runtime>(
             Ok(format!("Backend is reachable. Status: {}", status))
         }
         Err(e) => {
-            let error_msg = format!("Failed to connect to backend: {}", e);
-            log_debug!("{}", error_msg);
-            Err(error_msg)
+            log_debug!(
+                "Backend connection failed; error_class={}",
+                reqwest_error_class(&e)
+            );
+            Err(format!("Failed to connect to backend: {}", e))
         }
     }
 }
@@ -1114,11 +1121,11 @@ pub async fn debug_backend_connection<R: Runtime>(app: AppHandle<R>) -> Result<S
     // Test 1: Check server address from store
     let server_url = match get_server_address(&app).await {
         Ok(url) => {
-            log_debug!("✓ Server URL from store: {}", url);
+            log_debug!("Configured backend origin={}", url_origin_for_log(&url));
             url
         }
         Err(e) => {
-            log_error!("✗ Failed to get server URL: {}", e);
+            log_error!("Failed to resolve configured backend origin");
             return Err(format!("Failed to get server URL: {}", e));
         }
     };
@@ -1127,7 +1134,7 @@ pub async fn debug_backend_connection<R: Runtime>(app: AppHandle<R>) -> Result<S
     let client = reqwest::Client::new();
     let test_url = format!("{}/docs", server_url); // Try the docs endpoint which should be public
 
-    log_debug!("Testing connection to: {}", test_url);
+    log_debug!("Testing connection to origin={}", url_origin_for_log(&test_url));
 
     match client.get(&test_url).send().await {
         Ok(response) => {
@@ -1139,7 +1146,10 @@ pub async fn debug_backend_connection<R: Runtime>(app: AppHandle<R>) -> Result<S
             ))
         }
         Err(e) => {
-            log_error!("✗ Backend connection failed: {}", e);
+            log_error!(
+                "Backend connection failed; error_class={}",
+                reqwest_error_class(&e)
+            );
             Err(format!("Backend connection failed: {}", e))
         }
     }
@@ -1180,9 +1190,9 @@ pub async fn api_save_custom_openai_config<R: Runtime>(
     top_p: Option<f32>,
 ) -> Result<serde_json::Value, String> {
     log_info!(
-        "api_save_custom_openai_config called: endpoint='{}', model='{}'",
-        &endpoint,
-        &model
+        "Custom OpenAI config save requested; endpoint_origin={}, model={}",
+        url_origin_for_log(&endpoint),
+        model
     );
 
     // Validate required fields
@@ -1228,14 +1238,17 @@ pub async fn api_save_custom_openai_config<R: Runtime>(
 
     match SettingsRepository::save_custom_openai_config(pool, &config).await {
         Ok(()) => {
-            log_info!("✅ Successfully saved custom OpenAI config for endpoint: {}", config.endpoint);
+            log_info!(
+                "Custom OpenAI config saved; endpoint_origin={}",
+                url_origin_for_log(&config.endpoint)
+            );
             Ok(serde_json::json!({
                 "status": "success",
                 "message": "Custom OpenAI configuration saved successfully"
             }))
         }
         Err(e) => {
-            log_error!("❌ Failed to save custom OpenAI config: {}", e);
+            log_error!("Failed to save custom OpenAI config");
             Err(format!("Failed to save custom OpenAI configuration: {}", e))
         }
     }
@@ -1253,9 +1266,12 @@ pub async fn api_get_custom_openai_config<R: Runtime>(
 
     match SettingsRepository::get_custom_openai_config(pool).await {
         Ok(config) => {
-            if let Some(ref c) = config {
-                log_info!("✅ Found custom OpenAI config: endpoint='{}', model='{}'",
-                    c.endpoint, c.model);
+            if let Some(config) = &config {
+                log_info!(
+                    "Custom OpenAI config loaded; endpoint_origin={}, model={}",
+                    url_origin_for_log(&config.endpoint),
+                    config.model
+                );
             } else {
                 log_info!("No custom OpenAI config found");
             }
@@ -1277,44 +1293,33 @@ pub async fn api_test_custom_openai_connection<R: Runtime>(
     api_key: Option<String>,
     model: String,
 ) -> Result<serde_json::Value, String> {
+    let endpoint_origin = url_origin_for_log(&endpoint);
     log_info!(
-        "api_test_custom_openai_connection called: endpoint='{}', model='{}'",
-        &endpoint,
-        &model
+        "Custom OpenAI connection test requested; endpoint_origin={}, model={}",
+        endpoint_origin,
+        model
     );
 
-    // Validate endpoint URL format
     if !endpoint.starts_with("http://") && !endpoint.starts_with("https://") {
         return Err("Endpoint must start with http:// or https://".to_string());
     }
 
-    // Build the URL - append /chat/completions to the base endpoint
     let url = format!("{}/chat/completions", endpoint.trim_end_matches('/'));
-
-    // Create a minimal test request
     let test_request = serde_json::json!({
         "model": model,
-        "messages": [
-            {
-                "role": "user",
-                "content": "Hi"
-            }
-        ],
+        "messages": [{"role": "user", "content": "Hi"}],
         "max_tokens": 5
     });
-
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(30))
         .build()
-        .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
-
+        .map_err(|error| format!("Failed to create HTTP client: {}", error))?;
     let mut request = client
         .post(&url)
         .header("Content-Type", "application/json")
         .json(&test_request);
 
-    // Add authorization if API key provided
-    if let Some(key) = api_key.filter(|k| !k.trim().is_empty()) {
+    if let Some(key) = api_key.filter(|key| !key.trim().is_empty()) {
         request = request.header("Authorization", format!("Bearer {}", key));
     }
 
@@ -1322,61 +1327,76 @@ pub async fn api_test_custom_openai_connection<R: Runtime>(
         Ok(response) => {
             let status = response.status();
             let response_text = response.text().await.unwrap_or_default();
+            log_info!(
+                "Custom OpenAI connection response; endpoint_origin={}, status={}, response_bytes={}",
+                endpoint_origin,
+                status,
+                response_text.len()
+            );
 
             if status.is_success() {
-                // Parse response as JSON to verify it's a valid OpenAI-compatible response
                 match serde_json::from_str::<serde_json::Value>(&response_text) {
-                    Ok(json) => {
-                        // Verify the response has the expected OpenAI structure
-                        if let Some(choices) = json.get("choices") {
-                            if let Some(choices_array) = choices.as_array() {
-                                if !choices_array.is_empty() {
-                                    // Verify the first choice has the required message structure
-                                    if let Some(first_choice) = choices_array.get(0) {
-                                        // Check if message.content field exists (can be empty string)
-                                        let has_message_structure = first_choice
-                                            .get("message")
-                                            .and_then(|m| {
-                                                m.get("content")
-                                                .or_else(|| m.get("reasoning_content"))
-                                            })
-                                            .is_some();
-
-                                        if has_message_structure {
-                                            log_info!("✅ Custom OpenAI connection test successful - response validated");
-                                            return Ok(serde_json::json!({
-                                                "status": "success",
-                                                "message": "Connection successful and response validated",
-                                                "http_status": status.as_u16()
-                                            }));
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        // Response was 200 but doesn't match OpenAI format
-                        log_warn!("⚠️ Endpoint returned 200 but response doesn't match OpenAI format: {}", response_text);
+                    Ok(json) if json
+                        .get("choices")
+                        .and_then(serde_json::Value::as_array)
+                        .and_then(|choices| choices.first())
+                        .and_then(|choice| choice.get("message"))
+                        .and_then(|message| {
+                            message
+                                .get("content")
+                                .or_else(|| message.get("reasoning_content"))
+                        })
+                        .is_some() =>
+                    {
+                        log_info!(
+                            "Custom OpenAI connection validated; endpoint_origin={}, status={}",
+                            endpoint_origin,
+                            status
+                        );
+                        Ok(serde_json::json!({
+                            "status": "success",
+                            "message": "Connection successful and response validated",
+                            "http_status": status.as_u16()
+                        }))
+                    }
+                    Ok(_) => {
+                        log_warn!(
+                            "Custom OpenAI response is not compatible; endpoint_origin={}, status={}",
+                            endpoint_origin,
+                            status
+                        );
                         Err("Endpoint is reachable but doesn't appear to be OpenAI-compatible. Response is missing 'choices' array or 'message.content' / 'message.reasoning_content' field.".to_string())
                     }
-                    Err(e) => {
-                        log_warn!("⚠️ Endpoint returned 200 but response is not valid JSON: {}", e);
-                        Err(format!("Endpoint is reachable but returned invalid JSON: {}. Response: {}", e, response_text))
+                    Err(error) => {
+                        log_warn!(
+                            "Custom OpenAI response is invalid JSON; endpoint_origin={}, status={}",
+                            endpoint_origin,
+                            status
+                        );
+                        Err(format!("Endpoint is reachable but returned invalid JSON: {}. Response: {}", error, response_text))
                     }
                 }
             } else {
-                log_warn!("⚠️ Custom OpenAI connection test failed with status {}: {}", status, response_text);
+                log_warn!(
+                    "Custom OpenAI connection failed; endpoint_origin={}, status={}",
+                    endpoint_origin,
+                    status
+                );
                 Err(format!("Connection failed with status {}: {}", status, response_text))
             }
         }
-        Err(e) => {
-            log_error!("❌ Custom OpenAI connection test failed: {}", e);
-            if e.is_timeout() {
+        Err(error) => {
+            log_error!(
+                "Custom OpenAI connection request failed; endpoint_origin={}, error_class={}",
+                endpoint_origin,
+                reqwest_error_class(&error)
+            );
+            if error.is_timeout() {
                 Err("Connection timed out. Please check the endpoint URL.".to_string())
-            } else if e.is_connect() {
+            } else if error.is_connect() {
                 Err("Could not connect to endpoint. Please verify the URL is correct and the server is running.".to_string())
             } else {
-                Err(format!("Connection failed: {}", e))
+                Err(format!("Connection failed: {}", error))
             }
         }
     }

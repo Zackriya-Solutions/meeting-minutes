@@ -4,7 +4,7 @@ use std::future::Future;
 use std::path::PathBuf;
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
-use tracing::{info, warn};
+use log::{info, warn};
 
 const REQUEST_TIMEOUT_DURATION: Duration = Duration::from_secs(300);
 
@@ -924,5 +924,3 @@ fn provider_name(provider: &LLMProvider) -> &str {
         LLMProvider::CustomOpenAI => "Custom OpenAI",
     }
 }
-
-

@@ -1,7 +1,7 @@
 use crate::summary::templates;
 use serde::{Deserialize, Serialize};
 use tauri::Runtime;
-use tracing::{info, warn};
+use log::{info, warn};
 
 /// Template metadata for UI display
 #[derive(Debug, Serialize, Deserialize)]
