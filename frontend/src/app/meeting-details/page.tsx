@@ -120,8 +120,8 @@ function MeetingDetailsContent() {
 
   // Sync meeting metadata from pagination hook to meeting details state
   useEffect(() => {
-    if (metadata && (!meetingId || meetingId === 'intro-call')) {
-      // If invalid meeting ID, don't sync
+    if (isLoadingTranscripts || !meetingId || meetingId === 'intro-call' || metadata?.id !== meetingId) {
+      // Keep the current view until the selected meeting's first transcript page is ready.
       return;
     }
 
@@ -141,7 +141,7 @@ function MeetingDetailsContent() {
       // Sync with sidebar context
       setCurrentMeeting({ id: metadata.id, title: metadata.title });
     }
-  }, [metadata, transcripts, meetingId, setCurrentMeeting]);
+  }, [metadata, transcripts, meetingId, isLoadingTranscripts, setCurrentMeeting]);
 
   // Handle transcript loading errors
   useEffect(() => {
@@ -264,7 +264,7 @@ function MeetingDetailsContent() {
   }
 
   // Show loading spinner while initial data loads
-  if ((isLoading || isLoadingTranscripts) || !meetingDetails || meetingDetails.id !== meetingId) {
+  if (isLoading || !meetingDetails || meetingDetails.id !== meetingId) {
     return <div className="flex items-center justify-center h-screen">
       <LoaderIcon className="animate-spin size-6 " />
     </div>;
