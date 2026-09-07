@@ -49,6 +49,8 @@ pub mod anthropic;
 pub mod groq;
 pub mod openrouter;
 pub mod parakeet_engine;
+#[cfg(target_os = "macos")]
+pub mod apple_speech_engine;
 pub mod state;
 pub mod summary;
 pub mod tray;
