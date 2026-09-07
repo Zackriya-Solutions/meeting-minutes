@@ -477,7 +477,12 @@ async fn transcribe_chunk_with_provider<R: Runtime>(
             }
         }
         TranscriptionEngine::Parakeet(parakeet_engine) => {
-            match parakeet_engine.transcribe_audio(speech_samples).await {
+            // Parakeet only supports automatic language detection. Passing the
+            // global language preference here would leak a stale/specific
+            // language (e.g. one set while using Whisper, then switched to
+            // Parakeet) that Parakeet can't honor, so we explicitly transcribe
+            // in auto mode (issue #581).
+            match parakeet_engine.transcribe_audio(speech_samples, None).await {
                 Ok(text) => {
                     let cleaned_text = text.trim().to_string();
                     if cleaned_text.is_empty() {

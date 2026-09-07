@@ -539,8 +539,36 @@ impl ParakeetEngine {
         self.current_model.read().await.is_some()
     }
 
-    /// Transcribe audio samples using the loaded Parakeet model
-    pub async fn transcribe_audio(&self, audio_data: Vec<f32>) -> Result<String> {
+    /// Transcribe audio samples using the loaded Parakeet model.
+    ///
+    /// `language` is accepted for parity with the Whisper and provider-based
+    /// transcription paths (issue #581). The Parakeet model performs automatic
+    /// language detection and has no per-call language input, so a specific
+    /// language cannot be forced here. When a concrete language is requested we
+    /// emit a one-time warning so the behaviour is transparent; use the Whisper
+    /// engine if you need to lock the transcription language.
+    pub async fn transcribe_audio(
+        &self,
+        audio_data: Vec<f32>,
+        language: Option<String>,
+    ) -> Result<String> {
+        // Warn once (not per chunk) when the user selected a concrete language
+        // that Parakeet can't honor, so the logs stay readable.
+        match language.as_deref() {
+            None | Some("auto") | Some("auto-translate") => {}
+            Some(lang) => {
+                static LANGUAGE_WARNING: std::sync::Once = std::sync::Once::new();
+                let lang = lang.to_string();
+                LANGUAGE_WARNING.call_once(move || {
+                    log::warn!(
+                        "Parakeet auto-detects language and cannot lock to '{}'. \
+                         Switch to the Whisper engine to force a fixed transcription language (issue #581).",
+                        lang
+                    );
+                });
+            }
+        }
+
         let mut model_guard = self.current_model.write().await;
         let model = model_guard
             .as_mut()
