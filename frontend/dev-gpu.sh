@@ -167,6 +167,14 @@ echo ""
 echo -e "${CYAN}Starting complete Tauri application...${NC}"
 echo ""
 
+# Fix for relocation R_X86_64_PC32 linker error with CUDA
+export CFLAGS="-fPIC"
+export CXXFLAGS="-fPIC"
+export NVCC_PREPEND_FLAGS="-Xcompiler -fPIC"
+export CMAKE_CUDA_FLAGS="-Xcompiler -fPIC"
+export CMAKE_CXX_FLAGS="-fPIC"
+export CMAKE_C_FLAGS="-fPIC"
+
 $PKG_MGR run tauri:dev
 
 if [ $? -eq 0 ]; then

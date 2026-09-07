@@ -31,8 +31,17 @@ pub async fn list_audio_devices() -> Result<Vec<AudioDevice>> {
     if let Ok(other_devices) = host.devices() {
         for device in other_devices {
             if let Ok(name) = device.name() {
-                if !devices.iter().any(|d| d.name == name) {
-                    devices.push(AudioDevice::new(name, DeviceType::Output));
+                // Only add if not already present as Output
+                // We typically assume devices from host.devices() are at least Outputs, 
+                // but checking for duplicates by name AND type ensures we don't duplicate 
+                // if platform code already added it.
+                if !devices.iter().any(|d| d.name == name && d.device_type == DeviceType::Output) {
+                   // Verify it actually supports output before adding
+                   if let Ok(configs) = device.supported_output_configs() {
+                       if configs.count() > 0 {
+                           devices.push(AudioDevice::new(name, DeviceType::Output));
+                       }
+                   }
                 }
             }
         }

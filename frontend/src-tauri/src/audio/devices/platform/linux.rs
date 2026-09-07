@@ -14,6 +14,13 @@ pub fn configure_linux_audio(host: &cpal::Host) -> Result<Vec<AudioDevice>> {
         }
     }
 
+    // Add output devices
+    for device in host.output_devices()? {
+        if let Ok(name) = device.name() {
+            devices.push(AudioDevice::new(name, DeviceType::Output));
+        }
+    }
+
     // Add PulseAudio monitor sources for system audio
     if let Ok(pulse_host) = cpal::host_from_id(cpal::HostId::Alsa) {
         for device in pulse_host.input_devices()? {
