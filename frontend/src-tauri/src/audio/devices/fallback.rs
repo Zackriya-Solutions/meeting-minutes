@@ -165,6 +165,7 @@ pub fn get_safe_recording_devices() -> Result<(Option<AudioDevice>, Option<Audio
 
 #[cfg(test)]
 mod tests {
+    #[allow(unused_imports)]
     use super::*;
 
     #[test]
