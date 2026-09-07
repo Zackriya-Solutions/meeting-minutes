@@ -5,12 +5,76 @@ use regex::Regex;
 use reqwest::Client;
 use std::path::PathBuf;
 use tokio_util::sync::CancellationToken;
-use log::{debug, error, info};
+use log::{error, info, warn};
 
-// Compile regex once and reuse (significant performance improvement for repeated calls)
-static THINKING_TAG_REGEX: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"(?s)<think(?:ing)?>.*?</think(?:ing)?>").unwrap()
+static THINK_ENVELOPE_REGEX: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"(?is)<think(?:ing)?(?:\s+[^>]*)?>.*?</think(?:ing)?\s*>").unwrap()
 });
+static THINK_MARKER_REGEX: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"(?is)</?think(?:ing)?(?:\s+[^>]*)?>").unwrap());
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CleanedLlmMarkdown {
+    pub markdown: String,
+    pub reasoning_stripped: bool,
+}
+
+pub fn clean_llm_markdown_detailed(raw: &str) -> CleanedLlmMarkdown {
+    let visible = THINK_ENVELOPE_REGEX.replace_all(raw, "");
+    let reasoning_stripped = visible.as_ref() != raw;
+    let trimmed = visible.trim();
+    const PREFIXES: &[&str] = &["```markdown\n", "```\n", "```markdown\r\n", "```\r\n"];
+    const SUFFIX: &str = "```";
+    let markdown = PREFIXES
+        .iter()
+        .find_map(|prefix| {
+            (trimmed.starts_with(prefix) && trimmed.ends_with(SUFFIX))
+                .then(|| trimmed[prefix.len()..trimmed.len() - SUFFIX.len()].trim())
+        })
+        .unwrap_or(trimmed)
+        .to_string();
+
+    if THINK_MARKER_REGEX.is_match(&markdown) {
+        warn!(
+            "LLM output contains an unterminated reasoning marker (raw_len: {}, sanitized_len: {})",
+            raw.len(),
+            markdown.len()
+        );
+    }
+
+    CleanedLlmMarkdown {
+        markdown,
+        reasoning_stripped,
+    }
+}
+
+pub(crate) fn contains_reasoning_marker(markdown: &str) -> bool {
+    THINK_MARKER_REGEX.is_match(markdown)
+}
+
+pub fn require_visible_markdown(stage: &str, cleaned: &CleanedLlmMarkdown) -> Result<(), String> {
+    if contains_reasoning_marker(&cleaned.markdown) {
+        Err(format!(
+            "{stage} contained an unterminated reasoning marker"
+        ))
+    } else if cleaned.markdown.is_empty() {
+        Err(format!(
+            "{stage} returned no visible summary content after reasoning removal"
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+const MAX_CHUNK_ATTEMPTS: usize = 2;
+
+fn should_retry_chunk_failure(
+    attempt: usize,
+    cancellation_token: Option<&CancellationToken>,
+) -> bool {
+    attempt < MAX_CHUNK_ATTEMPTS
+        && !cancellation_token.is_some_and(CancellationToken::is_cancelled)
+}
 
 const ENGLISH_BASE_SUMMARY_INSTRUCTION: &str =
     "**Write the summary/report in English regardless of transcript language; non-English prose is invalid.**";
@@ -59,17 +123,34 @@ fn english_normalization_system_prompt() -> &'static str {
 
 fn english_markdown_after_normalization_result(
     original_markdown: &str,
-    normalization_result: Result<String, String>,
-) -> Result<String, String> {
+    normalization_result: Result<CleanedLlmMarkdown, String>,
+    cancellation_token: Option<&CancellationToken>,
+) -> Result<(CleanedLlmMarkdown, bool), String> {
     match normalization_result {
-        Ok(normalized) => Ok(normalized),
-        Err(e) if e.contains("cancelled") => Err(e),
+        Ok(cleaned) if !cleaned.markdown.is_empty() => Ok((cleaned, false)),
+        Ok(cleaned) => {
+            warn!("English normalization returned no visible content; returning pass-1 markdown");
+            Ok((
+                CleanedLlmMarkdown {
+                    markdown: original_markdown.to_string(),
+                    reasoning_stripped: cleaned.reasoning_stripped,
+                },
+                true,
+            ))
+        }
+        Err(error) if cancellation_token.is_some_and(CancellationToken::is_cancelled) => Err(error),
         Err(e) => {
             error!(
                 "English normalization pass failed; returning pass-1 markdown without hard fail: {}",
                 e
             );
-            Ok(original_markdown.to_string())
+            Ok((
+                CleanedLlmMarkdown {
+                    markdown: original_markdown.to_string(),
+                    reasoning_stripped: false,
+                },
+                true,
+            ))
         }
     }
 }
@@ -136,16 +217,15 @@ fn translation_system_prompt(target_language: &str) -> String {
 
 fn build_chunk_summary_user_prompt(chunk: &str) -> String {
     format!(
-        "{ENGLISH_BASE_SUMMARY_INSTRUCTION}\n\nProvide a concise but comprehensive summary of the following transcript chunk. Capture all key points, decisions, action items, and mentioned individuals.\n\n<transcript_chunk>\n{chunk}\n</transcript_chunk>"
+        "{ENGLISH_BASE_SUMMARY_INSTRUCTION}\n\nProvide a concise but comprehensive summary of the following transcript chunk. Capture all key points, decisions, action items, and mentioned individuals. Do not include reasoning, self-correction, or meta-commentary — output only the summary content.\n\n<transcript_chunk>\n{chunk}\n</transcript_chunk>"
     )
 }
 
 fn build_combine_summary_user_prompt(combined_text: &str) -> String {
     format!(
-        "{ENGLISH_BASE_SUMMARY_INSTRUCTION}\n\nThe following are consecutive summaries of a meeting. Combine them into a single, coherent, and detailed narrative summary that retains all important details, organized logically.\n\n<summaries>\n{combined_text}\n</summaries>"
+        "{ENGLISH_BASE_SUMMARY_INSTRUCTION}\n\nThe following are consecutive summaries of a meeting. Combine them into a single, coherent, and detailed narrative summary that retains all important details, organized logically. Do not include reasoning, self-correction, or meta-commentary — output only the summary content.\n\n<summaries>\n{combined_text}\n</summaries>"
     )
 }
-
 fn build_final_report_system_prompt(
     section_instructions: &str,
     clean_template_markdown: &str,
@@ -160,7 +240,8 @@ fn build_final_report_system_prompt(
 4. Fill each template section per its instructions.
 5. If a section has no relevant info, write "None noted in this section."
 6. Output **only** the completed Markdown report.
-7. If unsure about something, omit it.
+7. Do not include reasoning, thinking, self-correction, decision strategy, or any meta-commentary sections — output only the completed Markdown report.
+8. If unsure about something, omit it.
 
 **SECTION-SPECIFIC INSTRUCTIONS:**
 {section_instructions}
@@ -256,35 +337,6 @@ pub fn chunk_text(text: &str, chunk_size_tokens: usize, overlap_tokens: usize) -
     chunks
 }
 
-/// Cleans markdown output from LLM by removing thinking tags and code fences
-///
-/// # Arguments
-/// * `markdown` - Raw markdown output from LLM
-///
-/// # Returns
-/// Cleaned markdown string
-pub fn clean_llm_markdown_output(markdown: &str) -> String {
-    // Remove <think>...</think> or <thinking>...</thinking> blocks using cached regex
-    let without_thinking = THINKING_TAG_REGEX.replace_all(markdown, "");
-
-    let trimmed = without_thinking.trim();
-
-    // List of possible language identifiers for code blocks
-    const PREFIXES: &[&str] = &["```markdown\n", "```\n"];
-    const SUFFIX: &str = "```";
-
-    for prefix in PREFIXES {
-        if trimmed.starts_with(prefix) && trimmed.ends_with(SUFFIX) {
-            // Extract content between the fences
-            let content = &trimmed[prefix.len()..trimmed.len() - SUFFIX.len()];
-            return content.trim().to_string();
-        }
-    }
-
-    // If no fences found, return the trimmed string
-    trimmed.to_string()
-}
-
 /// Extracts meeting name from the first heading in markdown
 ///
 /// # Arguments
@@ -299,33 +351,17 @@ pub fn extract_meeting_name_from_markdown(markdown: &str) -> Option<String> {
         .map(|line| line.trim_start_matches("# ").trim().to_string())
 }
 
-/// Generates a complete meeting summary with conditional chunking strategy
-///
-/// # Arguments
-/// * `client` - Reqwest HTTP client
-/// * `provider` - LLM provider to use
-/// * `model_name` - Specific model name
-/// * `api_key` - API key for the provider
-/// * `text` - Full transcript text to summarize
-/// * `custom_prompt` - Optional user-provided context
-/// * `template_id` - Template identifier (e.g., "daily_standup", "standard_meeting")
-/// * `token_threshold` - Token limit for single-pass processing (default 4000)
-/// * `ollama_endpoint` - Optional custom Ollama endpoint
-/// * `custom_openai_endpoint` - Optional custom OpenAI-compatible endpoint
-/// * `max_tokens` - Optional max tokens for completion (CustomOpenAI provider)
-/// * `temperature` - Optional temperature (CustomOpenAI provider)
-/// * `top_p` - Optional top_p (CustomOpenAI provider)
-/// * `app_data_dir` - Optional app data directory (BuiltInAI provider)
-/// * `cancellation_token` - Optional cancellation token to stop processing
-/// * `summary_language` - Optional BCP-47 tag (e.g. "en-GB") to force summary output language
-/// * `detected_transcript_language` - Optional detected transcript language BCP-47 tag
-/// * `cached_english` - Optional previously-generated English summary to skip pass 1 when translating
-///
-/// # Returns
-/// Tuple of (final_summary_markdown, english_summary_markdown, number_of_chunks_processed)
-/// where english_summary_markdown is the canonical AI-generated English summary
-/// (equals final_summary_markdown when target language is English)
-pub async fn generate_meeting_summary(
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct GeneratedMeetingSummary {
+    pub final_markdown: String,
+    pub english_markdown: String,
+    pub successful_chunk_count: i64,
+    pub reasoning_stripped: bool,
+    pub normalization_fallback: bool,
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn generate_meeting_summary(
     client: &Client,
     provider: &LLMProvider,
     model_name: &str,
@@ -345,243 +381,177 @@ pub async fn generate_meeting_summary(
     summary_language: Option<&str>,
     detected_transcript_language: Option<&str>,
     cached_english: Option<&str>,
-) -> Result<(String, String, i64), String> {
-    if let Some(token) = cancellation_token {
-        if token.is_cancelled() {
-            return Err("Summary generation was cancelled".to_string());
-        }
+) -> Result<GeneratedMeetingSummary, String> {
+    if cancellation_token.is_some_and(CancellationToken::is_cancelled) {
+        return Err("Summary generation was cancelled".to_string());
     }
-    info!(
-        "Starting summary generation with provider: {:?}, model: {}",
-        provider, model_name
-    );
+    info!("Starting summary generation with provider: {:?}, model: {}", provider, model_name);
 
     let total_tokens = rough_token_count(text);
-    info!("Transcript length: {} tokens", total_tokens);
-
-    let (mut english_markdown, successful_chunk_count) = if let Some(cached) =
-        resolve_cached_english(cached_english, summary_language)
-    {
-        info!("✓ Using cached English summary ({} chars), skipping pass 1", cached.len());
-        (cached.to_string(), 1_i64)
-    } else {
-        let content_to_summarize: String;
-        let successful_chunk_count: i64;
-
-        // Strategy: Use single-pass for cloud providers or short transcripts
-        // Use multi-level chunking for Ollama/BuiltInAI with long transcripts
-        // Note: CustomOpenAI is treated like cloud providers (unlimited context)
-        if (provider != &LLMProvider::Ollama && provider != &LLMProvider::BuiltInAI) || total_tokens < token_threshold {
-            info!(
-                "Using single-pass summarization (tokens: {}, threshold: {})",
-                total_tokens, token_threshold
-            );
-            content_to_summarize = text.to_string();
-            successful_chunk_count = 1;
+    let (mut english_markdown, successful_chunk_count, mut reasoning_stripped) =
+        if let Some(cached) = resolve_cached_english(cached_english, summary_language) {
+            info!("✓ Using cached English summary ({} chars), skipping pass 1", cached.len());
+            (cached.to_string(), 1_i64, false)
         } else {
-            info!(
-                "Using multi-level summarization (tokens: {} exceeds threshold: {})",
-                total_tokens, token_threshold
-            );
+            let mut content_to_summarize = text.to_string();
+            let successful_chunk_count;
+            let mut stage_reasoning_stripped = false;
 
-            // Reserve 300 tokens for prompt overhead
-            let chunks = chunk_text(text, token_threshold - 300, 100);
-            let num_chunks = chunks.len();
-            info!("Split transcript into {} chunks", num_chunks);
-
-            let mut chunk_summaries = Vec::new();
-            let system_prompt_chunk = "You are an expert meeting summarizer.";
-
-            for (i, chunk) in chunks.iter().enumerate() {
-                // Check for cancellation before processing each chunk
-                if let Some(token) = cancellation_token {
-                    if token.is_cancelled() {
-                        info!("Summary generation cancelled during chunk {}/{}", i + 1, num_chunks);
+            if (provider == &LLMProvider::Ollama || provider == &LLMProvider::BuiltInAI)
+                && total_tokens >= token_threshold
+            {
+                let chunks = chunk_text(text, token_threshold - 300, 100);
+                let num_chunks = chunks.len();
+                let mut chunk_summaries = Vec::with_capacity(num_chunks);
+                for (index, chunk) in chunks.iter().enumerate() {
+                    if cancellation_token.is_some_and(CancellationToken::is_cancelled) {
                         return Err("Summary generation was cancelled".to_string());
                     }
+                    let prompt = build_chunk_summary_user_prompt(chunk);
+                    for attempt in 1..=MAX_CHUNK_ATTEMPTS {
+                        let result = match generate_summary(
+                            client, provider, model_name, api_key, "You are an expert meeting summarizer.",
+                            &prompt, ollama_endpoint, custom_openai_endpoint, max_tokens, temperature,
+                            top_p, app_data_dir, cancellation_token,
+                        )
+                        .await
+                        {
+                            Ok(completion) => {
+                                let cleaned = clean_llm_markdown_detailed(&completion.content);
+                                stage_reasoning_stripped |=
+                                    completion.reasoning_stripped || cleaned.reasoning_stripped;
+                                require_visible_markdown("Summary chunk", &cleaned).map(|()| cleaned)
+                            }
+                            Err(error) => Err(error),
+                        };
+
+                        match result {
+                            Ok(cleaned) => {
+                                chunk_summaries.push(cleaned.markdown);
+                                break;
+                            }
+                            Err(error)
+                                if cancellation_token.is_some_and(CancellationToken::is_cancelled) =>
+                            {
+                                return Err("Summary generation was cancelled".to_string());
+                            }
+                            Err(error) if should_retry_chunk_failure(attempt, cancellation_token) => {
+                                warn!(
+                                    "Failed processing chunk {}/{} on attempt {}/{}: {}; retrying",
+                                    index + 1,
+                                    num_chunks,
+                                    attempt,
+                                    MAX_CHUNK_ATTEMPTS,
+                                    error
+                                );
+                            }
+                            Err(error) => {
+                                error!(
+                                    "Failed processing chunk {}/{} on attempt {}/{}: {}",
+                                    index + 1,
+                                    num_chunks,
+                                    attempt,
+                                    MAX_CHUNK_ATTEMPTS,
+                                    error
+                                );
+                                return Err(format!(
+                                    "Summary generation could not complete because transcript section {} of {} failed after {} attempts: {}. Please retry.",
+                                    index + 1,
+                                    num_chunks,
+                                    MAX_CHUNK_ATTEMPTS,
+                                    error
+                                ));
+                            }
+                        }
+                    }
                 }
+                if chunk_summaries.is_empty() {
+                    return Err("Multi-level summarization failed: No chunks were processed successfully.".to_string());
+                }
+                successful_chunk_count = chunk_summaries.len() as i64;
+                content_to_summarize = if chunk_summaries.len() == 1 {
+                    chunk_summaries.remove(0)
+                } else {
+                    let prompt = build_combine_summary_user_prompt(&chunk_summaries.join("\n---\n"));
+                    let completion = generate_summary(
+                        client, provider, model_name, api_key,
+                        "You are an expert at synthesizing meeting summaries.", &prompt,
+                        ollama_endpoint, custom_openai_endpoint, max_tokens, temperature, top_p,
+                        app_data_dir, cancellation_token,
+                    )
+                    .await?;
+                    let cleaned = clean_llm_markdown_detailed(&completion.content);
+                    stage_reasoning_stripped |=
+                        completion.reasoning_stripped || cleaned.reasoning_stripped;
+                    require_visible_markdown("Combined summary", &cleaned)?;
+                    cleaned.markdown
+                };
+            } else {
+                successful_chunk_count = 1;
+            }
 
-                debug!("Processing summary chunk {}/{}", i + 1, num_chunks);
-                let user_prompt_chunk = build_chunk_summary_user_prompt(chunk);
+            info!("Generating final markdown report with template: {}", template_id);
+            let final_system_prompt = build_final_report_system_prompt(
+                &template.to_section_instructions(),
+                &template.to_markdown_structure(),
+            );
+            let mut final_user_prompt =
+                format!("<transcript_chunks>\n{content_to_summarize}\n</transcript_chunks>\n");
+            if !custom_prompt.is_empty() {
+                final_user_prompt.push_str("\n\nUser Provided Context:\n\n<user_context>\n");
+                final_user_prompt.push_str(custom_prompt);
+                final_user_prompt.push_str("\n</user_context>");
+            }
+            let completion = generate_summary(
+                client, provider, model_name, api_key, &final_system_prompt, &final_user_prompt,
+                ollama_endpoint, custom_openai_endpoint, max_tokens, temperature, top_p,
+                app_data_dir, cancellation_token,
+            )
+            .await?;
+            let cleaned = clean_llm_markdown_detailed(&completion.content);
+            stage_reasoning_stripped |= completion.reasoning_stripped || cleaned.reasoning_stripped;
+            require_visible_markdown("Final summary", &cleaned)?;
+            (cleaned.markdown, successful_chunk_count, stage_reasoning_stripped)
+        };
 
-                match generate_summary(
-                    client,
-                    provider,
-                    model_name,
-                    api_key,
-                    system_prompt_chunk,
-                    &user_prompt_chunk,
-                    ollama_endpoint,
-                    custom_openai_endpoint,
-                    max_tokens,
-                    temperature,
-                    top_p,
-                    app_data_dir,
-                    cancellation_token,
+    let (final_markdown, normalization_fallback) =
+        match resolve_final_language_action(summary_language, detected_transcript_language) {
+            FinalLanguageAction::Translate(language) => {
+                let translated = translate_markdown(
+                    client, provider, model_name, api_key, &english_markdown, language,
+                    ollama_endpoint, custom_openai_endpoint, max_tokens, temperature, top_p,
+                    app_data_dir, cancellation_token,
                 )
                 .await
-                {
-                    Ok(summary) => {
-                        chunk_summaries.push(summary);
-                        debug!("Summary chunk {}/{} processed", i + 1, num_chunks);
-                    }
-                    Err(e) => {
-                        // Check if error is due to cancellation
-                        if e.contains("cancelled") {
-                            return Err(e);
-                        }
-                        error!("Failed processing chunk {}/{}: {}", i + 1, num_chunks, e);
-                    }
-                }
+                .map_err(|error| format!("Translation to {language} failed: {error}"))?;
+                reasoning_stripped |= translated.reasoning_stripped;
+                (translated.markdown, false)
             }
-
-            if chunk_summaries.is_empty() {
-                return Err(
-                    "Multi-level summarization failed: No chunks were processed successfully."
-                        .to_string(),
-                );
-            }
-
-            successful_chunk_count = chunk_summaries.len() as i64;
-            info!(
-                "Successfully processed {} out of {} chunks",
-                successful_chunk_count, num_chunks
-            );
-
-            // Combine chunk summaries if multiple chunks
-            content_to_summarize = if chunk_summaries.len() > 1 {
-                info!(
-                    "Combining {} chunk summaries into cohesive summary",
-                    chunk_summaries.len()
-                );
-                let combined_text = chunk_summaries.join("\n---\n");
-                let system_prompt_combine = "You are an expert at synthesizing meeting summaries.";
-                let user_prompt_combine = build_combine_summary_user_prompt(&combined_text);
-                generate_summary(
-                    client,
-                    provider,
-                    model_name,
-                    api_key,
-                    system_prompt_combine,
-                    &user_prompt_combine,
-                    ollama_endpoint,
-                    custom_openai_endpoint,
-                    max_tokens,
-                    temperature,
-                    top_p,
-                    app_data_dir,
-                    cancellation_token,
-                )
-                .await?
-            } else {
-                chunk_summaries.remove(0)
-            };
-        }
-
-        info!("Generating final markdown report with template: {}", template_id);
-
-        // Generate markdown structure and section instructions using template methods
-        let clean_template_markdown = template.to_markdown_structure();
-        let section_instructions = template.to_section_instructions();
-
-        let final_system_prompt =
-            build_final_report_system_prompt(&section_instructions, &clean_template_markdown);
-
-        let mut final_user_prompt = format!(
-            "<transcript_chunks>\n{content_to_summarize}\n</transcript_chunks>\n"
-        );
-
-        if !custom_prompt.is_empty() {
-            final_user_prompt.push_str("\n\nUser Provided Context:\n\n<user_context>\n");
-            final_user_prompt.push_str(custom_prompt);
-            final_user_prompt.push_str("\n</user_context>");
-        }
-
-        // Check cancellation before final summary generation
-        if let Some(token) = cancellation_token {
-            if token.is_cancelled() {
-                info!("Summary generation cancelled before final summary");
-                return Err("Summary generation was cancelled".to_string());
-            }
-        }
-
-        let raw_markdown = generate_summary(
-            client,
-            provider,
-            model_name,
-            api_key,
-            &final_system_prompt,
-            &final_user_prompt,
-            ollama_endpoint,
-            custom_openai_endpoint,
-            max_tokens,
-            temperature,
-            top_p,
-            app_data_dir,
-            cancellation_token,
-        )
-        .await?;
-
-        let english_markdown = clean_llm_markdown_output(&raw_markdown);
-        info!("Summary pass completed ({} chars)", english_markdown.len());
-
-        (english_markdown, successful_chunk_count)
-    };
-
-    let final_markdown = match resolve_final_language_action(summary_language, detected_transcript_language) {
-        FinalLanguageAction::Translate(name) => {
-            match translate_markdown(
-                client,
-                provider,
-                model_name,
-                api_key,
-                &english_markdown,
-                name,
-                ollama_endpoint,
-                custom_openai_endpoint,
-                max_tokens,
-                temperature,
-                top_p,
-                app_data_dir,
-                cancellation_token,
-            )
-            .await
-            {
-                Ok(translated) => translated,
-                Err(e) => return Err(format!("Translation to {} failed: {}", name, e)),
-            }
-        }
-        FinalLanguageAction::NormalizeEnglish => {
-            info!(
-                "English target with detected transcript language {:?}; running soft English normalization",
-                detected_transcript_language
-            );
-            let normalized = english_markdown_after_normalization_result(
-                &english_markdown,
-                normalize_markdown_to_english(
-                    client,
-                    provider,
-                    model_name,
-                    api_key,
+            FinalLanguageAction::NormalizeEnglish => {
+                let (normalized, fallback) = english_markdown_after_normalization_result(
                     &english_markdown,
-                    ollama_endpoint,
-                    custom_openai_endpoint,
-                    max_tokens,
-                    temperature,
-                    top_p,
-                    app_data_dir,
+                    normalize_markdown_to_english(
+                        client, provider, model_name, api_key, &english_markdown, ollama_endpoint,
+                        custom_openai_endpoint, max_tokens, temperature, top_p, app_data_dir,
+                        cancellation_token,
+                    )
+                    .await,
                     cancellation_token,
-                )
-                .await,
-            )?;
-            english_markdown = normalized.clone();
-            normalized
-        }
-        FinalLanguageAction::ReturnEnglish => english_markdown.clone(),
-    };
+                )?;
+                reasoning_stripped |= normalized.reasoning_stripped;
+                english_markdown = normalized.markdown.clone();
+                (normalized.markdown, fallback)
+            }
+            FinalLanguageAction::ReturnEnglish => (english_markdown.clone(), false),
+        };
 
-    info!("Summary generation completed successfully");
-    Ok((final_markdown, english_markdown, successful_chunk_count))
+    Ok(GeneratedMeetingSummary {
+        final_markdown,
+        english_markdown,
+        successful_chunk_count,
+        reasoning_stripped,
+        normalization_fallback,
+    })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -600,32 +570,19 @@ async fn run_markdown_transform(
     top_p: Option<f32>,
     app_data_dir: Option<&PathBuf>,
     cancellation_token: Option<&CancellationToken>,
-) -> Result<String, String> {
-    if let Some(token) = cancellation_token {
-        if token.is_cancelled() {
-            return Err("Summary generation was cancelled".to_string());
-        }
+) -> Result<CleanedLlmMarkdown, String> {
+    if cancellation_token.is_some_and(CancellationToken::is_cancelled) {
+        return Err("Summary generation was cancelled".to_string());
     }
-
-    let raw = generate_summary(
-        client,
-        provider,
-        model_name,
-        api_key,
-        system_prompt,
-        user_prompt,
-        ollama_endpoint,
-        custom_openai_endpoint,
-        max_tokens,
-        temperature,
-        top_p,
-        app_data_dir,
-        cancellation_token,
+    let completion = generate_summary(
+        client, provider, model_name, api_key, system_prompt, user_prompt, ollama_endpoint,
+        custom_openai_endpoint, max_tokens, temperature, top_p, app_data_dir, cancellation_token,
     )
     .await
-    .map_err(|e| format!("{failure_label} failed: {e}"))?;
-
-    Ok(clean_llm_markdown_output(&raw))
+    .map_err(|error| format!("{failure_label} failed: {error}"))?;
+    let mut cleaned = clean_llm_markdown_detailed(&completion.content);
+    cleaned.reasoning_stripped |= completion.reasoning_stripped;
+    Ok(cleaned)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -643,31 +600,19 @@ async fn translate_markdown(
     top_p: Option<f32>,
     app_data_dir: Option<&PathBuf>,
     cancellation_token: Option<&CancellationToken>,
-) -> Result<String, String> {
-    info!("Translation pass: target language = {}", target_language);
-
+) -> Result<CleanedLlmMarkdown, String> {
     let system_prompt = translation_system_prompt(target_language);
     let user_prompt = format!(
         "Translate the following Markdown document into {target_language}. Return ONLY the translated Markdown, nothing else.\n\n<document>\n{english_markdown}\n</document>"
     );
-
-    run_markdown_transform(
-        client,
-        provider,
-        model_name,
-        api_key,
-        &system_prompt,
-        &user_prompt,
-        "Translation pass",
-        ollama_endpoint,
-        custom_openai_endpoint,
-        max_tokens,
-        temperature,
-        top_p,
-        app_data_dir,
+    let cleaned = run_markdown_transform(
+        client, provider, model_name, api_key, &system_prompt, &user_prompt, "Translation pass",
+        ollama_endpoint, custom_openai_endpoint, max_tokens, temperature, top_p, app_data_dir,
         cancellation_token,
     )
-    .await
+    .await?;
+    require_visible_markdown("Translation", &cleaned)?;
+    Ok(cleaned)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -684,28 +629,14 @@ async fn normalize_markdown_to_english(
     top_p: Option<f32>,
     app_data_dir: Option<&PathBuf>,
     cancellation_token: Option<&CancellationToken>,
-) -> Result<String, String> {
-    info!("English normalization pass: preserving Markdown structure");
-
+) -> Result<CleanedLlmMarkdown, String> {
     let user_prompt = format!(
         "Convert the following Markdown document into English. Return ONLY the English Markdown, nothing else.\n\n<document>\n{markdown}\n</document>"
     );
-
     run_markdown_transform(
-        client,
-        provider,
-        model_name,
-        api_key,
-        english_normalization_system_prompt(),
-        &user_prompt,
-        "English normalization pass",
-        ollama_endpoint,
-        custom_openai_endpoint,
-        max_tokens,
-        temperature,
-        top_p,
-        app_data_dir,
-        cancellation_token,
+        client, provider, model_name, api_key, english_normalization_system_prompt(), &user_prompt,
+        "English normalization pass", ollama_endpoint, custom_openai_endpoint, max_tokens,
+        temperature, top_p, app_data_dir, cancellation_token,
     )
     .await
 }
@@ -762,6 +693,24 @@ mod tests {
     }
 
     #[test]
+    fn final_report_prompt_forbids_reasoning_output() {
+        let prompt = build_final_report_system_prompt("Fill", "# Title");
+        assert!(prompt.to_lowercase().contains("no reasoning")
+            || prompt.contains("meta-commentary")
+            || prompt.contains("self-correction"));
+    }
+
+    #[test]
+    fn chunk_prompt_forbids_reasoning_output() {
+        let prompt = build_chunk_summary_user_prompt("x");
+        assert!(
+            prompt.contains("Do not include reasoning")
+                || prompt.contains("meta-commentary")
+                || prompt.contains("self-correction")
+        );
+    }
+
+    #[test]
     fn english_base_instruction_marks_non_english_prose_invalid_without_bloat() {
         assert!(ENGLISH_BASE_SUMMARY_INSTRUCTION.contains("non-English prose is invalid"));
         assert!(ENGLISH_BASE_SUMMARY_INSTRUCTION.len() <= 120);
@@ -800,26 +749,42 @@ mod tests {
     }
 
     #[test]
-    fn failed_english_normalization_falls_back_to_original_markdown() {
+    fn normalization_fallback_preserves_markdown_and_observed_reasoning() {
         assert_eq!(
             english_markdown_after_normalization_result(
                 "# Original",
-                Err("normalization failed".to_string())
+                Ok(CleanedLlmMarkdown {
+                    markdown: String::new(),
+                    reasoning_stripped: true,
+                }),
+                None,
             )
             .unwrap(),
-            "# Original"
+            (
+                CleanedLlmMarkdown {
+                    markdown: "# Original".to_string(),
+                    reasoning_stripped: true,
+                },
+                true,
+            )
         );
+        let cancellation_token = CancellationToken::new();
+        cancellation_token.cancel();
+        assert!(english_markdown_after_normalization_result(
+            "# Original",
+            Err("Summary generation was cancelled".to_string()),
+            Some(&cancellation_token),
+        )
+        .is_err());
     }
 
     #[test]
-    fn cancelled_english_normalization_is_not_swallowed() {
-        assert!(
-            english_markdown_after_normalization_result(
-                "# Original",
-                Err("Summary generation was cancelled".to_string())
-            )
-            .is_err()
-        );
+    fn chunk_retries_once_unless_cancelled() {
+        assert!(should_retry_chunk_failure(1, None));
+        assert!(!should_retry_chunk_failure(2, None));
+        let cancellation_token = CancellationToken::new();
+        cancellation_token.cancel();
+        assert!(!should_retry_chunk_failure(1, Some(&cancellation_token)));
     }
 
     // resolve_cached_english matrix -------------------------------------------
@@ -880,5 +845,76 @@ mod tests {
     fn underscore_locale_variant_returns_none() {
         // OS locale APIs (notably macOS) may emit "en_GB" with underscore.
         assert_eq!(resolve_cached_english(Some("body"), Some("en_GB")), None);
+    }
+
+    #[test]
+    fn cleaner_removes_closed_reasoning_envelopes_everywhere() {
+        let cleaned = clean_llm_markdown_detailed(
+            "Intro\n<think>private</think>\n# Meeting\nHello\n<thinking>also private</thinking>\nTail",
+        );
+        assert!(cleaned.reasoning_stripped);
+        assert!(!cleaned.markdown.contains("<think"));
+        assert!(!cleaned.markdown.contains("<thinking"));
+        assert!(cleaned.markdown.contains("Intro"));
+        assert!(cleaned.markdown.contains("# Meeting"));
+        assert!(cleaned.markdown.contains("Tail"));
+
+        let fenced = clean_llm_markdown_detailed("```\n<think>private</think>\nvisible\n```");
+        assert_eq!(fenced.markdown, "visible");
+        assert!(fenced.reasoning_stripped);
+
+        let attributed = clean_llm_markdown_detailed(
+            "Visible\n<thinking class=\"internal\">private</thinking>\nTail",
+        );
+        assert!(attributed.reasoning_stripped);
+        assert!(!attributed.markdown.contains("private"));
+        assert!(attributed.markdown.contains("Visible"));
+        assert!(attributed.markdown.contains("Tail"));
+
+        let literal = clean_llm_markdown_detailed("<thinker>Visible</thinker>");
+        assert!(!literal.reasoning_stripped);
+        assert_eq!(literal.markdown, "<thinker>Visible</thinker>");
+    }
+
+    #[test]
+    fn cleaner_rejects_unterminated_reasoning_markers() {
+        for raw in [
+            "Visible\n<think>private",
+            "Visible\n</thinking>",
+            "Visible\n<think class=\"internal\">private",
+        ] {
+            let cleaned = clean_llm_markdown_detailed(raw);
+            assert_eq!(
+                require_visible_markdown("Final summary", &cleaned),
+                Err("Final summary contained an unterminated reasoning marker".to_string())
+            );
+        }
+    }
+
+    #[test]
+    fn reasoning_only_and_empty_fences_fail_visible_content_guard() {
+        let reasoning_only = clean_llm_markdown_detailed("<think>private</think>");
+        assert_eq!(
+            require_visible_markdown("Final summary", &reasoning_only),
+            Err("Final summary returned no visible summary content after reasoning removal".to_string())
+        );
+        for raw in ["```\n```", "```markdown\n```", "```\r\n```", "```markdown\r\n```"] {
+            let empty_fence = clean_llm_markdown_detailed(raw);
+            assert_eq!(empty_fence.markdown, "");
+            assert_eq!(
+                require_visible_markdown("Translation", &empty_fence),
+                Err("Translation returned no visible summary content after reasoning removal".to_string())
+            );
+        }
+    }
+
+    #[test]
+    fn cleaner_strips_outer_crlf_fence_without_normalizing_inner_markdown() {
+        let markdown = "# Heading\r\n\r\n```rust\r\nlet x = 1;\r\n```";
+        let wrapped = format!("```\r\n{markdown}\r\n```");
+        let cleaned = clean_llm_markdown_detailed(&wrapped);
+        assert_eq!(cleaned.markdown, markdown);
+        assert!(!cleaned.reasoning_stripped);
+        assert_eq!(clean_llm_markdown_detailed(markdown).markdown, markdown);
     }
 }

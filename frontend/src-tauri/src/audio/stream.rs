@@ -456,6 +456,18 @@ impl AudioStreamManager {
         }
     }
 
+    /// Take the microphone stream OUT of the manager, keeping system audio
+    /// running. The caller stops/drops it OUTSIDE any lock — a cpal teardown
+    /// of a dead BT device can stall and must not block a held mutex.
+    pub fn take_mic_stream(&mut self) -> Option<AudioStream> {
+        self.microphone_stream.take()
+    }
+
+    /// Set a new microphone stream (used after hot-swap creation).
+    pub fn set_mic_stream(&mut self, stream: AudioStream) {
+        self.microphone_stream = Some(stream);
+    }
+
     /// Get stream count
     pub fn active_stream_count(&self) -> usize {
         let mut count = 0;

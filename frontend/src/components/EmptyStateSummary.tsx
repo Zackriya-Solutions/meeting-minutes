@@ -14,9 +14,15 @@ interface EmptyStateSummaryProps {
   onGenerate: () => void;
   hasModel: boolean;
   isGenerating?: boolean;
+  error?: string | null;
 }
 
-export function EmptyStateSummary({ onGenerate, hasModel, isGenerating = false }: EmptyStateSummaryProps) {
+export function EmptyStateSummary({
+  onGenerate,
+  hasModel,
+  isGenerating = false,
+  error = null,
+}: EmptyStateSummaryProps) {
   return (
     <motion.div
       initial={{ opacity: 0, scale: 0.95 }}
@@ -32,6 +38,12 @@ export function EmptyStateSummary({ onGenerate, hasModel, isGenerating = false }
         Generate an AI-powered summary of your meeting transcript to get key points, action items, and decisions.
       </p>
 
+      {error && (
+        <p role="alert" className="mb-4 max-w-md rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
+          {error}
+        </p>
+      )}
+
       <TooltipProvider>
         <Tooltip>
           <TooltipTrigger asChild>
@@ -42,7 +54,7 @@ export function EmptyStateSummary({ onGenerate, hasModel, isGenerating = false }
                 className="gap-2"
               >
                 <Sparkles className="w-4 h-4" />
-                {isGenerating ? 'Generating...' : 'Generate Summary'}
+                {isGenerating ? 'Generating...' : error ? 'Retry summary' : 'Generate Summary'}
               </Button>
             </div>
           </TooltipTrigger>
