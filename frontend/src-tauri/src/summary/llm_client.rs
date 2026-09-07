@@ -162,9 +162,12 @@ pub async fn generate_summary(
             header::HeaderMap::new(),
         ),
         LLMProvider::Ollama => {
-            let host = ollama_endpoint
-                .map(|s| s.to_string())
+            let mut host = ollama_endpoint
+                .map(|s| s.trim().trim_end_matches('/').to_string())
                 .unwrap_or_else(|| "http://localhost:11434".to_string());
+            if host.ends_with("/v1") {
+                host = host[..host.len() - 3].trim_end_matches('/').to_string();
+            }
             (
                 format!("{}/v1/chat/completions", host),
                 header::HeaderMap::new(),
@@ -173,8 +176,14 @@ pub async fn generate_summary(
         LLMProvider::CustomOpenAI => {
             let endpoint = custom_openai_endpoint
                 .ok_or_else(|| "Custom OpenAI endpoint not configured".to_string())?;
+            let base = endpoint.trim().trim_end_matches('/');
+            let url = if base.ends_with("/chat/completions") {
+                base.to_string()
+            } else {
+                format!("{}/chat/completions", base)
+            };
             (
-                format!("{}/chat/completions", endpoint.trim_end_matches('/')),
+                url,
                 header::HeaderMap::new(),
             )
         }
@@ -200,11 +209,11 @@ pub async fn generate_summary(
         }
     };
 
-    // Add authorization header for non-Claude providers
-    if provider != &LLMProvider::Claude {
+    // Add authorization header for non-Claude providers if API key is present
+    if provider != &LLMProvider::Claude && !api_key.trim().is_empty() {
         headers.insert(
             header::AUTHORIZATION,
-            format!("Bearer {}", api_key)
+            format!("Bearer {}", api_key.trim())
                 .parse()
                 .map_err(|_| "Invalid authorization header".to_string())?,
         );

@@ -218,9 +218,24 @@ pub fn get_available_models() -> Vec<ModelDef> {
     ]
 }
 
-/// Get a specific model by name
+/// Get a specific model by name (supports identifiers like 'qwen3.5:4b' and display names like 'Qwen 3.5 4B')
 pub fn get_model_by_name(name: &str) -> Option<ModelDef> {
-    get_available_models().into_iter().find(|m| m.name == name)
+    let clean = name.trim().to_lowercase();
+    let normalized: String = clean.chars().filter(|c| c.is_alphanumeric() || *c == ':').collect();
+
+    get_available_models().into_iter().find(|m| {
+        let m_name_clean = m.name.to_lowercase();
+        let m_name_norm: String = m_name_clean.chars().filter(|c| c.is_alphanumeric() || *c == ':').collect();
+        let m_disp_clean = m.display_name.to_lowercase();
+
+        m.name == name
+            || m_name_clean == clean
+            || m_disp_clean == clean
+            || m_name_norm == normalized
+            || (!normalized.is_empty() && (normalized.starts_with(&m_name_norm) || m_name_norm.starts_with(&normalized)))
+            || m_disp_clean.contains(&clean)
+            || clean.contains(&m_name_clean)
+    })
 }
 
 /// Get the default model (first in list)
