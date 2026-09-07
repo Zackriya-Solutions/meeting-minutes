@@ -63,7 +63,8 @@ pub fn start_transcription_task<R: Runtime>(
                 let _ = app.emit("transcription-error", serde_json::json!({
                     "error": e,
                     "userMessage": "Recording failed: Unable to initialize speech recognition. Please check your model settings.",
-                    "actionable": true
+                    "actionable": true,
+                    "phase": "active"
                 }));
                 return;
             }
@@ -468,7 +469,8 @@ async fn transcribe_chunk_with_provider<R: Runtime>(
                         &serde_json::json!({
                             "error": transcription_error.to_string(),
                             "userMessage": format!("Transcription failed: {}", transcription_error),
-                            "actionable": false
+                            "actionable": false,
+                            "phase": "active"
                         }),
                     );
 
@@ -504,7 +506,8 @@ async fn transcribe_chunk_with_provider<R: Runtime>(
                         &serde_json::json!({
                             "error": transcription_error.to_string(),
                             "userMessage": format!("Transcription failed: {}", transcription_error),
-                            "actionable": false
+                            "actionable": false,
+                            "phase": "active"
                         }),
                     );
 
@@ -552,7 +555,8 @@ async fn transcribe_chunk_with_provider<R: Runtime>(
                         &serde_json::json!({
                             "error": e.to_string(),
                             "userMessage": format!("Transcription failed: {}", e),
-                            "actionable": false
+                            "actionable": false,
+                            "phase": "active"
                         }),
                     );
 

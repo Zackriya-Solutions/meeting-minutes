@@ -368,6 +368,13 @@ jobs:
 
           echo "Copied llama-helper to frontend/src-tauri/binaries/llama-helper-${{ matrix.target }}${EXT}"
           ls -la frontend/src-tauri/binaries/
+      - name: Cache Windows ONNX Runtime
+        if: contains(matrix.platform, 'windows')
+        uses: actions/cache@v4
+        with:
+          path: frontend/src-tauri/binaries/onnxruntime
+          key: ${{ runner.os }}-onnxruntime-${{ matrix.target }}-${{ hashFiles('frontend/src-tauri/build/onnxruntime.rs') }}
+
 
       # Build step (with code signing)
       - name: Build Tauri app (with code signing)

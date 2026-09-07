@@ -14,6 +14,7 @@ use tauri::{AppHandle, Emitter, Manager, Runtime};
 use tokio::task::JoinHandle;
 
 use super::{
+    recording_manager::RecordingStartError,
     parse_audio_device,
     default_input_device,   // Get default microphone
     default_output_device,  // Get default system audio
@@ -105,6 +106,10 @@ static TRANSCRIPTION_TASK: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
 // Listener ID for proper cleanup - prevents microphone from staying active after recording stops
 static TRANSCRIPT_LISTENER_ID: Mutex<Option<tauri::EventId>> = Mutex::new(None);
 
+const TRANSCRIPTION_RUNTIME_START_ERROR_CODE: &str =
+    "TRANSCRIPTION_RUNTIME_INITIALIZATION_FAILED";
+const TRANSCRIPTION_RUNTIME_USER_MESSAGE: &str = "Speech recognition could not initialize. Restart Meetily. If the problem continues, repair or reinstall the app.";
+
 // ============================================================================
 // PUBLIC TYPES
 // ============================================================================
@@ -119,6 +124,30 @@ pub struct TranscriptionStatus {
     pub chunks_in_queue: usize,
     pub is_processing: bool,
     pub last_activity_ms: u64,
+}
+
+fn map_recording_start_error<R: Runtime>(
+    app: &AppHandle<R>,
+    error: RecordingStartError,
+) -> String {
+    crate::tray::update_tray_menu(app);
+
+    match error {
+        RecordingStartError::TranscriptionRuntime(source) => {
+            error!("Failed to initialize speech recognition: {source:#}");
+            let error = RecordingStartError::TranscriptionRuntime(source);
+            if let Err(emit_error) = app.emit("transcription-error", serde_json::json!({
+                "error": error.to_string(),
+                "userMessage": TRANSCRIPTION_RUNTIME_USER_MESSAGE,
+                "actionable": false,
+                "phase": "startup"
+            })) {
+                error!("Failed to emit transcription runtime startup error: {emit_error}");
+            }
+            TRANSCRIPTION_RUNTIME_START_ERROR_CODE.to_string()
+        }
+        RecordingStartError::Other(error) => format!("Failed to start recording: {error}"),
+    }
 }
 
 // ============================================================================
@@ -265,6 +294,13 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
         return Err("Recording already in progress".to_string());
     }
 
+    if let Err(error) = crate::ensure_onnx_runtime_available() {
+        return Err(map_recording_start_error(
+            &app,
+            RecordingStartError::TranscriptionRuntime(error),
+        ));
+    }
+
     // Validate that transcription models are available before starting recording
     info!("🔍 Validating transcription model availability before starting recording...");
     if let Err(validation_error) = transcription::validate_transcription_model_ready(&app).await {
@@ -274,8 +310,9 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
         // (download progress is already shown in top-right toast)
         let _ = app.emit("transcription-error", serde_json::json!({
             "error": validation_error,
-            "userMessage": "Recording cannot start: Transcription model is still downloading. Please wait for the download to complete.",
-            "actionable": false
+            "userMessage": format!("Recording cannot start: {}", validation_error),
+            "actionable": false,
+            "phase": "startup"
         }));
 
         return Err(validation_error);
@@ -332,7 +369,7 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
     let transcription_receiver = manager
         .start_recording(microphone_device, system_device, auto_save)
         .await
-        .map_err(|e| format!("Failed to start recording: {}", e))?;
+        .map_err(|error| map_recording_start_error(&app, error))?;
 
     // Take the device event receiver BEFORE storing manager globally.
     // A background task will process device events (hot-swap) without frontend polling.
@@ -440,6 +477,13 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
         return Err("Recording already in progress".to_string());
     }
 
+    if let Err(error) = crate::ensure_onnx_runtime_available() {
+        return Err(map_recording_start_error(
+            &app,
+            RecordingStartError::TranscriptionRuntime(error),
+        ));
+    }
+
     // Validate that transcription models are available before starting recording
     info!("🔍 Validating transcription model availability before starting recording...");
     if let Err(validation_error) = transcription::validate_transcription_model_ready(&app).await {
@@ -449,8 +493,9 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
         // (download progress is already shown in top-right toast)
         let _ = app.emit("transcription-error", serde_json::json!({
             "error": validation_error,
-            "userMessage": "Recording cannot start: Transcription model is still downloading. Please wait for the download to complete.",
-            "actionable": false
+            "userMessage": format!("Recording cannot start: {}", validation_error),
+            "actionable": false,
+            "phase": "startup"
         }));
 
         return Err(validation_error);
@@ -504,7 +549,7 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
     let transcription_receiver = manager
         .start_recording(mic_device, system_device, auto_save)
         .await
-        .map_err(|e| format!("Failed to start recording: {}", e))?;
+        .map_err(|error| map_recording_start_error(&app, error))?;
 
     // Take the device event receiver BEFORE storing manager globally.
     // A background task will process device events (hot-swap) without frontend polling.
