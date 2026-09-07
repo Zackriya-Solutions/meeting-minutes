@@ -8,23 +8,42 @@ This guide helps you build Meetily on Linux with **automatic GPU acceleration**.
 
 If you're new to building on Linux, start here. These simple commands work for most users:
 
-### 1. Install Basic Dependencies
+### 1. Install All Dependencies
+
+The build requires several tools. Install them all at once:
 
 ```bash
 # Ubuntu/Debian
 sudo apt update
-sudo apt install build-essential cmake git
+sudo apt install build-essential cmake git curl nodejs npm rustc cargo clang libclang-dev \
+    libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev pnpm
 
 # Fedora/RHEL
-sudo dnf install gcc-c++ cmake git
+sudo dnf install gcc-c++ cmake git nodejs npm rust cargo clang clang-devel \
+    webkit2gtk4.1-devel gtk3-devel libappindicator-gtk3-devel librsvg2-devel
+sudo npm install -g pnpm
 
 # Arch Linux
-sudo pacman -S base-devel cmake git
+sudo pacman -S base-devel cmake git nodejs npm rust clang pnpm \
+    webkit2gtk-4.1 gtk3 libayatana-appindicator librsvg
 ```
 
-### 2. Build and Run
+> **Note:** On some distributions, you may need to install `pnpm` via npm: `sudo npm install -g pnpm`
+
+### 2. Clone and Setup
 
 ```bash
+git clone https://github.com/Zackriya-Solutions/meeting-minutes.git
+cd meeting-minutes/frontend
+pnpm install
+```
+
+### 3. Build and Run
+
+```bash
+# Navigate to frontend directory (where the build scripts are located)
+cd frontend
+
 # Development mode (with hot reload)
 ./dev-gpu.sh
 
@@ -32,7 +51,17 @@ sudo pacman -S base-devel cmake git
 ./build-gpu.sh
 ```
 
+> **Important:** The build scripts (`dev-gpu.sh` and `build-gpu.sh`) are located in the `frontend/` directory, not the project root.
+
 **That's it!** The scripts automatically detect your GPU and configure acceleration.
+
+### Build Output Location
+
+After a successful build, you'll find the AppImage at:
+
+```
+<project-root>/target/release/bundle/appimage/meetily_<version>_amd64.AppImage
+```
 
 ### What Happens Automatically?
 
@@ -41,6 +70,68 @@ sudo pacman -S base-devel cmake git
 - ✅ **No GPU** → Optimized CPU mode (still works great!)
 
 > 💡 **Tip:** If you have an NVIDIA or AMD GPU but want better performance, jump to the [GPU Setup](#-gpu-setup-guides-intermediate) section below.
+
+---
+
+## 📦 Distribution-Specific Instructions
+
+### Arch Linux
+
+```bash
+# Install all dependencies
+sudo pacman -S base-devel cmake git nodejs npm rust clang pnpm \
+    webkit2gtk-4.1 gtk3 libayatana-appindicator librsvg
+
+# For NVIDIA GPU acceleration
+sudo pacman -S cuda nvidia-utils
+
+# Clone and build
+git clone https://github.com/Zackriya-Solutions/meeting-minutes.git
+cd meeting-minutes/frontend
+pnpm install
+./build-gpu.sh
+```
+
+### Ubuntu/Debian
+
+```bash
+# Install all dependencies
+sudo apt update
+sudo apt install build-essential cmake git curl rustc cargo clang libclang-dev \
+    libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev
+
+# Install Node.js (LTS version recommended)
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt install nodejs
+sudo npm install -g pnpm
+
+# For NVIDIA GPU acceleration
+sudo apt install nvidia-driver-550 nvidia-cuda-toolkit
+
+# Clone and build
+git clone https://github.com/Zackriya-Solutions/meeting-minutes.git
+cd meeting-minutes/frontend
+pnpm install
+./build-gpu.sh
+```
+
+### Fedora/RHEL
+
+```bash
+# Install all dependencies
+sudo dnf install gcc-c++ cmake git nodejs npm rust cargo clang clang-devel \
+    webkit2gtk4.1-devel gtk3-devel libappindicator-gtk3-devel librsvg2-devel
+sudo npm install -g pnpm
+
+# For NVIDIA GPU acceleration (RPM Fusion required)
+sudo dnf install cuda nvidia-driver
+
+# Clone and build
+git clone https://github.com/Zackriya-Solutions/meeting-minutes.git
+cd meeting-minutes/frontend
+pnpm install
+./build-gpu.sh
+```
 
 ---
 
@@ -87,6 +178,12 @@ Want better performance? Follow these guides to enable GPU acceleration.
 # Ubuntu/Debian (CUDA 12.x)
 sudo apt install nvidia-driver-550 nvidia-cuda-toolkit
 
+# Arch Linux
+sudo pacman -S cuda nvidia-utils
+
+# Fedora (RPM Fusion required)
+sudo dnf install cuda nvidia-driver
+
 # Verify installation
 nvidia-smi          # Shows GPU info
 nvcc --version      # Shows CUDA version
@@ -99,6 +196,7 @@ nvcc --version      # Shows CUDA version
 # Example: RTX 3080 = 8.6 → use "86"
 # Example: GTX 1080 = 6.1 → use "61"
 
+cd frontend
 CMAKE_CUDA_ARCHITECTURES=75 \
 CMAKE_CUDA_STANDARD=17 \
 CMAKE_POSITION_INDEPENDENT_CODE=ON \
@@ -143,7 +241,8 @@ sudo pacman -S vulkan-devel openblas
 ```bash
 # Add to ~/.bashrc or ~/.zshrc
 export VULKAN_SDK=/usr
-export BLAS_INCLUDE_DIRS=/usr/include/x86_64-linux-gnu
+export BLAS_INCLUDE_DIRS=/usr/include/x86_64-linux-gnu  # Ubuntu/Debian
+# or for Arch: export BLAS_INCLUDE_DIRS=/usr/include
 
 # Apply changes
 source ~/.bashrc
@@ -152,6 +251,7 @@ source ~/.bashrc
 #### Step 3: Build
 
 ```bash
+cd frontend
 ./build-gpu.sh
 ```
 
@@ -168,6 +268,9 @@ The script will automatically detect Vulkan and build with `--features vulkan`.
 # Add ROCm repository (see https://rocm.docs.amd.com for latest)
 sudo apt install rocm-smi hipcc
 
+# Arch Linux
+sudo pacman -S rocm-hip-sdk
+
 # Set environment
 export ROCM_PATH=/opt/rocm
 
@@ -176,6 +279,7 @@ rocm-smi            # Shows GPU info
 hipcc --version     # Shows ROCm version
 
 # Build
+cd frontend
 ./build-gpu.sh
 ```
 
@@ -188,6 +292,8 @@ hipcc --version     # Shows ROCm version
 Want to force a specific acceleration method? Use the `TAURI_GPU_FEATURE` environment variable with the shell scripts:
 
 ```bash
+cd frontend
+
 # Force CUDA (ignore auto-detection)
 TAURI_GPU_FEATURE=cuda ./dev-gpu.sh
 TAURI_GPU_FEATURE=cuda ./build-gpu.sh
@@ -209,42 +315,67 @@ TAURI_GPU_FEATURE=openblas ./dev-gpu.sh
 TAURI_GPU_FEATURE=openblas ./build-gpu.sh
 ```
 
-### Build Output Location
-
-After successful build:
-
-```
-src-tauri/target/release/bundle/appimage/Meetily_<version>_amd64.AppImage
-```
-
 ---
 
 ## 🧭 Troubleshooting
 
-### "CUDA toolkit not found"
+For detailed troubleshooting information, see [TROUBLESHOOTING_LINUX.md](TROUBLESHOOTING_LINUX.md).
 
-- **Fix:** Install `nvidia-cuda-toolkit` or set `CUDA_PATH` environment variable
-- **Check:** `nvcc --version` should work
+### Quick Fixes
 
-### "Vulkan detected but missing dependencies"
+#### "cargo: command not found"
 
-- **Fix:** Set both `VULKAN_SDK` and `BLAS_INCLUDE_DIRS` environment variables
-- **Example:**
-  ```bash
-  export VULKAN_SDK=/usr
-  export BLAS_INCLUDE_DIRS=/usr/include/x86_64-linux-gnu
-  ```
+Install Rust:
+```bash
+# Ubuntu/Debian
+sudo apt install rustc cargo
 
-### "AppImage build stripping symbols"
+# Arch Linux
+sudo pacman -S rust
 
-- **Fix:** Already handled! `build-gpu.sh` sets `NO_STRIP=true` automatically
-- **Why:** Prevents runtime errors from missing symbols
+# Or via rustup (all distros)
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+```
 
-### Build works but no GPU acceleration
+#### "Unable to find libclang"
 
-- **Check detection:** Look at the build output for GPU detection messages
-- **Verify:** `nvidia-smi` (NVIDIA) or `rocm-smi` (AMD) should work
-- **Missing SDK:** Install the development toolkit, not just drivers
+Install clang development files:
+```bash
+# Ubuntu/Debian
+sudo apt install clang libclang-dev
+
+# Arch Linux
+sudo pacman -S clang
+
+# Fedora
+sudo dnf install clang clang-devel
+```
+
+#### "pnpm: command not found"
+
+```bash
+# Via npm (all distros)
+sudo npm install -g pnpm
+
+# Or via pacman (Arch Linux)
+sudo pacman -S pnpm
+```
+
+#### "tauri: command not found"
+
+```bash
+cd frontend
+pnpm install  # This installs @tauri-apps/cli locally
+```
+
+#### White/blank screen after launch
+
+This is usually a WebKit rendering issue. Launch with:
+```bash
+WEBKIT_DISABLE_COMPOSITING_MODE=1 ./path/to/meetily.AppImage
+```
+
+See [TROUBLESHOOTING_LINUX.md](TROUBLESHOOTING_LINUX.md) for permanent fixes.
 
 ---
 
@@ -291,14 +422,20 @@ Both `dev-gpu.sh` and `build-gpu.sh` work the same way:
 ### NVIDIA GPU (CUDA)
 
 ```bash
-# Install
-sudo apt install nvidia-driver-550 nvidia-cuda-toolkit
+# Install dependencies (Ubuntu/Debian)
+sudo apt install build-essential cmake git rustc cargo clang libclang-dev \
+    libwebkit2gtk-4.1-dev libgtk-3-dev pnpm nvidia-driver-550 nvidia-cuda-toolkit
 
-# Verify
+# Clone and build
+git clone https://github.com/Zackriya-Solutions/meeting-minutes.git
+cd meeting-minutes/frontend
+pnpm install
+
+# Verify GPU
 nvidia-smi --query-gpu=compute_cap --format=csv
 
 # Build (adjust architecture for your GPU)
-CMAKE_CUDA_ARCHITECTURES=86 \ # (86 may change in your case)
+CMAKE_CUDA_ARCHITECTURES=86 \
 CMAKE_CUDA_STANDARD=17 \
 CMAKE_POSITION_INDEPENDENT_CODE=ON \
 ./build-gpu.sh
@@ -312,6 +449,7 @@ sudo apt install rocm-smi hipcc
 export ROCM_PATH=/opt/rocm
 
 # Build
+cd meeting-minutes/frontend
 ./build-gpu.sh
 ```
 
@@ -326,6 +464,7 @@ export VULKAN_SDK=/usr
 export BLAS_INCLUDE_DIRS=/usr/include/x86_64-linux-gnu
 
 # Build
+cd meeting-minutes/frontend
 ./build-gpu.sh
 ```
 
@@ -333,9 +472,10 @@ export BLAS_INCLUDE_DIRS=/usr/include/x86_64-linux-gnu
 
 ```bash
 # Just build - works out of the box
+cd meeting-minutes/frontend
 ./build-gpu.sh
 ```
 
 ---
 
-**Need help?** Open an issue on GitHub with your GPU type, distro, and the output from `./build-gpu.sh`.
+**Need help?** Check [TROUBLESHOOTING_LINUX.md](TROUBLESHOOTING_LINUX.md) or open an issue on GitHub with your GPU type, distro, and the output from `./build-gpu.sh`.
