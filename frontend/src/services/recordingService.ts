@@ -176,17 +176,6 @@ export class RecordingService {
   }
 
   /**
-   * Listen for chunk-drop-warning event (audio buffer overflow)
-   * @param callback - Function to call when chunks are dropped
-   * @returns Promise that resolves to unlisten function
-   */
-  async onChunkDropWarning(callback: (warning: string) => void): Promise<UnlistenFn> {
-    return listen<string>('chunk-drop-warning', (event) => {
-      callback(event.payload);
-    });
-  }
-
-  /**
    * Listen for speech-detected event (VAD)
    * @param callback - Function to call when speech is detected
    * @returns Promise that resolves to unlisten function

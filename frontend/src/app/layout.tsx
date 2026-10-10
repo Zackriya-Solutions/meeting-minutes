@@ -103,26 +103,6 @@ export default function RootLayout({
       return () => document.removeEventListener('contextmenu', handleContextMenu);
     }
   }, []);
-  useEffect(() => {
-    // Listen for tray recording toggle request
-    const unlisten = listen('request-recording-toggle', () => {
-      console.log('[Layout] Received request-recording-toggle from tray');
-
-      if (showOnboarding) {
-        toast.error("Please complete setup first", {
-          description: "You need to finish onboarding before you can start recording."
-        });
-      } else {
-        // If in main app, forward to useRecordingStart via window event
-        console.log('[Layout] Forwarding to start-recording-from-sidebar');
-        window.dispatchEvent(new CustomEvent('start-recording-from-sidebar'));
-      }
-    });
-
-    return () => {
-      unlisten.then(fn => fn());
-    };
-  }, [showOnboarding]);
 
   // Handle file drop for audio import
   const handleFileDrop = useCallback((paths: string[]) => {

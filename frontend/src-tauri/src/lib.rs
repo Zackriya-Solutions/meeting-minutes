@@ -1,4 +1,4 @@
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::sync::Mutex as StdMutex;
 
 // Performance optimization: Conditional logging macros for hot paths
@@ -117,13 +117,6 @@ static LANGUAGE_PREFERENCE: std::sync::LazyLock<StdMutex<String>> =
 #[derive(Debug, Deserialize)]
 struct RecordingArgs {
     save_path: String,
-}
-
-#[derive(Debug, Serialize, Clone)]
-struct TranscriptionStatus {
-    chunks_in_queue: usize,
-    is_processing: bool,
-    last_activity_ms: u64,
 }
 
 #[tauri::command]
@@ -251,15 +244,6 @@ async fn stop_recording<R: Runtime>(app: AppHandle<R>, args: RecordingArgs) -> R
 #[tauri::command]
 async fn is_recording() -> bool {
     audio::recording_commands::is_recording().await
-}
-
-#[tauri::command]
-fn get_transcription_status() -> TranscriptionStatus {
-    TranscriptionStatus {
-        chunks_in_queue: 0,
-        is_processing: false,
-        last_activity_ms: 0,
-    }
 }
 
 #[tauri::command]
@@ -553,7 +537,6 @@ pub fn run() {
             start_recording,
             stop_recording,
             is_recording,
-            get_transcription_status,
             whisper_engine::commands::whisper_init,
             whisper_engine::commands::whisper_get_available_models,
             whisper_engine::commands::whisper_load_model,

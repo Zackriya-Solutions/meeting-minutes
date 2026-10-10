@@ -227,9 +227,6 @@ export default function Home() {
                       onTranscriptReceived={() => { }} // Not actually used by RecordingControls
                       onStopInitiated={() => setIsStopping(true)}
                       barHeights={barHeights}
-                      onTranscriptionError={(message) => {
-                        showModal('errorAlert', message);
-                      }}
                       isRecordingDisabled={isRecordingDisabled}
                       isParentProcessing={isProcessingStop}
                       selectedDevices={selectedDevices}

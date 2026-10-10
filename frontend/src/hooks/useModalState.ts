@@ -37,11 +37,11 @@ interface UseModalStateReturn {
 
 /**
  * Custom hook for managing all modal state and event listeners.
- * Consolidates 9 useState calls and 3 event listeners from page.tsx.
+ * Consolidates modal state and related event listeners from page.tsx.
  *
  * Features:
  * - Unified modal state management
- * - Event listeners for chunk drops, transcription errors, model downloads
+ * - Event listeners for transcript chunk loss, transcription errors, model downloads
  * - Auto-close on model download completion
  */
 export function useModalState(transcriptModelConfig?: TranscriptModelProps): UseModalStateReturn {
@@ -99,20 +99,22 @@ export function useModalState(transcriptModelConfig?: TranscriptModelProps): Use
     });
   }, []);
 
-  // Set up chunk drop warning listener
+  // Warn when the transcription worker reports chunks lost during shutdown
   useEffect(() => {
     let unlistenFn: (() => void) | undefined;
 
     const setupChunkDropListener = async () => {
       try {
-        console.log('Setting up chunk-drop-warning listener...');
-        unlistenFn = await listen<string>('chunk-drop-warning', (event) => {
-          console.log('Chunk drop warning received:', event.payload);
-          showModal('chunkDropWarning', event.payload);
-        });
-        console.log('Chunk drop warning listener setup complete');
+        unlistenFn = await listen<{ chunks_lost: number; message: string }>(
+          'transcript-chunk-loss-detected',
+          (event) => {
+            const { chunks_lost, message } = event.payload;
+            console.warn('Transcript chunk loss detected:', event.payload);
+            showModal('chunkDropWarning', `${message} (${chunks_lost} chunk(s) lost).`);
+          }
+        );
       } catch (error) {
-        console.error('Failed to setup chunk drop warning listener:', error);
+        console.error('Failed to setup chunk loss listener:', error);
       }
     };
 

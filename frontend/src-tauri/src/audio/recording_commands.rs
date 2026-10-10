@@ -5,7 +5,7 @@
 
 use anyhow::Result;
 use log::{debug, error, info, warn};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, Mutex,
@@ -117,13 +117,6 @@ const TRANSCRIPTION_RUNTIME_USER_MESSAGE: &str = "Speech recognition could not i
 #[derive(Debug, Deserialize)]
 pub struct RecordingArgs {
     pub save_path: String,
-}
-
-#[derive(Debug, Serialize, Clone)]
-pub struct TranscriptionStatus {
-    pub chunks_in_queue: usize,
-    pub is_processing: bool,
-    pub last_activity_ms: u64,
 }
 
 fn map_recording_start_error<R: Runtime>(
@@ -997,15 +990,6 @@ pub async fn stop_recording<R: Runtime>(
 /// Check if recording is active
 pub async fn is_recording() -> bool {
     IS_RECORDING.load(Ordering::SeqCst)
-}
-
-/// Get recording statistics
-pub async fn get_transcription_status() -> TranscriptionStatus {
-    TranscriptionStatus {
-        chunks_in_queue: 0,
-        is_processing: IS_RECORDING.load(Ordering::SeqCst),
-        last_activity_ms: 0,
-    }
 }
 
 /// Pause the current recording

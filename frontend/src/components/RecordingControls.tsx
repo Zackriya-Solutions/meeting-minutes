@@ -17,7 +17,6 @@ interface RecordingControlsProps {
   onRecordingStop: (callApi?: boolean) => void;
   onRecordingStart: () => void;
   onTranscriptReceived: (summary: SummaryResponse) => void;
-  onTranscriptionError?: (message: string) => void;
   onStopInitiated?: () => void; // Called immediately when stop button is clicked
   isRecordingDisabled: boolean;
   isParentProcessing: boolean;
@@ -34,7 +33,6 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
   onRecordingStop,
   onRecordingStart,
   onTranscriptReceived,
-  onTranscriptionError,
   onStopInitiated,
   isRecordingDisabled,
   isParentProcessing,
@@ -182,6 +180,12 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
     }
   }, [onRecordingStop]);
 
+  // Latest stop action for event listeners that are registered once
+  const stopRecordingActionRef = useRef(stopRecordingAction);
+  useEffect(() => {
+    stopRecordingActionRef.current = stopRecordingAction;
+  }, [stopRecordingAction]);
+
   const handleStopRecording = useCallback(async () => {
     console.log('handleStopRecording called - isRecording:', isRecording, 'isStarting:', isStarting, 'isStopping:', isStopping, 'isStartingRecording:', isStartingRecording);
     if (!isRecording || isStarting || isStopping || isStartingRecording) {
@@ -248,25 +252,6 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
 
     const setupListeners = async () => {
       try {
-        // Transcript error listener - handles both regular and actionable errors
-        const transcriptErrorUnsubscribe = await listen('transcript-error', (event) => {
-          console.log('transcript-error event received:', event);
-          console.error('Transcription error received:', event.payload);
-          const errorMessage = event.payload as string;
-
-          setTranscriptionErrors(prev => {
-            const newCount = prev + 1;
-            console.log('Transcription error count incremented:', newCount);
-            return newCount;
-          });
-          setIsProcessing(false);
-          console.log('Calling onRecordingStop(false) due to transcript error');
-          onRecordingStop(false);
-          if (onTranscriptionError) {
-            onTranscriptionError(errorMessage);
-          }
-        });
-
         // Transcription error listener - handles structured error objects with actionable flag
         const transcriptionErrorUnsubscribe = await listen<TranscriptionErrorPayload>('transcription-error', (event) => {
           console.log('transcription-error event received:', event);
@@ -277,15 +262,14 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
             console.log('Transcription error count incremented:', newCount);
             return newCount;
           });
-          setIsProcessing(false);
 
-          if (event.payload.phase === 'active') {
-            console.log('Calling onRecordingStop(false) due to active transcription error');
-            onRecordingStop(false);
+          // Actionable errors (e.g. the engine failed to load) end the transcription worker,
+          // so stop the backend recording properly; audio captured so far is still saved.
+          // A single failed chunk is not fatal: keep recording (useModalState shows the error).
+          if (event.payload.phase === 'active' && event.payload.actionable) {
+            console.log('Stopping recording due to actionable transcription error');
+            stopRecordingActionRef.current();
           }
-
-          // For actionable errors (like model loading failures), the main page will handle showing the model selector
-          // For regular errors, they are handled by useModalState global listener which shows a toast
         });
 
         // Pause/Resume events are now handled by RecordingStateContext
@@ -298,7 +282,6 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
         });
 
         unsubscribes = [
-          transcriptErrorUnsubscribe,
           transcriptionErrorUnsubscribe,
           speechDetectedUnsubscribe
         ];
@@ -318,7 +301,7 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
         }
       });
     };
-  }, [onRecordingStop, onTranscriptionError]);
+  }, []);
 
   return (
     <TooltipProvider>
