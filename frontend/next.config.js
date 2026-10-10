@@ -15,7 +15,14 @@ const nextConfig = {
   assetPrefix: '/',
 
   // Add webpack configuration for Tauri
-  webpack: (config, { isServer }) => {
+  webpack: (config, { dev, isServer }) => {
+    if (dev && !isServer) {
+      // First on-demand compile of the BlockNote-heavy chunks can exceed webpack's
+      // default 120s chunk timeout (e.g. while cargo is building in parallel),
+      // which surfaces as a ChunkLoadError in the Tauri webview.
+      config.output.chunkLoadTimeout = 10 * 60 * 1000;
+    }
+
     if (!isServer) {
       config.resolve.fallback = {
         ...config.resolve.fallback,
