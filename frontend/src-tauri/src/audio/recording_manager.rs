@@ -191,6 +191,8 @@ pub struct RecordingManager {
     recording_saver: RecordingSaver,
     device_monitor: Option<AudioDeviceMonitor>,
     device_event_receiver: Option<mpsc::UnboundedReceiver<DeviceEvent>>,
+    /// Active (pause-excluded) duration captured at stop time, before state cleanup
+    final_active_duration: Option<f64>,
 }
 
 // SAFETY: RecordingManager contains types that we've marked as Send
@@ -211,6 +213,7 @@ impl RecordingManager {
             recording_saver: RecordingSaver::new(),
             device_monitor: Some(device_monitor),
             device_event_receiver: Some(device_event_receiver),
+            final_active_duration: None,
         }
     }
 
@@ -305,31 +308,6 @@ impl RecordingManager {
         Ok(transcription_receiver)
     }
 
-    /// Stop recording streams without saving (for use when waiting for transcription)
-    pub async fn stop_streams_only(&mut self) -> Result<()> {
-        info!("Stopping recording streams only");
-
-        // Stop device monitoring
-        if let Some(ref mut monitor) = self.device_monitor {
-            monitor.stop_monitoring().await;
-        }
-
-        // Stop recording state first
-        self.state.stop_recording();
-
-        // Stop audio streams
-        if let Err(e) = self.stream_manager.stop_streams() {
-            error!("Error stopping audio streams: {}", e);
-        }
-
-        // Stop audio pipeline
-        if let Err(e) = self.pipeline_manager.stop().await {
-            error!("Error stopping audio pipeline: {}", e);
-        }
-
-        debug!("Recording streams stopped successfully");
-        Ok(())
-    }
 
     /// Stop streams and force immediate pipeline flush to process all accumulated audio
     pub async fn stop_streams_and_force_flush(&mut self) -> Result<()> {
@@ -341,6 +319,9 @@ impl RecordingManager {
             info!("Stopping device monitor first...");
             monitor.stop_monitoring().await;
         }
+
+        // Capture the duration before stop_recording()/cleanup() reset the timing state
+        self.final_active_duration = self.state.get_active_recording_duration();
 
         // Stop recording state first - this clears device references
         self.state.stop_recording();
@@ -368,9 +349,11 @@ impl RecordingManager {
     pub async fn save_recording_only<R: tauri::Runtime>(&mut self, app: &tauri::AppHandle<R>) -> Result<()> {
         debug!("Saving recording with transcript chunks");
 
-        // Get actual recording duration from state
-        let recording_duration = self.state.get_active_recording_duration();
-        info!("Recording duration from state: {:?}s", recording_duration);
+        // Prefer the duration captured at stop time; the state is cleaned up by then
+        let recording_duration = self
+            .final_active_duration
+            .or_else(|| self.state.get_active_recording_duration());
+        info!("Recording duration: {:?}s", recording_duration);
 
         // Save the recording with actual duration
         match self.recording_saver.stop_and_save(app, recording_duration).await {
@@ -390,44 +373,6 @@ impl RecordingManager {
         Ok(())
     }
 
-    /// Stop recording and save audio (legacy method)
-    pub async fn stop_recording<R: tauri::Runtime>(&mut self, app: &tauri::AppHandle<R>) -> Result<()> {
-        info!("Stopping recording manager");
-
-        // Get recording duration BEFORE stopping (important!)
-        let recording_duration = self.state.get_active_recording_duration();
-        info!("Recording duration before stop: {:?}s", recording_duration);
-
-        // Stop recording state first
-        self.state.stop_recording();
-
-        // Stop audio streams
-        if let Err(e) = self.stream_manager.stop_streams() {
-            error!("Error stopping audio streams: {}", e);
-        }
-
-        // Stop audio pipeline
-        if let Err(e) = self.pipeline_manager.stop().await {
-            error!("Error stopping audio pipeline: {}", e);
-        }
-
-        // Save the recording with actual duration
-        match self.recording_saver.stop_and_save(app, recording_duration).await {
-            Ok(Some(file_path)) => {
-                info!("Recording saved successfully to: {}", file_path);
-            }
-            Ok(None) => {
-                info!("Recording not saved (auto-save disabled or no audio data)");
-            }
-            Err(e) => {
-                error!("Failed to save recording: {}", e);
-                // Don't fail the stop operation if saving fails
-            }
-        }
-
-        info!("Recording manager stopped");
-        Ok(())
-    }
 
     /// Get recording stats from the saver
     pub fn get_recording_stats(&self) -> (usize, u32) {
@@ -519,10 +464,6 @@ impl RecordingManager {
         self.recording_saver.add_transcript_segment(segment);
     }
 
-    /// Add a transcript chunk to be saved later (legacy method)
-    pub fn add_transcript_chunk(&self, text: String) {
-        self.recording_saver.add_transcript_chunk(text);
-    }
 
     /// Get accumulated transcript segments from current recording session
     /// Used for syncing frontend state after page reload during active recording
@@ -536,26 +477,6 @@ impl RecordingManager {
         self.recording_saver.get_meeting_name()
     }
 
-    /// Cleanup all resources without saving
-    pub async fn cleanup_without_save(&mut self) {
-        if self.is_recording() {
-            debug!("Stopping recording without saving during cleanup");
-
-            // Stop recording state first
-            self.state.stop_recording();
-
-            // Stop audio streams
-            if let Err(e) = self.stream_manager.stop_streams() {
-                error!("Error stopping audio streams during cleanup: {}", e);
-            }
-
-            // Stop audio pipeline
-            if let Err(e) = self.pipeline_manager.stop().await {
-                error!("Error stopping audio pipeline during cleanup: {}", e);
-            }
-        }
-        self.state.cleanup();
-    }
 
     /// Get the meeting folder path (if available)
     /// Returns None if no meeting name was set or folder structure not initialized
