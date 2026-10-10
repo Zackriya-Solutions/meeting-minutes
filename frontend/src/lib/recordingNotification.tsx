@@ -1,5 +1,4 @@
 import { toast } from 'sonner';
-import Analytics from '@/lib/analytics';
 
 /**
  * Shows the recording notification toast with compliance message.
@@ -43,7 +42,6 @@ export async function showRecordingNotification(): Promise<void> {
                   await store.set('show_recording_notification', false);
                   await store.save();
                 }
-                Analytics.trackButtonClick('recording_notification_acknowledged', 'toast');
                 toast.dismiss(toastId);
               }}
               className="w-full px-3 py-1.5 bg-gray-900 text-white text-xs rounded hover:bg-gray-800 transition-colors font-medium"

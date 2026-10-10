@@ -12,7 +12,6 @@ pub mod permissions;
 
 // NEW: Device detection and diagnostics for adaptive buffering
 pub mod device_detection;
-pub mod diagnostics;
 pub mod ffmpeg_mixer;  // NEW: FFmpeg-style adaptive audio mixer
 
 // New simplified audio system
@@ -24,15 +23,10 @@ pub mod recording_commands;
 pub mod recording_preferences;
 pub mod recording_saver;
 pub mod incremental_saver;  // NEW: Incremental audio saving with checkpoints
-pub mod level_monitor;
 pub mod simple_level_monitor;
 pub mod buffer_pool;
-pub mod post_processor;
 pub mod hardware_detector;
-pub mod async_logger;
 pub mod batch_processor;
-pub mod system_detector;
-pub mod system_audio_commands;
 pub mod device_monitor;  // NEW: Device disconnect/reconnect monitoring
 pub mod playback_monitor; // NEW: Playback device detection for BT warnings
 
@@ -66,18 +60,8 @@ pub use capture::{
 };
 
 // Export system audio detection functionality
-pub use system_detector::{
-    SystemAudioDetector, SystemAudioEvent, SystemAudioCallback,
-    new_system_audio_callback
-};
 
 // Export system audio commands
-pub use system_audio_commands::{
-    start_system_audio_capture_command, list_system_audio_devices_command,
-    check_system_audio_permissions_command, start_system_audio_monitoring,
-    stop_system_audio_monitoring, get_system_audio_monitoring_status,
-    init_system_audio_state
-};
 
 // Export new simplified components
 pub use recording_state::{RecordingState, AudioChunk, ProcessedAudioChunk, AudioError, DeviceType as RecordingDeviceType};
@@ -92,9 +76,7 @@ pub use recording_preferences::{
     RecordingPreferences, get_default_recordings_folder
 };
 pub use recording_saver::RecordingSaver;
-pub use level_monitor::{AudioLevelMonitor, AudioLevelData, AudioLevelUpdate};
 pub use buffer_pool::{AudioBufferPool, PooledBuffer};
-pub use post_processor::{PostProcessor, PostProcessRequest, PostProcessResponse};
 pub use hardware_detector::{HardwareProfile, AdaptiveWhisperConfig, PerformanceTier, GpuType};
 pub use encode::{
     encode_single_audio, AudioInput
@@ -103,10 +85,6 @@ pub use device_monitor::{AudioDeviceMonitor, DeviceEvent, DeviceMonitorType};
 
 // Export device detection and diagnostics
 pub use device_detection::{InputDeviceKind, calculate_buffer_timeout};
-pub use diagnostics::{
-    log_device_capabilities, log_detection_summary, log_buffer_health,
-    log_mixer_status, log_performance_summary
-};
 
 // Export FFmpeg mixer
 pub use ffmpeg_mixer::{FFmpegAudioMixer, BufferStats, RNNOISE_APPLY_ENABLED};

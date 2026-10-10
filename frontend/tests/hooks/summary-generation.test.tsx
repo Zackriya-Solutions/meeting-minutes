@@ -5,11 +5,9 @@ import { parseSummaryContent } from '../../src/lib/summary-content';
 import type { MeetingSummary, SummaryProcessResponse } from '../../src/types';
 
 // Bun shares module mocks between test files; restore application modules after this suite.
-const originalAnalytics = { ...await import('../../src/lib/analytics') };
 const originalPreferences = { ...await import('../../src/lib/summary-language-preferences') };
 const originalToast = { ...await import('sonner') };
 afterAll(() => {
-  mock.module('../../src/lib/analytics', () => originalAnalytics);
   mock.module('../../src/lib/summary-language-preferences', () => originalPreferences);
   mock.module('sonner', () => originalToast);
 });
@@ -18,11 +16,6 @@ mock.module('next/navigation', () => ({ usePathname: () => '/meeting-details', u
 mock.module('../../src/contexts/RecordingStateContext', () => ({ useRecordingState: () => ({ isRecording: false }) }));
 const notify = mock(() => {});
 mock.module('sonner', () => ({ toast: { info: notify, error: notify, success: notify, warning: notify } }));
-const trackCompletion = mock(async (..._args: Parameters<typeof originalAnalytics.default.trackSummaryGenerationCompleted>) => {});
-mock.module('../../src/lib/analytics', () => ({ default: {
-  trackBackendConnection() {}, trackSummaryGenerationStarted: async () => {},
-  trackSummaryGenerationCompleted: trackCompletion,
-} }));
 let startProcess: () => Promise<{ process_id: string }>;
 let getSummary: (meetingId: string) => Promise<SummaryProcessResponse>;
 const invoke = mock(async (command: string, args?: Record<string, unknown>): Promise<unknown> => {
@@ -71,7 +64,7 @@ const realClearInterval = globalThis.clearInterval;
 beforeEach(() => {
   renderer = undefined as unknown as ReactTestRenderer;
   configuredModel = 'test';
-  timers.clear(); notify.mockClear(); trackCompletion.mockClear(); invoke.mockClear();
+  timers.clear(); notify.mockClear(); invoke.mockClear();
   getSummary = async () => response();
   startProcess = async () => ({ process_id: 'attempt-a' });
   globalThis.setInterval = ((callback: () => Promise<void>) => {
@@ -190,7 +183,7 @@ describe('summary state restored when returning to a meeting', () => {
     expect(state.summaryStatus).toBe('completed');
   });
 
-  test('hydrates completed and cancelled records without replaying notifications or analytics', async () => {
+  test('hydrates completed and cancelled records without replaying notifications', async () => {
     await show(response({ status: 'completed', data: { markdown: 'Finished while away' } }));
     expect(state.summaryStatus).toBe('completed');
     expect(text()).toContain('Finished while away');
@@ -200,7 +193,6 @@ describe('summary state restored when returning to a meeting', () => {
     expect(text()).toContain('Restored summary');
     expect(timers.size).toBe(0);
     expect(notify).not.toHaveBeenCalled();
-    expect(trackCompletion).not.toHaveBeenCalled();
   });
 
   test('ignores a response belonging to another meeting', async () => {
@@ -244,17 +236,6 @@ describe('summary state restored when returning to a meeting', () => {
     getSummary = async () => response({ status: 'completed', data: { markdown: 'Finished summary' } });
     await tick();
     expect(state.summaryStatus).toBe('completed');
-  });
-
-  test('completion analytics retain the model used to start the attempt after settings change', async () => {
-    const initial = response({ status: 'idle', start: null });
-    await show(initial);
-    await act(async () => state.handleGenerateSummary());
-    configuredModel = 'different-model';
-    await show(initial);
-    getSummary = async () => response({ status: 'completed', data: { markdown: 'Finished summary' } });
-    await tick();
-    expect(trackCompletion.mock.calls[0]?.slice(0, 3)).toEqual(['ollama', 'test', true]);
   });
 
   test('old in-flight poll cannot stop a resumed poll for the same process', async () => {

@@ -8,7 +8,6 @@ import { ProcessRequest, SummaryResponse } from '@/types/summary';
 import { listen } from '@tauri-apps/api/event';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import Analytics from '@/lib/analytics';
 import { useRecordingState } from '@/contexts/RecordingStateContext';
 import type { TranscriptionErrorPayload } from '@/services/transcriptService';
 
@@ -157,8 +156,6 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
       setRecordingPath(savePath);
       // setShowPlayback(true);
       setIsProcessing(false);
-      // Track successful transcription
-      Analytics.trackTranscriptionSuccess();
       onRecordingStop(true);
     } catch (error) {
       console.error('Failed to stop recording:', error);
@@ -257,9 +254,6 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
           console.error('Transcription error received:', event.payload);
           const errorMessage = event.payload as string;
 
-          Analytics.trackTranscriptionError(errorMessage);
-          console.log('Tracked transcription error:', errorMessage);
-
           setTranscriptionErrors(prev => {
             const newCount = prev + 1;
             console.log('Transcription error count incremented:', newCount);
@@ -277,11 +271,6 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
         const transcriptionErrorUnsubscribe = await listen<TranscriptionErrorPayload>('transcription-error', (event) => {
           console.log('transcription-error event received:', event);
           console.error('Transcription error received:', event.payload);
-
-          const errorMessage = event.payload.userMessage || event.payload.error;
-
-          Analytics.trackTranscriptionError(errorMessage);
-          console.log('Tracked transcription error:', errorMessage);
 
           setTranscriptionErrors(prev => {
             const newCount = prev + 1;
@@ -385,7 +374,6 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
                       <TooltipTrigger asChild>
                         <button
                           onClick={() => {
-                            Analytics.trackButtonClick('start_recording', 'recording_controls');
                             handleStartRecording();
                           }}
                           disabled={isStarting || isProcessing || isRecordingDisabled || isValidatingModel || isStartingRecording}
@@ -411,10 +399,8 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
                           <button
                             onClick={() => {
                               if (isPaused) {
-                                Analytics.trackButtonClick('resume_recording', 'recording_controls');
                                 handleResumeRecording();
                               } else {
-                                Analytics.trackButtonClick('pause_recording', 'recording_controls');
                                 handlePauseRecording();
                               }
                             }}
@@ -441,7 +427,6 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
                         <TooltipTrigger asChild>
                           <button
                             onClick={() => {
-                              Analytics.trackButtonClick('stop_recording', 'recording_controls');
                               handleStopRecording();
                             }}
                             disabled={isStopping || isPausing || isResuming || isStartingRecording}
