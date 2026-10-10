@@ -252,10 +252,22 @@ fn build_final_report_system_prompt(
     )
 }
 
-/// Rough token count estimation using character count
+/// Approximate tokens contributed by one character.
+///
+/// Latin text averages ~0.35 tokens per character, but CJK characters are close to one
+/// token each and accented Latin (e.g. Vietnamese) splits more often, so a flat ratio
+/// badly undercounts Chinese and Vietnamese transcripts and overflows the context.
+fn char_token_weight(c: char) -> f64 {
+    match c as u32 {
+        0x0000..=0x007F => 0.35,
+        0x2E80..=0x9FFF | 0xAC00..=0xD7AF | 0xF900..=0xFAFF | 0xFF00..=0xFFEF | 0x20000..=0x2FA1F => 1.0,
+        _ => 0.5,
+    }
+}
+
+/// Rough token count estimation using per-character weights
 pub fn rough_token_count(s: &str) -> usize {
-    let char_count = s.chars().count();
-    (char_count as f64 * 0.35).ceil() as usize
+    s.chars().map(char_token_weight).sum::<f64>().ceil() as usize
 }
 
 /// Chunks text into overlapping segments based on token count
@@ -278,15 +290,17 @@ pub fn chunk_text(text: &str, chunk_size_tokens: usize, overlap_tokens: usize) -
         return vec![];
     }
 
-    // Convert token-based sizes to character-based sizes
-    // Using ~2.85 chars per token (inverse of 0.35 tokens per char from rough_token_count)
-    let chars_per_token = 1.0 / 0.35;
-    let chunk_size_chars = (chunk_size_tokens as f64 * chars_per_token).ceil() as usize;
-    let overlap_chars = (overlap_tokens as f64 * chars_per_token).ceil() as usize;
-
     // Collect characters for indexing (needed for proper Unicode support)
     let chars: Vec<char> = text.chars().collect();
     let total_chars = chars.len();
+
+    // Convert token-based sizes to character-based sizes using this text's own density,
+    // so CJK/Vietnamese text gets proportionally smaller chunks than English
+    let tokens_per_char =
+        (chars.iter().copied().map(char_token_weight).sum::<f64>() / total_chars as f64).max(0.35);
+    let chars_per_token = 1.0 / tokens_per_char;
+    let chunk_size_chars = (chunk_size_tokens as f64 * chars_per_token).ceil() as usize;
+    let overlap_chars = (overlap_tokens as f64 * chars_per_token).ceil() as usize;
 
     if total_chars <= chunk_size_chars {
         info!("Text is shorter than chunk size, returning as a single chunk.");
@@ -307,7 +321,10 @@ pub fn chunk_text(text: &str, chunk_size_tokens: usize, overlap_tokens: usize) -
         // Try to break at sentence or word boundary for cleaner chunks
         if end_char < total_chars {
             let slice = &text[start_byte..end_byte];
-            let sentence_boundary = slice.rfind(". ").map(|index| index + 2);
+            let sentence_boundary = [". ", "? ", "! ", "。", "？", "！"]
+                .iter()
+                .filter_map(|marker| slice.rfind(marker).map(|index| index + marker.len()))
+                .max();
             let word_boundary = slice.rfind(' ').map(|index| index + 1);
             let boundary = sentence_boundary
                 .filter(|end| slice[..*end].chars().count() > overlap_chars)
@@ -400,7 +417,7 @@ pub(crate) async fn generate_meeting_summary(
             if (provider == &LLMProvider::Ollama || provider == &LLMProvider::BuiltInAI)
                 && total_tokens >= token_threshold
             {
-                let chunks = chunk_text(text, token_threshold - 300, 100);
+                let chunks = chunk_text(text, token_threshold.saturating_sub(300).max(1), 100);
                 let num_chunks = chunks.len();
                 let mut chunk_summaries = Vec::with_capacity(num_chunks);
                 for (index, chunk) in chunks.iter().enumerate() {
@@ -661,6 +678,25 @@ mod tests {
     #[test]
     fn chunk_text_keeps_unicode_boundaries() {
         assert_eq!(chunk_text("é ab", 1, 0), vec!["é ", "ab"]);
+    }
+
+    #[test]
+    fn token_estimate_counts_cjk_and_vietnamese_more_densely_than_english() {
+        assert_eq!(rough_token_count("abcdefghij"), 4);
+        assert_eq!(rough_token_count("会议内容很重要"), 7);
+        assert!(rough_token_count("Cuộc họp hôm nay") > rough_token_count("Meeting today ab"));
+    }
+
+    #[test]
+    fn chunk_text_keeps_cjk_chunks_within_token_budget() {
+        let text = "今天的会议讨论了项目进度。".repeat(200);
+        let chunks = chunk_text(&text, 100, 10);
+
+        assert!(chunks.len() > 1);
+        for chunk in &chunks {
+            assert!(rough_token_count(chunk) <= 101, "chunk too large: {}", rough_token_count(chunk));
+        }
+        assert!(chunks[0].ends_with('。'), "should split at a CJK sentence boundary");
     }
 
     #[test]

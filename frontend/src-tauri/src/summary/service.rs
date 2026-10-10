@@ -457,8 +457,13 @@ impl SummaryService {
 
             match model {
                 Ok(model_def) => {
-                    // Reserve 300 tokens for prompt overhead
-                    let optimal = model_def.context_size.saturating_sub(300) as usize;
+                    // Reserve 300 tokens for prompt overhead plus room for the generated output,
+                    // otherwise prompt + output can exceed the sidecar's n_ctx
+                    let optimal = model_def
+                        .context_size
+                        .saturating_sub(300)
+                        .saturating_sub(models::DEFAULT_MAX_TOKENS.max(0) as u32)
+                        as usize;
                     info!(
                         "✓ Using BuiltInAI context size: {} tokens (chunk size: {})",
                         model_def.context_size, optimal
