@@ -35,7 +35,7 @@ pub fn default_output_device() -> Result<AudioDevice> {
         return Ok(AudioDevice::new(device.name()?, DeviceType::Output));
     }
 
-    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    #[cfg(target_os = "linux")]
     {
         // DO NOT return cpal's default_output_device() here. On Linux, output
         // capture is resolved by looking up an ALSA *input* device of the same
@@ -45,18 +45,24 @@ pub fn default_output_device() -> Result<AudioDevice> {
         // must come from a monitor source exposed as an ALSA capture PCM, e.g.
         // a ~/.asoundrc `pcm.system_monitor { type pulse; device "@DEFAULT_MONITOR@" }`.
         let host = cpal::default_host();
-        for device in host.input_devices()? {
-            if let Ok(name) = device.name() {
-                if name.to_lowercase().contains("monitor") {
-                    info!("🔊 Using monitor source for system audio: '{}'", name);
-                    return Ok(AudioDevice::new(name, DeviceType::Output));
-                }
-            }
+        let names = host.input_devices()?.filter_map(|d| d.name().ok());
+        if let Some(name) = super::platform::linux::first_monitor_device_name(names) {
+            info!("🔊 Using monitor source for system audio: '{}'", name);
+            return Ok(AudioDevice::new(name, DeviceType::Output));
         }
         return Err(anyhow!(
             "No monitor capture device found for system audio. Define an ALSA PCM whose \
              name contains \"monitor\" that captures the PipeWire/PulseAudio default sink monitor"
         ));
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+    {
+        let host = cpal::default_host();
+        let device = host
+            .default_output_device()
+            .ok_or_else(|| anyhow!("No default output device found"))?;
+        return Ok(AudioDevice::new(device.name()?, DeviceType::Output));
     }
 }
 
