@@ -2,7 +2,7 @@
     "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
     "productName": "meetily",
     "version": "0.4.1",
-    "identifier": "com.meetily.ai",
+    "identifier": "com.trinhhuutho.meetily",
     "build": {
         "frontendDist": "../out",
         "devUrl": "http://localhost:3118",
