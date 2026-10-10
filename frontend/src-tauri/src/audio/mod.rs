@@ -12,7 +12,6 @@ pub mod permissions;
 
 // NEW: Device detection and diagnostics for adaptive buffering
 pub mod device_detection;
-pub mod ffmpeg_mixer;  // NEW: FFmpeg-style adaptive audio mixer
 
 // New simplified audio system
 pub mod recording_state;
@@ -86,8 +85,6 @@ pub use device_monitor::{AudioDeviceMonitor, DeviceEvent, DeviceMonitorType};
 // Export device detection and diagnostics
 pub use device_detection::{InputDeviceKind, calculate_buffer_timeout};
 
-// Export FFmpeg mixer
-pub use ffmpeg_mixer::{FFmpegAudioMixer, BufferStats, RNNOISE_APPLY_ENABLED};
 
 pub use vad::{extract_speech_16k};
 

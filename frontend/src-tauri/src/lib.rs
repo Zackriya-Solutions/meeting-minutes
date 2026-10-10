@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex as StdMutex;
 // Removed unused import
 
@@ -60,8 +59,6 @@ use notifications::commands::NotificationManagerState;
 use std::sync::Arc;
 use tauri::{AppHandle, Manager, Runtime};
 use tokio::sync::RwLock;
-
-static RECORDING_FLAG: AtomicBool = AtomicBool::new(false);
 
 #[cfg(target_os = "windows")]
 static ONNX_RUNTIME_INIT_ERROR: std::sync::OnceLock<String> = std::sync::OnceLock::new();
@@ -165,7 +162,6 @@ async fn start_recording<R: Runtime>(
     .await
     {
         Ok(_) => {
-            RECORDING_FLAG.store(true, Ordering::SeqCst);
             tray::update_tray_menu(&app);
 
             log_info!("Recording started successfully");
@@ -217,7 +213,6 @@ async fn stop_recording<R: Runtime>(app: AppHandle<R>, args: RecordingArgs) -> R
     .await
     {
         Ok(_) => {
-            RECORDING_FLAG.store(false, Ordering::SeqCst);
             tray::update_tray_menu(&app);
 
             // Create the save directory if it doesn't exist
@@ -254,7 +249,6 @@ async fn stop_recording<R: Runtime>(app: AppHandle<R>, args: RecordingArgs) -> R
         Err(e) => {
             log_error!("Failed to stop audio recording: {}", e);
             // Still update the flag even if stopping failed
-            RECORDING_FLAG.store(false, Ordering::SeqCst);
             tray::update_tray_menu(&app);
             Err(format!("Failed to stop recording: {}", e))
         }

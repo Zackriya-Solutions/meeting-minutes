@@ -282,7 +282,7 @@ impl AudioCapture {
         // System audio doesn't need enhancement (already clean)
         let (noise_suppressor, high_pass_filter, normalizer) = if matches!(device_type, DeviceType::Microphone) {
             // Initialize noise suppression (RNNoise) at 48kHz - CONDITIONAL based on flag
-            let ns = if super::ffmpeg_mixer::RNNOISE_APPLY_ENABLED {
+            let ns = if super::constants::RNNOISE_APPLY_ENABLED {
                 match NoiseSuppressionProcessor::new(TARGET_SAMPLE_RATE) {
                     Ok(processor) => {
                         info!("✅ RNNoise noise suppression ENABLED for microphone '{}' (10-15 dB reduction)", device.name);
@@ -533,7 +533,7 @@ impl AudioCapture {
             }
 
             // STEP 2: Apply RNNoise noise suppression (10-15 dB reduction) - CONDITIONAL
-            if super::ffmpeg_mixer::RNNOISE_APPLY_ENABLED {
+            if super::constants::RNNOISE_APPLY_ENABLED {
                 if let Ok(mut ns_lock) = self.noise_suppressor.lock() {
                     if let Some(ref mut suppressor) = *ns_lock {
                         let before_len = mono_data.len();

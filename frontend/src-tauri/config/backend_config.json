@@ -1,5 +1,0 @@
-{
-  "whisperEndpoint": "http://127.0.0.1:8178/stream",
-  "ollamaEndpoint": "http://localhost:11434",
-  "fastApiEndpoint": "http://localhost:5167"
-}
