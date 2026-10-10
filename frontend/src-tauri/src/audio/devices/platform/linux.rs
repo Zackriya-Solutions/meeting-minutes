@@ -20,10 +20,10 @@ pub fn configure_linux_audio(host: &cpal::Host) -> Result<Vec<AudioDevice>> {
             if let Ok(name) = device.name() {
                 // Check if it's a monitor source
                 if name.contains("monitor") {
-                    devices.push(AudioDevice::new(
-                        format!("{} (System Audio)", name),
-                        DeviceType::Output
-                    ));
+                    // Keep the raw ALSA name: get_device_and_config looks the
+                    // device up by exact name, so a display suffix here made
+                    // every selected monitor fail with "Device not found".
+                    devices.push(AudioDevice::new(name, DeviceType::Output));
                 }
             }
         }

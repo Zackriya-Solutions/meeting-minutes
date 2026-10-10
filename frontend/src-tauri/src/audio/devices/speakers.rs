@@ -37,11 +37,26 @@ pub fn default_output_device() -> Result<AudioDevice> {
 
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
+        // DO NOT return cpal's default_output_device() here. On Linux, output
+        // capture is resolved by looking up an ALSA *input* device of the same
+        // name (see get_device_and_config), and the default output is named
+        // "default", which as an input is the microphone. Returning it made the
+        // "system audio" stream a second copy of the mic. System audio on Linux
+        // must come from a monitor source exposed as an ALSA capture PCM, e.g.
+        // a ~/.asoundrc `pcm.system_monitor { type pulse; device "@DEFAULT_MONITOR@" }`.
         let host = cpal::default_host();
-        let device = host
-            .default_output_device()
-            .ok_or_else(|| anyhow!("No default output device found"))?;
-        return Ok(AudioDevice::new(device.name()?, DeviceType::Output));
+        for device in host.input_devices()? {
+            if let Ok(name) = device.name() {
+                if name.to_lowercase().contains("monitor") {
+                    info!("🔊 Using monitor source for system audio: '{}'", name);
+                    return Ok(AudioDevice::new(name, DeviceType::Output));
+                }
+            }
+        }
+        return Err(anyhow!(
+            "No monitor capture device found for system audio. Define an ALSA PCM whose \
+             name contains \"monitor\" that captures the PipeWire/PulseAudio default sink monitor"
+        ));
     }
 }
 
