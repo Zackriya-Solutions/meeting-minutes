@@ -7,6 +7,9 @@ pub mod backend_config;
 #[cfg(target_os = "macos")]
 pub mod core_audio;
 
+#[cfg(target_os = "linux")]
+pub mod pipewire;
+
 // Re-export capture functionality
 pub use system::{
     SystemAudioCapture, SystemAudioStream,

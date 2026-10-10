@@ -2,7 +2,7 @@ use anyhow::Result;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use log::error;
 
-use super::configuration::{AudioDevice, DeviceType};
+use super::configuration::AudioDevice;
 use super::platform;
 
 /// List all available audio devices on the system
@@ -10,6 +10,7 @@ pub async fn list_audio_devices() -> Result<Vec<AudioDevice>> {
     let host = cpal::default_host();
 
     // Platform-specific device enumeration
+    #[cfg_attr(target_os = "linux", allow(unused_mut))]
     let mut devices = {
         #[cfg(target_os = "windows")]
         {
@@ -27,12 +28,14 @@ pub async fn list_audio_devices() -> Result<Vec<AudioDevice>> {
         }
     };
 
-    // Add any additional devices from the default host
+    // Add any additional devices from the default host. Not on Linux: ALSA playback
+    // devices cannot be captured, and opening them by name would resolve to a microphone.
+    #[cfg(not(target_os = "linux"))]
     if let Ok(other_devices) = host.devices() {
         for device in other_devices {
             if let Ok(name) = device.name() {
                 if !devices.iter().any(|d| d.name == name) {
-                    devices.push(AudioDevice::new(name, DeviceType::Output));
+                    devices.push(AudioDevice::new(name, super::configuration::DeviceType::Output));
                 }
             }
         }

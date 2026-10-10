@@ -21,6 +21,9 @@ pub enum StreamBackend {
     CoreAudio {
         task: Option<tokio::task::JoinHandle<()>>,
     },
+    /// PipeWire default-sink monitor capture (Linux system audio)
+    #[cfg(target_os = "linux")]
+    PipeWire(super::capture::pipewire::PipeWireSystemCapture),
 }
 
 // SAFETY: While Stream doesn't implement Send, we ensure it's only accessed
@@ -82,6 +85,14 @@ impl AudioStream {
         if use_core_audio {
             info!("🎵 Stream: Using Core Audio backend (cidre) for system audio");
             return Self::create_core_audio_stream(device, state, device_type).await;
+        }
+
+        #[cfg(target_os = "linux")]
+        if device_type == DeviceType::System
+            && device.name == super::capture::pipewire::PIPEWIRE_SYSTEM_DEVICE
+        {
+            info!("🎵 Stream: Using PipeWire monitor capture for system audio");
+            return Self::create_pipewire_stream(device, state, device_type);
         }
 
         // Default path: use CPAL
@@ -226,6 +237,31 @@ impl AudioStream {
         })
     }
 
+    /// Create a PipeWire system audio stream (Linux only)
+    #[cfg(target_os = "linux")]
+    fn create_pipewire_stream(
+        device: Arc<AudioDevice>,
+        state: Arc<RecordingState>,
+        device_type: DeviceType,
+    ) -> Result<Self> {
+        use super::capture::pipewire::{PipeWireSystemCapture, PIPEWIRE_SAMPLE_RATE};
+
+        // pw-record is asked for mono f32 at the pipeline rate
+        let capture = AudioCapture::new(
+            device.clone(),
+            state,
+            PIPEWIRE_SAMPLE_RATE,
+            1,
+            device_type,
+        );
+        let pipewire = PipeWireSystemCapture::start(capture)?;
+
+        Ok(Self {
+            device,
+            backend: StreamBackend::PipeWire(pipewire),
+        })
+    }
+
     /// Build stream based on sample format
     fn build_stream(
         device: &Device,
@@ -335,6 +371,10 @@ impl AudioStream {
                     std::thread::sleep(std::time::Duration::from_millis(50));
                     info!("Core Audio task aborted");
                 }
+            }
+            #[cfg(target_os = "linux")]
+            StreamBackend::PipeWire(pipewire) => {
+                pipewire.stop();
             }
         }
 

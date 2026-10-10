@@ -1,9 +1,13 @@
 use anyhow::Result;
 use cpal::traits::{DeviceTrait, HostTrait};
 
+use crate::audio::capture::pipewire;
 use crate::audio::devices::configuration::{AudioDevice, DeviceType};
 
-/// Configure Linux audio devices using ALSA/PulseAudio
+/// Configure Linux audio devices: ALSA inputs for microphones, PipeWire for system audio.
+///
+/// ALSA does not expose PulseAudio/PipeWire monitor sources, so system audio is offered
+/// as a single PipeWire device that records the default sink's monitor.
 pub fn configure_linux_audio(host: &cpal::Host) -> Result<Vec<AudioDevice>> {
     let mut devices = Vec::new();
 
@@ -14,19 +18,11 @@ pub fn configure_linux_audio(host: &cpal::Host) -> Result<Vec<AudioDevice>> {
         }
     }
 
-    // Add PulseAudio monitor sources for system audio
-    if let Ok(pulse_host) = cpal::host_from_id(cpal::HostId::Alsa) {
-        for device in pulse_host.input_devices()? {
-            if let Ok(name) = device.name() {
-                // Check if it's a monitor source
-                if name.contains("monitor") {
-                    devices.push(AudioDevice::new(
-                        format!("{} (System Audio)", name),
-                        DeviceType::Output
-                    ));
-                }
-            }
-        }
+    if pipewire::is_available() {
+        devices.push(AudioDevice::new(
+            pipewire::PIPEWIRE_SYSTEM_DEVICE.to_string(),
+            DeviceType::Output,
+        ));
     }
 
     Ok(devices)

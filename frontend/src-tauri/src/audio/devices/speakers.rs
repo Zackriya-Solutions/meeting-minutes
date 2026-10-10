@@ -35,13 +35,19 @@ pub fn default_output_device() -> Result<AudioDevice> {
         return Ok(AudioDevice::new(device.name()?, DeviceType::Output));
     }
 
-    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    #[cfg(target_os = "linux")]
     {
-        let host = cpal::default_host();
-        let device = host
-            .default_output_device()
-            .ok_or_else(|| anyhow!("No default output device found"))?;
-        return Ok(AudioDevice::new(device.name()?, DeviceType::Output));
+        // System audio on Linux comes from the PipeWire default-sink monitor. The ALSA
+        // "default" output name would otherwise be resolved to the default microphone.
+        if crate::audio::capture::pipewire::is_available() {
+            return Ok(AudioDevice::new(
+                crate::audio::capture::pipewire::PIPEWIRE_SYSTEM_DEVICE.to_string(),
+                DeviceType::Output,
+            ));
+        }
+        return Err(anyhow!(
+            "System audio capture requires PipeWire (pw-record was not found)"
+        ));
     }
 }
 
