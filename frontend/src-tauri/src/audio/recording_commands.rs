@@ -1276,7 +1276,6 @@ async fn do_mic_swap(device_name: &str, session: &Arc<super::RecordingState>) ->
         device_arc.clone(),
         session.clone(),
         super::recording_state::DeviceType::Microphone,
-        None,
     ).await.map_err(|e| format!("Failed to create mic stream: {}", e))?;
 
     // Resolve the current default output OUTSIDE the lock — a CoreAudio stall here

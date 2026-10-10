@@ -622,7 +622,7 @@ impl SummaryService {
                     ),
                 }
             }
-            Err(error) if cancellation_token.is_cancelled() => {
+            Err(_) if cancellation_token.is_cancelled() => {
                 match SummaryProcessesRepository::update_process_cancelled(
                     &pool,
                     &meeting_id,

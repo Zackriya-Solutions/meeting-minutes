@@ -1,6 +1,5 @@
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex as StdMutex;
-// Removed unused import
 
 // Performance optimization: Conditional logging macros for hot paths
 #[cfg(debug_assertions)]
@@ -26,12 +25,6 @@ macro_rules! perf_trace {
 macro_rules! perf_trace {
     ($($arg:tt)*) => {};
 }
-
-// Make these macros available to other modules
-pub(crate) use perf_debug;
-pub(crate) use perf_trace;
-
-// Re-export async logging macros for external use (removed due to macro conflicts)
 
 // Declare audio module
 pub mod api;

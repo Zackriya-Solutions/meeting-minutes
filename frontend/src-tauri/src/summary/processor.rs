@@ -430,7 +430,7 @@ pub(crate) async fn generate_meeting_summary(
                                 chunk_summaries.push(cleaned.markdown);
                                 break;
                             }
-                            Err(error)
+                            Err(_)
                                 if cancellation_token.is_some_and(CancellationToken::is_cancelled) =>
                             {
                                 return Err("Summary generation was cancelled".to_string());
