@@ -111,7 +111,8 @@ pub struct RecordingState {
     error_count: AtomicU32,
     recoverable_error_count: AtomicU32,
     last_error: Mutex<Option<AudioError>>,
-    error_callback: Mutex<Option<Box<dyn Fn(&AudioError) + Send + Sync>>>,
+    /// Called with the error and whether it caused the recording to stop
+    error_callback: Mutex<Option<Box<dyn Fn(&AudioError, bool) + Send + Sync>>>,
 
     // Statistics
     stats: Mutex<RecordingStats>,
@@ -258,7 +259,7 @@ impl RecordingState {
     // Error handling
     pub fn set_error_callback<F>(&self, callback: F)
     where
-        F: Fn(&AudioError) + Send + Sync + 'static,
+        F: Fn(&AudioError, bool) + Send + Sync + 'static,
     {
         *self.error_callback.lock().unwrap() = Some(Box::new(callback));
     }
@@ -267,18 +268,28 @@ impl RecordingState {
         let count = self.error_count.fetch_add(1, Ordering::SeqCst) + 1;
 
         // Track recoverable vs non-recoverable errors separately
-        if error.is_recoverable() {
+        let should_stop = if error.is_recoverable() {
             let recoverable_count = self.recoverable_error_count.fetch_add(1, Ordering::SeqCst) + 1;
             log::warn!("Recoverable audio error ({}): {:?}", recoverable_count, error);
 
             // Allow more recoverable errors before stopping
             if recoverable_count >= 10 {
                 log::error!("Too many recoverable errors ({}), stopping recording", recoverable_count);
-                self.stop_recording();
+                true
+            } else if count >= 15 {
+                // Fallback: stop recording after too many total errors
+                log::error!("Too many total audio errors ({}), stopping recording", count);
+                true
+            } else {
+                false
             }
         } else {
             log::error!("Non-recoverable audio error: {:?}", error);
             // Stop immediately for non-recoverable errors
+            true
+        };
+
+        if should_stop {
             self.stop_recording();
         }
 
@@ -286,13 +297,7 @@ impl RecordingState {
 
         // Call error callback if set
         if let Some(callback) = self.error_callback.lock().unwrap().as_ref() {
-            callback(&error);
-        }
-
-        // Fallback: stop recording after too many total errors
-        if count >= 15 {
-            log::error!("Too many total audio errors ({}), stopping recording", count);
-            self.stop_recording();
+            callback(&error, should_stop);
         }
     }
 

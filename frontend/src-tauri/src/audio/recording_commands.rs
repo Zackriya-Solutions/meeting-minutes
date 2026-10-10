@@ -119,6 +119,21 @@ pub struct RecordingArgs {
     pub save_path: String,
 }
 
+/// Forward audio errors to the frontend. When an error stops the capture, finish the
+/// stop through the same path as the tray so IS_RECORDING, the saved audio and the
+/// frontend state stay consistent instead of leaving a "recording" session with no audio.
+fn install_error_callback<R: Runtime>(manager: &RecordingManager, app: &AppHandle<R>) {
+    let app_for_error = app.clone();
+    let auto_stop_requested = AtomicBool::new(false);
+    manager.set_error_callback(move |error, stopped| {
+        let _ = app_for_error.emit("recording-error", error.user_message());
+        if stopped && !auto_stop_requested.swap(true, Ordering::SeqCst) {
+            warn!("Audio error stopped the capture, finalizing the recording");
+            crate::tray::stop_recording_handler(&app_for_error);
+        }
+    });
+}
+
 fn map_recording_start_error<R: Runtime>(
     app: &AppHandle<R>,
     error: RecordingStartError,
@@ -387,11 +402,7 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
     });
     manager.set_meeting_name(Some(effective_meeting_name));
 
-    // Set up error callback
-    let app_for_error = app.clone();
-    manager.set_error_callback(move |error| {
-        let _ = app_for_error.emit("recording-error", error.user_message());
-    });
+    install_error_callback(&manager, &app);
 
     // Start recording with resolved devices (replaces start_recording_with_defaults_and_auto_save call)
     let transcription_receiver = manager
@@ -574,11 +585,7 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
     });
     manager.set_meeting_name(Some(effective_meeting_name));
 
-    // Set up error callback
-    let app_for_error = app.clone();
-    manager.set_error_callback(move |error| {
-        let _ = app_for_error.emit("recording-error", error.user_message());
-    });
+    install_error_callback(&manager, &app);
 
     // Start recording with specified devices and auto_save setting
     let transcription_receiver = manager

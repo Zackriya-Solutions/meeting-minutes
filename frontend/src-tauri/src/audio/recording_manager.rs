@@ -444,7 +444,7 @@ impl RecordingManager {
     /// Set error callback for handling errors
     pub fn set_error_callback<F>(&self, callback: F)
     where
-        F: Fn(&super::recording_state::AudioError) + Send + Sync + 'static,
+        F: Fn(&super::recording_state::AudioError, bool) + Send + Sync + 'static,
     {
         self.state.set_error_callback(callback);
     }
