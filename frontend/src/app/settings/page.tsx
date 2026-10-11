@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
-import { ArrowLeft, Settings2, Mic, Database as DatabaseIcon, SparkleIcon, FlaskConical } from 'lucide-react';
+import React, { useState, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
+import { ArrowLeft, Settings2, Mic, Database as DatabaseIcon, SparkleIcon, FlaskConical, Users } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { invoke } from '@tauri-apps/api/core';
 import { motion } from 'framer-motion';
@@ -10,6 +10,7 @@ import { RecordingSettings } from '@/components/RecordingSettings';
 import { PreferenceSettings } from '@/components/PreferenceSettings';
 import { SummaryModelSettings } from '@/components/SummaryModelSettings';
 import { BetaSettings } from '@/components/BetaSettings';
+import { SpeakerSettings } from '@/components/Speakers/SpeakerSettings';
 import { useConfig } from '@/contexts/ConfigContext';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 
@@ -19,17 +20,27 @@ const TABS = [
   { value: 'recording', label: 'Recordings', icon: Mic },
   { value: 'Transcriptionmodels', label: 'Transcription', icon: DatabaseIcon },
   { value: 'summaryModels', label: 'Summary', icon: SparkleIcon },
+  { value: 'speakers', label: 'Speakers', icon: Users },
   { value: 'beta', label: 'Beta', icon: FlaskConical }
 ] as const;
 
 export default function SettingsPage() {
   const router = useRouter();
-  const { transcriptModelConfig, setTranscriptModelConfig } = useConfig();
+  const { transcriptModelConfig, setTranscriptModelConfig, betaFeatures } = useConfig();
 
   // Animation state for tabs
   const [activeTab, setActiveTab] = useState('general');
   const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const [underlineStyle, setUnderlineStyle] = useState({ left: 0, width: 0 });
+
+  // The Speakers tab belongs to the speaker identification beta.
+  const tabs = useMemo(
+    () => TABS.filter((tab) => tab.value !== 'speakers' || betaFeatures.speakerIdentification),
+    [betaFeatures.speakerIdentification],
+  );
+  useEffect(() => {
+    if (!tabs.some((tab) => tab.value === activeTab)) setActiveTab('general');
+  }, [tabs, activeTab]);
 
   // Load saved transcript configuration on mount
   useEffect(() => {
@@ -53,14 +64,14 @@ export default function SettingsPage() {
 
   // Update underline position when active tab changes
   useLayoutEffect(() => {
-    const activeIndex = TABS.findIndex(tab => tab.value === activeTab);
+    const activeIndex = tabs.findIndex(tab => tab.value === activeTab);
     const activeTabElement = tabRefs.current[activeIndex];
 
     if (activeTabElement) {
       const { offsetLeft, offsetWidth } = activeTabElement;
       setUnderlineStyle({ left: offsetLeft, width: offsetWidth });
     }
-  }, [activeTab]);
+  }, [activeTab, tabs]);
 
   return (
     <div className="h-screen bg-gray-50 flex flex-col">
@@ -86,7 +97,7 @@ export default function SettingsPage() {
           {/* Tabs */}
           <Tabs value={activeTab} onValueChange={setActiveTab}>
             <TabsList className="bg-transparent relative rounded-none border-b border-gray-200 p-0 h-auto">
-              {TABS.map((tab, index) => {
+              {tabs.map((tab, index) => {
                 const Icon = tab.icon;
                 return (
                   <TabsTrigger
@@ -124,6 +135,11 @@ export default function SettingsPage() {
             <TabsContent value="summaryModels">
               <SummaryModelSettings />
             </TabsContent>
+            {betaFeatures.speakerIdentification && (
+              <TabsContent value="speakers">
+                <SpeakerSettings />
+              </TabsContent>
+            )}
             <TabsContent value="beta" className="mt-6">
               <BetaSettings />
             </TabsContent>

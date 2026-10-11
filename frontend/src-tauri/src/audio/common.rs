@@ -14,6 +14,38 @@ pub(crate) async fn acquire_engine_lifecycle_lock() -> OwnedMutexGuard<()> {
     ENGINE_LIFECYCLE_LOCK.clone().lock_owned().await
 }
 
+/// Held by every batch job (retranscription, import, speaker-identification splitting) from
+/// engine load to unload, so one job cannot unload or swap the model another is using.
+static BATCH_ENGINE_LOCK: Lazy<Arc<AsyncMutex<()>>> =
+    Lazy::new(|| Arc::new(AsyncMutex::new(())));
+
+pub(crate) async fn acquire_batch_engine_lock() -> OwnedMutexGuard<()> {
+    BATCH_ENGINE_LOCK.clone().lock_owned().await
+}
+
+/// True while a batch job holds the transcription engine.
+pub(crate) fn batch_engine_busy() -> bool {
+    BATCH_ENGINE_LOCK.try_lock().is_err()
+}
+
+/// Speaker identification settings for retranscription and import.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SpeakerOptions {
+    pub identify: bool,
+    pub num_speakers: Option<usize>,
+}
+
+impl SpeakerOptions {
+    pub fn from_command(identify: Option<bool>, num_speakers: Option<u32>) -> Self {
+        Self { identify: identify.unwrap_or(false), num_speakers: speaker_count_from_command(num_speakers) }
+    }
+}
+
+/// The speaker count a command asked for; None (automatic) when it gave none or 0.
+pub fn speaker_count_from_command(num_speakers: Option<u32>) -> Option<usize> {
+    num_speakers.filter(|n| *n > 0).map(|n| n as usize)
+}
+
 /// Unload the transcription engine after a batch job (import or retranscription).
 /// Skips unloading if a live recording is currently in progress, since recording
 /// uses the same global engine instances.
@@ -46,6 +78,34 @@ pub(crate) async fn unload_engine_after_batch(use_parakeet: bool) {
     }
 }
 
+/// A loaded local transcription engine for batch jobs.
+pub(crate) enum BatchEngine {
+    Whisper(Arc<crate::whisper_engine::WhisperEngine>),
+    Parakeet(Arc<crate::parakeet_engine::ParakeetEngine>),
+}
+
+impl BatchEngine {
+    pub(crate) fn is_parakeet(&self) -> bool {
+        matches!(self, BatchEngine::Parakeet(_))
+    }
+
+    pub(crate) async fn transcribe(&self, samples: Vec<f32>, language: Option<String>) -> Result<String> {
+        match self {
+            BatchEngine::Whisper(e) => {
+                let (text, _, _) = e
+                    .transcribe_audio_with_confidence(samples, language)
+                    .await
+                    .map_err(|e| anyhow::anyhow!("Whisper transcription failed: {}", e))?;
+                Ok(text)
+            }
+            BatchEngine::Parakeet(e) => e
+                .transcribe_audio(samples)
+                .await
+                .map_err(|e| anyhow::anyhow!("Parakeet transcription failed: {}", e)),
+        }
+    }
+}
+
 /// Create transcript segments from transcription results.
 /// Each tuple is (text, start_ms, end_ms) from VAD timestamps.
 pub(crate) fn create_transcript_segments(transcripts: &[(String, f64, f64)]) -> Vec<TranscriptSegment> {
@@ -63,20 +123,29 @@ pub(crate) fn create_transcript_segments(transcripts: &[(String, f64, f64)]) -> 
                 audio_start_time: Some(start_seconds),
                 audio_end_time: Some(end_seconds),
                 duration: Some(duration),
+                speaker: None,
             }
         })
         .collect()
 }
 
-/// Write transcripts.json to a meeting folder (atomic write with temp file)
-pub(crate) fn write_transcripts_json(folder: &Path, segments: &[TranscriptSegment]) -> Result<()> {
+/// Write transcripts.json to a meeting folder (atomic write with temp file).
+/// `speaker_labels` maps speaker keys to the label shown to the user.
+pub(crate) fn write_transcripts_json(
+    folder: &Path,
+    segments: &[TranscriptSegment],
+    speaker_labels: &std::collections::BTreeMap<String, String>,
+) -> Result<()> {
     let transcript_path = folder.join("transcripts.json");
-    let temp_path = folder.join(".transcripts.json.tmp");
+    // Unique per call. Rewrites from the database are serialised, but the live recording saver
+    // writes this file without that lock.
+    let temp_path = folder.join(format!(".transcripts.json.{}.tmp", Uuid::new_v4()));
 
     let json = serde_json::json!({
         "version": "1.0",
         "last_updated": chrono::Utc::now().to_rfc3339(),
         "total_segments": segments.len(),
+        "speakers": speaker_labels,
         "segments": segments.iter().enumerate().map(|(i, s)| {
             serde_json::json!({
                 "id": s.id,
@@ -85,6 +154,7 @@ pub(crate) fn write_transcripts_json(folder: &Path, segments: &[TranscriptSegmen
                 "audio_start_time": s.audio_start_time,
                 "audio_end_time": s.audio_end_time,
                 "duration": s.duration,
+                "speaker": s.speaker,
                 "sequence_id": i
             })
         }).collect::<Vec<_>>()
@@ -215,6 +285,39 @@ pub(crate) fn split_segment_at_silence(
 mod tests {
     use super::*;
 
+    #[test]
+    fn speaker_options_default_to_off() {
+        let o = SpeakerOptions::from_command(None, None);
+        assert!(!o.identify);
+        let o = SpeakerOptions::from_command(Some(true), Some(3));
+        assert!(o.identify);
+        assert_eq!(o.num_speakers, Some(3));
+        assert_eq!(SpeakerOptions::from_command(Some(true), Some(0)).num_speakers, None);
+    }
+
+    #[test]
+    fn transcripts_json_includes_speakers() {
+        let dir = tempfile::tempdir().unwrap();
+        let segments = vec![crate::api::TranscriptSegment {
+            id: "t1".into(),
+            text: "hello".into(),
+            timestamp: "ts".into(),
+            audio_start_time: Some(0.0),
+            audio_end_time: Some(1.0),
+            duration: Some(1.0),
+            speaker: Some("spk_0".into()),
+        }];
+        let mut labels = std::collections::BTreeMap::new();
+        labels.insert("spk_0".to_string(), "Noah".to_string());
+
+        write_transcripts_json(dir.path(), &segments, &labels).unwrap();
+
+        let json: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(dir.path().join("transcripts.json")).unwrap()).unwrap();
+        assert_eq!(json["segments"][0]["speaker"], "spk_0");
+        assert_eq!(json["speakers"]["spk_0"], "Noah");
+    }
+
     #[tokio::test]
     async fn test_engine_lifecycle_lock_serializes_acquirers() {
         let guard = acquire_engine_lifecycle_lock().await;
@@ -232,5 +335,13 @@ mod tests {
 
         acquired_rx.await.unwrap();
         waiter.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_batch_engine_busy_tracks_the_guard() {
+        let guard = acquire_batch_engine_lock().await;
+        assert!(batch_engine_busy());
+        drop(guard);
+        assert!(!batch_engine_busy());
     }
 }

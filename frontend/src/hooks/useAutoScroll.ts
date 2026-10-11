@@ -10,6 +10,8 @@ interface UseAutoScrollProps {
     virtualizer?: Virtualizer<HTMLDivElement, Element>;
     virtualizationThreshold?: number;
     disableAutoScroll?: boolean; // Completely disable auto-scroll behavior (for meeting details page)
+    /** Called when the user scrolls (wheel, touch, scroll keys or scrollbar), never for scrolls made here. */
+    onManualScroll?: () => void;
 }
 
 interface UseAutoScrollReturn {
@@ -44,6 +46,7 @@ export function useAutoScroll({
     virtualizer,
     virtualizationThreshold = 10,
     disableAutoScroll = false,
+    onManualScroll,
 }: UseAutoScrollProps): UseAutoScrollReturn {
     const useVirtualization = virtualizer && segments.length >= virtualizationThreshold;
     const [autoScroll, setAutoScroll] = useState(true);
@@ -128,6 +131,34 @@ export function useAutoScroll({
         };
     }, [isNearBottom, scrollRef]);
 
+    // Follow-along stops when the user scrolls. Only input events count: the virtualizer also moves
+    // the scroll position while it measures rows, and smooth scrolls outlast any flag.
+    const onManualScrollRef = useRef(onManualScroll);
+    onManualScrollRef.current = onManualScroll;
+    useEffect(() => {
+        const container = scrollRef.current;
+        if (!container) return;
+        const scrollKeys = new Set(['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End']);
+        const notify = () => onManualScrollRef.current?.();
+        const onKeyDown = (event: KeyboardEvent) => {
+            if (scrollKeys.has(event.key)) notify();
+        };
+        // A press on the container itself (not on a row) is a scrollbar drag.
+        const onPointerDown = (event: PointerEvent) => {
+            if (event.target === container) notify();
+        };
+        container.addEventListener("wheel", notify, { passive: true });
+        container.addEventListener("touchmove", notify, { passive: true });
+        container.addEventListener("keydown", onKeyDown);
+        container.addEventListener("pointerdown", onPointerDown);
+        return () => {
+            container.removeEventListener("wheel", notify);
+            container.removeEventListener("touchmove", notify);
+            container.removeEventListener("keydown", onKeyDown);
+            container.removeEventListener("pointerdown", onPointerDown);
+        };
+    }, [scrollRef]);
+
     // Auto-scroll to bottom when new segments arrive during recording
     useEffect(() => {
         // EARLY RETURN: If auto-scroll is completely disabled (e.g., meeting details page)
@@ -186,7 +217,7 @@ export function useAutoScroll({
                 if (index >= 0) {
                     virtualizer.scrollToIndex(index, { align: "center", behavior: "smooth" });
                 }
-            } else {
+            } else if (typeof document !== 'undefined') {
                 const element = document.getElementById(`segment-${activeSegmentId}`);
                 if (element) {
                     element.scrollIntoView({ behavior: "smooth", block: "center" });

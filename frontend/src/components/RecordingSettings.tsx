@@ -7,6 +7,7 @@ import Analytics from '@/lib/analytics';
 import { toast } from 'sonner';
 import { useRecordingState } from '@/contexts/RecordingStateContext';
 import { useConfig } from '@/contexts/ConfigContext';
+import { DiarizationModelSettings } from '@/components/Speakers/DiarizationModelSettings';
 
 export interface RecordingPreferences {
   save_folder: string;
@@ -14,6 +15,9 @@ export interface RecordingPreferences {
   file_format: string;
   preferred_mic_device: string | null;
   preferred_system_device: string | null;
+  identify_speakers_after_recording: boolean;
+  /** Recognise voices named in one meeting in the others (Settings → Speakers) */
+  remember_voices: boolean;
 }
 
 interface RecordingSettingsProps {
@@ -26,13 +30,15 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
     auto_save: true,
     file_format: 'mp4',
     preferred_mic_device: null,
-    preferred_system_device: null
+    preferred_system_device: null,
+    identify_speakers_after_recording: true,
+    remember_voices: true
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [showRecordingNotification, setShowRecordingNotification] = useState(true);
   const { isRecording } = useRecordingState();
-  const { setSelectedDevices } = useConfig();
+  const { setSelectedDevices, betaFeatures } = useConfig();
 
   // Load recording preferences on component mount
   useEffect(() => {
@@ -71,6 +77,13 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
     };
     loadNotificationPref();
   }, []);
+
+  const handleIdentifySpeakersToggle = async (enabled: boolean) => {
+    const newPreferences = { ...preferences, identify_speakers_after_recording: enabled };
+    setPreferences(newPreferences);
+    await savePreferences(newPreferences);
+    await Analytics.track('identify_speakers_after_recording_toggled', { enabled: enabled.toString() });
+  };
 
   const handleAutoSaveToggle = async (enabled: boolean) => {
     const newPreferences = { ...preferences, auto_save: enabled };
@@ -184,6 +197,23 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
           disabled={saving}
         />
       </div>
+
+      {betaFeatures.speakerIdentification && (
+        <div className="space-y-3 p-4 border rounded-lg">
+          <div className="flex items-center justify-between">
+            <div className="flex-1">
+              <div className="font-medium">Identify speakers after recording</div>
+              <div className="text-sm text-gray-600">Label who said what once a recording stops</div>
+            </div>
+            <Switch
+              checked={preferences.identify_speakers_after_recording}
+              onCheckedChange={handleIdentifySpeakersToggle}
+              disabled={saving}
+            />
+          </div>
+          <DiarizationModelSettings />
+        </div>
+      )}
 
       {/* Folder Location - Only shown when auto_save is enabled */}
       {preferences.auto_save && (

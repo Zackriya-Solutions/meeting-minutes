@@ -1,5 +1,6 @@
 use crate::api::{MeetingDetails, MeetingTranscript};
 use crate::database::models::{MeetingModel, Transcript};
+use super::person::PeopleRepository;
 use chrono::Utc;
 use sqlx::{Connection, Error as SqlxError, SqliteConnection, SqlitePool};
 use log::{error, info};
@@ -92,6 +93,7 @@ impl MeetingsRepository {
                     audio_start_time: t.audio_start_time,
                     audio_end_time: t.audio_end_time,
                     duration: t.duration,
+                    speaker: t.speaker,
                 })
                 .collect::<Vec<_>>();
 
@@ -257,6 +259,15 @@ async fn delete_meeting_with_transaction(
         .bind(meeting_id)
         .execute(&mut *transaction)
         .await?;
+
+    // Delete from meeting_speakers
+    sqlx::query("DELETE FROM meeting_speakers WHERE meeting_id = ?")
+        .bind(meeting_id)
+        .execute(&mut *transaction)
+        .await?;
+
+    // Rejections reference the meeting; deleted explicitly so this does not depend on PRAGMA foreign_keys.
+    PeopleRepository::clear_rejections_conn(&mut *transaction, meeting_id).await?;
 
     // 3. Delete from transcripts
     sqlx::query("DELETE FROM transcripts WHERE meeting_id = ?")

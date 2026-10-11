@@ -848,6 +848,11 @@ pub async fn stop_recording<R: Runtime>(
     };
 
     match config.as_deref() {
+        // A retranscription, import or speaker-identification job is using the engine; it unloads
+        // the model itself when it finishes.
+        _ if crate::audio::common::batch_engine_busy() => {
+            info!("Skipping model unload after recording: a batch transcription job is running");
+        }
         Some("parakeet") => {
             info!("🦜 Unloading Parakeet model...");
             let engine_clone = {

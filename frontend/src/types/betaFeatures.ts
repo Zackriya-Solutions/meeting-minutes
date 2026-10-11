@@ -22,10 +22,16 @@ export interface BetaFeatures {
    * @since v0.3.0
    */
   importAndRetranscribe: boolean;
+  /**
+   * Identify individual speakers in transcripts, name them, and recognise named voices across meetings
+   * @since v0.4.1
+   */
+  speakerIdentification: boolean;
 }
 
 export const DEFAULT_BETA_FEATURES: BetaFeatures = {
   importAndRetranscribe: true, // Default: enabled
+  speakerIdentification: true,
 };
 
 
@@ -34,6 +40,7 @@ export const DEFAULT_BETA_FEATURES: BetaFeatures = {
  */
 export const BETA_FEATURE_NAMES: Record<keyof BetaFeatures, string> = {
   importAndRetranscribe: 'Import Audio & Retranscribe',
+  speakerIdentification: 'Speaker Identification',
 };
 
 /**
@@ -41,6 +48,7 @@ export const BETA_FEATURE_NAMES: Record<keyof BetaFeatures, string> = {
  */
 export const BETA_FEATURE_DESCRIPTIONS: Record<keyof BetaFeatures, string> = {
   importAndRetranscribe: 'Import audio files to transcribe or retranscribe existing meetings with different language settings.',
+  speakerIdentification: 'Label who said what in transcripts, name speakers (by voice across meetings or from the conversation), and include names in summaries.',
 };
 
 /**

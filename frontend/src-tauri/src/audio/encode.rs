@@ -100,3 +100,52 @@ pub fn encode_single_audio(
 
     Ok(())
 }
+
+/// 16-bit PCM WAV of interleaved `samples`: a 44-byte RIFF header and the data. Samples are
+/// clamped to [-1, 1]; NaN and infinities become silence.
+pub fn pcm16_wav(rate: u32, channels: u16, samples: &[f32]) -> Vec<u8> {
+    let data_len = (samples.len() * 2) as u32;
+    let mut wav = Vec::with_capacity(44 + data_len as usize);
+    wav.extend_from_slice(b"RIFF");
+    wav.extend_from_slice(&(36 + data_len).to_le_bytes());
+    wav.extend_from_slice(b"WAVEfmt ");
+    wav.extend_from_slice(&16u32.to_le_bytes()); // fmt chunk size
+    wav.extend_from_slice(&1u16.to_le_bytes()); // PCM
+    wav.extend_from_slice(&channels.to_le_bytes());
+    wav.extend_from_slice(&rate.to_le_bytes());
+    wav.extend_from_slice(&(rate * channels as u32 * 2).to_le_bytes()); // byte rate
+    wav.extend_from_slice(&(channels * 2).to_le_bytes()); // block align
+    wav.extend_from_slice(&16u16.to_le_bytes()); // bits per sample
+    wav.extend_from_slice(b"data");
+    wav.extend_from_slice(&data_len.to_le_bytes());
+    for &s in samples {
+        let v = if s.is_finite() { (s.clamp(-1.0, 1.0) * 32767.0).round() as i16 } else { 0 };
+        wav.extend_from_slice(&v.to_le_bytes());
+    }
+    wav
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pcm16_wav_header_and_samples() {
+        let wav = pcm16_wav(48_000, 2, &[0.0, 0.5, -0.5, 1.5, f32::NAN, -2.0]);
+        assert_eq!(wav.len(), 44 + 12);
+        assert_eq!(&wav[0..4], b"RIFF");
+        assert_eq!(u32::from_le_bytes(wav[4..8].try_into().unwrap()), 36 + 12);
+        assert_eq!(&wav[8..16], b"WAVEfmt ");
+        assert_eq!(u32::from_le_bytes(wav[16..20].try_into().unwrap()), 16, "fmt chunk size");
+        assert_eq!(u16::from_le_bytes(wav[20..22].try_into().unwrap()), 1, "PCM");
+        assert_eq!(u16::from_le_bytes(wav[22..24].try_into().unwrap()), 2, "channels");
+        assert_eq!(u32::from_le_bytes(wav[24..28].try_into().unwrap()), 48_000);
+        assert_eq!(u32::from_le_bytes(wav[28..32].try_into().unwrap()), 48_000 * 2 * 2, "byte rate");
+        assert_eq!(u16::from_le_bytes(wav[32..34].try_into().unwrap()), 4, "block align");
+        assert_eq!(u16::from_le_bytes(wav[34..36].try_into().unwrap()), 16, "bits");
+        assert_eq!(&wav[36..40], b"data");
+        assert_eq!(u32::from_le_bytes(wav[40..44].try_into().unwrap()), 12);
+        let samples: Vec<i16> = wav[44..].chunks_exact(2).map(|b| i16::from_le_bytes([b[0], b[1]])).collect();
+        assert_eq!(samples, vec![0, 16384, -16384, 32767, 0, -32767]);
+    }
+}

@@ -50,6 +50,7 @@ const invoke = mock(async (command: string, args?: Record<string, unknown>): Pro
   if (command === 'api_get_meeting_transcripts') return readTranscripts(args!.meetingId as string);
   if (command === 'api_process_transcript') return { process_id: 'attempt-b' };
   if (command === 'api_cancel_summary') return { cancelled: true };
+  if (command === 'api_list_meeting_speakers') return [];
   throw new Error(`Unexpected command: ${command}`);
 });
 mock.module('@tauri-apps/api/core', () => ({ ...originalCore, invoke }));

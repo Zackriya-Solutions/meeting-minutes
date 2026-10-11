@@ -100,6 +100,7 @@ Whether you're a defense consultant, enterprise executive, legal professional, o
 - **Multi-Platform:** Works on macOS, Windows, and Linux.
 - **Open Source:** Meetily is open source and free to use.
 - **Flexible AI Provider Support:** Choose from Ollama (local), Claude, Groq, OpenRouter, or use your own OpenAI-compatible endpoint.
+- **Speaker Identification (Beta):** Label who said each line, name speakers once and have their voices recognized in other meetings, and play the recording from any line. Runs locally; turn it off under Settings → Beta.
 
 ## Installation
 

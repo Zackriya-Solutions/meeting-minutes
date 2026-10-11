@@ -18,6 +18,7 @@ import {
   readCachedDetectedSummaryLanguage,
 } from '@/lib/summary-language-preferences';
 import { parseSummaryContent, readSummaryMetadata } from '@/lib/summary-content';
+import { fetchSpeakerNames, speakerLabel } from '@/lib/speakers';
 
 async function resolveSummaryLanguage(
   meetingId: string,
@@ -79,6 +80,8 @@ interface UseSummaryGenerationProps {
   updateMeetingTitle: (title: string) => void;
   setAiSummary: (summary: MeetingSummary | null) => void;
   onOpenModelSettings?: () => void;
+  /** Names the caller already holds; fetched per summary when absent. */
+  speakerNames?: Record<string, string>;
 }
 
 export function useSummaryGeneration({
@@ -92,6 +95,7 @@ export function useSummaryGeneration({
   updateMeetingTitle,
   setAiSummary,
   onOpenModelSettings,
+  speakerNames,
 }: UseSummaryGenerationProps) {
   const restored = initialSummary?.meeting_id === meeting.id ? initialSummary : null;
   const [summaryStatus, setSummaryStatus] = useState<SummaryStatus>(() => restoredSummaryStatus(restored));
@@ -433,9 +437,9 @@ export function useSummaryGeneration({
     }
   }, []);
 
-  const buildSummaryTranscriptPayload = useCallback((allTranscripts: Transcript[]) => {
+  const buildSummaryTranscriptPayload = useCallback((allTranscripts: Transcript[], names: Record<string, string>) => {
     const formatTime = (seconds: number | undefined, fallbackTimestamp: string): string => {
-      if (seconds === undefined) {
+      if (seconds == null) {
         return fallbackTimestamp;
       }
       const totalSecs = Math.floor(seconds);
@@ -444,7 +448,7 @@ export function useSummaryGeneration({
 
     return {
       transcriptText: allTranscripts
-        .map((transcript) => `${formatTime(transcript.audio_start_time, transcript.timestamp)} ${transcript.text}`)
+        .map((transcript) => `${formatTime(transcript.audio_start_time, transcript.timestamp)} ${transcript.speaker ? `${speakerLabel(transcript.speaker, names)}: ` : ''}${transcript.text}`)
         .join('\n'),
       transcriptTexts: allTranscripts.map((transcript) => transcript.text),
     };
@@ -500,7 +504,7 @@ export function useSummaryGeneration({
     }
 
     await processSummary({
-      ...buildSummaryTranscriptPayload(allTranscripts),
+      ...buildSummaryTranscriptPayload(allTranscripts, speakerNames ?? await fetchSpeakerNames(meeting.id)),
       customPrompt,
     });
   }, [
@@ -512,6 +516,7 @@ export function useSummaryGeneration({
     onOpenModelSettings,
     processSummary,
     showPreflightError,
+    speakerNames,
   ]);
 
   // Public API: Regenerate summary from the current saved transcript
@@ -525,10 +530,10 @@ export function useSummaryGeneration({
     }
 
     await processSummary({
-      ...buildSummaryTranscriptPayload(allTranscripts),
+      ...buildSummaryTranscriptPayload(allTranscripts, speakerNames ?? await fetchSpeakerNames(meeting.id)),
       isRegeneration: true
     });
-  }, [meeting.id, fetchAllTranscripts, buildSummaryTranscriptPayload, processSummary]);
+  }, [meeting.id, fetchAllTranscripts, buildSummaryTranscriptPayload, processSummary, speakerNames]);
 
   // Public API: Stop ongoing summary generation
   const handleStopGeneration = useCallback(async () => {

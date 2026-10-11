@@ -18,7 +18,7 @@ use tauri_plugin_dialog::DialogExt;
 use uuid::Uuid;
 
 use super::audio_processing::create_meeting_folder;
-use super::common::{create_transcript_segments, split_segment_at_silence, write_transcripts_json};
+use super::common::{create_transcript_segments, split_segment_at_silence};
 use super::constants::AUDIO_EXTENSIONS;
 use super::recording_preferences::get_default_recordings_folder;
 
@@ -86,6 +86,12 @@ pub struct ImportResult {
     pub title: String,
     pub segments_count: usize,
     pub duration_seconds: f64,
+    /// Number of speakers identified, when identification ran and found speakers.
+    #[serde(default)]
+    pub speaker_count: Option<usize>,
+    /// Why speakers were not identified although requested.
+    #[serde(default)]
+    pub speaker_warning: Option<String>,
 }
 
 /// Error during import
@@ -259,12 +265,19 @@ pub async fn start_import<R: Runtime>(
     language: Option<String>,
     model: Option<String>,
     provider: Option<String>,
+    speakers: super::common::SpeakerOptions,
 ) -> Result<ImportResult> {
     // Acquire guard - ensures flag is cleared even on panic/early return
     let _guard = ImportGuard::acquire().map_err(|e| anyhow!(e))?;
 
     // Reset cancellation flag
     IMPORT_CANCELLED.store(false, Ordering::SeqCst);
+
+    // One batch job at a time uses the shared transcription engine (load to unload).
+    if super::common::batch_engine_busy() {
+        emit_progress(&app, "waiting", 0, "Waiting for another transcription job to finish...");
+    }
+    let batch_guard = super::common::acquire_batch_engine_lock().await;
 
     let use_parakeet = provider.as_deref() == Some("parakeet");
     let result = run_import(
@@ -274,11 +287,13 @@ pub async fn start_import<R: Runtime>(
         language,
         model,
         provider,
+        speakers,
     )
     .await;
 
     // Unload the engine after the batch job (success, failure, or cancellation)
     super::common::unload_engine_after_batch(use_parakeet).await;
+    drop(batch_guard);
 
     // Guard will automatically clear flag on drop
     // No need for manual: IMPORT_IN_PROGRESS.store(false, Ordering::SeqCst);
@@ -291,7 +306,9 @@ pub async fn start_import<R: Runtime>(
                     "meeting_id": res.meeting_id,
                     "title": res.title,
                     "segments_count": res.segments_count,
-                    "duration_seconds": res.duration_seconds
+                    "duration_seconds": res.duration_seconds,
+                    "speaker_count": res.speaker_count,
+                    "speaker_warning": res.speaker_warning
                 }),
             );
         }
@@ -316,6 +333,7 @@ async fn run_import<R: Runtime>(
     language: Option<String>,
     model: Option<String>,
     provider: Option<String>,
+    speakers: super::common::SpeakerOptions,
 ) -> Result<ImportResult> {
     let source = PathBuf::from(&source_path);
 
@@ -411,7 +429,7 @@ async fn run_import<R: Runtime>(
     });
 
     let audio_samples = tokio::task::spawn_blocking(move || {
-        decoded.to_whisper_format_with_progress(Some(resample_progress))
+        decoded.into_whisper_format_with_progress(Some(resample_progress))
     })
     .await
     .map_err(|e| anyhow!("Resample task join error: {}", e))?;
@@ -430,6 +448,8 @@ async fn run_import<R: Runtime>(
 
     // Use VAD to find speech segments
     let app_for_vad = app.clone();
+    let audio_samples = Arc::new(audio_samples);
+    let samples_for_speakers = audio_samples.clone();
 
     let speech_segments = tokio::task::spawn_blocking(move || {
         get_speech_chunks_with_progress(
@@ -506,6 +526,31 @@ async fn run_import<R: Runtime>(
         return Err(anyhow!("Import cancelled"));
     }
 
+    let (diarization, speaker_warning): (Option<crate::diarization::diarizer::Diarization>, Option<String>) =
+        if speakers.identify && total_segments > 0 {
+            let app_p = app.clone();
+            let report = move |message: &str| emit_progress(&app_p, "speakers", 30, message);
+            match crate::diarization::jobs::diarize_for_batch(
+                &app,
+                samples_for_speakers.clone(),
+                speakers.num_speakers,
+                report,
+                || IMPORT_CANCELLED.load(Ordering::SeqCst),
+            )
+            .await
+            {
+                Ok(result) => result,
+                Err(crate::diarization::Cancelled) => {
+                    let _ = std::fs::remove_dir_all(&meeting_folder);
+                    return Err(anyhow!("Import cancelled"));
+                }
+            }
+        } else {
+            (None, None)
+        };
+    // The full-length 16 kHz buffer is no longer needed; VAD segments carry their own samples.
+    drop(samples_for_speakers);
+
     emit_progress(&app, "transcribing", 30, "Loading transcription engine...");
 
     // Initialize the appropriate engine
@@ -540,6 +585,10 @@ async fn run_import<R: Runtime>(
         } else {
             processable_segments.push(segment.clone());
         }
+    }
+
+    if let Some(d) = &diarization {
+        processable_segments = crate::diarization::assign::split_segments_at_turns(processable_segments, &d.turns, 16000);
     }
 
     let processable_count = processable_segments.len();
@@ -631,27 +680,37 @@ async fn run_import<R: Runtime>(
     emit_progress(&app, "saving", 85, "Creating meeting...");
 
     // Create transcript segments
-    let segments = create_transcript_segments(&all_transcripts);
+    let mut segments = create_transcript_segments(&all_transcripts);
+    if let Some(d) = &diarization {
+        crate::diarization::assign::label_segments(&mut segments, &d.turns);
+    }
+
+    let new_speakers: Vec<crate::database::repositories::speaker::NewSpeaker> = diarization
+        .as_ref()
+        .map(|d| d.speakers.iter().map(Into::into).collect())
+        .unwrap_or_default();
 
     // Save to database
     let app_state = app
         .try_state::<AppState>()
         .ok_or_else(|| anyhow!("App state not available"))?;
 
+    let remember_voices = super::recording_preferences::remember_voices(&app).await;
     let meeting_id = create_meeting_with_transcripts(
         app_state.db_manager.pool(),
         &title,
         &segments,
         meeting_folder.to_string_lossy().to_string(),
+        new_speakers,
+        remember_voices,
     )
     .await?;
 
     // Write transcripts.json and metadata.json to the meeting folder
     emit_progress(&app, "saving", 90, "Writing transcript files...");
 
-    if let Err(e) = write_transcripts_json(&meeting_folder, &segments) {
-        warn!("Failed to write transcripts.json: {}", e);
-    }
+    crate::diarization::jobs::rewrite_transcripts_json(app_state.db_manager.pool(), &meeting_id, Some(&meeting_folder))
+        .await;
 
     if let Err(e) = write_import_metadata(
         &meeting_folder,
@@ -671,6 +730,8 @@ async fn run_import<R: Runtime>(
         title,
         segments_count: segments.len(),
         duration_seconds,
+        speaker_count: diarization.as_ref().map(|d| d.speakers.len()),
+        speaker_warning,
     })
 }
 
@@ -687,12 +748,15 @@ fn emit_progress<R: Runtime>(app: &AppHandle<R>, stage: &str, progress: u32, mes
 }
 
 
-/// Create a new meeting with transcripts in the database
+/// Create a new meeting with transcripts in the database. Its speakers are matched against people
+/// named in other meetings when `remember_voices` is on.
 async fn create_meeting_with_transcripts(
     pool: &sqlx::SqlitePool,
     title: &str,
     segments: &[TranscriptSegment],
     folder_path: String,
+    mut speakers: Vec<crate::database::repositories::speaker::NewSpeaker>,
+    remember_voices: bool,
 ) -> Result<String> {
     let meeting_id = format!("meeting-{}", Uuid::new_v4());
     let now = chrono::Utc::now();
@@ -720,8 +784,8 @@ async fn create_meeting_with_transcripts(
     // Insert transcripts
     for segment in segments {
         sqlx::query(
-            "INSERT INTO transcripts (id, meeting_id, transcript, timestamp, audio_start_time, audio_end_time, duration)
-             VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO transcripts (id, meeting_id, transcript, timestamp, audio_start_time, audio_end_time, duration, speaker)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(&segment.id)
         .bind(&meeting_id)
@@ -730,10 +794,26 @@ async fn create_meeting_with_transcripts(
         .bind(segment.audio_start_time)
         .bind(segment.audio_end_time)
         .bind(segment.duration)
+        .bind(&segment.speaker)
         .execute(&mut *tx)
         .await
         .map_err(|e| anyhow!("Failed to insert transcript: {}", e))?;
     }
+
+    let (linked, suggested) =
+        crate::diarization::people::match_new_speakers_conn(&mut tx, &meeting_id, &mut speakers, remember_voices)
+            .await
+            .map_err(|e| anyhow!("Failed to match voices: {}", e))?;
+    if linked + suggested > 0 {
+        info!("Voice matching for {}: {} linked, {} suggested", meeting_id, linked, suggested);
+    }
+    crate::database::repositories::speaker::SpeakersRepository::replace_for_meeting(
+        &mut tx,
+        &meeting_id,
+        &crate::database::repositories::speaker::SpeakerWrite { speakers, ..Default::default() },
+    )
+    .await
+    .map_err(|e| anyhow!("Failed to save speakers: {}", e))?;
 
     tx.commit()
         .await
@@ -969,6 +1049,8 @@ pub async fn start_import_audio_command<R: Runtime>(
     language: Option<String>,
     model: Option<String>,
     provider: Option<String>,
+    identify_speakers: Option<bool>,
+    num_speakers: Option<u32>,
 ) -> Result<ImportStarted, String> {
     // Check if import is already in progress (guard will be acquired in start_import)
     if IMPORT_IN_PROGRESS.load(Ordering::SeqCst) {
@@ -977,7 +1059,7 @@ pub async fn start_import_audio_command<R: Runtime>(
 
     // Spawn import in background
     tauri::async_runtime::spawn(async move {
-        let result = start_import(app, source_path, title, language, model, provider).await;
+        let result = start_import(app, source_path, title, language, model, provider, super::common::SpeakerOptions::from_command(identify_speakers, num_speakers)).await;
 
         if let Err(e) = result {
             error!("Import failed: {}", e);
@@ -1182,6 +1264,7 @@ mod tests {
                 audio_start_time: Some(0.0),
                 audio_end_time: Some(1.5),
                 duration: Some(1.5),
+                speaker: None,
             },
             TranscriptSegment {
                 id: "t-2".to_string(),
@@ -1190,10 +1273,11 @@ mod tests {
                 audio_start_time: Some(2.0),
                 audio_end_time: Some(3.5),
                 duration: Some(1.5),
+                speaker: None,
             },
         ];
 
-        let result = write_transcripts_json(dir.path(), &segments);
+        let result = crate::audio::common::write_transcripts_json(dir.path(), &segments, &std::collections::BTreeMap::new());
         assert!(result.is_ok(), "write_transcripts_json failed: {:?}", result);
 
         // Verify file exists and is valid JSON
@@ -1319,5 +1403,42 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[tokio::test]
+    async fn imported_meeting_is_matched() {
+        use crate::database::repositories::speaker::{NameSource, NewSpeaker, SpeakerLink, SpeakerWrite, SpeakersRepository};
+        use crate::database::test_support::{migrated_pool, seed_meeting, seed_person};
+        let pool = migrated_pool().await;
+        seed_person(&pool, "person-noah", "Noah").await;
+        seed_meeting(&pool, "a", &[]).await;
+        let mut conn = pool.acquire().await.unwrap();
+        SpeakersRepository::replace_for_meeting(
+            &mut conn,
+            "a",
+            &SpeakerWrite {
+                speakers: vec![NewSpeaker {
+                    key: "spk_0".into(),
+                    display_name: Some("Noah".into()),
+                    embedding: vec![1.0, 0.0],
+                    speech_seconds: 1.0,
+                    link: SpeakerLink { person_id: Some("person-noah".into()), name_source: Some(NameSource::User), ..Default::default() },
+                }],
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        drop(conn);
+
+        let speakers = vec![NewSpeaker { key: "spk_0".into(), embedding: vec![0.98, 0.2], speech_seconds: 1.0, ..Default::default() }];
+        let id = create_meeting_with_transcripts(&pool, "Imported", &[], "/tmp/imported-meeting".into(), speakers, true)
+            .await
+            .unwrap();
+
+        let listed = SpeakersRepository::list(&pool, &id).await.unwrap();
+        assert_eq!(listed[0].display_name.as_deref(), Some("Noah"));
+        assert_eq!(listed[0].link.person_id.as_deref(), Some("person-noah"));
+        assert_eq!(listed[0].link.name_source, Some(NameSource::Voice));
     }
 }

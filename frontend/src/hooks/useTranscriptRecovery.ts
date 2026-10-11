@@ -11,6 +11,7 @@ import { indexedDBService, MeetingMetadata, StoredTranscript } from '@/services/
 import { storageService } from '@/services/storageService';
 import { applyPinnedSummaryLanguageToMeeting } from '@/lib/summary-language-preferences';
 import { toast } from 'sonner';
+import { loadBetaFeatures } from '@/types/betaFeatures';
 
 interface AudioRecoveryStatus {
   status: string; // "success" | "partial" | "failed" | "none"
@@ -179,7 +180,8 @@ export function useTranscriptRecovery(): UseTranscriptRecoveryReturn {
       const saveResponse = await storageService.saveMeeting(
         metadata.title,
         formattedTranscripts,
-        folderPath ?? null
+        folderPath ?? null,
+        loadBetaFeatures().speakerIdentification
       );
 
       const savedMeetingId = saveResponse.meeting_id;

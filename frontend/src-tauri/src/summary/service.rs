@@ -210,6 +210,160 @@ fn extract_cached_english_markdown(
     }
 }
 
+/// Provider, credentials, endpoints and usable context of a summary model, from the settings.
+/// Deliberately not `Debug`: it holds the API key.
+pub(crate) struct ResolvedLlm {
+    pub provider: LLMProvider,
+    pub model: String,
+    pub api_key: String,
+    pub ollama_endpoint: Option<String>,
+    pub custom_openai_endpoint: Option<String>,
+    pub max_tokens: Option<u32>,
+    pub temperature: Option<f32>,
+    pub top_p: Option<f32>,
+    /// Tokens one request may carry: the model's context minus 300 for the prompt, or 100 000
+    /// for cloud and custom providers.
+    pub context_tokens: usize,
+    pub app_data_dir: Option<std::path::PathBuf>,
+}
+
+impl ResolvedLlm {
+    /// See `is_local_model`.
+    pub(crate) fn is_local(&self) -> bool {
+        is_local_model(&self.provider, self.ollama_endpoint.as_deref(), self.custom_openai_endpoint.as_deref())
+    }
+}
+
+/// True when the model runs on this machine, so a transcript sent to it stays here: the built-in
+/// model, Ollama at its default endpoint or on localhost/127.0.0.1, and a custom endpoint on
+/// localhost/127.0.0.1. Every other provider is a cloud service.
+pub(crate) fn is_local_model(
+    provider: &LLMProvider,
+    ollama_endpoint: Option<&str>,
+    custom_openai_endpoint: Option<&str>,
+) -> bool {
+    let loopback = |endpoint: &str| {
+        url::Url::parse(endpoint.trim())
+            .ok()
+            .is_some_and(|url| matches!(url.host_str(), Some("localhost" | "127.0.0.1")))
+    };
+    match provider {
+        LLMProvider::BuiltInAI => true,
+        // No endpoint means the default local server.
+        LLMProvider::Ollama => ollama_endpoint.map(str::trim).filter(|e| !e.is_empty()).map_or(true, loopback),
+        LLMProvider::CustomOpenAI => custom_openai_endpoint.is_some_and(loopback),
+        _ => false,
+    }
+}
+
+/// Everything needed to call `provider_name`/`model_name`. Err carries the message shown to the user.
+pub(crate) async fn resolve_llm(
+    pool: &SqlitePool,
+    provider_name: &str,
+    model_name: &str,
+    app_data_dir: Option<std::path::PathBuf>,
+) -> Result<ResolvedLlm, String> {
+    let provider = LLMProvider::from_str(provider_name)?;
+
+    // Ollama, BuiltInAI and CustomOpenAI don't use the standard API key columns.
+    let api_key = if matches!(provider, LLMProvider::Ollama | LLMProvider::BuiltInAI | LLMProvider::CustomOpenAI) {
+        String::new()
+    } else {
+        match SettingsRepository::get_api_key(pool, provider_name).await {
+            Ok(Some(key)) if !key.is_empty() => key,
+            Ok(None) | Ok(Some(_)) => return Err(format!("API key not found for {}", provider_name)),
+            Err(e) => return Err(format!("Failed to retrieve API key for {}: {}", provider_name, e)),
+        }
+    };
+
+    let ollama_endpoint = if provider == LLMProvider::Ollama {
+        match SettingsRepository::get_model_config(pool).await {
+            Ok(Some(config)) => config.ollama_endpoint,
+            Ok(None) => None,
+            Err(e) => {
+                info!("Failed to retrieve Ollama endpoint: {}, using default", e);
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    let (custom_openai_endpoint, custom_openai_api_key, max_tokens, temperature, top_p) =
+        if provider == LLMProvider::CustomOpenAI {
+            match SettingsRepository::get_custom_openai_config(pool).await {
+                Ok(Some(config)) => {
+                    info!("✓ Using custom OpenAI endpoint_origin={}", url_origin_for_log(&config.endpoint));
+                    (
+                        Some(config.endpoint),
+                        config.api_key,
+                        config.max_tokens.map(|t| t as u32),
+                        config.temperature,
+                        config.top_p,
+                    )
+                }
+                Ok(None) => return Err("Custom OpenAI provider selected but no configuration found".to_string()),
+                Err(e) => return Err(format!("Failed to retrieve custom OpenAI config: {}", e)),
+            }
+        } else {
+            (None, None, None, None, None)
+        };
+
+    // CustomOpenAI uses its own API key (if any) instead of the empty string.
+    let api_key = if provider == LLMProvider::CustomOpenAI { custom_openai_api_key.unwrap_or_default() } else { api_key };
+
+    let context_tokens = if provider == LLMProvider::Ollama {
+        match METADATA_CACHE.get_or_fetch(model_name, ollama_endpoint.as_deref()).await {
+            Ok(metadata) => {
+                // Reserve 300 tokens for prompt overhead
+                let optimal = metadata.context_size.saturating_sub(300);
+                info!(
+                    "✓ Using dynamic context for {}: {} tokens (chunk size: {})",
+                    model_name, metadata.context_size, optimal
+                );
+                optimal
+            }
+            Err(e) => {
+                warn!("Failed to fetch context for {}: {}. Using default 4000", model_name, e);
+                4000
+            }
+        }
+    } else if provider == LLMProvider::BuiltInAI {
+        use crate::summary::summary_engine::models;
+        match models::get_model_by_name(model_name) {
+            Some(model_def) => {
+                // Reserve 300 tokens for prompt overhead
+                let optimal = model_def.context_size.saturating_sub(300) as usize;
+                info!(
+                    "✓ Using BuiltInAI context size: {} tokens (chunk size: {})",
+                    model_def.context_size, optimal
+                );
+                optimal
+            }
+            None => {
+                warn!("Unknown model: {}, using default 2048", model_name);
+                1748 // 2048 - 300 for overhead
+            }
+        }
+    } else {
+        // Cloud providers (OpenAI, Claude, Groq, CustomOpenAI) handle large contexts automatically
+        100000
+    };
+
+    Ok(ResolvedLlm {
+        provider,
+        model: model_name.to_string(),
+        api_key,
+        ollama_endpoint,
+        custom_openai_endpoint,
+        max_tokens,
+        temperature,
+        top_p,
+        context_tokens,
+        app_data_dir,
+    })
+}
+
 /// Summary service - handles all summary generation logic
 pub struct SummaryService;
 
@@ -352,135 +506,24 @@ impl SummaryService {
         );
 
         // Parse provider
-        let provider = match LLMProvider::from_str(&model_provider) {
-            Ok(p) => p,
+        let ResolvedLlm {
+            provider,
+            api_key: final_api_key,
+            ollama_endpoint,
+            custom_openai_endpoint,
+            max_tokens: custom_openai_max_tokens,
+            temperature: custom_openai_temperature,
+            top_p: custom_openai_top_p,
+            context_tokens: token_threshold,
+            app_data_dir,
+            ..
+        } = match resolve_llm(&pool, &model_provider, &model_name, _app.path().app_data_dir().ok()).await {
+            Ok(llm) => llm,
             Err(e) => {
                 Self::fail_and_cleanup(&pool, &meeting_id, started_at, &e).await;
                 return;
             }
         };
-
-        // Validate and setup api_key, Flexible for Ollama, BuiltInAI, and CustomOpenAI
-        let api_key = if provider == LLMProvider::Ollama || provider == LLMProvider::BuiltInAI || provider == LLMProvider::CustomOpenAI {
-            // These providers don't require API keys from the standard database column
-            String::new()
-        } else {
-            match SettingsRepository::get_api_key(&pool, &model_provider).await {
-                Ok(Some(key)) if !key.is_empty() => key,
-                Ok(None) | Ok(Some(_)) => {
-                    let err_msg = format!("API key not found for {}", &model_provider);
-                    Self::fail_and_cleanup(&pool, &meeting_id, started_at, &err_msg).await;
-                    return;
-                }
-                Err(e) => {
-                    let err_msg = format!("Failed to retrieve API key for {}: {}", &model_provider, e);
-                    Self::fail_and_cleanup(&pool, &meeting_id, started_at, &err_msg).await;
-                    return;
-                }
-            }
-        };
-
-        // Get Ollama endpoint if provider is Ollama
-        let ollama_endpoint = if provider == LLMProvider::Ollama {
-            match SettingsRepository::get_model_config(&pool).await {
-                Ok(Some(config)) => config.ollama_endpoint,
-                Ok(None) => None,
-                Err(e) => {
-                    info!("Failed to retrieve Ollama endpoint: {}, using default", e);
-                    None
-                }
-            }
-        } else {
-            None
-        };
-
-        // Get CustomOpenAI config if provider is CustomOpenAI
-        let (custom_openai_endpoint, custom_openai_api_key, custom_openai_max_tokens, custom_openai_temperature, custom_openai_top_p) =
-            if provider == LLMProvider::CustomOpenAI {
-                match SettingsRepository::get_custom_openai_config(&pool).await {
-                    Ok(Some(config)) => {
-                        info!(
-                            "✓ Using custom OpenAI endpoint_origin={}",
-                            url_origin_for_log(&config.endpoint)
-                        );
-                        (
-                            Some(config.endpoint),
-                            config.api_key,
-                            config.max_tokens.map(|t| t as u32),
-                            config.temperature,
-                            config.top_p,
-                        )
-                    }
-                    Ok(None) => {
-                        let err_msg = "Custom OpenAI provider selected but no configuration found";
-                        Self::fail_and_cleanup(&pool, &meeting_id, started_at, err_msg).await;
-                        return;
-                    }
-                    Err(e) => {
-                        let err_msg = format!("Failed to retrieve custom OpenAI config: {}", e);
-                        Self::fail_and_cleanup(&pool, &meeting_id, started_at, &err_msg).await;
-                        return;
-                    }
-                }
-            } else {
-                (None, None, None, None, None)
-            };
-
-        // For CustomOpenAI, use its API key (if any) instead of the empty string
-        let final_api_key = if provider == LLMProvider::CustomOpenAI {
-            custom_openai_api_key.unwrap_or_default()
-        } else {
-            api_key
-        };
-
-        // Dynamically fetch context size based on provider and model
-        let token_threshold = if provider == LLMProvider::Ollama {
-            match METADATA_CACHE.get_or_fetch(&model_name, ollama_endpoint.as_deref()).await {
-                Ok(metadata) => {
-                    // Reserve 300 tokens for prompt overhead
-                    let optimal = metadata.context_size.saturating_sub(300);
-                    info!(
-                        "✓ Using dynamic context for {}: {} tokens (chunk size: {})",
-                        model_name, metadata.context_size, optimal
-                    );
-                    optimal
-                }
-                Err(e) => {
-                    warn!(
-                        "Failed to fetch context for {}: {}. Using default 4000",
-                        model_name, e
-                    );
-                    4000  // Fallback to safe default
-                }
-            }
-        } else if provider == LLMProvider::BuiltInAI {
-            // Get model's context size from registry
-            use crate::summary::summary_engine::models;
-            let model = models::get_model_by_name(&model_name)
-                .ok_or_else(|| format!("Unknown model: {}", model_name));
-
-            match model {
-                Ok(model_def) => {
-                    // Reserve 300 tokens for prompt overhead
-                    let optimal = model_def.context_size.saturating_sub(300) as usize;
-                    info!(
-                        "✓ Using BuiltInAI context size: {} tokens (chunk size: {})",
-                        model_def.context_size, optimal
-                    );
-                    optimal
-                }
-                Err(e) => {
-                    warn!("{}, using default 2048", e);
-                    1748  // 2048 - 300 for overhead
-                }
-            }
-        } else {
-            // Cloud providers (OpenAI, Claude, Groq, CustomOpenAI) handle large contexts automatically
-            100000  // Effectively unlimited for single-pass processing
-        };
-
-        // Get app data directory for BuiltInAI provider
-        let app_data_dir = _app.path().app_data_dir().ok();
 
         if let Some(code) = &summary_language {
             info!("📝 Summary language preference: {}", code);
@@ -694,6 +737,92 @@ impl SummaryService {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::database::test_support::migrated_pool;
+    use crate::summary::CustomOpenAIConfig;
+
+    #[tokio::test]
+    async fn resolve_llm_reads_custom_openai_config() {
+        let pool = migrated_pool().await;
+        SettingsRepository::save_custom_openai_config(
+            &pool,
+            &CustomOpenAIConfig {
+                endpoint: "http://localhost:8080/v1".into(),
+                api_key: Some("local-key".into()),
+                model: "qwen".into(),
+                max_tokens: Some(512),
+                temperature: Some(0.3),
+                top_p: Some(0.9),
+            },
+        )
+        .await
+        .unwrap();
+        let llm = resolve_llm(&pool, "custom-openai", "qwen", None).await.unwrap();
+        assert_eq!(llm.provider, LLMProvider::CustomOpenAI);
+        assert_eq!(llm.model, "qwen");
+        assert_eq!(llm.api_key, "local-key");
+        assert_eq!(llm.custom_openai_endpoint.as_deref(), Some("http://localhost:8080/v1"));
+        assert_eq!((llm.max_tokens, llm.temperature, llm.top_p), (Some(512), Some(0.3), Some(0.9)));
+        assert_eq!(llm.ollama_endpoint, None);
+        assert_eq!(llm.context_tokens, 100_000);
+        assert!(llm.is_local());
+
+        let empty = migrated_pool().await;
+        assert_eq!(
+            resolve_llm(&empty, "custom-openai", "qwen", None).await.err().as_deref(),
+            Some("Custom OpenAI provider selected but no configuration found")
+        );
+    }
+
+    #[tokio::test]
+    async fn resolve_llm_requires_cloud_api_key() {
+        let pool = migrated_pool().await;
+        assert_eq!(resolve_llm(&pool, "openai", "gpt-4o", None).await.err().as_deref(), Some("API key not found for openai"));
+        SettingsRepository::save_api_key(&pool, "openai", "sk-test").await.unwrap();
+        let llm = resolve_llm(&pool, "openai", "gpt-4o", None).await.unwrap();
+        assert_eq!(llm.api_key, "sk-test");
+        assert_eq!(llm.custom_openai_endpoint, None);
+        assert_eq!(resolve_llm(&pool, "nonsense", "m", None).await.err().as_deref(), Some("Unsupported LLM provider: nonsense"));
+    }
+
+    #[tokio::test]
+    async fn resolve_llm_gives_cloud_models_a_large_context() {
+        let pool = migrated_pool().await;
+        SettingsRepository::save_api_key(&pool, "claude", "sk-ant").await.unwrap();
+        let claude = resolve_llm(&pool, "claude", "claude-sonnet", None).await.unwrap();
+        assert_eq!(claude.context_tokens, 100_000);
+        assert_eq!(claude.api_key, "sk-ant");
+
+        let builtin = resolve_llm(&pool, "builtin-ai", "gemma3:1b", Some(std::path::PathBuf::from("/data"))).await.unwrap();
+        let context = crate::summary::summary_engine::models::get_model_by_name("gemma3:1b").unwrap().context_size;
+        assert_eq!(builtin.context_tokens, context as usize - 300);
+        assert_eq!(builtin.api_key, "");
+        assert_eq!(builtin.app_data_dir, Some(std::path::PathBuf::from("/data")));
+        assert!(builtin.is_local());
+        assert!(!claude.is_local());
+    }
+
+    #[test]
+    fn only_models_on_this_machine_are_local() {
+        use LLMProvider::*;
+        assert!(is_local_model(&BuiltInAI, None, None));
+        // Ollama: the default server, localhost and 127.0.0.1 are local; another machine is not.
+        assert!(is_local_model(&Ollama, None, None));
+        assert!(is_local_model(&Ollama, Some("  "), None));
+        assert!(is_local_model(&Ollama, Some("http://localhost:11434"), None));
+        assert!(is_local_model(&Ollama, Some("http://127.0.0.1:11434/"), None));
+        assert!(!is_local_model(&Ollama, Some("http://10.0.0.5:11434"), None));
+        assert!(!is_local_model(&Ollama, Some("https://ollama.example.com"), None));
+        // Custom endpoints count only on this machine; the host must match exactly.
+        assert!(is_local_model(&CustomOpenAI, None, Some("http://localhost:8080/v1")));
+        assert!(is_local_model(&CustomOpenAI, None, Some("http://127.0.0.1:8080/v1")));
+        assert!(!is_local_model(&CustomOpenAI, None, Some("http://localhost.example.com/v1")));
+        assert!(!is_local_model(&CustomOpenAI, None, Some("localhost:8080")));
+        assert!(!is_local_model(&CustomOpenAI, None, None));
+        // Cloud providers never are, whatever endpoints are stored.
+        for provider in [OpenAI, Claude, Groq, OpenRouter] {
+            assert!(!is_local_model(&provider, Some("http://localhost:11434"), Some("http://localhost:8080")));
+        }
+    }
 
     #[test]
     fn stale_cleanup_keeps_the_replacement_cancellation_token() {

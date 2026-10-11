@@ -12,6 +12,7 @@ export interface SaveMeetingRequest {
   meetingTitle: string;
   transcripts: Transcript[];
   folderPath: string | null;
+  identifySpeakers: boolean;
 }
 
 export interface SaveMeetingResponse {
@@ -34,17 +35,21 @@ export class StorageService {
    * @param meetingTitle - Title of the meeting
    * @param transcripts - Array of transcript segments
    * @param folderPath - Optional folder path for audio file
+   * @param identifySpeakers - Whether the Speaker Identification beta feature is on; the backend
+   *   queues automatic identification only when this and the recording preference are both on
    * @returns Promise with { meeting_id: string }
    */
   async saveMeeting(
     meetingTitle: string,
     transcripts: Transcript[],
-    folderPath: string | null
+    folderPath: string | null,
+    identifySpeakers: boolean
   ): Promise<SaveMeetingResponse> {
     return invoke<SaveMeetingResponse>('api_save_transcript', {
       meetingTitle,
       transcripts,
       folderPath,
+      identifySpeakers,
     });
   }
 

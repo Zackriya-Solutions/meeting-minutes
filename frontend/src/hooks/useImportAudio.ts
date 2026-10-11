@@ -24,6 +24,8 @@ export interface ImportResult {
   title: string;
   segments_count: number;
   duration_seconds: number;
+  speaker_count?: number | null;
+  speaker_warning?: string | null;
 }
 
 export interface ImportError {
@@ -51,7 +53,8 @@ export interface UseImportAudioReturn {
     title: string,
     language?: string | null,
     model?: string | null,
-    provider?: string | null
+    provider?: string | null,
+    speakers?: { identify: boolean; numSpeakers: number | null }
   ) => Promise<void>;
   cancelImport: () => Promise<void>;
   reset: () => void;
@@ -110,6 +113,9 @@ export function useImportAudio({
 
           setStatus('complete');
           setProgress(null);
+          if (event.payload.speaker_warning) {
+            toast.warning('Imported without speaker labels', { description: event.payload.speaker_warning });
+          }
           try {
             await applyPinnedSummaryLanguageToMeeting(event.payload.meeting_id);
           } catch (error) {
@@ -208,7 +214,8 @@ export function useImportAudio({
       title: string,
       language?: string | null,
       model?: string | null,
-      provider?: string | null
+      provider?: string | null,
+      speakers?: { identify: boolean; numSpeakers: number | null }
     ) => {
       isCancelledRef.current = false;
       setStatus('processing');
@@ -232,6 +239,8 @@ export function useImportAudio({
           language: language || null,
           model: model || null,
           provider: provider || null,
+          identifySpeakers: speakers?.identify ?? false,
+          numSpeakers: speakers?.numSpeakers ?? null,
         });
       } catch (err: any) {
         setStatus('error');

@@ -7,6 +7,11 @@ use serde::{Serialize, Deserialize};
 
 use super::ffmpeg::find_ffmpeg_path;
 
+/// metadata.json field that records how audio.mp4 was produced.
+pub const AUDIO_LAYOUT_FIELD: &str = "audio_layout";
+/// audio.mp4 is a single AAC stream: only the encoder's 1024-sample priming precedes the audio.
+pub const AUDIO_LAYOUT_SINGLE_STREAM: &str = "single_stream";
+
 /// Audio data without device type (we only store mixed audio)
 #[derive(Clone)]
 struct AudioData {

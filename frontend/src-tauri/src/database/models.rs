@@ -35,6 +35,26 @@ pub struct Transcript {
     pub audio_start_time: Option<f64>,
     pub audio_end_time: Option<f64>,
     pub duration: Option<f64>,
+    /// Per-meeting speaker key (`spk_N`); NULL when the row is unlabelled.
+    pub speaker: Option<String>,
+    /// The row holds another speaker's words too: Identify could not cut it and kept the
+    /// majority speaker. Speaker samples skip it.
+    #[serde(default)]
+    pub speaker_mixed: bool,
+}
+
+impl From<Transcript> for crate::api::TranscriptSegment {
+    fn from(t: Transcript) -> Self {
+        Self {
+            id: t.id,
+            text: t.transcript,
+            timestamp: t.timestamp,
+            audio_start_time: t.audio_start_time,
+            audio_end_time: t.audio_end_time,
+            duration: t.duration,
+            speaker: t.speaker,
+        }
+    }
 }
 
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize)]

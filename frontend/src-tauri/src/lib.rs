@@ -42,6 +42,7 @@ pub mod audio;
 pub mod config;
 pub mod console_utils;
 pub mod database;
+pub mod diarization;
 pub mod notifications;
 pub mod ollama;
 pub mod onboarding;
@@ -50,6 +51,7 @@ pub mod anthropic;
 pub mod groq;
 pub mod openrouter;
 pub mod parakeet_engine;
+pub mod playback;
 pub mod state;
 pub mod summary;
 pub mod tray;
@@ -674,6 +676,9 @@ pub fn run() {
             // Set Parakeet models directory
             parakeet_engine::commands::set_models_directory(&_app.handle());
 
+            // Set speaker identification models directory
+            diarization::models::set_models_directory(&_app.handle());
+
             // Initialize Parakeet engine on startup
             tauri::async_runtime::spawn(async {
                 if let Err(e) = parakeet_engine::commands::parakeet_init().await {
@@ -954,6 +959,29 @@ pub fn run() {
             audio::import::start_import_audio_command,
             audio::import::cancel_import_command,
             audio::import::is_import_in_progress_command,
+            // Speaker identification commands
+            diarization::commands::diarization_models_status,
+            diarization::commands::diarization_download_models,
+            diarization::commands::diarization_delete_models,
+            diarization::commands::start_speaker_identification,
+            diarization::commands::cancel_speaker_identification,
+            diarization::commands::get_speaker_identification_status,
+            diarization::commands::api_list_meeting_speakers,
+            diarization::commands::api_name_meeting_speaker,
+            diarization::commands::api_confirm_meeting_speaker_name,
+            diarization::commands::api_reject_meeting_speaker_name,
+            diarization::commands::api_undo_name_propagation,
+            diarization::commands::api_list_people,
+            diarization::commands::api_rename_person,
+            diarization::commands::api_merge_people,
+            diarization::commands::api_forget_person,
+            diarization::commands::api_forget_all_voices,
+            diarization::commands::api_merge_meeting_speakers,
+            diarization::commands::api_set_transcript_speaker,
+            diarization::commands::api_guess_speaker_names,
+            // Recording playback commands
+            playback::api_prepare_meeting_playback,
+            playback::api_render_playback_clip,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
