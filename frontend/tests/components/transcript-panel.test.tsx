@@ -14,7 +14,7 @@ afterAll(() => {
   Reflect.deleteProperty(globalThis, 'Audio');
 });
 
-const source: PlaybackSource = { path: '/recordings/meeting/audio.mp4', duration_s: 60, time_table: [[0, 0], [60, 60]] };
+let source: PlaybackSource = { path: '/recordings/meeting/audio.mp4', duration_s: 60, time_table: [[0, 0], [60, 60]] };
 const invoke = mock(async (command: string): Promise<unknown> => {
   if (command === 'api_prepare_meeting_playback') return source;
   throw new Error(`Unexpected command: ${command}`);
@@ -23,8 +23,10 @@ mock.module('@tauri-apps/api/core', () => ({ ...originalCore, invoke, convertFil
 
 // The transcript view and the button group stand in for the panel's children: their renders count.
 type ViewProps = { activeSegmentId?: string | null; onPlayFrom?: (startS: number) => void };
+type ButtonProps = { onRefetchTranscripts?: () => Promise<void> };
 const renders = { view: 0, buttons: 0 };
 let viewProps: ViewProps = {};
+let buttonProps: ButtonProps = {};
 mock.module('../../src/components/VirtualizedTranscriptView', () => ({
   ...originalView,
   VirtualizedTranscriptView: (props: ViewProps) => {
@@ -35,8 +37,9 @@ mock.module('../../src/components/VirtualizedTranscriptView', () => ({
 }));
 mock.module('../../src/components/MeetingDetails/TranscriptButtonGroup', () => ({
   ...originalButtons,
-  TranscriptButtonGroup: () => {
+  TranscriptButtonGroup: (props: ButtonProps) => {
     renders.buttons += 1;
+    buttonProps = props;
     return null;
   },
 }));
@@ -76,6 +79,33 @@ describe('transcript panel during playback', () => {
     await act(async () => { audio.emit('timeupdate'); });
     expect(viewProps.activeSegmentId).toBe('b');
     expect(renders.view).toBe(before.view + 1);
+    await act(async () => renderer.unmount());
+  });
+
+  test('a reloaded transcript is placed in the audio by a reloaded time table', async () => {
+    const noop = () => {};
+    const refetch = mock(async () => {});
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(
+        <TranscriptPanel
+          transcripts={[]} customPrompt="" onPromptChange={noop} onCopyTranscript={noop} onOpenMeetingFolder={async () => {}}
+          isRecording={false} usePagination segments={segments} hasMore={false} meetingId="meeting-a" meetingFolderPath="/recordings/meeting"
+          onRefetchTranscripts={refetch}
+        />,
+      );
+    });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    const audio = audios[audios.length - 1];
+    await act(async () => { viewProps.onPlayFrom!(45); });
+    expect(audio.currentTime).toBe(45);
+
+    // A retranscription times the new rows by the decoded file, which this table maps to the audio.
+    source = { ...source, time_table: [[0, 0], [0.02, 0], [30.02, 30], [30.06, 30], [60.06, 60]] };
+    await act(async () => { await buttonProps.onRefetchTranscripts!(); });
+    expect(refetch).toHaveBeenCalledTimes(1);
+    await act(async () => { viewProps.onPlayFrom!(45.06); });
+    expect(Math.abs(audio.currentTime - 45)).toBeLessThan(1e-9);
     await act(async () => renderer.unmount());
   });
 });

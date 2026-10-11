@@ -109,6 +109,11 @@ export function TranscriptPanel({
   const playbackRef = useRef(playback);
   playbackRef.current = playback;
   const { playing } = playback;
+  // Reloaded rows may be timed differently (a retranscription counts the decoded file's frames),
+  // so the table that places them in the audio is reloaded with them.
+  const refetchTranscripts = useCallback(async () => {
+    await Promise.all([onRefetchTranscripts?.(), playbackRef.current.refresh()]);
+  }, [onRefetchTranscripts]);
 
   // Follow along: the row playing now is highlighted and kept in view until the user scrolls away.
   const [follow, setFollow] = useState<FollowState>({ following: true, showBack: false });
@@ -184,7 +189,7 @@ export function TranscriptPanel({
           onOpenMeetingFolder={onOpenMeetingFolder}
           meetingId={meetingId}
           meetingFolderPath={meetingFolderPath}
-          onRefetchTranscripts={onRefetchTranscripts}
+          onRefetchTranscripts={refetchTranscripts}
           onIdentifySpeakers={tools?.onStartIdentify}
           hasSpeakers={(tools?.speakers.length ?? 0) > 0}
           speakerJobActive={!!speakerJob}

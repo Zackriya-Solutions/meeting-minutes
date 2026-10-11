@@ -110,6 +110,27 @@ describe('usePlayback', () => {
     near(controls.clock.get(), 50);
   });
 
+  test('refresh loads the time table again without restarting playback', async () => {
+    FakeAudio.canPlay = '';
+    const audio = await mount();
+    await act(async () => { controls.playFrom(45); });
+    await settle();
+    near(clipStarts()[0], 45);
+    // A retranscription has replaced the rows: they now count the decoded file's frames.
+    source = { ...IDENTITY_SOURCE, time_table: [[0, 0], [0.02, 0], [30.02, 30], [30.06, 30], [60.06, 60]] };
+    await act(async () => { await controls.refresh(); });
+    expect(invoke.mock.calls.filter(([command]) => command === 'api_prepare_meeting_playback')).toHaveLength(2);
+    expect(audios).toHaveLength(1);
+    expect(audio.paused).toBe(false);
+    expect(clipStarts()).toHaveLength(1);
+    audio.currentTime = 5;
+    await act(async () => { audio.emit('timeupdate'); });
+    near(controls.clock.get(), 50.06);
+    await act(async () => { controls.playFrom(45.06); });
+    await settle();
+    near(clipStarts()[1], 45);
+  });
+
   test('switches to clip mode on src not supported', async () => {
     const audio = await mount();
     await act(async () => { controls.playFrom(45); });

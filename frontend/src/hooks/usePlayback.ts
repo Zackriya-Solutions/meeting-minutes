@@ -33,6 +33,11 @@ export interface PlaybackControls {
   toggle: () => void;
   seek: (clockS: number) => void;
   setRate: (rate: PlaybackRate) => void;
+  /**
+   * Loads the time table again. A retranscription times its rows by the decoded file instead of
+   * the recording clock, so the table loaded with the meeting no longer places them in the audio.
+   */
+  refresh: () => Promise<void>;
 }
 
 /** In clip mode a seek renders its clip only after the seek bar has been still this long. */
@@ -272,6 +277,20 @@ export function usePlayback(meetingId: string | null, enabled: boolean): Playbac
     }
   }, []);
 
+  const refresh = useCallback(async () => {
+    const id = meetingIdRef.current;
+    if (!id || !sourceRef.current) return;
+    try {
+      const prepared = await invoke<PlaybackSource>('api_prepare_meeting_playback', { meetingId: id });
+      // The audio keeps playing: the file is the same, only the clock of its positions changes.
+      if (meetingIdRef.current !== id || !sourceRef.current) return;
+      sourceRef.current = prepared;
+      setSource(prepared);
+    } catch (e) {
+      console.warn('Meeting playback could not be refreshed:', e);
+    }
+  }, []);
+
   useEffect(() => {
     sourceRef.current = null;
     setSource(null);
@@ -409,5 +428,6 @@ export function usePlayback(meetingId: string | null, enabled: boolean): Playbac
     toggle,
     seek,
     setRate,
+    refresh,
   };
 }
