@@ -6,6 +6,7 @@ import { FolderOpen } from "lucide-react"
 import { invoke } from "@tauri-apps/api/core"
 import Analytics from "@/lib/analytics"
 import AnalyticsConsentSwitch from "./AnalyticsConsentSwitch"
+import { TagManager } from "@/components/organization/TagManager"
 import { useConfig, NotificationSettings } from "@/contexts/ConfigContext"
 
 export function PreferenceSettings() {
@@ -218,6 +219,13 @@ export function PreferenceSettings() {
             <strong>Note:</strong> Database and models are stored together in your application data directory for unified management.
           </p>
         </div>
+      </div>
+
+      {/* Tags Section */}
+      <div className="bg-white rounded-lg border border-gray-200 p-6 shadow-sm">
+        <h3 className="text-lg font-semibold text-gray-900 mb-1">Tags</h3>
+        <p className="text-sm text-gray-600 mb-4">Rename or delete tags. Deleting a tag keeps its meetings.</p>
+        <TagManager />
       </div>
 
       {/* Analytics Section */}

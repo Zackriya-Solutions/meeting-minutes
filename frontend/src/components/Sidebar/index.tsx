@@ -33,6 +33,7 @@ import { Input } from '../ui/input';
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from '../ui/input-group';
 import { MeetingSections } from './MeetingSections';
 import { TagFilterChips } from './TagFilterChips';
+import { TagManager } from '@/components/organization/TagManager';
 import { NewFolderButton } from './NewFolderButton';
 import { MeetingItemMenu } from './MeetingItemMenu';
 import { MeetingOrganizationBar } from '@/components/organization/MeetingOrganizationBar';
@@ -120,6 +121,7 @@ const Sidebar: React.FC = () => {
   const [tagsDialogMeetingId, setTagsDialogMeetingId] = useState<string | null>(null);
   const [folderRename, setFolderRename] = useState<{ folder: Folder; name: string } | null>(null);
   const [folderDelete, setFolderDelete] = useState<Folder | null>(null);
+  const [manageTagsOpen, setManageTagsOpen] = useState(false);
 
   const sections = useMemo(() => buildSidebarSections(meetings, folders, {
     selectedTagIds,
@@ -671,7 +673,7 @@ const Sidebar: React.FC = () => {
                     }
                   </InputGroup>
                 </div>
-                <TagFilterChips tags={tags} selectedIds={selectedTagIds} onToggle={toggleTagFilter} />
+                <TagFilterChips tags={tags} selectedIds={selectedTagIds} onToggle={toggleTagFilter} onManage={() => setManageTagsOpen(true)} />
               </div>
             )}
           </div>
@@ -773,6 +775,13 @@ const Sidebar: React.FC = () => {
         <DialogContent className="sm:max-w-md">
           <DialogTitle>Folder &amp; tags</DialogTitle>
           {tagsDialogMeetingId && <MeetingOrganizationBar meetingId={tagsDialogMeetingId} />}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={manageTagsOpen} onOpenChange={setManageTagsOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogTitle>Manage tags</DialogTitle>
+          <TagManager />
         </DialogContent>
       </Dialog>
 
