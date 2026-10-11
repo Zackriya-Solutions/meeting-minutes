@@ -26,9 +26,18 @@ export default function TrashPage() {
 
   useEffect(() => {
     void load();
+    let cancelled = false;
     let unlisten: (() => void) | undefined;
-    listen('meetings-changed', () => void load()).then(fn => { unlisten = fn; });
-    return () => unlisten?.();
+    listen('meetings-changed', () => void load())
+      .then(fn => {
+        if (cancelled) fn();
+        else unlisten = fn;
+      })
+      .catch(error => console.error('Failed to listen for meetings-changed:', error));
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
   }, [load]);
 
   const refreshAll = () => Promise.all([load(), refetchMeetings(), refetchOrganization()]);
@@ -110,8 +119,8 @@ export default function TrashPage() {
       <ConfirmationModal
         isOpen={confirm !== null}
         text={confirm?.kind === 'one'
-          ? `Permanently delete "${confirm.item.title}" and its recording? This cannot be undone.`
-          : `Permanently delete all ${items.length} meeting(s) in Trash and their recordings? This cannot be undone.`}
+          ? `Permanently delete "${confirm.item.title}" and its recording (if stored in the recordings folder)? This cannot be undone.`
+          : `Permanently delete all ${items.length} meeting(s) in Trash and their recordings (if stored in the recordings folder)? This cannot be undone.`}
         onConfirm={() => void onConfirm()}
         onCancel={() => setConfirm(null)}
       />

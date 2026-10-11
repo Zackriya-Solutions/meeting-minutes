@@ -321,7 +321,7 @@ const Sidebar: React.FC = () => {
     } catch (error) {
       toast.error(String(error));
     }
-    await refetchMeetings();
+    await Promise.all([refetchMeetings(), refetchOrganization()]);
   };
 
   // Handle modal editing of meeting names

@@ -206,6 +206,7 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
 
   const applyPendingOrganization = React.useCallback(async (meetingId: string) => {
     const { folderId, tagIds } = pendingOrganizationRef.current;
+    const attempted = Boolean(folderId) || tagIds.length > 0;
     try {
       if (folderId) await organizationService.setMeetingFolder(meetingId, folderId);
       if (tagIds.length) await organizationService.setMeetingTags(meetingId, tagIds);
@@ -214,8 +215,9 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
       toast.error('Meeting saved, but its folder/tags could not be applied');
     } finally {
       setPendingOrganization(EMPTY_PENDING_ORGANIZATION);
+      if (attempted) await fetchOrganization();
     }
-  }, [setPendingOrganization]);
+  }, [setPendingOrganization, fetchOrganization]);
 
   useEffect(() => {
     const fetchSettings = async () => {
