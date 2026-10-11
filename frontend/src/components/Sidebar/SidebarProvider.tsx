@@ -172,14 +172,24 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!serverAddress) return;
     fetchOrganization();
+    let cancelled = false;
     let unlisten: (() => void) | undefined;
-    import('@tauri-apps/api/event').then(({ listen }) =>
-      listen('meetings-changed', () => {
-        fetchMeetings();
-        fetchOrganization();
-      }).then(fn => { unlisten = fn; })
-    );
-    return () => unlisten?.();
+    import('@tauri-apps/api/event')
+      .then(({ listen }) =>
+        listen('meetings-changed', () => {
+          fetchMeetings();
+          fetchOrganization();
+        })
+      )
+      .then(fn => {
+        if (cancelled) fn();
+        else unlisten = fn;
+      })
+      .catch(error => console.error('Failed to listen for meetings-changed:', error));
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
   }, [serverAddress, fetchMeetings, fetchOrganization]);
 
   const toggleTagFilter = React.useCallback((tagId: string) => {
