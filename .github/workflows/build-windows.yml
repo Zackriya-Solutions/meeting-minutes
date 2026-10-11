@@ -694,6 +694,16 @@ jobs:
           path: frontend/src-tauri/binaries/onnxruntime
           key: ${{ runner.os }}-onnxruntime-x86_64-pc-windows-msvc-${{ hashFiles('frontend/src-tauri/build/onnxruntime.rs') }}
 
+      - name: Verify migration files have LF line endings
+        shell: pwsh
+        run: |
+          $crFiles = Get-ChildItem frontend/src-tauri/migrations/*.sql | Where-Object { (Get-Content $_.FullName -Raw) -match "`r" }
+          if ($crFiles) {
+            Write-Host "FAIL: CRLF line endings found in migration files (sqlx checksums would differ between platforms):"
+            $crFiles | ForEach-Object { Write-Host "  $($_.Name)" }
+            exit 1
+          }
+          Write-Host "PASS: all migration files use LF line endings"
 
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
