@@ -9,7 +9,7 @@ use crate::{
     database::{
         models::MeetingModel,
         repositories::{
-            meeting::MeetingsRepository, setting::SettingsRepository,
+            meeting::MeetingsRepository, setting::SettingsRepository, tag::TagRepository,
             transcript::TranscriptsRepository,
         },
     },
@@ -31,6 +31,9 @@ pub struct ApiResponse<T> {
 pub struct Meeting {
     pub id: String,
     pub title: String,
+    pub created_at: String,
+    pub folder_id: Option<String>,
+    pub tag_ids: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -149,6 +152,8 @@ pub struct MeetingMetadata {
     pub updated_at: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub folder_path: Option<String>,
+    pub folder_id: Option<String>,
+    pub deleted_at: Option<String>,
 }
 
 /// Paginated transcripts response with total count
@@ -373,9 +378,19 @@ pub async fn api_get_meetings<R: Runtime>(
         Ok(meeting_models) => {
             log_info!("Successfully got {} meetings", meeting_models.len());
 
+            let mut tag_map = match TagRepository::tag_ids_by_meeting(pool).await {
+                Ok(map) => map,
+                Err(e) => {
+                    log_error!("Error getting meeting tags: {}", e);
+                    return Err(e.to_string());
+                }
+            };
             let result: Vec<Meeting> = meeting_models
                 .into_iter()
                 .map(|m| Meeting {
+                    tag_ids: tag_map.remove(&m.id).unwrap_or_default(),
+                    created_at: m.created_at.0.to_rfc3339(),
+                    folder_id: m.folder_id,
                     id: m.id,
                     title: m.title,
                 })
@@ -394,6 +409,7 @@ pub async fn api_search_transcripts<R: Runtime>(
     _app: AppHandle<R>,
     state: tauri::State<'_, AppState>,
     query: String,
+    tag_ids: Option<Vec<String>>,
     auth_token: Option<String>,
 ) -> Result<Vec<TranscriptSearchResult>, String> {
     log_info!(
@@ -404,7 +420,8 @@ pub async fn api_search_transcripts<R: Runtime>(
 
     let pool = state.db_manager.pool();
 
-    match TranscriptsRepository::search_transcripts(pool, &query, &[]).await {
+    let tag_ids = tag_ids.unwrap_or_default();
+    match TranscriptsRepository::search_transcripts(pool, &query, &tag_ids).await {
         Ok(results) => {
             log_info!(
                 "Search completed successfully with {} results.",
@@ -854,6 +871,8 @@ pub async fn api_get_meeting_metadata<R: Runtime>(
                 created_at: meeting.created_at.0.to_rfc3339(),
                 updated_at: meeting.updated_at.0.to_rfc3339(),
                 folder_path: meeting.folder_path,
+                folder_id: meeting.folder_id,
+                deleted_at: meeting.deleted_at.map(|d| d.0.to_rfc3339()),
             })
         }
         Ok(None) => {
