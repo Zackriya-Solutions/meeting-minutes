@@ -9,6 +9,11 @@ pub struct MeetingModel {
     pub created_at: DateTimeUtc,
     pub updated_at: DateTimeUtc,
     pub folder_path: Option<String>,
+    // Defaulted so queries that select explicit columns keep working.
+    #[sqlx(default)]
+    pub folder_id: Option<String>,
+    #[sqlx(default)]
+    pub deleted_at: Option<DateTimeUtc>,
 }
 
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
@@ -152,4 +157,12 @@ pub struct TagWithCount {
     pub id: String,
     pub name: String,
     pub meeting_count: i64,
+}
+
+#[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
+pub struct TrashedMeeting {
+    pub id: String,
+    pub title: String,
+    pub folder_path: Option<String>,
+    pub deleted_at: DateTimeUtc,
 }

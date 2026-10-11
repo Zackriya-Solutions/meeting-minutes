@@ -404,7 +404,7 @@ pub async fn api_search_transcripts<R: Runtime>(
 
     let pool = state.db_manager.pool();
 
-    match TranscriptsRepository::search_transcripts(pool, &query).await {
+    match TranscriptsRepository::search_transcripts(pool, &query, &[]).await {
         Ok(results) => {
             log_info!(
                 "Search completed successfully with {} results.",
