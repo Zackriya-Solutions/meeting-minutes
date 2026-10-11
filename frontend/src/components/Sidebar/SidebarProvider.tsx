@@ -1,11 +1,20 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import Analytics from '@/lib/analytics';
 import { invoke } from '@tauri-apps/api/core';
 import { useRecordingState } from '@/contexts/RecordingStateContext';
 import type { SummaryProcessResponse } from '@/types';
+import { toast } from 'sonner';
+import { organizationService } from '@/services/organizationService';
+import {
+  EMPTY_PENDING_ORGANIZATION,
+  type Folder,
+  type MeetingListItem,
+  type PendingOrganization,
+  type Tag,
+} from '@/lib/organization';
 
 
 
@@ -41,8 +50,17 @@ interface SidebarContextType {
   sidebarItems: SidebarItem[];
   isCollapsed: boolean;
   toggleCollapse: () => void;
-  meetings: CurrentMeeting[];
-  setMeetings: (meetings: CurrentMeeting[]) => void;
+  meetings: MeetingListItem[];
+  setMeetings: (meetings: MeetingListItem[]) => void;
+  folders: Folder[];
+  tags: Tag[];
+  trashCount: number;
+  selectedTagIds: string[];
+  toggleTagFilter: (tagId: string) => void;
+  refetchOrganization: () => Promise<void>;
+  pendingOrganization: PendingOrganization;
+  setPendingOrganization: (pending: PendingOrganization) => void;
+  applyPendingOrganization: (meetingId: string) => Promise<void>;
   isMeetingActive: boolean;
   setIsMeetingActive: (active: boolean) => void;
   handleRecordingToggle: () => void;
@@ -78,7 +96,15 @@ export const useSidebar = () => {
 export function SidebarProvider({ children }: { children: React.ReactNode }) {
   const [currentMeeting, setCurrentMeeting] = useState<CurrentMeeting | null>({ id: 'intro-call', title: '+ New Call' });
   const [isCollapsed, setIsCollapsed] = useState(true);
-  const [meetings, setMeetings] = useState<CurrentMeeting[]>([]);
+  const [meetings, setMeetings] = useState<MeetingListItem[]>([]);
+  const [folders, setFolders] = useState<Folder[]>([]);
+  const [tags, setTags] = useState<Tag[]>([]);
+  const [trashCount, setTrashCount] = useState(0);
+  const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
+  const selectedTagIdsRef = useRef<string[]>([]);
+  const [pendingOrganization, setPendingOrganizationState] =
+    useState<PendingOrganization>(EMPTY_PENDING_ORGANIZATION);
+  const pendingOrganizationRef = useRef<PendingOrganization>(EMPTY_PENDING_ORGANIZATION);
   const [sidebarItems, setSidebarItems] = useState<SidebarItem[]>([]);
   const [isMeetingActive, setIsMeetingActive] = useState(false);
   const [searchResults, setSearchResults] = useState<any[]>([]);
@@ -97,10 +123,15 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
   const fetchMeetings = React.useCallback(async () => {
     if (serverAddress) {
       try {
-        const meetings = await invoke('api_get_meetings') as Array<{ id: string, title: string }>;
-        const transformedMeetings = meetings.map((meeting: any) => ({
+        const meetings = await invoke('api_get_meetings') as Array<{
+          id: string; title: string; created_at: string; folder_id: string | null; tag_ids: string[];
+        }>;
+        const transformedMeetings: MeetingListItem[] = meetings.map(meeting => ({
           id: meeting.id,
-          title: meeting.title
+          title: meeting.title,
+          created_at: meeting.created_at,
+          folder_id: meeting.folder_id ?? null,
+          tag_ids: meeting.tag_ids ?? [],
         }));
         setMeetings(transformedMeetings);
         Analytics.trackBackendConnection(true);
@@ -115,6 +146,66 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     fetchMeetings();
   }, [serverAddress, fetchMeetings]);
+
+  const fetchOrganization = React.useCallback(async () => {
+    try {
+      const [folderList, tagList, trash] = await Promise.all([
+        organizationService.listFolders(),
+        organizationService.listTags(),
+        organizationService.listTrash(),
+      ]);
+      setFolders(folderList);
+      setTags(tagList);
+      setTrashCount(trash.length);
+      // Drop filters for tags that no longer exist.
+      const live = new Set(tagList.map(t => t.id));
+      const kept = selectedTagIdsRef.current.filter(id => live.has(id));
+      if (kept.length !== selectedTagIdsRef.current.length) {
+        selectedTagIdsRef.current = kept;
+        setSelectedTagIds(kept);
+      }
+    } catch (error) {
+      console.error('Error fetching folders/tags:', error);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!serverAddress) return;
+    fetchOrganization();
+    let unlisten: (() => void) | undefined;
+    import('@tauri-apps/api/event').then(({ listen }) =>
+      listen('meetings-changed', () => {
+        fetchMeetings();
+        fetchOrganization();
+      }).then(fn => { unlisten = fn; })
+    );
+    return () => unlisten?.();
+  }, [serverAddress, fetchMeetings, fetchOrganization]);
+
+  const toggleTagFilter = React.useCallback((tagId: string) => {
+    const current = selectedTagIdsRef.current;
+    const next = current.includes(tagId) ? current.filter(id => id !== tagId) : [...current, tagId];
+    selectedTagIdsRef.current = next;
+    setSelectedTagIds(next);
+  }, []);
+
+  const setPendingOrganization = React.useCallback((pending: PendingOrganization) => {
+    pendingOrganizationRef.current = pending;
+    setPendingOrganizationState(pending);
+  }, []);
+
+  const applyPendingOrganization = React.useCallback(async (meetingId: string) => {
+    const { folderId, tagIds } = pendingOrganizationRef.current;
+    try {
+      if (folderId) await organizationService.setMeetingFolder(meetingId, folderId);
+      if (tagIds.length) await organizationService.setMeetingTags(meetingId, tagIds);
+    } catch (error) {
+      console.error('Failed to apply folder/tags to saved meeting:', error);
+      toast.error('Meeting saved, but its folder/tags could not be applied');
+    } finally {
+      setPendingOrganization(EMPTY_PENDING_ORGANIZATION);
+    }
+  }, [setPendingOrganization]);
 
   useEffect(() => {
     const fetchSettings = async () => {
@@ -185,7 +276,10 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
       setIsSearching(true);
 
 
-      const results = await invoke('api_search_transcripts', { query }) as TranscriptSearchResult[];
+      const results = await invoke('api_search_transcripts', {
+        query,
+        tagIds: selectedTagIdsRef.current,
+      }) as TranscriptSearchResult[];
       setSearchResults(results);
     } catch (error) {
       console.error('Error searching transcripts:', error);
@@ -316,6 +410,15 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
       startSummaryPolling,
       stopSummaryPolling,
       refetchMeetings: fetchMeetings,
+      folders,
+      tags,
+      trashCount,
+      selectedTagIds,
+      toggleTagFilter,
+      refetchOrganization: fetchOrganization,
+      pendingOrganization,
+      setPendingOrganization,
+      applyPendingOrganization,
 
     }}>
       {children}

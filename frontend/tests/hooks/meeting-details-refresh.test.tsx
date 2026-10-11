@@ -45,6 +45,7 @@ const transcriptPage = {
 let savedSummary: SummaryProcessResponse;
 const invoke = mock(async (command: string, args?: Record<string, unknown>): Promise<unknown> => {
   if (command === 'api_get_meetings') return [];
+  if (command === 'list_folders' || command === 'list_tags' || command === 'list_trash') return [];
   if (command === 'api_get_summary') return { ...savedSummary, meeting_id: args!.meetingId };
   if (command === 'api_get_meeting_metadata') return readMetadata(args!.meetingId as string);
   if (command === 'api_get_meeting_transcripts') return readTranscripts(args!.meetingId as string);
@@ -53,6 +54,7 @@ const invoke = mock(async (command: string, args?: Record<string, unknown>): Pro
   throw new Error(`Unexpected command: ${command}`);
 });
 mock.module('@tauri-apps/api/core', () => ({ ...originalCore, invoke }));
+mock.module('@tauri-apps/api/event', () => ({ listen: async () => () => {} }));
 const { SidebarProvider } = await import('../../src/components/Sidebar/SidebarProvider');
 const { useSummaryGeneration } = await import('../../src/hooks/meeting-details/useSummaryGeneration');
 const { useMeetingData } = await import('../../src/hooks/meeting-details/useMeetingData');

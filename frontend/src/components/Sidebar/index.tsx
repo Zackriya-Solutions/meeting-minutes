@@ -390,7 +390,7 @@ const Sidebar: React.FC = () => {
       });
 
       // Update local state
-      const updatedMeetings = meetings.map((m: CurrentMeeting) =>
+      const updatedMeetings = meetings.map(m =>
         m.id === meetingId ? { ...m, title: newTitle } : m
       );
       setMeetings(updatedMeetings);

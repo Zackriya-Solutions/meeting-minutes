@@ -27,6 +27,7 @@ let startProcess: () => Promise<{ process_id: string }>;
 let getSummary: (meetingId: string) => Promise<SummaryProcessResponse>;
 const invoke = mock(async (command: string, args?: Record<string, unknown>): Promise<unknown> => {
   if (command === 'api_get_meetings') return [];
+  if (command === 'list_folders' || command === 'list_tags' || command === 'list_trash') return [];
   if (command === 'api_get_summary') return getSummary(args!.meetingId as string);
   if (command === 'api_get_meeting_transcripts') return { transcripts: [{ text: 'Meeting transcript', timestamp: '00:00' }], total_count: 1 };
   if (command === 'get_ollama_models') return [{ name: 'test' }];
@@ -35,6 +36,7 @@ const invoke = mock(async (command: string, args?: Record<string, unknown>): Pro
   throw new Error(`Unexpected command: ${command}`);
 });
 mock.module('@tauri-apps/api/core', () => ({ invoke }));
+mock.module('@tauri-apps/api/event', () => ({ listen: async () => () => {} }));
 mock.module('../../src/lib/summary-language-preferences', () => ({
   readCachedDetectedSummaryLanguage: async () => null,
   detectAndCacheSummaryLanguage: async () => ({ language: 'en' }),

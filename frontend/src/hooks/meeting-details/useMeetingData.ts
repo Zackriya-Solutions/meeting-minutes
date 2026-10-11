@@ -77,8 +77,8 @@ export function useMeetingData({ meeting, summaryData, onMeetingUpdated }: UseMe
   const updateMeetingTitle = useCallback((newTitle: string) => {
     console.log('📝 Updating meeting title to:', newTitle);
     setMeetingTitle(newTitle);
-    const updatedMeetings = sidebarMeetings.map((m: CurrentMeeting) =>
-      m.id === meeting.id ? { id: m.id, title: newTitle } : m
+    const updatedMeetings = sidebarMeetings.map(m =>
+      m.id === meeting.id ? { ...m, title: newTitle } : m
     );
     setMeetings(updatedMeetings);
     setCurrentMeeting({ id: meeting.id, title: newTitle });
