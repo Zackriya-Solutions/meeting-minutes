@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { Check, Plus, Tag as TagIcon } from 'lucide-react';
+import { toast } from 'sonner';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import type { Tag } from '@/lib/organization';
@@ -26,9 +27,13 @@ export function TagPicker({ tags, selectedIds, onChange, onCreate, triggerLabel 
 
   const create = async () => {
     if (!trimmed) return;
-    const tag = await onCreate(trimmed);
-    if (!selectedIds.includes(tag.id)) onChange([...selectedIds, tag.id]);
-    setQuery('');
+    try {
+      const tag = await onCreate(trimmed);
+      if (!selectedIds.includes(tag.id)) onChange([...selectedIds, tag.id]);
+      setQuery('');
+    } catch (error) {
+      toast.error(String(error));
+    }
   };
 
   return (
