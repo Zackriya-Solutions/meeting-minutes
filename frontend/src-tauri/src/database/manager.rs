@@ -32,7 +32,52 @@ impl DatabaseManager {
 
         let pool = SqlitePool::connect(tauri_db_path).await?;
 
-        sqlx::migrate!("./migrations").run(&pool).await?;
+        if let Err(migrate_err) = sqlx::migrate!("./migrations").run(&pool).await {
+            // The existing database is incompatible with the current schema (e.g. it
+            // was created by an older build whose migration checksums differ). Back it
+            // up and recreate a fresh database so the app keeps working instead of
+            // failing on every startup.
+            let err_str = migrate_err.to_string();
+            let incompatible = err_str.contains("previously applied")
+                || err_str.contains("checksum")
+                || err_str.contains("version mismatch");
+            if !incompatible {
+                return Err(migrate_err.into());
+            }
+            log::warn!(
+                "Database migration failed (incompatible existing database): {}. Backing it up and recreating a fresh one.",
+                err_str
+            );
+            pool.close().await;
+
+            let db_path = Path::new(tauri_db_path);
+            let ts = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            let backup_path = db_path.with_extension(format!("sqlite.bak-{}", ts));
+
+            if db_path.exists() {
+                fs::rename(db_path, &backup_path).map_err(|e| sqlx::Error::Io(e))?;
+                log::warn!("Backed up incompatible database to {}", backup_path.display());
+            }
+            // Remove stale WAL/SHM sidecars belonging to the old database file
+            for sidecar in [format!("{}-wal", tauri_db_path), format!("{}-shm", tauri_db_path)] {
+                let sidecar_path = Path::new(&sidecar);
+                if sidecar_path.exists() {
+                    if let Err(e) = fs::remove_file(sidecar_path) {
+                        log::warn!("Failed to remove stale sidecar {}: {}", sidecar, e);
+                    }
+                }
+            }
+
+            log::info!("Creating a fresh database at {}", tauri_db_path);
+            Sqlite::create_database(tauri_db_path).await?;
+            let pool = SqlitePool::connect(tauri_db_path).await?;
+            sqlx::migrate!("./migrations").run(&pool).await?;
+            log::warn!("Recreated a fresh database after backing up the incompatible one");
+            return Ok(DatabaseManager { pool });
+        }
 
         Ok(DatabaseManager { pool })
     }
