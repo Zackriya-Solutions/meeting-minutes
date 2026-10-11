@@ -127,6 +127,48 @@ impl MeetingsRepository {
         }
     }
 
+    /// Hard-delete a meeting only if it is still in Trash, checked and deleted in one
+    /// transaction so a concurrent restore is never turned into a deletion.
+    pub async fn delete_trashed_meeting(
+        pool: &SqlitePool,
+        meeting_id: &str,
+    ) -> Result<bool, SqlxError> {
+        if meeting_id.trim().is_empty() {
+            return Err(SqlxError::Protocol(
+                "meeting_id cannot be empty".to_string(),
+            ));
+        }
+
+        let mut conn = pool.acquire().await?;
+        let mut transaction = conn.begin().await?;
+
+        let trashed: Option<(i64,)> =
+            sqlx::query_as("SELECT 1 FROM meetings WHERE id = ? AND deleted_at IS NOT NULL")
+                .bind(meeting_id)
+                .fetch_optional(&mut *transaction)
+                .await?;
+        if trashed.is_none() {
+            transaction.rollback().await?;
+            return Ok(false);
+        }
+
+        match delete_meeting_with_transaction(&mut transaction, meeting_id).await {
+            Ok(true) => {
+                transaction.commit().await?;
+                Ok(true)
+            }
+            Ok(false) => {
+                transaction.rollback().await?;
+                Ok(false)
+            }
+            Err(e) => {
+                let _ = transaction.rollback().await;
+                error!("Failed to delete trashed meeting {}: {}", meeting_id, e);
+                Err(e)
+            }
+        }
+    }
+
     pub async fn get_meeting(
         pool: &SqlitePool,
         meeting_id: &str,

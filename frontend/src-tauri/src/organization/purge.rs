@@ -42,10 +42,27 @@ pub async fn purge_meeting(
     };
 
     if let Some(folder_path) = folder_path {
+        let shared: Option<(i64,)> =
+            sqlx::query_as("SELECT 1 FROM meetings WHERE folder_path = ? AND id != ? LIMIT 1")
+                .bind(&folder_path)
+                .bind(meeting_id)
+                .fetch_optional(pool)
+                .await
+                .map_err(|e| e.to_string())?;
         let path = PathBuf::from(folder_path);
-        if path.exists() {
+        if shared.is_some() {
+            warn!(
+                "Trash purge: recording folder is used by another meeting, leaving files; meeting_id={}",
+                meeting_id
+            );
+        } else if path.exists() {
             if is_within_roots(&path, roots) {
-                std::fs::remove_dir_all(&path).map_err(|e| {
+                let removed = if path.is_dir() {
+                    std::fs::remove_dir_all(&path)
+                } else {
+                    std::fs::remove_file(&path)
+                };
+                removed.map_err(|e| {
                     format!("Failed to remove recording folder; meeting_id={}: {}", meeting_id, e)
                 })?;
             } else {
@@ -57,9 +74,12 @@ pub async fn purge_meeting(
         }
     }
 
-    MeetingsRepository::delete_meeting(pool, meeting_id)
+    let deleted = MeetingsRepository::delete_trashed_meeting(pool, meeting_id)
         .await
         .map_err(|e| e.to_string())?;
+    if !deleted {
+        return Err(format!("Meeting is no longer in Trash: {}", meeting_id));
+    }
     Ok(())
 }
 
@@ -202,6 +222,72 @@ mod tests {
         purge_meeting(&pool, "meeting-1", &[root.path().to_path_buf()]).await.unwrap();
         assert!(purge_meeting(&pool, "meeting-2", &[root.path().to_path_buf()]).await.is_err());
         assert_eq!(MeetingsRepository::get_meetings(&pool).await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn purge_keeps_folder_shared_with_another_meeting() {
+        let pool = test_pool().await;
+        let root = tempfile::tempdir().unwrap();
+        let folder = root.path().join("Import_2026-10-11_12-00");
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::write(folder.join("audio.mp4"), b"x").unwrap();
+        let fp = folder.to_str().unwrap();
+        insert_meeting(&pool, "meeting-1", "A", Some(fp)).await;
+        insert_meeting(&pool, "meeting-2", "A", Some(fp)).await;
+        trash_at(&pool, "meeting-1", now()).await;
+
+        purge_meeting(&pool, "meeting-1", &[root.path().to_path_buf()]).await.unwrap();
+        assert!(folder.join("audio.mp4").exists());
+        assert!(MeetingsRepository::list_trash(&pool).await.unwrap().is_empty());
+        let left = MeetingsRepository::get_meetings(&pool).await.unwrap();
+        assert_eq!(left.len(), 1);
+        assert_eq!(left[0].id, "meeting-2");
+    }
+
+    #[tokio::test]
+    async fn delete_trashed_meeting_refuses_live_meeting() {
+        let pool = test_pool().await;
+        insert_meeting(&pool, "meeting-1", "A", None).await;
+        assert!(!MeetingsRepository::delete_trashed_meeting(&pool, "meeting-1").await.unwrap());
+        assert_eq!(MeetingsRepository::get_meetings(&pool).await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn purge_removes_folder_path_that_is_a_file() {
+        let pool = test_pool().await;
+        let root = tempfile::tempdir().unwrap();
+        let file = root.path().join("audio.mp4");
+        std::fs::write(&file, b"x").unwrap();
+        insert_meeting(&pool, "meeting-1", "A", Some(file.to_str().unwrap())).await;
+        trash_at(&pool, "meeting-1", now()).await;
+
+        purge_meeting(&pool, "meeting-1", &[root.path().to_path_buf()]).await.unwrap();
+        assert!(!file.exists());
+        assert!(MeetingsRepository::list_trash(&pool).await.unwrap().is_empty());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn purge_keeps_meeting_in_trash_when_removal_fails() {
+        use std::os::unix::fs::PermissionsExt;
+        let pool = test_pool().await;
+        let root = tempfile::tempdir().unwrap();
+        let parent = root.path().join("parent");
+        let folder = parent.join("rec");
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::write(folder.join("audio.mp4"), b"x").unwrap();
+        insert_meeting(&pool, "meeting-1", "A", Some(folder.to_str().unwrap())).await;
+        trash_at(&pool, "meeting-1", now()).await;
+
+        std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o555)).unwrap();
+        let result = purge_meeting(&pool, "meeting-1", &[root.path().to_path_buf()]).await;
+        std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        // Running as root bypasses permission checks; only assert when removal really failed.
+        if folder.exists() {
+            assert!(result.is_err());
+            assert_eq!(MeetingsRepository::list_trash(&pool).await.unwrap().len(), 1);
+        }
     }
 
     #[test]
