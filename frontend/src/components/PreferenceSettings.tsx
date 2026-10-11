@@ -25,6 +25,21 @@ export function PreferenceSettings() {
   const [previousNotificationsEnabled, setPreviousNotificationsEnabled] = useState<boolean | null>(null);
   const hasTrackedViewRef = useRef(false);
 
+  const [trashRetention, setTrashRetention] = useState('30');
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const { Store } = await import('@tauri-apps/plugin-store');
+        const store = await Store.load('preferences.json');
+        const days = await store.get<number>('trash_retention_days');
+        setTrashRetention(String(days ?? 30));
+      } catch (error) {
+        console.error('Failed to load trash retention:', error);
+      }
+    })();
+  }, []);
+
   // Lazy load preferences on mount (only loads if not already cached)
   useEffect(() => {
     loadPreferences();
@@ -148,21 +163,6 @@ export function PreferenceSettings() {
 
   // Ensure we have a boolean value for the Switch component
   const notificationsEnabledValue = notificationsEnabled ?? false;
-
-  const [trashRetention, setTrashRetention] = useState('30');
-
-  useEffect(() => {
-    (async () => {
-      try {
-        const { Store } = await import('@tauri-apps/plugin-store');
-        const store = await Store.load('preferences.json');
-        const days = await store.get<number>('trash_retention_days');
-        setTrashRetention(String(days ?? 30));
-      } catch (error) {
-        console.error('Failed to load trash retention:', error);
-      }
-    })();
-  }, []);
 
   const saveTrashRetention = async (value: string) => {
     setTrashRetention(value);
