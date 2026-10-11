@@ -1,6 +1,6 @@
 'use client';
 
-import { Check, MoreHorizontal } from 'lucide-react';
+import { Check, FolderPlus, MoreHorizontal } from 'lucide-react';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator,
   DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger,
@@ -11,11 +11,12 @@ interface MeetingItemMenuProps {
   folders: Folder[];
   folderId: string | null;
   onMove: (folderId: string | null) => void;
+  onNewFolder: () => void;
   onEditTags: () => void;
   onTrash: () => void;
 }
 
-export function MeetingItemMenu({ folders, folderId, onMove, onEditTags, onTrash }: MeetingItemMenuProps) {
+export function MeetingItemMenu({ folders, folderId, onMove, onNewFolder, onEditTags, onTrash }: MeetingItemMenuProps) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -42,6 +43,11 @@ export function MeetingItemMenu({ folders, folderId, onMove, onEditTags, onTrash
                 {f.name}
               </DropdownMenuItem>
             ))}
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onSelect={onNewFolder}>
+              <FolderPlus className="mr-2 h-3 w-3" />
+              New folder…
+            </DropdownMenuItem>
           </DropdownMenuSubContent>
         </DropdownMenuSub>
         <DropdownMenuItem onSelect={onEditTags}>Edit tags…</DropdownMenuItem>

@@ -120,6 +120,7 @@ const Sidebar: React.FC = () => {
 
   const [tagsDialogMeetingId, setTagsDialogMeetingId] = useState<string | null>(null);
   const [folderRename, setFolderRename] = useState<{ folder: Folder; name: string } | null>(null);
+  const [newFolderFor, setNewFolderFor] = useState<{ meetingId: string; name: string } | null>(null);
   const [folderDelete, setFolderDelete] = useState<Folder | null>(null);
   const [manageTagsOpen, setManageTagsOpen] = useState(false);
 
@@ -318,6 +319,19 @@ const Sidebar: React.FC = () => {
   const moveMeeting = async (meetingId: string, folderId: string | null) => {
     try {
       await organizationService.setMeetingFolder(meetingId, folderId);
+    } catch (error) {
+      toast.error(String(error));
+    }
+    await Promise.all([refetchMeetings(), refetchOrganization()]);
+  };
+
+  // Creates a folder from a meeting's "Move to folder" menu and files the meeting in it.
+  const createFolderForMeeting = async () => {
+    if (!newFolderFor || !newFolderFor.name.trim()) return;
+    try {
+      const folder = await organizationService.createFolder(newFolderFor.name);
+      await organizationService.setMeetingFolder(newFolderFor.meetingId, folder.id);
+      setNewFolderFor(null);
     } catch (error) {
       toast.error(String(error));
     }
@@ -595,6 +609,7 @@ const Sidebar: React.FC = () => {
                       folders={folders}
                       folderId={meetings.find(m => m.id === item.id)?.folder_id ?? null}
                       onMove={folderId => void moveMeeting(item.id, folderId)}
+                      onNewFolder={() => setNewFolderFor({ meetingId: item.id, name: '' })}
                       onEditTags={() => setTagsDialogMeetingId(item.id)}
                       onTrash={() => void handleTrash(item.id)}
                     />
@@ -699,6 +714,7 @@ const Sidebar: React.FC = () => {
             {renderCollapsedIcons()}
             {!isCollapsed && (
               <div className="flex-1 overflow-y-auto custom-scrollbar min-h-0 pt-2">
+                <NewFolderButton onCreated={refetchOrganization} />
                 {searchQuery && isSearching && (
                   <div className="mx-3 mb-1 text-xs text-blue-500 animate-pulse">Searching...</div>
                 )}
@@ -709,7 +725,6 @@ const Sidebar: React.FC = () => {
                   onRenameFolder={folder => setFolderRename({ folder, name: folder.name })}
                   onDeleteFolder={folder => setFolderDelete(folder)}
                 />
-                <NewFolderButton onCreated={refetchOrganization} />
               </div>
             )}
             {!isCollapsed && (
@@ -782,6 +797,23 @@ const Sidebar: React.FC = () => {
         <DialogContent className="sm:max-w-md">
           <DialogTitle>Manage tags</DialogTitle>
           <TagManager />
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={newFolderFor !== null} onOpenChange={open => !open && setNewFolderFor(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogTitle>New folder</DialogTitle>
+          <input
+            autoFocus
+            placeholder="Folder name"
+            value={newFolderFor?.name ?? ''}
+            onChange={e => newFolderFor && setNewFolderFor({ ...newFolderFor, name: e.target.value })}
+            onKeyDown={e => {
+              if (e.key === 'Enter') void createFolderForMeeting();
+            }}
+            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+          />
+          <p className="text-xs text-gray-500">Press Enter to create it. The meeting moves into the new folder.</p>
         </DialogContent>
       </Dialog>
 
