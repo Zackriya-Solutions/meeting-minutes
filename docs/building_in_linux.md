@@ -10,16 +10,52 @@ If you're new to building on Linux, start here. These simple commands work for m
 
 ### 1. Install Basic Dependencies
 
+You need three things: a system toolchain, Rust, and Node.js + pnpm.
+
+#### System packages
+
 ```bash
 # Ubuntu/Debian
 sudo apt update
-sudo apt install build-essential cmake git
+sudo apt install -y \
+  build-essential cmake git pkg-config \
+  clang libclang-dev \
+  libasound2-dev libdbus-1-dev \
+  libwebkit2gtk-4.1-dev libjavascriptcoregtk-4.1-dev libsoup-3.0-dev \
+  libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libssl-dev
 
 # Fedora/RHEL
-sudo dnf install gcc-c++ cmake git
+sudo dnf install -y \
+  gcc-c++ cmake git pkgconf-pkg-config \
+  clang clang-devel \
+  alsa-lib-devel dbus-devel \
+  webkit2gtk4.1-devel javascriptcoregtk4.1-devel libsoup3-devel \
+  gtk3-devel libappindicator-gtk3-devel librsvg2-devel openssl-devel
 
 # Arch Linux
-sudo pacman -S base-devel cmake git
+sudo pacman -S --needed \
+  base-devel cmake git pkgconf \
+  clang \
+  alsa-lib dbus \
+  webkit2gtk-4.1 libsoup3 \
+  gtk3 libayatana-appindicator librsvg openssl
+```
+
+These cover: the build toolchain, `bindgen` (`clang` / `libclang-dev`), the ALSA audio backend (`libasound2-dev`), D-Bus (`libdbus-1-dev`, linked by the Tauri runtime), the Tauri 2 runtime (`webkit2gtk-4.1`, `javascriptcoregtk-4.1`, `libsoup-3.0`, `gtk-3`), the `tray-icon` feature (`libayatana-appindicator3-dev`), and AppImage bundling (`librsvg2-dev`).
+
+#### Rust toolchain
+
+```bash
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+source "$HOME/.cargo/env"
+```
+
+#### Node.js and pnpm
+
+Install Node.js 20+ (via your package manager, [nvm](https://github.com/nvm-sh/nvm), or [fnm](https://github.com/Schniz/fnm)), then enable `pnpm`:
+
+```bash
+corepack enable pnpm
 ```
 
 ### 2. Build and Run
@@ -211,10 +247,11 @@ TAURI_GPU_FEATURE=openblas ./build-gpu.sh
 
 ### Build Output Location
 
-After successful build:
+After a successful build, artifacts land in the workspace `target` directory at the repo root:
 
 ```
-src-tauri/target/release/bundle/appimage/Meetily_<version>_amd64.AppImage
+target/release/bundle/appimage/meetily_<version>_amd64.AppImage
+target/release/bundle/deb/meetily_<version>_amd64.deb
 ```
 
 ---
@@ -225,6 +262,16 @@ src-tauri/target/release/bundle/appimage/Meetily_<version>_amd64.AppImage
 
 - **Fix:** Install `nvidia-cuda-toolkit` or set `CUDA_PATH` environment variable
 - **Check:** `nvcc --version` should work
+
+### "fatal error: 'stdbool.h' file not found" (bindgen)
+
+- **Cause:** `clang` / `libclang-dev` is not installed. `bindgen` (used by `llama-cpp-sys`) needs them to parse C headers.
+- **Fix:** `sudo apt install clang libclang-dev` (or your distro's equivalent — see [Install Basic Dependencies](#1-install-basic-dependencies)).
+
+### "gdk-3.0 was not found in the pkg-config search path"
+
+- **Cause:** The GTK/WebKit runtime libraries are installed, but their `-dev` / `-devel` packages (which provide the `.pc` files) are not.
+- **Fix:** Install the Tauri 2 development packages listed in [Install Basic Dependencies](#1-install-basic-dependencies) (`libwebkit2gtk-4.1-dev libgtk-3-dev ...` on Debian/Ubuntu, `webkit2gtk4.1-devel gtk3-devel ...` on Fedora).
 
 ### "Vulkan detected but missing dependencies"
 
@@ -297,8 +344,8 @@ sudo apt install nvidia-driver-550 nvidia-cuda-toolkit
 # Verify
 nvidia-smi --query-gpu=compute_cap --format=csv
 
-# Build (adjust architecture for your GPU)
-CMAKE_CUDA_ARCHITECTURES=86 \ # (86 may change in your case)
+# Build (adjust architecture for your GPU; 86 = RTX 30-series)
+CMAKE_CUDA_ARCHITECTURES=86 \
 CMAKE_CUDA_STANDARD=17 \
 CMAKE_POSITION_INDEPENDENT_CODE=ON \
 ./build-gpu.sh
