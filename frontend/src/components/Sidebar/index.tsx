@@ -31,6 +31,13 @@ import Info from '../Info';
 import { ComplianceNotification } from '../ComplianceNotification';
 import { Input } from '../ui/input';
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from '../ui/input-group';
+import { MeetingSections } from './MeetingSections';
+import { TagFilterChips } from './TagFilterChips';
+import { NewFolderButton } from './NewFolderButton';
+import { MeetingItemMenu } from './MeetingItemMenu';
+import { MeetingOrganizationBar } from '@/components/organization/MeetingOrganizationBar';
+import { buildSidebarSections, type Folder } from '@/lib/organization';
+import { organizationService } from '@/services/organizationService';
 
 interface SidebarItem {
   id: string;
@@ -54,7 +61,14 @@ const Sidebar: React.FC = () => {
     isSearching,
     meetings,
     setMeetings,
-    serverAddress
+    serverAddress,
+    folders,
+    tags,
+    trashCount,
+    selectedTagIds,
+    toggleTagFilter,
+    refetchOrganization,
+    refetchMeetings,
   } = useSidebar();
 
   // Get recording state from RecordingStateContext (single source of truth)
@@ -103,7 +117,21 @@ const Sidebar: React.FC = () => {
   // }, [settingsSaveSuccess]);
 
 
-  const [deleteModalState, setDeleteModalState] = useState<{ isOpen: boolean; itemId: string | null }>({ isOpen: false, itemId: null });
+  const [tagsDialogMeetingId, setTagsDialogMeetingId] = useState<string | null>(null);
+  const [folderRename, setFolderRename] = useState<{ folder: Folder; name: string } | null>(null);
+  const [folderDelete, setFolderDelete] = useState<Folder | null>(null);
+
+  const sections = useMemo(() => buildSidebarSections(meetings, folders, {
+    selectedTagIds,
+    searchQuery,
+    searchResultIds: searchResults.map((r: { id: string }) => r.id),
+  }), [meetings, folders, selectedTagIds, searchQuery, searchResults]);
+
+  // Re-run transcript search when tag filters change.
+  useEffect(() => {
+    if (searchQuery.trim()) void searchTranscripts(searchQuery);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedTagIds]);
 
   useEffect(() => {
     // Note: Don't set hardcoded defaults - let DB be the source of truth
@@ -255,110 +283,43 @@ const Sidebar: React.FC = () => {
     }
   }, [expandedFolders, searchTranscripts]);
 
-  // Combine search results with sidebar items
-  const filteredSidebarItems = useMemo(() => {
-    if (!searchQuery.trim()) return sidebarItems;
-
-    // If we have search results, highlight matching meetings
-    if (searchResults.length > 0) {
-      // Get the IDs of meetings that matched in transcripts
-      const matchedMeetingIds = new Set(searchResults.map(result => result.id));
-
-      return sidebarItems
-        .map(folder => {
-          // Always include folders in the results
-          if (folder.type === 'folder') {
-            if (!folder.children) return folder;
-
-            // Filter children based on search results or title match
-            const filteredChildren = folder.children.filter(item => {
-              // Include if the meeting ID is in our search results
-              if (matchedMeetingIds.has(item.id)) return true;
-
-              // Or if the title matches the search query
-              return item.title.toLowerCase().includes(searchQuery.toLowerCase());
-            });
-
-            return {
-              ...folder,
-              children: filteredChildren
-            };
-          }
-
-          // For non-folder items, check if they match the search
-          return (matchedMeetingIds.has(folder.id) ||
-            folder.title.toLowerCase().includes(searchQuery.toLowerCase()))
-            ? folder : undefined;
-        })
-        .filter((item): item is SidebarItem => item !== undefined); // Type-safe filter
-    } else {
-      // Fall back to title-only filtering if no transcript results
-      return sidebarItems
-        .map(folder => {
-          // Always include folders in the results
-          if (folder.type === 'folder') {
-            if (!folder.children) return folder;
-
-            // Filter children based on search query
-            const filteredChildren = folder.children.filter(item =>
-              item.title.toLowerCase().includes(searchQuery.toLowerCase())
-            );
-
-            return {
-              ...folder,
-              children: filteredChildren
-            };
-          }
-
-          // For non-folder items, check if they match the search
-          return folder.title.toLowerCase().includes(searchQuery.toLowerCase()) ? folder : undefined;
-        })
-        .filter((item): item is SidebarItem => item !== undefined); // Type-safe filter
-    }
-  }, [sidebarItems, searchQuery, searchResults, expandedFolders]);
-
-
-  const handleDelete = async (itemId: string) => {
-    console.log('Deleting item:', itemId);
-    const payload = {
-      meetingId: itemId
-    };
-
+  const handleTrash = async (itemId: string) => {
     try {
-      const { invoke } = await import('@tauri-apps/api/core');
-      await invoke('api_delete_meeting', {
-        meetingId: itemId,
+      await organizationService.trashMeeting(itemId);
+      setMeetings(meetings.filter(m => m.id !== itemId));
+      await refetchOrganization();
+      toast.success('Moved to Trash', {
+        action: {
+          label: 'Undo',
+          onClick: async () => {
+            try {
+              await organizationService.restoreMeeting(itemId);
+            } catch (error) {
+              toast.error(String(error));
+            }
+            await Promise.all([refetchMeetings(), refetchOrganization()]);
+          },
+        },
       });
-      console.log('Meeting deleted successfully');
-      const updatedMeetings = meetings.filter((m: CurrentMeeting) => m.id !== itemId);
-      setMeetings(updatedMeetings);
 
-      // Track meeting deletion
-      Analytics.trackMeetingDeleted(itemId);
-
-      // Show success toast
-      toast.success("Meeting deleted successfully", {
-        description: "All associated data has been removed"
-      });
-
-      // If deleting the active meeting, navigate to home
+      // If trashing the active meeting, navigate to home
       if (currentMeeting?.id === itemId) {
         setCurrentMeeting({ id: 'intro-call', title: '+ New Call' });
         router.push('/');
       }
     } catch (error) {
-      console.error('Failed to delete meeting:', error);
-      toast.error("Failed to delete meeting", {
-        description: error instanceof Error ? error.message : String(error)
-      });
+      console.error('Failed to move meeting to Trash:', error);
+      toast.error('Failed to move meeting to Trash', { description: String(error) });
     }
   };
 
-  const handleDeleteConfirm = () => {
-    if (deleteModalState.itemId) {
-      handleDelete(deleteModalState.itemId);
+  const moveMeeting = async (meetingId: string, folderId: string | null) => {
+    try {
+      await organizationService.setMeetingFolder(meetingId, folderId);
+    } catch (error) {
+      toast.error(String(error));
     }
-    setDeleteModalState({ isOpen: false, itemId: null });
+    await refetchMeetings();
   };
 
   // Handle modal editing of meeting names
@@ -628,16 +589,13 @@ const Sidebar: React.FC = () => {
                     >
                       <Pencil className="w-4 h-4" />
                     </button>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setDeleteModalState({ isOpen: true, itemId: item.id });
-                      }}
-                      className="hover:text-red-600 p-1 rounded-md hover:bg-red-50 flex-shrink-0"
-                      aria-label="Delete meeting"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                    <MeetingItemMenu
+                      folders={folders}
+                      folderId={meetings.find(m => m.id === item.id)?.folder_id ?? null}
+                      onMove={folderId => void moveMeeting(item.id, folderId)}
+                      onEditTags={() => setTagsDialogMeetingId(item.id)}
+                      onTrash={() => void handleTrash(item.id)}
+                    />
                   </div>
                 )}
               </div>
@@ -713,6 +671,7 @@ const Sidebar: React.FC = () => {
                     }
                   </InputGroup>
                 </div>
+                <TagFilterChips tags={tags} selectedIds={selectedTagIds} onToggle={toggleTagFilter} />
               </div>
             )}
           </div>
@@ -736,36 +695,29 @@ const Sidebar: React.FC = () => {
           {/* Content area */}
           <div className="flex-1 flex flex-col min-h-0">
             {renderCollapsedIcons()}
-            {/* Meeting Notes folder header - fixed */}
             {!isCollapsed && (
-              <div className="flex-shrink-0">
-                {filteredSidebarItems.filter(item => item.type === 'folder').map(item => (
-                  <div key={item.id}>
-                    <div
-                      className="flex items-center transition-all duration-150 p-3 text-lg font-semibold h-10 mx-3 mt-3 rounded-lg"
-                    >
-                      <NotebookPen className="w-4 h-4 mr-2 text-gray-600" />
-                      <span className="text-gray-700">{item.title}</span>
-                      {searchQuery && item.id === 'meetings' && isSearching && (
-                        <span className="ml-2 text-xs text-blue-500 animate-pulse">Searching...</span>
-                      )}
-                    </div>
-                  </div>
-                ))}
+              <div className="flex-1 overflow-y-auto custom-scrollbar min-h-0 pt-2">
+                {searchQuery && isSearching && (
+                  <div className="mx-3 mb-1 text-xs text-blue-500 animate-pulse">Searching...</div>
+                )}
+                <MeetingSections
+                  sections={sections}
+                  renderMeeting={meeting => renderItem({ id: meeting.id, title: meeting.title, type: 'file' }, 1)}
+                  onDropMeeting={(meetingId, folderId) => void moveMeeting(meetingId, folderId)}
+                  onRenameFolder={folder => setFolderRename({ folder, name: folder.name })}
+                  onDeleteFolder={folder => setFolderDelete(folder)}
+                />
+                <NewFolderButton onCreated={refetchOrganization} />
               </div>
             )}
-
-            {/* Scrollable meeting items */}
             {!isCollapsed && (
-              <div className="flex-1 overflow-y-auto custom-scrollbar min-h-0">
-                {filteredSidebarItems
-                  .filter(item => item.type === 'folder' && expandedFolders.has(item.id) && item.children)
-                  .map(item => (
-                    <div key={`${item.id}-children`} className="mx-3">
-                      {item.children!.map(child => renderItem(child, 1))}
-                    </div>
-                  ))}
-              </div>
+              <button
+                type="button"
+                onClick={() => router.push('/trash')}
+                className="mx-3 mb-2 flex items-center gap-2 rounded-md px-3 py-2 text-sm text-gray-600 hover:bg-gray-50"
+              >
+                <Trash2 className="h-4 w-4" /> Trash{trashCount ? ` (${trashCount})` : ''}
+              </button>
             )}
           </div>
         </div>
@@ -817,12 +769,51 @@ const Sidebar: React.FC = () => {
         )}
       </div>
 
-      {/* Confirmation Modal for Delete */}
+      <Dialog open={tagsDialogMeetingId !== null} onOpenChange={open => !open && setTagsDialogMeetingId(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogTitle>Folder &amp; tags</DialogTitle>
+          {tagsDialogMeetingId && <MeetingOrganizationBar meetingId={tagsDialogMeetingId} />}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={folderRename !== null} onOpenChange={open => !open && setFolderRename(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogTitle>Rename folder</DialogTitle>
+          <input
+            autoFocus
+            value={folderRename?.name ?? ''}
+            onChange={e => folderRename && setFolderRename({ ...folderRename, name: e.target.value })}
+            onKeyDown={async e => {
+              if (e.key !== 'Enter' || !folderRename) return;
+              try {
+                await organizationService.renameFolder(folderRename.folder.id, folderRename.name);
+                setFolderRename(null);
+                await refetchOrganization();
+              } catch (error) {
+                toast.error(String(error));
+              }
+            }}
+            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+          />
+        </DialogContent>
+      </Dialog>
+
       <ConfirmationModal
-        isOpen={deleteModalState.isOpen}
-        text="Are you sure you want to delete this meeting? This action cannot be undone."
-        onConfirm={handleDeleteConfirm}
-        onCancel={() => setDeleteModalState({ isOpen: false, itemId: null })}
+        isOpen={folderDelete !== null}
+        text={folderDelete
+          ? `Delete folder "${folderDelete.name}"? ${meetings.filter(m => m.folder_id === folderDelete.id).length} meeting(s) will move to Unfiled.`
+          : ''}
+        onConfirm={async () => {
+          if (!folderDelete) return;
+          try {
+            await organizationService.deleteFolder(folderDelete.id);
+          } catch (error) {
+            toast.error(String(error));
+          }
+          setFolderDelete(null);
+          await Promise.all([refetchMeetings(), refetchOrganization()]);
+        }}
+        onCancel={() => setFolderDelete(null)}
       />
 
       {/* Edit Meeting Title Modal */}
