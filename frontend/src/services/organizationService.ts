@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import type { Folder, PurgeOutcome, Tag, TagRecord, TrashItem } from '@/lib/organization';
 
 export const organizationService = {
@@ -22,4 +23,8 @@ export const organizationService = {
   deleteMeetingForever: (meetingId: string) => invoke<void>('delete_meeting_forever', { meetingId }),
   emptyTrash: () => invoke<PurgeOutcome>('empty_trash'),
   listTrash: () => invoke<TrashItem[]>('list_trash'),
+
+  /** Fires after any meeting, folder, tag or Trash change. */
+  onMeetingsChanged: (callback: () => void): Promise<UnlistenFn> =>
+    listen('meetings-changed', () => callback()),
 };

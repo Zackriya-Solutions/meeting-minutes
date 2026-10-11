@@ -1,26 +1,34 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { FolderPlus } from 'lucide-react';
 import { toast } from 'sonner';
 import { organizationService } from '@/services/organizationService';
 
-export function NewFolderButton({ onCreated }: { onCreated: () => Promise<void> }) {
+export function NewFolderButton() {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState('');
+  const submittingRef = useRef(false);
+  const cancelRef = useRef(false);
 
-  const submit = async () => {
-    if (!name.trim()) {
+  // Blur is the only submit path: Enter blurs, Escape blurs with the cancel flag set.
+  const onBlur = async () => {
+    if (cancelRef.current || !name.trim()) {
+      cancelRef.current = false;
+      setName('');
       setEditing(false);
       return;
     }
+    if (submittingRef.current) return;
+    submittingRef.current = true;
     try {
       await organizationService.createFolder(name);
       setName('');
       setEditing(false);
-      await onCreated();
     } catch (error) {
       toast.error(String(error));
+    } finally {
+      submittingRef.current = false;
     }
   };
 
@@ -31,10 +39,10 @@ export function NewFolderButton({ onCreated }: { onCreated: () => Promise<void> 
         value={name}
         onChange={e => setName(e.target.value)}
         onKeyDown={e => {
-          if (e.key === 'Enter') void submit();
-          if (e.key === 'Escape') { setName(''); setEditing(false); }
+          if (e.key === 'Escape') cancelRef.current = true;
+          if (e.key === 'Enter' || e.key === 'Escape') e.currentTarget.blur();
         }}
-        onBlur={() => void submit()}
+        onBlur={() => void onBlur()}
         placeholder="Folder name"
         className="mx-3 my-1 w-[calc(100%-1.5rem)] rounded-md border border-gray-300 px-2 py-1 text-sm"
       />

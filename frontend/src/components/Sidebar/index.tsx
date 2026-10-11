@@ -1,10 +1,9 @@
 'use client';
 
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
-import { ChevronDown, ChevronRight, File, Settings, ChevronLeftCircle, ChevronRightCircle, Calendar, StickyNote, Home, Trash2, Mic, Square, Plus, Search, Pencil, NotebookPen, SearchIcon, X, Upload } from 'lucide-react';
+import { File, Settings, ChevronLeftCircle, ChevronRightCircle, Home, Trash2, Mic, Square, Plus, Pencil, NotebookPen, SearchIcon, X, Upload } from 'lucide-react';
 import { useRouter, usePathname } from 'next/navigation';
 import { useSidebar } from './SidebarProvider';
-import type { CurrentMeeting } from '@/components/Sidebar/SidebarProvider';
 import { ConfirmationModal } from '../ConfirmationModel/confirmation-modal';
 import { ModelConfig } from '@/components/ModelSettingsModal';
 import { SettingTabs } from '../SettingTabs';
@@ -37,15 +36,8 @@ import { TagManager } from '@/components/organization/TagManager';
 import { NewFolderButton } from './NewFolderButton';
 import { MeetingItemMenu } from './MeetingItemMenu';
 import { MeetingOrganizationBar } from '@/components/organization/MeetingOrganizationBar';
-import { buildSidebarSections, type Folder } from '@/lib/organization';
+import { buildSidebarSections, type Folder, type MeetingListItem } from '@/lib/organization';
 import { organizationService } from '@/services/organizationService';
-
-interface SidebarItem {
-  id: string;
-  title: string;
-  type: 'folder' | 'file';
-  children?: SidebarItem[];
-}
 
 const Sidebar: React.FC = () => {
   const router = useRouter();
@@ -53,7 +45,6 @@ const Sidebar: React.FC = () => {
   const {
     currentMeeting,
     setCurrentMeeting,
-    sidebarItems,
     isCollapsed,
     toggleCollapse,
     handleRecordingToggle,
@@ -65,18 +56,15 @@ const Sidebar: React.FC = () => {
     serverAddress,
     folders,
     tags,
-    trashCount,
+    trashItems,
     selectedTagIds,
     toggleTagFilter,
-    refetchOrganization,
-    refetchMeetings,
   } = useSidebar();
 
   // Get recording state from RecordingStateContext (single source of truth)
   const { isRecording } = useRecordingState();
   const { openImportDialog } = useImportDialog();
   const { betaFeatures } = useConfig();
-  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set(['meetings']));
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [showModelSettings, setShowModelSettings] = useState(false);
   const [modelConfig, setModelConfig] = useState<ModelConfig>({
@@ -100,15 +88,6 @@ const Sidebar: React.FC = () => {
   });
   const [editingTitle, setEditingTitle] = useState<string>('');
 
-  // Ensure 'meetings' folder is always expanded
-  useEffect(() => {
-    if (!expandedFolders.has('meetings')) {
-      const newExpanded = new Set(expandedFolders);
-      newExpanded.add('meetings');
-      setExpandedFolders(newExpanded);
-    }
-  }, [expandedFolders]);
-
   // useEffect(() => {
   //   if (settingsSaveSuccess !== null) {
   //     const timer = setTimeout(() => {
@@ -129,12 +108,6 @@ const Sidebar: React.FC = () => {
     searchQuery,
     searchResultIds: searchResults.map((r: { id: string }) => r.id),
   }), [meetings, folders, selectedTagIds, searchQuery, searchResults]);
-
-  // Re-run transcript search when tag filters change.
-  useEffect(() => {
-    if (searchQuery.trim()) void searchTranscripts(searchQuery);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedTagIds]);
 
   useEffect(() => {
     // Note: Don't set hardcoded defaults - let DB be the source of truth
@@ -277,20 +250,12 @@ const Sidebar: React.FC = () => {
 
     // Search through transcripts
     await searchTranscripts(value);
-
-    // Make sure the meetings folder is expanded when searching
-    if (!expandedFolders.has('meetings')) {
-      const newExpanded = new Set(expandedFolders);
-      newExpanded.add('meetings');
-      setExpandedFolders(newExpanded);
-    }
-  }, [expandedFolders, searchTranscripts]);
+  }, [searchTranscripts]);
 
   const handleTrash = async (itemId: string) => {
     try {
       await organizationService.trashMeeting(itemId);
       setMeetings(meetings.filter(m => m.id !== itemId));
-      await refetchOrganization();
       toast.success('Moved to Trash', {
         action: {
           label: 'Undo',
@@ -300,7 +265,6 @@ const Sidebar: React.FC = () => {
             } catch (error) {
               toast.error(String(error));
             }
-            await Promise.all([refetchMeetings(), refetchOrganization()]);
           },
         },
       });
@@ -322,7 +286,6 @@ const Sidebar: React.FC = () => {
     } catch (error) {
       toast.error(String(error));
     }
-    await Promise.all([refetchMeetings(), refetchOrganization()]);
   };
 
   // Creates a folder from a meeting's "Move to folder" menu and files the meeting in it.
@@ -335,7 +298,6 @@ const Sidebar: React.FC = () => {
     } catch (error) {
       toast.error(String(error));
     }
-    await Promise.all([refetchMeetings(), refetchOrganization()]);
   };
 
   // Handle modal editing of meeting names
@@ -396,17 +358,6 @@ const Sidebar: React.FC = () => {
   const handleEditCancel = () => {
     setEditModalState({ isOpen: false, meetingId: null, currentTitle: '' });
     setEditingTitle('');
-  };
-
-  const toggleFolder = (folderId: string) => {
-    // Normal toggle behavior for all folders
-    const newExpanded = new Set(expandedFolders);
-    if (newExpanded.has(folderId)) {
-      newExpanded.delete(folderId);
-    } else {
-      newExpanded.add(folderId);
-    }
-    setExpandedFolders(newExpanded);
   };
 
   // Expose setShowModelSettings to window for Rust tray to call
@@ -486,10 +437,7 @@ const Sidebar: React.FC = () => {
           <Tooltip>
             <TooltipTrigger asChild>
               <button
-                onClick={() => {
-                  if (isCollapsed) toggleCollapse();
-                  toggleFolder('meetings');
-                }}
+                onClick={toggleCollapse}
                 className={`p-2 rounded-lg transition-colors duration-150 ${isMeetingPage ? 'bg-gray-100' : 'hover:bg-gray-100'
                   }`}
               >
@@ -528,109 +476,72 @@ const Sidebar: React.FC = () => {
     return searchResults.find(result => result.id === itemId);
   };
 
-  const renderItem = (item: SidebarItem, depth = 0) => {
-    const isExpanded = expandedFolders.has(item.id);
-    const paddingLeft = `${depth * 12 + 12}px`;
-    const isActive = item.type === 'file' && currentMeeting?.id === item.id;
-    const isMeetingItem = item.id.includes('-') && !item.id.startsWith('intro-call');
+  const renderMeetingRow = (meeting: MeetingListItem) => {
+    const isActive = currentMeeting?.id === meeting.id;
+    const isMeetingItem = meeting.id.includes('-') && !meeting.id.startsWith('intro-call');
 
     // Check if this item has a matching transcript snippet
-    const matchingResult = isMeetingItem ? findMatchingSnippet(item.id) : null;
+    const matchingResult = isMeetingItem ? findMatchingSnippet(meeting.id) : null;
     const hasTranscriptMatch = !!matchingResult;
 
-    if (isCollapsed) return null;
-
     return (
-      <div key={item.id}>
+      <div key={meeting.id}>
         <div
-          className={`flex items-center transition-all duration-150 group ${item.type === 'folder' && depth === 0
-            ? 'p-3 text-lg font-semibold h-10 mx-3 mt-3 rounded-lg'
-            : `px-3 py-2 my-0.5 rounded-md text-sm ${isActive ? 'bg-blue-100 text-blue-700 font-medium' :
-              hasTranscriptMatch ? 'bg-yellow-50' : 'hover:bg-gray-50'
-            } cursor-pointer`
-            }`}
-          style={item.type === 'folder' && depth === 0 ? {} : { paddingLeft }}
+          className={`flex items-center transition-all duration-150 group px-3 py-2 my-0.5 rounded-md text-sm ${isActive ? 'bg-blue-100 text-blue-700 font-medium' :
+            hasTranscriptMatch ? 'bg-yellow-50' : 'hover:bg-gray-50'
+            } cursor-pointer`}
+          style={{ paddingLeft: '24px' }}
           onClick={() => {
-            if (item.type === 'folder') {
-              toggleFolder(item.id);
-            } else {
-              setCurrentMeeting({ id: item.id, title: item.title });
-              const basePath = item.id.startsWith('intro-call') ? '/' :
-                item.id.includes('-') ? `/meeting-details?id=${item.id}` : `/notes/${item.id}`;
-              router.push(basePath);
-            }
+            setCurrentMeeting({ id: meeting.id, title: meeting.title });
+            const basePath = meeting.id.startsWith('intro-call') ? '/' :
+              meeting.id.includes('-') ? `/meeting-details?id=${meeting.id}` : `/notes/${meeting.id}`;
+            router.push(basePath);
           }}
         >
-          {item.type === 'folder' ? (
-            <>
-              {item.id === 'meetings' ? (
-                <Calendar className="w-4 h-4 mr-2" />
-              ) : item.id === 'notes' ? (
-                <Calendar className="w-4 h-4 mr-2" />
-              ) : null}
-              <span className={depth === 0 ? "" : "font-medium"}>{item.title}</span>
-              <div className="ml-auto">
-                {isExpanded ? (
-                  <ChevronDown className="w-4 h-4 text-gray-500" />
-                ) : (
-                  <ChevronRight className="w-4 h-4 text-gray-500" />
-                )}
-              </div>
-              {searchQuery && item.id === 'meetings' && isSearching && (
-                <span className="ml-2 text-xs text-blue-500 animate-pulse">Searching...</span>
+          <div className="flex flex-col w-full">
+            <div className="flex items-center w-full">
+              {isMeetingItem ? (
+                <div className="flex-shrink-0 flex items-center justify-center w-6 h-6 rounded-full mr-2 bg-gray-100">
+                  <File className="w-3.5 h-3.5 text-gray-600" />
+                </div>
+              ) : (
+                <div className="flex-shrink-0 flex items-center justify-center w-6 h-6 rounded-full mr-2 bg-blue-100">
+                  <Plus className="w-3.5 h-3.5 text-blue-600" />
+                </div>
               )}
-            </>
-          ) : (
-            <div className="flex flex-col w-full">
-              <div className="flex items-center w-full">
-                {isMeetingItem ? (
-                  <div className="flex-shrink-0 flex items-center justify-center w-6 h-6 rounded-full mr-2 bg-gray-100">
-                    <File className="w-3.5 h-3.5 text-gray-600" />
-                  </div>
-                ) : (
-                  <div className="flex-shrink-0 flex items-center justify-center w-6 h-6 rounded-full mr-2 bg-blue-100">
-                    <Plus className="w-3.5 h-3.5 text-blue-600" />
-                  </div>
-                )}
-                <span className="flex-1 break-words">{item.title}</span>
-                {isMeetingItem && (
-                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleEditStart(item.id, item.title);
-                      }}
-                      className="hover:text-blue-600 p-1 rounded-md hover:bg-blue-50 flex-shrink-0"
-                      aria-label="Edit meeting title"
-                    >
-                      <Pencil className="w-4 h-4" />
-                    </button>
-                    <MeetingItemMenu
-                      folders={folders}
-                      folderId={meetings.find(m => m.id === item.id)?.folder_id ?? null}
-                      onMove={folderId => void moveMeeting(item.id, folderId)}
-                      onNewFolder={() => setNewFolderFor({ meetingId: item.id, name: '' })}
-                      onEditTags={() => setTagsDialogMeetingId(item.id)}
-                      onTrash={() => void handleTrash(item.id)}
-                    />
-                  </div>
-                )}
-              </div>
-
-              {/* Show transcript match snippet if available */}
-              {hasTranscriptMatch && (
-                <div className="mt-1 ml-8 text-xs text-gray-500 bg-yellow-50 p-1.5 rounded border border-yellow-100 line-clamp-2">
-                  <span className="font-medium text-yellow-600">Match:</span> {matchingResult.matchContext}
+              <span className="flex-1 break-words">{meeting.title}</span>
+              {isMeetingItem && (
+                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleEditStart(meeting.id, meeting.title);
+                    }}
+                    className="hover:text-blue-600 p-1 rounded-md hover:bg-blue-50 flex-shrink-0"
+                    aria-label="Edit meeting title"
+                  >
+                    <Pencil className="w-4 h-4" />
+                  </button>
+                  <MeetingItemMenu
+                    folders={folders}
+                    folderId={meeting.folder_id}
+                    onMove={folderId => void moveMeeting(meeting.id, folderId)}
+                    onNewFolder={() => setNewFolderFor({ meetingId: meeting.id, name: '' })}
+                    onEditTags={() => setTagsDialogMeetingId(meeting.id)}
+                    onTrash={() => void handleTrash(meeting.id)}
+                  />
                 </div>
               )}
             </div>
-          )}
-        </div>
-        {item.type === 'folder' && isExpanded && item.children && (
-          <div className="ml-1">
-            {item.children.map(child => renderItem(child, depth + 1))}
+
+            {/* Show transcript match snippet if available */}
+            {hasTranscriptMatch && (
+              <div className="mt-1 ml-8 text-xs text-gray-500 bg-yellow-50 p-1.5 rounded border border-yellow-100 line-clamp-2">
+                <span className="font-medium text-yellow-600">Match:</span> {matchingResult.matchContext}
+              </div>
+            )}
           </div>
-        )}
+        </div>
       </div>
     );
   };
@@ -714,13 +625,13 @@ const Sidebar: React.FC = () => {
             {renderCollapsedIcons()}
             {!isCollapsed && (
               <div className="flex-1 overflow-y-auto custom-scrollbar min-h-0 pt-2">
-                <NewFolderButton onCreated={refetchOrganization} />
+                <NewFolderButton />
                 {searchQuery && isSearching && (
                   <div className="mx-3 mb-1 text-xs text-blue-500 animate-pulse">Searching...</div>
                 )}
                 <MeetingSections
                   sections={sections}
-                  renderMeeting={meeting => renderItem({ id: meeting.id, title: meeting.title, type: 'file' }, 1)}
+                  renderMeeting={renderMeetingRow}
                   onDropMeeting={(meetingId, folderId) => void moveMeeting(meetingId, folderId)}
                   onRenameFolder={folder => setFolderRename({ folder, name: folder.name })}
                   onDeleteFolder={folder => setFolderDelete(folder)}
@@ -733,7 +644,7 @@ const Sidebar: React.FC = () => {
                 onClick={() => router.push('/trash')}
                 className="mx-3 mb-2 flex items-center gap-2 rounded-md px-3 py-2 text-sm text-gray-600 hover:bg-gray-50"
               >
-                <Trash2 className="h-4 w-4" /> Trash{trashCount ? ` (${trashCount})` : ''}
+                <Trash2 className="h-4 w-4" /> Trash{trashItems.length ? ` (${trashItems.length})` : ''}
               </button>
             )}
           </div>
@@ -829,7 +740,6 @@ const Sidebar: React.FC = () => {
               try {
                 await organizationService.renameFolder(folderRename.folder.id, folderRename.name);
                 setFolderRename(null);
-                await refetchOrganization();
               } catch (error) {
                 toast.error(String(error));
               }
@@ -852,7 +762,6 @@ const Sidebar: React.FC = () => {
             toast.error(String(error));
           }
           setFolderDelete(null);
-          await Promise.all([refetchMeetings(), refetchOrganization()]);
         }}
         onCancel={() => setFolderDelete(null)}
       />

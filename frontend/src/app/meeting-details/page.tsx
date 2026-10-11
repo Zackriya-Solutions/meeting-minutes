@@ -18,6 +18,7 @@ interface MeetingDetailsResponse {
   updated_at: string;
   transcripts: Transcript[];
   folder_path?: string;
+  deleted_at?: string | null;
 }
 
 function MeetingDetailsContent() {
@@ -136,6 +137,7 @@ function MeetingDetailsContent() {
         updated_at: metadata.updated_at,
         transcripts: transcripts, // Paginated transcripts from hook
         folder_path: metadata.folder_path, // For retranscription feature
+        deleted_at: metadata.deleted_at,
       });
 
       // Sync with sidebar context

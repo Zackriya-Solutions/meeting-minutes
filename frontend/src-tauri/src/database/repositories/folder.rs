@@ -2,7 +2,7 @@ use chrono::Utc;
 use sqlx::SqlitePool;
 use uuid::Uuid;
 
-use super::org_error::{clean_name, is_unique_violation, OrgError};
+use super::org_error::{clean_name, duplicate_or, OrgError};
 use crate::database::models::Folder;
 
 const FOLDER_COLUMNS: &str = "id, name, parent_id, sort_order, created_at, updated_at";
@@ -44,7 +44,7 @@ impl FolderRepository {
         .bind(now)
         .execute(pool)
         .await
-        .map_err(|e| duplicate_or(e, &name))?;
+        .map_err(|e| duplicate_or(e, "folder", &name))?;
         Self::get_live(pool, &id).await
     }
 
@@ -58,7 +58,7 @@ impl FolderRepository {
         .bind(id)
         .execute(pool)
         .await
-        .map_err(|e| duplicate_or(e, &name))?;
+        .map_err(|e| duplicate_or(e, "folder", &name))?;
         if result.rows_affected() == 0 {
             return Err(OrgError::NotFound(format!("Folder not found: {}", id)));
         }
@@ -88,14 +88,6 @@ impl FolderRepository {
             .rows_affected();
         tx.commit().await?;
         Ok(moved)
-    }
-}
-
-fn duplicate_or(e: sqlx::Error, name: &str) -> OrgError {
-    if is_unique_violation(&e) {
-        OrgError::Duplicate(format!("A folder named \"{}\" already exists", name))
-    } else {
-        e.into()
     }
 }
 

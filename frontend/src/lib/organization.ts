@@ -64,11 +64,16 @@ export interface PendingOrganization {
 export const UNFILED_ID = '__unfiled__';
 export const EMPTY_PENDING_ORGANIZATION: PendingOrganization = { folderId: null, tagIds: [] };
 
-export function meetingMatchesFilter(meeting: MeetingListItem, filter: SectionFilter): boolean {
+/** SectionFilter with the search result ids indexed for per-meeting lookups. */
+export type IndexedSectionFilter = Omit<SectionFilter, 'searchResultIds'> & {
+  searchResultIds: ReadonlySet<string>;
+};
+
+export function meetingMatchesFilter(meeting: MeetingListItem, filter: IndexedSectionFilter): boolean {
   if (!filter.selectedTagIds.every(id => meeting.tag_ids.includes(id))) return false;
   const query = filter.searchQuery.trim().toLowerCase();
   if (!query) return true;
-  return filter.searchResultIds.includes(meeting.id) || meeting.title.toLowerCase().includes(query);
+  return filter.searchResultIds.has(meeting.id) || meeting.title.toLowerCase().includes(query);
 }
 
 /**
@@ -82,17 +87,25 @@ export function buildSidebarSections(
 ): SidebarSection[] {
   const filtering = filter.selectedTagIds.length > 0 || filter.searchQuery.trim() !== '';
   const known = new Set(folders.map(f => f.id));
-  const visible = meetings.filter(m => meetingMatchesFilter(m, filter));
+  const indexed = { ...filter, searchResultIds: new Set(filter.searchResultIds) };
 
-  const unfiled: SidebarSection = {
-    id: UNFILED_ID,
-    title: 'Unfiled',
-    folder: null,
-    meetings: visible.filter(m => !m.folder_id || !known.has(m.folder_id)),
-  };
+  const unfiledMeetings: MeetingListItem[] = [];
+  const byFolder = new Map<string, MeetingListItem[]>();
+  for (const m of meetings) {
+    if (!meetingMatchesFilter(m, indexed)) continue;
+    if (!m.folder_id || !known.has(m.folder_id)) {
+      unfiledMeetings.push(m);
+    } else {
+      const bucket = byFolder.get(m.folder_id);
+      if (bucket) bucket.push(m);
+      else byFolder.set(m.folder_id, [m]);
+    }
+  }
+
+  const unfiled: SidebarSection = { id: UNFILED_ID, title: 'Unfiled', folder: null, meetings: unfiledMeetings };
   const folderSections: SidebarSection[] = [...folders]
     .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))
-    .map(f => ({ id: f.id, title: f.name, folder: f, meetings: visible.filter(m => m.folder_id === f.id) }));
+    .map(f => ({ id: f.id, title: f.name, folder: f, meetings: byFolder.get(f.id) ?? [] }));
 
   const sections = [unfiled, ...folderSections];
   return filtering ? sections.filter(s => s.meetings.length > 0) : sections;

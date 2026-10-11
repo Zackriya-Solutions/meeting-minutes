@@ -14,16 +14,8 @@ import {
   type MeetingListItem,
   type PendingOrganization,
   type Tag,
+  type TrashItem,
 } from '@/lib/organization';
-
-
-
-interface SidebarItem {
-  id: string;
-  title: string;
-  type: 'folder' | 'file';
-  children?: SidebarItem[];
-}
 
 export interface CurrentMeeting {
   id: string;
@@ -47,17 +39,15 @@ interface SummaryPoll {
 interface SidebarContextType {
   currentMeeting: CurrentMeeting | null;
   setCurrentMeeting: (meeting: CurrentMeeting | null) => void;
-  sidebarItems: SidebarItem[];
   isCollapsed: boolean;
   toggleCollapse: () => void;
   meetings: MeetingListItem[];
   setMeetings: (meetings: MeetingListItem[]) => void;
   folders: Folder[];
   tags: Tag[];
-  trashCount: number;
+  trashItems: TrashItem[];
   selectedTagIds: string[];
   toggleTagFilter: (tagId: string) => void;
-  refetchOrganization: () => Promise<void>;
   pendingOrganization: PendingOrganization;
   setPendingOrganization: (pending: PendingOrganization) => void;
   applyPendingOrganization: (meetingId: string) => Promise<void>;
@@ -99,13 +89,11 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
   const [meetings, setMeetings] = useState<MeetingListItem[]>([]);
   const [folders, setFolders] = useState<Folder[]>([]);
   const [tags, setTags] = useState<Tag[]>([]);
-  const [trashCount, setTrashCount] = useState(0);
+  const [trashItems, setTrashItems] = useState<TrashItem[]>([]);
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
-  const selectedTagIdsRef = useRef<string[]>([]);
   const [pendingOrganization, setPendingOrganizationState] =
     useState<PendingOrganization>(EMPTY_PENDING_ORGANIZATION);
   const pendingOrganizationRef = useRef<PendingOrganization>(EMPTY_PENDING_ORGANIZATION);
-  const [sidebarItems, setSidebarItems] = useState<SidebarItem[]>([]);
   const [isMeetingActive, setIsMeetingActive] = useState(false);
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [isSearching, setIsSearching] = useState(false);
@@ -156,14 +144,13 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
       ]);
       setFolders(folderList);
       setTags(tagList);
-      setTrashCount(trash.length);
+      setTrashItems(trash);
       // Drop filters for tags that no longer exist.
       const live = new Set(tagList.map(t => t.id));
-      const kept = selectedTagIdsRef.current.filter(id => live.has(id));
-      if (kept.length !== selectedTagIdsRef.current.length) {
-        selectedTagIdsRef.current = kept;
-        setSelectedTagIds(kept);
-      }
+      setSelectedTagIds(prev => {
+        const kept = prev.filter(id => live.has(id));
+        return kept.length === prev.length ? prev : kept;
+      });
     } catch (error) {
       console.error('Error fetching folders/tags:', error);
     }
@@ -174,13 +161,11 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
     fetchOrganization();
     let cancelled = false;
     let unlisten: (() => void) | undefined;
-    import('@tauri-apps/api/event')
-      .then(({ listen }) =>
-        listen('meetings-changed', () => {
-          fetchMeetings();
-          fetchOrganization();
-        })
-      )
+    organizationService
+      .onMeetingsChanged(() => {
+        fetchMeetings();
+        fetchOrganization();
+      })
       .then(fn => {
         if (cancelled) fn();
         else unlisten = fn;
@@ -193,10 +178,7 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
   }, [serverAddress, fetchMeetings, fetchOrganization]);
 
   const toggleTagFilter = React.useCallback((tagId: string) => {
-    const current = selectedTagIdsRef.current;
-    const next = current.includes(tagId) ? current.filter(id => id !== tagId) : [...current, tagId];
-    selectedTagIdsRef.current = next;
-    setSelectedTagIds(next);
+    setSelectedTagIds(prev => (prev.includes(tagId) ? prev.filter(id => id !== tagId) : [...prev, tagId]));
   }, []);
 
   const setPendingOrganization = React.useCallback((pending: PendingOrganization) => {
@@ -206,7 +188,6 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
 
   const applyPendingOrganization = React.useCallback(async (meetingId: string) => {
     const { folderId, tagIds } = pendingOrganizationRef.current;
-    const attempted = Boolean(folderId) || tagIds.length > 0;
     try {
       if (folderId) await organizationService.setMeetingFolder(meetingId, folderId);
       if (tagIds.length) await organizationService.setMeetingTags(meetingId, tagIds);
@@ -215,9 +196,8 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
       toast.error('Meeting saved, but its folder/tags could not be applied');
     } finally {
       setPendingOrganization(EMPTY_PENDING_ORGANIZATION);
-      if (attempted) await fetchOrganization();
     }
-  }, [setPendingOrganization, fetchOrganization]);
+  }, [setPendingOrganization]);
 
   useEffect(() => {
     const fetchSettings = async () => {
@@ -226,18 +206,6 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
     };
     fetchSettings();
   }, []);
-
-  const baseItems: SidebarItem[] = [
-    {
-      id: 'meetings',
-      title: 'Meeting Notes',
-      type: 'folder' as const,
-      children: [
-        ...meetings.map(meeting => ({ id: meeting.id, title: meeting.title, type: 'file' as const }))
-      ]
-    },
-  ];
-
 
   const toggleCollapse = () => {
     setIsCollapsed(!isCollapsed);
@@ -248,13 +216,7 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
     if (pathname === '/') {
       setCurrentMeeting({ id: 'intro-call', title: '+ New Call' });
     }
-    setSidebarItems(baseItems);
   }, [pathname]);
-
-  // Update sidebar items when meetings change
-  useEffect(() => {
-    setSidebarItems(baseItems);
-  }, [meetings]);
 
   // Function to handle recording toggle from sidebar
   const handleRecordingToggle = () => {
@@ -288,10 +250,7 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
       setIsSearching(true);
 
 
-      const results = await invoke('api_search_transcripts', {
-        query,
-        tagIds: selectedTagIdsRef.current,
-      }) as TranscriptSearchResult[];
+      const results = await invoke('api_search_transcripts', { query }) as TranscriptSearchResult[];
       setSearchResults(results);
     } catch (error) {
       console.error('Error searching transcripts:', error);
@@ -404,7 +363,6 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
     <SidebarContext.Provider value={{
       currentMeeting,
       setCurrentMeeting,
-      sidebarItems,
       isCollapsed,
       toggleCollapse,
       meetings,
@@ -424,10 +382,9 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
       refetchMeetings: fetchMeetings,
       folders,
       tags,
-      trashCount,
+      trashItems,
       selectedTagIds,
       toggleTagFilter,
-      refetchOrganization: fetchOrganization,
       pendingOrganization,
       setPendingOrganization,
       applyPendingOrganization,

@@ -84,49 +84,22 @@ impl TranscriptsRepository {
     pub async fn search_transcripts(
         pool: &SqlitePool,
         query: &str,
-        tag_ids: &[String],
     ) -> Result<Vec<TranscriptSearchResult>, SqlxError> {
         if query.trim().is_empty() {
             return Ok(Vec::new());
         }
 
         let search_query = format!("%{}%", query.to_lowercase());
-        let mut tags: Vec<&str> = Vec::new();
-        for id in tag_ids {
-            if !tags.contains(&id.as_str()) {
-                tags.push(id.as_str());
-            }
-        }
 
-        let mut sql = String::from(
+        let rows = sqlx::query_as::<_, (String, String, String, String)>(
             "SELECT m.id, m.title, t.transcript, t.timestamp
              FROM meetings m
              JOIN transcripts t ON m.id = t.meeting_id
              WHERE LOWER(t.transcript) LIKE ? AND m.deleted_at IS NULL",
-        );
-        if !tags.is_empty() {
-            // Meetings carrying every selected tag (AND).
-            let placeholders = vec!["?"; tags.len()].join(", ");
-            sql.push_str(&format!(
-                " AND m.id IN (
-                    SELECT mt.meeting_id FROM meeting_tags mt
-                    JOIN tags tg ON tg.id = mt.tag_id
-                    WHERE mt.deleted_at IS NULL AND tg.deleted_at IS NULL AND mt.tag_id IN ({})
-                    GROUP BY mt.meeting_id
-                    HAVING COUNT(DISTINCT mt.tag_id) = ?)",
-                placeholders
-            ));
-        }
-
-        let mut statement =
-            sqlx::query_as::<_, (String, String, String, String)>(&sql).bind(&search_query);
-        for id in &tags {
-            statement = statement.bind(*id);
-        }
-        if !tags.is_empty() {
-            statement = statement.bind(tags.len() as i64);
-        }
-        let rows = statement.fetch_all(pool).await?;
+        )
+        .bind(&search_query)
+        .fetch_all(pool)
+        .await?;
 
         let results = rows
             .into_iter()
@@ -172,7 +145,6 @@ impl TranscriptsRepository {
 #[cfg(test)]
 mod search_tests {
     use super::*;
-    use crate::database::repositories::tag::TagRepository;
     use crate::database::test_support::{insert_meeting, insert_transcript, test_pool};
 
     fn ids(results: &[TranscriptSearchResult]) -> Vec<String> {
@@ -183,39 +155,21 @@ mod search_tests {
     }
 
     #[tokio::test]
-    async fn search_requires_all_selected_tags_and_skips_trash() {
+    async fn search_skips_trash() {
         let pool = test_pool().await;
-        for id in ["meeting-1", "meeting-2", "meeting-3"] {
+        for id in ["meeting-1", "meeting-2"] {
             insert_meeting(&pool, id, id, None).await;
             insert_transcript(&pool, id, "we discussed the budget").await;
         }
-        let a = TagRepository::create_or_get(&pool, "a").await.unwrap();
-        let b = TagRepository::create_or_get(&pool, "b").await.unwrap();
-        TagRepository::set_meeting_tags(&pool, "meeting-1", &[a.id.clone(), b.id.clone()]).await.unwrap();
-        TagRepository::set_meeting_tags(&pool, "meeting-2", &[a.id.clone()]).await.unwrap();
 
-        let all = TranscriptsRepository::search_transcripts(&pool, "budget", &[]).await.unwrap();
-        assert_eq!(ids(&all), vec!["meeting-1", "meeting-2", "meeting-3"]);
+        let all = TranscriptsRepository::search_transcripts(&pool, "budget").await.unwrap();
+        assert_eq!(ids(&all), vec!["meeting-1", "meeting-2"]);
 
-        let only_a = TranscriptsRepository::search_transcripts(&pool, "budget", &[a.id.clone()])
-            .await
-            .unwrap();
-        assert_eq!(ids(&only_a), vec!["meeting-1", "meeting-2"]);
-
-        let a_and_b = TranscriptsRepository::search_transcripts(
-            &pool,
-            "budget",
-            &[a.id.clone(), b.id.clone(), a.id.clone()],
-        )
-        .await
-        .unwrap();
-        assert_eq!(ids(&a_and_b), vec!["meeting-1"]);
-
-        sqlx::query("UPDATE meetings SET deleted_at = datetime('now') WHERE id = 'meeting-3'")
+        sqlx::query("UPDATE meetings SET deleted_at = datetime('now') WHERE id = 'meeting-2'")
             .execute(&pool)
             .await
             .unwrap();
-        let after_trash = TranscriptsRepository::search_transcripts(&pool, "budget", &[]).await.unwrap();
-        assert_eq!(ids(&after_trash), vec!["meeting-1", "meeting-2"]);
+        let after_trash = TranscriptsRepository::search_transcripts(&pool, "budget").await.unwrap();
+        assert_eq!(ids(&after_trash), vec!["meeting-1"]);
     }
 }

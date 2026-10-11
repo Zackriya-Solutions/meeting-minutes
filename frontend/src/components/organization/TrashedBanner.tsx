@@ -1,34 +1,23 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { invoke } from '@tauri-apps/api/core';
+import { useState } from 'react';
 import { toast } from 'sonner';
-import { useSidebar } from '@/components/Sidebar/SidebarProvider';
 import { organizationService } from '@/services/organizationService';
 
-export function TrashedBanner({ meetingId }: { meetingId: string }) {
-  const { refetchMeetings, refetchOrganization } = useSidebar();
-  const [trashed, setTrashed] = useState(false);
+export function TrashedBanner({ meetingId, deletedAt }: { meetingId: string; deletedAt?: string | null }) {
+  // Hides the banner right after a restore, before the meeting metadata is reloaded.
+  const [restoredId, setRestoredId] = useState<string | null>(null);
 
-  useEffect(() => {
-    let alive = true;
-    invoke<{ deleted_at: string | null }>('api_get_meeting_metadata', { meetingId })
-      .then(meta => { if (alive) setTrashed(Boolean(meta.deleted_at)); })
-      .catch(() => { if (alive) setTrashed(false); });
-    return () => { alive = false; };
-  }, [meetingId]);
-
-  if (!trashed) return null;
+  if (!deletedAt || restoredId === meetingId) return null;
 
   const restore = async () => {
     try {
       await organizationService.restoreMeeting(meetingId);
-      setTrashed(false);
+      setRestoredId(meetingId);
       toast.success('Meeting restored');
     } catch (error) {
       toast.error(String(error));
     }
-    await Promise.all([refetchMeetings(), refetchOrganization()]);
   };
 
   return (

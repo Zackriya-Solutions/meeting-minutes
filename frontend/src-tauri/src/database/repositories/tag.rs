@@ -4,7 +4,7 @@ use chrono::Utc;
 use sqlx::SqlitePool;
 use uuid::Uuid;
 
-use super::org_error::{clean_name, is_unique_violation, OrgError};
+use super::org_error::{clean_name, duplicate_or, is_unique_violation, OrgError};
 use crate::database::models::{Tag, TagWithCount};
 
 pub struct TagRepository;
@@ -81,13 +81,7 @@ impl TagRepository {
         .bind(id)
         .execute(pool)
         .await
-        .map_err(|e| {
-            if is_unique_violation(&e) {
-                OrgError::Duplicate(format!("A tag named \"{}\" already exists", name))
-            } else {
-                e.into()
-            }
-        })?;
+        .map_err(|e| duplicate_or(e, "tag", &name))?;
         if result.rows_affected() == 0 {
             return Err(OrgError::NotFound(format!("Tag not found: {}", id)));
         }

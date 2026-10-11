@@ -371,37 +371,32 @@ pub async fn api_get_meetings<R: Runtime>(
         auth_token.is_some()
     );
     let pool = state.db_manager.pool();
-    let meetings: Result<Vec<MeetingModel>, sqlx::Error> =
-        MeetingsRepository::get_meetings(pool).await;
+    let (meeting_models, mut tag_map) = tokio::try_join!(
+        async {
+            MeetingsRepository::get_meetings(pool).await.map_err(|e| {
+                log_error!("Error getting meetings: {}", e);
+                e.to_string()
+            })
+        },
+        async {
+            TagRepository::tag_ids_by_meeting(pool).await.map_err(|e| {
+                log_error!("Error getting meeting tags: {}", e);
+                e.to_string()
+            })
+        },
+    )?;
+    log_info!("Successfully got {} meetings", meeting_models.len());
 
-    match meetings {
-        Ok(meeting_models) => {
-            log_info!("Successfully got {} meetings", meeting_models.len());
-
-            let mut tag_map = match TagRepository::tag_ids_by_meeting(pool).await {
-                Ok(map) => map,
-                Err(e) => {
-                    log_error!("Error getting meeting tags: {}", e);
-                    return Err(e.to_string());
-                }
-            };
-            let result: Vec<Meeting> = meeting_models
-                .into_iter()
-                .map(|m| Meeting {
-                    tag_ids: tag_map.remove(&m.id).unwrap_or_default(),
-                    created_at: m.created_at.0.to_rfc3339(),
-                    folder_id: m.folder_id,
-                    id: m.id,
-                    title: m.title,
-                })
-                .collect();
-            Ok(result)
-        }
-        Err(e) => {
-            log_error!("Error getting meetings: {}", e);
-            Err(e.to_string())
-        }
-    }
+    Ok(meeting_models
+        .into_iter()
+        .map(|m| Meeting {
+            tag_ids: tag_map.remove(&m.id).unwrap_or_default(),
+            created_at: m.created_at.0.to_rfc3339(),
+            folder_id: m.folder_id,
+            id: m.id,
+            title: m.title,
+        })
+        .collect())
 }
 
 #[tauri::command]
@@ -409,7 +404,6 @@ pub async fn api_search_transcripts<R: Runtime>(
     _app: AppHandle<R>,
     state: tauri::State<'_, AppState>,
     query: String,
-    tag_ids: Option<Vec<String>>,
     auth_token: Option<String>,
 ) -> Result<Vec<TranscriptSearchResult>, String> {
     log_info!(
@@ -420,8 +414,7 @@ pub async fn api_search_transcripts<R: Runtime>(
 
     let pool = state.db_manager.pool();
 
-    let tag_ids = tag_ids.unwrap_or_default();
-    match TranscriptsRepository::search_transcripts(pool, &query, &tag_ids).await {
+    match TranscriptsRepository::search_transcripts(pool, &query).await {
         Ok(results) => {
             log_info!(
                 "Search completed successfully with {} results.",

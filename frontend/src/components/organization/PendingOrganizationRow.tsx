@@ -6,7 +6,7 @@ import { FolderSelect } from './FolderSelect';
 import { TagPicker } from './TagPicker';
 
 export function PendingOrganizationRow() {
-  const { folders, tags, pendingOrganization, setPendingOrganization, refetchOrganization } = useSidebar();
+  const { folders, tags, pendingOrganization, setPendingOrganization } = useSidebar();
   return (
     <div className="mb-2 flex items-center justify-center gap-2">
       <FolderSelect
@@ -18,11 +18,7 @@ export function PendingOrganizationRow() {
         tags={tags}
         selectedIds={pendingOrganization.tagIds}
         onChange={tagIds => setPendingOrganization({ ...pendingOrganization, tagIds })}
-        onCreate={async name => {
-          const tag = await organizationService.createTag(name);
-          await refetchOrganization();
-          return tag;
-        }}
+        onCreate={organizationService.createTag}
       />
     </div>
   );

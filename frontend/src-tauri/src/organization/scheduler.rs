@@ -3,9 +3,10 @@ use std::path::PathBuf;
 use chrono::{DateTime, Utc};
 use log::{error, info, warn};
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, Manager, Runtime};
+use tauri::{AppHandle, Manager, Runtime};
 use tauri_plugin_store::StoreExt;
 
+use super::notify_meetings_changed;
 use super::purge::{days_left, purge_expired};
 use crate::audio::recording_preferences::{get_default_recordings_folder, load_recording_preferences};
 use crate::database::models::TrashedMeeting;
@@ -82,7 +83,7 @@ async fn run_scheduled_purge<R: Runtime>(app: &AppHandle<R>) {
         Ok(outcome) => {
             if !outcome.purged.is_empty() {
                 info!("Trash purge removed {} meeting(s)", outcome.purged.len());
-                let _ = app.emit("meetings-changed", ());
+                notify_meetings_changed(app);
             }
             if !outcome.failed.is_empty() {
                 warn!("Trash purge left {} meeting(s) in Trash after errors", outcome.failed.len());

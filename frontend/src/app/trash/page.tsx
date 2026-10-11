@@ -1,9 +1,8 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
 import { toast } from 'sonner';
-import { listen } from '@tauri-apps/api/event';
 import { ConfirmationModal } from '@/components/ConfirmationModel/confirmation-modal';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
 import { daysLeftLabel, type PurgeOutcome, type TrashItem } from '@/lib/organization';
@@ -12,35 +11,8 @@ import { organizationService } from '@/services/organizationService';
 type PendingConfirm = { kind: 'one'; item: TrashItem } | { kind: 'all' } | null;
 
 export default function TrashPage() {
-  const { refetchMeetings, refetchOrganization } = useSidebar();
-  const [items, setItems] = useState<TrashItem[]>([]);
+  const { trashItems: items } = useSidebar();
   const [confirm, setConfirm] = useState<PendingConfirm>(null);
-
-  const load = useCallback(async () => {
-    try {
-      setItems(await organizationService.listTrash());
-    } catch (error) {
-      toast.error('Could not load Trash', { description: String(error) });
-    }
-  }, []);
-
-  useEffect(() => {
-    void load();
-    let cancelled = false;
-    let unlisten: (() => void) | undefined;
-    listen('meetings-changed', () => void load())
-      .then(fn => {
-        if (cancelled) fn();
-        else unlisten = fn;
-      })
-      .catch(error => console.error('Failed to listen for meetings-changed:', error));
-    return () => {
-      cancelled = true;
-      unlisten?.();
-    };
-  }, [load]);
-
-  const refreshAll = () => Promise.all([load(), refetchMeetings(), refetchOrganization()]);
 
   const reportOutcome = (outcome: PurgeOutcome) => {
     if (outcome.failed.length) {
@@ -57,7 +29,6 @@ export default function TrashPage() {
     } catch (error) {
       toast.error(String(error));
     }
-    await refreshAll();
   };
 
   const onConfirm = async () => {
@@ -74,7 +45,6 @@ export default function TrashPage() {
     } catch (error) {
       toast.error(String(error));
     }
-    await refreshAll();
   };
 
   return (

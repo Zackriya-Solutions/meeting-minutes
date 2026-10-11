@@ -7,7 +7,7 @@ interface TagFilterChipsProps {
   tags: Tag[];
   selectedIds: string[];
   onToggle: (tagId: string) => void;
-  onManage?: () => void;
+  onManage: () => void;
 }
 
 export function TagFilterChips({ tags, selectedIds, onToggle, onManage }: TagFilterChipsProps) {
@@ -33,16 +33,14 @@ export function TagFilterChips({ tags, selectedIds, onToggle, onManage }: TagFil
           </button>
         );
       })}
-      {onManage && (
-        <button
-          type="button"
-          onClick={onManage}
-          aria-label="Manage tags"
-          className="rounded-full p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
-        >
-          <Settings2 className="h-3 w-3" />
-        </button>
-      )}
+      <button
+        type="button"
+        onClick={onManage}
+        aria-label="Manage tags"
+        className="rounded-full p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+      >
+        <Settings2 className="h-3 w-3" />
+      </button>
     </div>
   );
 }

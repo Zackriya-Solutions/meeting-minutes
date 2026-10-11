@@ -12,10 +12,9 @@ interface TagPickerProps {
   selectedIds: string[];
   onChange: (tagIds: string[]) => void;
   onCreate: (name: string) => Promise<{ id: string }>;
-  triggerLabel?: string;
 }
 
-export function TagPicker({ tags, selectedIds, onChange, onCreate, triggerLabel = '+ tags' }: TagPickerProps) {
+export function TagPicker({ tags, selectedIds, onChange, onCreate }: TagPickerProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const trimmed = query.trim();
@@ -44,7 +43,7 @@ export function TagPicker({ tags, selectedIds, onChange, onCreate, triggerLabel 
           className="inline-flex items-center gap-1 rounded-md border border-gray-200 bg-white px-2 py-1 text-xs text-gray-700 hover:bg-gray-50"
         >
           <TagIcon className="h-3 w-3" />
-          {selectedNames.length ? selectedNames.join(' ') : triggerLabel}
+          {selectedNames.length ? selectedNames.join(' ') : '+ tags'}
         </button>
       </PopoverTrigger>
       <PopoverContent className="w-64 p-0" align="start">

@@ -6,37 +6,27 @@ import { organizationService } from '@/services/organizationService';
 import { FolderSelect } from './FolderSelect';
 import { TagPicker } from './TagPicker';
 
+const reportError = (error: unknown) => {
+  toast.error(String(error));
+};
+
 export function MeetingOrganizationBar({ meetingId, className = '' }: { meetingId: string; className?: string }) {
-  const { meetings, folders, tags, refetchMeetings, refetchOrganization } = useSidebar();
+  const { meetings, folders, tags } = useSidebar();
   const meeting = meetings.find(m => m.id === meetingId);
   if (!meeting) return null;
-
-  const run = async (action: () => Promise<unknown>) => {
-    try {
-      await action();
-    } catch (error) {
-      toast.error(String(error));
-    } finally {
-      await Promise.all([refetchMeetings(), refetchOrganization()]);
-    }
-  };
 
   return (
     <div className={`flex items-center gap-2 ${className}`}>
       <FolderSelect
         folders={folders}
         value={meeting.folder_id}
-        onChange={folderId => run(() => organizationService.setMeetingFolder(meetingId, folderId))}
+        onChange={folderId => void organizationService.setMeetingFolder(meetingId, folderId).catch(reportError)}
       />
       <TagPicker
         tags={tags}
         selectedIds={meeting.tag_ids}
-        onChange={tagIds => run(() => organizationService.setMeetingTags(meetingId, tagIds))}
-        onCreate={async name => {
-          const tag = await organizationService.createTag(name);
-          await refetchOrganization();
-          return tag;
-        }}
+        onChange={tagIds => void organizationService.setMeetingTags(meetingId, tagIds).catch(reportError)}
+        onCreate={organizationService.createTag}
       />
     </div>
   );

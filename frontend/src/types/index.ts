@@ -126,6 +126,7 @@ export interface MeetingMetadata {
   created_at: string;
   updated_at: string;
   folder_path?: string;
+  deleted_at?: string | null;
 }
 
 export interface PaginatedTranscriptsResponse {

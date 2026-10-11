@@ -42,36 +42,7 @@ pub async fn purge_meeting(
     };
 
     if let Some(folder_path) = folder_path {
-        let shared: Option<(i64,)> =
-            sqlx::query_as("SELECT 1 FROM meetings WHERE folder_path = ? AND id != ? LIMIT 1")
-                .bind(&folder_path)
-                .bind(meeting_id)
-                .fetch_optional(pool)
-                .await
-                .map_err(|e| e.to_string())?;
-        let path = PathBuf::from(folder_path);
-        if shared.is_some() {
-            warn!(
-                "Trash purge: recording folder is used by another meeting, leaving files; meeting_id={}",
-                meeting_id
-            );
-        } else if path.exists() {
-            if is_within_roots(&path, roots) {
-                let removed = if path.is_dir() {
-                    std::fs::remove_dir_all(&path)
-                } else {
-                    std::fs::remove_file(&path)
-                };
-                removed.map_err(|e| {
-                    format!("Failed to remove recording folder; meeting_id={}: {}", meeting_id, e)
-                })?;
-            } else {
-                warn!(
-                    "Trash purge: recording folder is outside the recordings root, leaving files; meeting_id={}",
-                    meeting_id
-                );
-            }
-        }
+        remove_recording(pool, folder_path, roots, meeting_id).await?;
     }
 
     let deleted = MeetingsRepository::delete_trashed_meeting(pool, meeting_id)
@@ -81,6 +52,55 @@ pub async fn purge_meeting(
         return Err(format!("Meeting is no longer in Trash: {}", meeting_id));
     }
     Ok(())
+}
+
+/// Remove a meeting's recording unless another meeting still uses the same folder.
+async fn remove_recording(
+    pool: &SqlitePool,
+    folder_path: String,
+    roots: &[PathBuf],
+    meeting_id: &str,
+) -> Result<(), String> {
+    let shared: Option<(i64,)> =
+        sqlx::query_as("SELECT 1 FROM meetings WHERE folder_path = ? AND id != ? LIMIT 1")
+            .bind(&folder_path)
+            .bind(meeting_id)
+            .fetch_optional(pool)
+            .await
+            .map_err(|e| e.to_string())?;
+    if shared.is_some() {
+        warn!(
+            "Trash purge: recording folder is used by another meeting, leaving files; meeting_id={}",
+            meeting_id
+        );
+        return Ok(());
+    }
+
+    let (roots, id) = (roots.to_vec(), meeting_id.to_string());
+    tokio::task::spawn_blocking(move || remove_recording_files(Path::new(&folder_path), &roots, &id))
+        .await
+        .map_err(|e| format!("Recording removal task failed; meeting_id={}: {}", meeting_id, e))?
+}
+
+/// Blocking filesystem half of `remove_recording`. Missing paths are fine; paths outside
+/// the recordings roots are left alone.
+fn remove_recording_files(path: &Path, roots: &[PathBuf], meeting_id: &str) -> Result<(), String> {
+    if !path.exists() {
+        return Ok(());
+    }
+    if !is_within_roots(path, roots) {
+        warn!(
+            "Trash purge: recording folder is outside the recordings root, leaving files; meeting_id={}",
+            meeting_id
+        );
+        return Ok(());
+    }
+    let removed = if path.is_dir() {
+        std::fs::remove_dir_all(path)
+    } else {
+        std::fs::remove_file(path)
+    };
+    removed.map_err(|e| format!("Failed to remove recording folder; meeting_id={}: {}", meeting_id, e))
 }
 
 pub async fn purge_many(pool: &SqlitePool, ids: Vec<String>, roots: &[PathBuf]) -> PurgeOutcome {

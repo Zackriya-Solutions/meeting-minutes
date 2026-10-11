@@ -1,4 +1,5 @@
 use crate::api::{MeetingDetails, MeetingTranscript};
+use super::folder::FolderRepository;
 use super::org_error::OrgError;
 use crate::database::models::{MeetingModel, Transcript, TrashedMeeting};
 use chrono::Utc;
@@ -24,14 +25,7 @@ impl MeetingsRepository {
         folder_id: Option<&str>,
     ) -> Result<(), OrgError> {
         if let Some(folder_id) = folder_id {
-            let live: Option<(i64,)> =
-                sqlx::query_as("SELECT 1 FROM folders WHERE id = ? AND deleted_at IS NULL")
-                    .bind(folder_id)
-                    .fetch_optional(pool)
-                    .await?;
-            if live.is_none() {
-                return Err(OrgError::NotFound(format!("Folder not found: {}", folder_id)));
-            }
+            FolderRepository::get_live(pool, folder_id).await?;
         }
         let result = sqlx::query("UPDATE meetings SET folder_id = ?, updated_at = ? WHERE id = ?")
             .bind(folder_id)
@@ -96,35 +90,7 @@ impl MeetingsRepository {
     }
 
     pub async fn delete_meeting(pool: &SqlitePool, meeting_id: &str) -> Result<bool, SqlxError> {
-        if meeting_id.trim().is_empty() {
-            return Err(SqlxError::Protocol(
-                "meeting_id cannot be empty".to_string(),
-            ));
-        }
-
-        let mut conn = pool.acquire().await?;
-        let mut transaction = conn.begin().await?;
-
-        match delete_meeting_with_transaction(&mut transaction, meeting_id).await {
-            Ok(success) => {
-                if success {
-                    transaction.commit().await?;
-                    info!(
-                        "Successfully deleted meeting {} and all associated data",
-                        meeting_id
-                    );
-                    Ok(true)
-                } else {
-                    transaction.rollback().await?;
-                    Ok(false)
-                }
-            }
-            Err(e) => {
-                let _ = transaction.rollback().await;
-                error!("Failed to delete meeting {}: {}", meeting_id, e);
-                Err(e)
-            }
-        }
+        delete_meeting_checked(pool, meeting_id, false).await
     }
 
     /// Hard-delete a meeting only if it is still in Trash, checked and deleted in one
@@ -133,40 +99,7 @@ impl MeetingsRepository {
         pool: &SqlitePool,
         meeting_id: &str,
     ) -> Result<bool, SqlxError> {
-        if meeting_id.trim().is_empty() {
-            return Err(SqlxError::Protocol(
-                "meeting_id cannot be empty".to_string(),
-            ));
-        }
-
-        let mut conn = pool.acquire().await?;
-        let mut transaction = conn.begin().await?;
-
-        let trashed: Option<(i64,)> =
-            sqlx::query_as("SELECT 1 FROM meetings WHERE id = ? AND deleted_at IS NOT NULL")
-                .bind(meeting_id)
-                .fetch_optional(&mut *transaction)
-                .await?;
-        if trashed.is_none() {
-            transaction.rollback().await?;
-            return Ok(false);
-        }
-
-        match delete_meeting_with_transaction(&mut transaction, meeting_id).await {
-            Ok(true) => {
-                transaction.commit().await?;
-                Ok(true)
-            }
-            Ok(false) => {
-                transaction.rollback().await?;
-                Ok(false)
-            }
-            Err(e) => {
-                let _ = transaction.rollback().await;
-                error!("Failed to delete trashed meeting {}: {}", meeting_id, e);
-                Err(e)
-            }
-        }
+        delete_meeting_checked(pool, meeting_id, true).await
     }
 
     pub async fn get_meeting(
@@ -349,6 +282,53 @@ impl MeetingsRepository {
 
         transaction.commit().await?;
         Ok(true)
+    }
+}
+
+async fn delete_meeting_checked(
+    pool: &SqlitePool,
+    meeting_id: &str,
+    require_trashed: bool,
+) -> Result<bool, SqlxError> {
+    if meeting_id.trim().is_empty() {
+        return Err(SqlxError::Protocol(
+            "meeting_id cannot be empty".to_string(),
+        ));
+    }
+
+    let mut conn = pool.acquire().await?;
+    let mut transaction = conn.begin().await?;
+
+    if require_trashed {
+        let trashed: Option<(i64,)> =
+            sqlx::query_as("SELECT 1 FROM meetings WHERE id = ? AND deleted_at IS NOT NULL")
+                .bind(meeting_id)
+                .fetch_optional(&mut *transaction)
+                .await?;
+        if trashed.is_none() {
+            transaction.rollback().await?;
+            return Ok(false);
+        }
+    }
+
+    match delete_meeting_with_transaction(&mut transaction, meeting_id).await {
+        Ok(true) => {
+            transaction.commit().await?;
+            info!(
+                "Successfully deleted meeting {} and all associated data",
+                meeting_id
+            );
+            Ok(true)
+        }
+        Ok(false) => {
+            transaction.rollback().await?;
+            Ok(false)
+        }
+        Err(e) => {
+            let _ = transaction.rollback().await;
+            error!("Failed to delete meeting {}: {}", meeting_id, e);
+            Err(e)
+        }
     }
 }
 

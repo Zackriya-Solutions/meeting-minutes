@@ -1,30 +1,20 @@
-use std::fmt;
-
 /// Errors from folder, tag, and trash operations. `Display` text is shown to the user.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum OrgError {
+    #[error("{0}")]
     NotFound(String),
+    #[error("{0}")]
     Duplicate(String),
+    #[error("{0}")]
     Invalid(String),
-    Db(sqlx::Error),
+    #[error("Database error: {0}")]
+    Db(#[from] sqlx::Error),
 }
 
-impl fmt::Display for OrgError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            OrgError::NotFound(msg) | OrgError::Duplicate(msg) | OrgError::Invalid(msg) => {
-                write!(f, "{}", msg)
-            }
-            OrgError::Db(e) => write!(f, "Database error: {}", e),
-        }
-    }
-}
-
-impl std::error::Error for OrgError {}
-
-impl From<sqlx::Error> for OrgError {
-    fn from(e: sqlx::Error) -> Self {
-        OrgError::Db(e)
+/// Commands return the display text, so the frontend sees a plain message string.
+impl serde::Serialize for OrgError {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&self.to_string())
     }
 }
 
@@ -47,4 +37,13 @@ pub fn clean_name(name: &str) -> Result<String, OrgError> {
 
 pub fn is_unique_violation(e: &sqlx::Error) -> bool {
     matches!(e, sqlx::Error::Database(db) if db.is_unique_violation())
+}
+
+/// Map a unique-constraint violation to a user-facing duplicate-name error, e.g. noun "folder".
+pub fn duplicate_or(e: sqlx::Error, noun: &str, name: &str) -> OrgError {
+    if is_unique_violation(&e) {
+        OrgError::Duplicate(format!("A {} named \"{}\" already exists", noun, name))
+    } else {
+        e.into()
+    }
 }
