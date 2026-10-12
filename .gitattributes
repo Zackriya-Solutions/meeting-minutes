@@ -1,0 +1,5 @@
+# sqlx::migrate! embeds migration files at compile time and checksums their bytes.
+# Force LF everywhere so checksums are identical on every platform (Windows CI
+# otherwise converts them to CRLF and sqlx reports "previously applied but has
+# been modified" against databases created from LF checkouts).
+*.sql text eol=lf
