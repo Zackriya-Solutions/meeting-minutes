@@ -53,19 +53,11 @@ impl MeetingNotesRepository {
             return Ok(true);
         }
 
-        let meeting_exists = sqlx::query("SELECT 1 FROM meetings WHERE id = ?")
-            .bind(meeting_id)
-            .fetch_optional(pool)
-            .await?
-            .is_some();
-        if !meeting_exists {
-            return Ok(false);
-        }
-
         let now = Utc::now();
-        sqlx::query(
+        let result = sqlx::query(
             "INSERT INTO meeting_notes (meeting_id, notes_markdown, notes_json, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?)
+             SELECT ?, ?, ?, ?, ?
+             WHERE EXISTS (SELECT 1 FROM meetings WHERE id = ?)
              ON CONFLICT(meeting_id) DO UPDATE SET
                  notes_markdown = excluded.notes_markdown,
                  notes_json = excluded.notes_json,
@@ -76,9 +68,10 @@ impl MeetingNotesRepository {
         .bind(notes_json)
         .bind(now)
         .bind(now)
+        .bind(meeting_id)
         .execute(pool)
         .await?;
-        Ok(true)
+        Ok(result.rows_affected() > 0)
     }
 
     /// Finds notes containing `query`, ignoring case.
@@ -115,35 +108,19 @@ impl MeetingNotesRepository {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
+pub(crate) mod test_support {
+    use chrono::Utc;
     use sqlx::sqlite::SqlitePoolOptions;
-    use std::time::Duration;
+    use sqlx::SqlitePool;
 
+    /// An in-memory database with the app's real schema applied.
     pub(crate) async fn test_pool() -> SqlitePool {
         let pool = SqlitePoolOptions::new()
             .max_connections(1)
             .connect("sqlite::memory:")
             .await
             .unwrap();
-        sqlx::query(
-            "CREATE TABLE meetings (
-                id TEXT PRIMARY KEY,
-                title TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                folder_path TEXT
-            )",
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
-        sqlx::raw_sql(include_str!(
-            "../../../migrations/20251223000000_add_meeting_notes.sql"
-        ))
-        .execute(&pool)
-        .await
-        .unwrap();
+        sqlx::migrate!("./migrations").run(&pool).await.unwrap();
         pool
     }
 
@@ -157,6 +134,13 @@ mod tests {
             .await
             .unwrap();
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use super::test_support::{seed_meeting, test_pool};
+    use std::time::Duration;
 
     const BLOCKS: &str = r#"[{"id":"a","type":"paragraph","content":[{"type":"text","text":"Ship Friday"}]}]"#;
 

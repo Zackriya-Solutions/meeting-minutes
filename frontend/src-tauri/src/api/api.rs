@@ -1474,52 +1474,13 @@ pub async fn api_test_custom_openai_connection<R: Runtime>(
 #[cfg(test)]
 mod search_tests {
     use super::*;
-    use sqlx::sqlite::SqlitePoolOptions;
+    use crate::database::repositories::meeting_notes::test_support::{seed_meeting, test_pool};
 
     #[tokio::test]
     async fn transcript_matches_come_before_note_matches() {
-        let pool = SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect("sqlite::memory:")
-            .await
-            .unwrap();
-        sqlx::query(
-            "CREATE TABLE meetings (
-                id TEXT PRIMARY KEY,
-                title TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                folder_path TEXT
-            )",
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
-        sqlx::query(
-            "CREATE TABLE transcripts (
-                id TEXT PRIMARY KEY,
-                meeting_id TEXT NOT NULL,
-                transcript TEXT NOT NULL,
-                timestamp TEXT NOT NULL
-            )",
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
-        sqlx::raw_sql(include_str!(
-            "../../migrations/20251223000000_add_meeting_notes.sql"
-        ))
-        .execute(&pool)
-        .await
-        .unwrap();
-        for (id, title) in [("m1", "Spoken"), ("m2", "Written")] {
-            sqlx::query("INSERT INTO meetings (id, title, created_at, updated_at) VALUES (?, ?, 'now', 'now')")
-                .bind(id)
-                .bind(title)
-                .execute(&pool)
-                .await
-                .unwrap();
-        }
+        let pool = test_pool().await;
+        seed_meeting(&pool, "m1", "Spoken").await;
+        seed_meeting(&pool, "m2", "Written").await;
         sqlx::query("INSERT INTO transcripts (id, meeting_id, transcript, timestamp) VALUES ('t1', 'm1', 'the budget is tight', '00:01')")
             .execute(&pool)
             .await
