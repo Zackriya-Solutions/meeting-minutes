@@ -2,10 +2,13 @@
 
 import { useEffect, useState, useRef } from "react"
 import { Switch } from "./ui/switch"
+import { toast } from "sonner"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select"
 import { FolderOpen } from "lucide-react"
 import { invoke } from "@tauri-apps/api/core"
 import Analytics from "@/lib/analytics"
 import AnalyticsConsentSwitch from "./AnalyticsConsentSwitch"
+import { TagManager } from "@/components/organization/TagManager"
 import { useConfig, NotificationSettings } from "@/contexts/ConfigContext"
 
 export function PreferenceSettings() {
@@ -21,6 +24,21 @@ export function PreferenceSettings() {
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [previousNotificationsEnabled, setPreviousNotificationsEnabled] = useState<boolean | null>(null);
   const hasTrackedViewRef = useRef(false);
+
+  const [trashRetention, setTrashRetention] = useState('30');
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const { Store } = await import('@tauri-apps/plugin-store');
+        const store = await Store.load('preferences.json');
+        const days = await store.get<number>('trash_retention_days');
+        setTrashRetention(String(days ?? 30));
+      } catch (error) {
+        console.error('Failed to load trash retention:', error);
+      }
+    })();
+  }, []);
 
   // Lazy load preferences on mount (only loads if not already cached)
   useEffect(() => {
@@ -146,6 +164,20 @@ export function PreferenceSettings() {
   // Ensure we have a boolean value for the Switch component
   const notificationsEnabledValue = notificationsEnabled ?? false;
 
+  const saveTrashRetention = async (value: string) => {
+    setTrashRetention(value);
+    try {
+      const { Store } = await import('@tauri-apps/plugin-store');
+      const store = await Store.load('preferences.json');
+      await store.set('trash_retention_days', Number(value));
+      await store.save();
+      toast.success('Preference saved');
+    } catch (error) {
+      console.error('Failed to save trash retention:', error);
+      toast.error('Failed to save preference');
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Notifications Section */}
@@ -218,6 +250,30 @@ export function PreferenceSettings() {
             <strong>Note:</strong> Database and models are stored together in your application data directory for unified management.
           </p>
         </div>
+      </div>
+
+      {/* Tags Section */}
+      <div className="bg-white rounded-lg border border-gray-200 p-6 shadow-sm">
+        <h3 className="text-lg font-semibold text-gray-900 mb-1">Tags</h3>
+        <p className="text-sm text-gray-600 mb-4">Rename or delete tags. Deleting a tag keeps its meetings.</p>
+        <TagManager />
+      </div>
+
+      {/* Trash Section */}
+      <div className="bg-white rounded-lg border border-gray-200 p-6 shadow-sm">
+        <h3 className="text-lg font-semibold text-gray-900 mb-1">Trash</h3>
+        <p className="text-sm text-gray-600 mb-4">
+          Meetings in Trash are deleted permanently, with their recordings, after this period.
+        </p>
+        <Select value={trashRetention} onValueChange={v => void saveTrashRetention(v)}>
+          <SelectTrigger className="w-48"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="7">After 7 days</SelectItem>
+            <SelectItem value="30">After 30 days</SelectItem>
+            <SelectItem value="90">After 90 days</SelectItem>
+            <SelectItem value="0">Never</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
 
       {/* Analytics Section */}

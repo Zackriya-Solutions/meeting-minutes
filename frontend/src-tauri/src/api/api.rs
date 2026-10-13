@@ -9,7 +9,7 @@ use crate::{
     database::{
         models::MeetingModel,
         repositories::{
-            meeting::MeetingsRepository, setting::SettingsRepository,
+            meeting::MeetingsRepository, setting::SettingsRepository, tag::TagRepository,
             transcript::TranscriptsRepository,
         },
     },
@@ -31,6 +31,9 @@ pub struct ApiResponse<T> {
 pub struct Meeting {
     pub id: String,
     pub title: String,
+    pub created_at: String,
+    pub folder_id: Option<String>,
+    pub tag_ids: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -149,6 +152,8 @@ pub struct MeetingMetadata {
     pub updated_at: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub folder_path: Option<String>,
+    pub folder_id: Option<String>,
+    pub deleted_at: Option<String>,
 }
 
 /// Paginated transcripts response with total count
@@ -366,27 +371,32 @@ pub async fn api_get_meetings<R: Runtime>(
         auth_token.is_some()
     );
     let pool = state.db_manager.pool();
-    let meetings: Result<Vec<MeetingModel>, sqlx::Error> =
-        MeetingsRepository::get_meetings(pool).await;
+    let (meeting_models, mut tag_map) = tokio::try_join!(
+        async {
+            MeetingsRepository::get_meetings(pool).await.map_err(|e| {
+                log_error!("Error getting meetings: {}", e);
+                e.to_string()
+            })
+        },
+        async {
+            TagRepository::tag_ids_by_meeting(pool).await.map_err(|e| {
+                log_error!("Error getting meeting tags: {}", e);
+                e.to_string()
+            })
+        },
+    )?;
+    log_info!("Successfully got {} meetings", meeting_models.len());
 
-    match meetings {
-        Ok(meeting_models) => {
-            log_info!("Successfully got {} meetings", meeting_models.len());
-
-            let result: Vec<Meeting> = meeting_models
-                .into_iter()
-                .map(|m| Meeting {
-                    id: m.id,
-                    title: m.title,
-                })
-                .collect();
-            Ok(result)
-        }
-        Err(e) => {
-            log_error!("Error getting meetings: {}", e);
-            Err(e.to_string())
-        }
-    }
+    Ok(meeting_models
+        .into_iter()
+        .map(|m| Meeting {
+            tag_ids: tag_map.remove(&m.id).unwrap_or_default(),
+            created_at: m.created_at.0.to_rfc3339(),
+            folder_id: m.folder_id,
+            id: m.id,
+            title: m.title,
+        })
+        .collect())
 }
 
 #[tauri::command]
@@ -854,6 +864,8 @@ pub async fn api_get_meeting_metadata<R: Runtime>(
                 created_at: meeting.created_at.0.to_rfc3339(),
                 updated_at: meeting.updated_at.0.to_rfc3339(),
                 folder_path: meeting.folder_path,
+                folder_id: meeting.folder_id,
+                deleted_at: meeting.deleted_at.map(|d| d.0.to_rfc3339()),
             })
         }
         Ok(None) => {

@@ -1,20 +1,21 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import Analytics from '@/lib/analytics';
 import { invoke } from '@tauri-apps/api/core';
 import { useRecordingState } from '@/contexts/RecordingStateContext';
 import type { SummaryProcessResponse } from '@/types';
-
-
-
-interface SidebarItem {
-  id: string;
-  title: string;
-  type: 'folder' | 'file';
-  children?: SidebarItem[];
-}
+import { toast } from 'sonner';
+import { organizationService } from '@/services/organizationService';
+import {
+  EMPTY_PENDING_ORGANIZATION,
+  type Folder,
+  type MeetingListItem,
+  type PendingOrganization,
+  type Tag,
+  type TrashItem,
+} from '@/lib/organization';
 
 export interface CurrentMeeting {
   id: string;
@@ -38,11 +39,18 @@ interface SummaryPoll {
 interface SidebarContextType {
   currentMeeting: CurrentMeeting | null;
   setCurrentMeeting: (meeting: CurrentMeeting | null) => void;
-  sidebarItems: SidebarItem[];
   isCollapsed: boolean;
   toggleCollapse: () => void;
-  meetings: CurrentMeeting[];
-  setMeetings: (meetings: CurrentMeeting[]) => void;
+  meetings: MeetingListItem[];
+  setMeetings: (meetings: MeetingListItem[]) => void;
+  folders: Folder[];
+  tags: Tag[];
+  trashItems: TrashItem[];
+  selectedTagIds: string[];
+  toggleTagFilter: (tagId: string) => void;
+  pendingOrganization: PendingOrganization;
+  setPendingOrganization: (pending: PendingOrganization) => void;
+  applyPendingOrganization: (meetingId: string) => Promise<void>;
   isMeetingActive: boolean;
   setIsMeetingActive: (active: boolean) => void;
   handleRecordingToggle: () => void;
@@ -78,8 +86,14 @@ export const useSidebar = () => {
 export function SidebarProvider({ children }: { children: React.ReactNode }) {
   const [currentMeeting, setCurrentMeeting] = useState<CurrentMeeting | null>({ id: 'intro-call', title: '+ New Call' });
   const [isCollapsed, setIsCollapsed] = useState(true);
-  const [meetings, setMeetings] = useState<CurrentMeeting[]>([]);
-  const [sidebarItems, setSidebarItems] = useState<SidebarItem[]>([]);
+  const [meetings, setMeetings] = useState<MeetingListItem[]>([]);
+  const [folders, setFolders] = useState<Folder[]>([]);
+  const [tags, setTags] = useState<Tag[]>([]);
+  const [trashItems, setTrashItems] = useState<TrashItem[]>([]);
+  const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
+  const [pendingOrganization, setPendingOrganizationState] =
+    useState<PendingOrganization>(EMPTY_PENDING_ORGANIZATION);
+  const pendingOrganizationRef = useRef<PendingOrganization>(EMPTY_PENDING_ORGANIZATION);
   const [isMeetingActive, setIsMeetingActive] = useState(false);
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [isSearching, setIsSearching] = useState(false);
@@ -97,10 +111,15 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
   const fetchMeetings = React.useCallback(async () => {
     if (serverAddress) {
       try {
-        const meetings = await invoke('api_get_meetings') as Array<{ id: string, title: string }>;
-        const transformedMeetings = meetings.map((meeting: any) => ({
+        const meetings = await invoke('api_get_meetings') as Array<{
+          id: string; title: string; created_at: string; folder_id: string | null; tag_ids: string[];
+        }>;
+        const transformedMeetings: MeetingListItem[] = meetings.map(meeting => ({
           id: meeting.id,
-          title: meeting.title
+          title: meeting.title,
+          created_at: meeting.created_at,
+          folder_id: meeting.folder_id ?? null,
+          tag_ids: meeting.tag_ids ?? [],
         }));
         setMeetings(transformedMeetings);
         Analytics.trackBackendConnection(true);
@@ -116,6 +135,70 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
     fetchMeetings();
   }, [serverAddress, fetchMeetings]);
 
+  const fetchOrganization = React.useCallback(async () => {
+    try {
+      const [folderList, tagList, trash] = await Promise.all([
+        organizationService.listFolders(),
+        organizationService.listTags(),
+        organizationService.listTrash(),
+      ]);
+      setFolders(folderList);
+      setTags(tagList);
+      setTrashItems(trash);
+      // Drop filters for tags that no longer exist.
+      const live = new Set(tagList.map(t => t.id));
+      setSelectedTagIds(prev => {
+        const kept = prev.filter(id => live.has(id));
+        return kept.length === prev.length ? prev : kept;
+      });
+    } catch (error) {
+      console.error('Error fetching folders/tags:', error);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!serverAddress) return;
+    fetchOrganization();
+    let cancelled = false;
+    let unlisten: (() => void) | undefined;
+    organizationService
+      .onMeetingsChanged(() => {
+        fetchMeetings();
+        fetchOrganization();
+      })
+      .then(fn => {
+        if (cancelled) fn();
+        else unlisten = fn;
+      })
+      .catch(error => console.error('Failed to listen for meetings-changed:', error));
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, [serverAddress, fetchMeetings, fetchOrganization]);
+
+  const toggleTagFilter = React.useCallback((tagId: string) => {
+    setSelectedTagIds(prev => (prev.includes(tagId) ? prev.filter(id => id !== tagId) : [...prev, tagId]));
+  }, []);
+
+  const setPendingOrganization = React.useCallback((pending: PendingOrganization) => {
+    pendingOrganizationRef.current = pending;
+    setPendingOrganizationState(pending);
+  }, []);
+
+  const applyPendingOrganization = React.useCallback(async (meetingId: string) => {
+    const { folderId, tagIds } = pendingOrganizationRef.current;
+    try {
+      if (folderId) await organizationService.setMeetingFolder(meetingId, folderId);
+      if (tagIds.length) await organizationService.setMeetingTags(meetingId, tagIds);
+    } catch (error) {
+      console.error('Failed to apply folder/tags to saved meeting:', error);
+      toast.error('Meeting saved, but its folder/tags could not be applied');
+    } finally {
+      setPendingOrganization(EMPTY_PENDING_ORGANIZATION);
+    }
+  }, [setPendingOrganization]);
+
   useEffect(() => {
     const fetchSettings = async () => {
       setServerAddress('http://localhost:5167');
@@ -123,18 +206,6 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
     };
     fetchSettings();
   }, []);
-
-  const baseItems: SidebarItem[] = [
-    {
-      id: 'meetings',
-      title: 'Meeting Notes',
-      type: 'folder' as const,
-      children: [
-        ...meetings.map(meeting => ({ id: meeting.id, title: meeting.title, type: 'file' as const }))
-      ]
-    },
-  ];
-
 
   const toggleCollapse = () => {
     setIsCollapsed(!isCollapsed);
@@ -145,13 +216,7 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
     if (pathname === '/') {
       setCurrentMeeting({ id: 'intro-call', title: '+ New Call' });
     }
-    setSidebarItems(baseItems);
   }, [pathname]);
-
-  // Update sidebar items when meetings change
-  useEffect(() => {
-    setSidebarItems(baseItems);
-  }, [meetings]);
 
   // Function to handle recording toggle from sidebar
   const handleRecordingToggle = () => {
@@ -298,7 +363,6 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
     <SidebarContext.Provider value={{
       currentMeeting,
       setCurrentMeeting,
-      sidebarItems,
       isCollapsed,
       toggleCollapse,
       meetings,
@@ -316,6 +380,14 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
       startSummaryPolling,
       stopSummaryPolling,
       refetchMeetings: fetchMeetings,
+      folders,
+      tags,
+      trashItems,
+      selectedTagIds,
+      toggleTagFilter,
+      pendingOrganization,
+      setPendingOrganization,
+      applyPendingOrganization,
 
     }}>
       {children}

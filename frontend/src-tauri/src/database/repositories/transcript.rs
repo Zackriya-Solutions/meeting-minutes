@@ -95,7 +95,7 @@ impl TranscriptsRepository {
             "SELECT m.id, m.title, t.transcript, t.timestamp
              FROM meetings m
              JOIN transcripts t ON m.id = t.meeting_id
-             WHERE LOWER(t.transcript) LIKE ?",
+             WHERE LOWER(t.transcript) LIKE ? AND m.deleted_at IS NULL",
         )
         .bind(&search_query)
         .fetch_all(pool)
@@ -139,5 +139,37 @@ impl TranscriptsRepository {
             }
             None => transcript.chars().take(200).collect(), // Fallback to the start of the transcript
         }
+    }
+}
+
+#[cfg(test)]
+mod search_tests {
+    use super::*;
+    use crate::database::test_support::{insert_meeting, insert_transcript, test_pool};
+
+    fn ids(results: &[TranscriptSearchResult]) -> Vec<String> {
+        let mut ids: Vec<String> = results.iter().map(|r| r.id.clone()).collect();
+        ids.sort();
+        ids.dedup();
+        ids
+    }
+
+    #[tokio::test]
+    async fn search_skips_trash() {
+        let pool = test_pool().await;
+        for id in ["meeting-1", "meeting-2"] {
+            insert_meeting(&pool, id, id, None).await;
+            insert_transcript(&pool, id, "we discussed the budget").await;
+        }
+
+        let all = TranscriptsRepository::search_transcripts(&pool, "budget").await.unwrap();
+        assert_eq!(ids(&all), vec!["meeting-1", "meeting-2"]);
+
+        sqlx::query("UPDATE meetings SET deleted_at = datetime('now') WHERE id = 'meeting-2'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let after_trash = TranscriptsRepository::search_transcripts(&pool, "budget").await.unwrap();
+        assert_eq!(ids(&after_trash), vec!["meeting-1"]);
     }
 }

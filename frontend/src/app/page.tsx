@@ -19,6 +19,7 @@ import { useTranscriptRecovery } from '@/hooks/useTranscriptRecovery';
 import { TranscriptRecovery } from '@/components/TranscriptRecovery';
 import { indexedDBService } from '@/services/indexedDBService';
 import { toast } from 'sonner';
+import { PendingOrganizationRow } from '@/components/organization/PendingOrganizationRow';
 import { useRouter } from 'next/navigation';
 
 export default function Home() {
@@ -224,7 +225,8 @@ export default function Home() {
                   marginLeft: sidebarCollapsed ? '4rem' : '16rem'
                 }}
               >
-                <div className="w-2/3 max-w-[750px] flex justify-center">
+                <div className="w-2/3 max-w-[750px] flex flex-col items-center">
+                  <PendingOrganizationRow />
                   <div className="bg-white rounded-full shadow-lg flex items-center">
                     <RecordingControls
                       isRecording={recordingState.isRecording}

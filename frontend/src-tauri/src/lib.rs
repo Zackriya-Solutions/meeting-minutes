@@ -45,6 +45,7 @@ pub mod database;
 pub mod notifications;
 pub mod ollama;
 pub mod onboarding;
+pub mod organization;
 pub mod openai;
 pub mod anthropic;
 pub mod groq;
@@ -709,6 +710,9 @@ pub fn run() {
             })
             .expect("Failed to initialize database");
 
+            // Purge expired Trash now and daily
+            organization::scheduler::spawn_purge_scheduler(_app.handle().clone());
+
             // Initialize bundled templates directory for dynamic template discovery
             log::info!("Initializing bundled templates directory...");
             if let Ok(resource_path) = _app.handle().path().resource_dir() {
@@ -850,6 +854,21 @@ pub fn run() {
             api::api_save_transcript_config,
             api::api_get_transcript_api_key,
             api::api_delete_meeting,
+            organization::commands::list_folders,
+            organization::commands::create_folder,
+            organization::commands::rename_folder,
+            organization::commands::delete_folder,
+            organization::commands::list_tags,
+            organization::commands::create_tag,
+            organization::commands::rename_tag,
+            organization::commands::delete_tag,
+            organization::commands::set_meeting_folder,
+            organization::commands::set_meeting_tags,
+            organization::commands::trash_meeting,
+            organization::commands::restore_meeting,
+            organization::commands::delete_meeting_forever,
+            organization::commands::empty_trash,
+            organization::commands::list_trash,
             api::api_get_meeting,
             api::api_get_meeting_metadata,
             api::api_get_meeting_transcripts,
