@@ -121,6 +121,14 @@ export function useTranscriptRecovery(): UseTranscriptRecoveryReturn {
       // 2. Load all transcripts
       const transcripts = await loadMeetingTranscripts(meetingId);
       if (transcripts.length === 0) {
+        if (metadata.notesDraft?.markdown.trim()) {
+          notifyUnsavedNotes({
+            level: 'warning',
+            title: 'This recording has notes but no transcript',
+            description: 'It cannot be recovered as a meeting. Copy your notes now so they are not lost.',
+            markdown: metadata.notesDraft.markdown,
+          });
+        }
         throw new Error('No transcripts found for this meeting');
       }
 

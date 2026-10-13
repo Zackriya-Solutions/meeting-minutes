@@ -7,7 +7,7 @@ import { useSidebar } from '@/components/Sidebar/SidebarProvider';
 import { useRecordingState, RecordingStatus } from '@/contexts/RecordingStateContext';
 import { storageService } from '@/services/storageService';
 import { transcriptService } from '@/services/transcriptService';
-import { commitNotesDraft, recordingNotesDraft, resolveNotesDraft } from '@/services/recordingNotesDraft';
+import { commitNotesDraft, recordingNotesDraft, reportUnsavedRecordingNotes, resolveNotesDraft } from '@/services/recordingNotesDraft';
 import { notifyUnsavedNotes } from '@/lib/notes-toast';
 import { indexedDBService } from '@/services/indexedDBService';
 import Analytics from '@/lib/analytics';
@@ -122,6 +122,9 @@ export function useRecordingStop(
 
   // Main recording stop handler
   const handleRecordingStop = useCallback(async (isCallApi: boolean) => {
+    const loadRecoveryNotesDraft = async (id: string) =>
+      (await indexedDBService.getMeetingMetadata(id))?.notesDraft;
+
     if (recordingStoppedDataRef.current) {
       await recordingStoppedDataRef.current;
     }
@@ -270,10 +273,7 @@ export function useRecordingStop(
 
           // Notes typed during the recording can be written now that the meeting exists.
           const recordingId = sessionStorage.getItem('indexeddb_current_meeting_id');
-          const notesDraft = await resolveNotesDraft(
-            recordingId,
-            async (id) => (await indexedDBService.getMeetingMetadata(id))?.notesDraft,
-          );
+          const notesDraft = await resolveNotesDraft(recordingId, loadRecoveryNotesDraft);
           const notesResult = await commitNotesDraft(notesDraft, meetingId);
           if (notesResult.status === 'saved' && recordingId) {
             recordingNotesDraft.clear(recordingId);
@@ -422,11 +422,19 @@ export function useRecordingStop(
           toast.error('Failed to save meeting', {
             description: saveError instanceof Error ? saveError.message : 'Unknown error'
           });
+          await reportUnsavedRecordingNotes(
+            sessionStorage.getItem('indexeddb_current_meeting_id'),
+            loadRecoveryNotesDraft,
+          );
           throw saveError;
         }
       } else {
         // No save needed, go back to IDLE
         setStatus(RecordingStatus.IDLE);
+        await reportUnsavedRecordingNotes(
+          sessionStorage.getItem('indexeddb_current_meeting_id'),
+          loadRecoveryNotesDraft,
+        );
       }
 
       setIsMeetingActive(false);

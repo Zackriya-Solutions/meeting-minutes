@@ -2,6 +2,7 @@ import type { Block } from '@blocknote/core';
 import type { NotesContent } from '@/lib/meeting-notes';
 import type { NotesDraft } from '@/services/indexedDBService';
 import { notesService } from '@/services/notesService';
+import { notifyUnsavedNotes } from '@/lib/notes-toast';
 
 // A meeting has no database row until its recording is saved, so notes typed
 // while recording are held here, tagged with the recording they belong to.
@@ -81,4 +82,25 @@ export async function commitNotesDraft(
     console.error('Failed to save recording notes to the meeting', error);
     return { status: 'failed', markdown: draft.markdown };
   }
+}
+
+/**
+ * For a stop that ends without a saved meeting: tells the user their notes were
+ * not saved, with a way to copy them, and drops the draft. Returns whether
+ * there were notes to report. Never throws.
+ */
+export async function reportUnsavedRecordingNotes(
+  recordingId: string | null,
+  loadRecoveryDraft: RecoveryDraftLoader,
+): Promise<boolean> {
+  const draft = await resolveNotesDraft(recordingId, loadRecoveryDraft);
+  if (!draft || !draft.markdown.trim()) return false;
+  notifyUnsavedNotes({
+    level: 'error',
+    title: 'Your notes were not saved',
+    description: 'Copy them now so they are not lost.',
+    markdown: draft.markdown,
+  });
+  if (recordingId) recordingNotesDraft.clear(recordingId);
+  return true;
 }

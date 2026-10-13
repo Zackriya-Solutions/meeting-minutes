@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { memo, useCallback, useState } from 'react';
 import type { NotesContent } from '@/lib/meeting-notes';
 import { NotesPanel } from '@/components/MeetingNotes/NotesPanel';
 import { useRecordingNotesDraft } from '@/hooks/useRecordingNotesDraft';
@@ -20,7 +20,7 @@ interface RecordingNotesPaneProps extends RecordingNotesProps {
 
 // The editor's starting content is read once per mount; the page re-renders
 // often while recording and must not hand the editor a new document each time.
-function RecordingNotesPane({ recordingId, onChange, onRetryLoad, editable, className }: RecordingNotesPaneProps) {
+const RecordingNotesPane = memo(function RecordingNotesPane({ recordingId, onChange, onRetryLoad, editable, className }: RecordingNotesPaneProps) {
   const [initial] = useState(() => recordingNotesDraft.get(recordingId));
 
   return (
@@ -34,12 +34,13 @@ function RecordingNotesPane({ recordingId, onChange, onRetryLoad, editable, clas
       className={className}
     />
   );
-}
+});
 
 /** Notes pane shown beside the live transcript while recording. */
 export function RecordingNotes({ editable, className }: RecordingNotesProps) {
   const { recordingId, isReady, handleChange } = useRecordingNotesDraft();
   const [attempt, setAttempt] = useState(0);
+  const retryLoad = useCallback(() => setAttempt((current) => current + 1), []);
 
   if (!recordingId || !isReady) return null;
 
@@ -48,7 +49,7 @@ export function RecordingNotes({ editable, className }: RecordingNotesProps) {
       key={`${recordingId}:${attempt}`}
       recordingId={recordingId}
       onChange={handleChange}
-      onRetryLoad={() => setAttempt((current) => current + 1)}
+      onRetryLoad={retryLoad}
       editable={editable}
       className={className}
     />

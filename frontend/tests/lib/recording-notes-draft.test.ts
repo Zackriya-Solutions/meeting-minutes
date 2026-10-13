@@ -1,9 +1,16 @@
-import { afterAll, beforeEach, describe, expect, mock, test } from 'bun:test';
+import { afterAll, beforeEach, describe, expect, mock, spyOn, test } from 'bun:test';
 
 const originalCore = { ...await import('@tauri-apps/api/core') };
 afterAll(() => {
   mock.module('@tauri-apps/api/core', () => originalCore);
 });
+
+const originalToast = { ...await import('sonner') };
+afterAll(() => {
+  mock.module('sonner', () => originalToast);
+});
+const toastError = mock((_title: string, _options?: unknown) => {});
+mock.module('sonner', () => ({ toast: { error: toastError, warning: mock(() => {}), success: mock(() => {}) } }));
 
 let failSave = false;
 const saves: Array<Record<string, unknown>> = [];
@@ -14,13 +21,14 @@ const invoke = mock(async (command: string, args?: Record<string, unknown>): Pro
   return null;
 });
 mock.module('@tauri-apps/api/core', () => ({ ...originalCore, invoke }));
-const { commitNotesDraft, recordingNotesDraft, resolveNotesDraft, restoreRecordingNotesDraft } = await import('../../src/services/recordingNotesDraft');
+const { commitNotesDraft, recordingNotesDraft, reportUnsavedRecordingNotes, resolveNotesDraft, restoreRecordingNotesDraft } = await import('../../src/services/recordingNotesDraft');
 
 const blocks = [{ id: 'a', type: 'paragraph', content: [{ type: 'text', text: 'Ship Friday' }], children: [] }];
 const draft = { blocks: blocks as any, markdown: 'Ship Friday' };
 
 beforeEach(() => {
   failSave = false;
+  toastError.mockClear();
   saves.length = 0;
   recordingNotesDraft.clear('meeting-1');
   recordingNotesDraft.clear('meeting-2');
@@ -162,5 +170,46 @@ describe('restoreRecordingNotesDraft', () => {
   test('a loader that rejects restores nothing', async () => {
     expect(await silenceConsole(() => restoreRecordingNotesDraft('meeting-1', rejectingLoader))).toBe(false);
     expect(recordingNotesDraft.get('meeting-1')).toBeNull();
+  });
+});
+
+describe('reportUnsavedRecordingNotes', () => {
+  test('warns about in-memory notes and drops them', async () => {
+    recordingNotesDraft.set('meeting-1', draft);
+
+    expect(await reportUnsavedRecordingNotes('meeting-1', async () => null)).toBe(true);
+
+    expect(toastError).toHaveBeenCalledTimes(1);
+    expect(toastError.mock.calls[0][0]).toBe('Your notes were not saved');
+    expect(recordingNotesDraft.get('meeting-1')).toBeNull();
+  });
+
+  test('warns about notes kept on the recovery record', async () => {
+    expect(await reportUnsavedRecordingNotes('meeting-1', async () => draft)).toBe(true);
+
+    expect(toastError).toHaveBeenCalledTimes(1);
+    expect(toastError.mock.calls[0][0]).toBe('Your notes were not saved');
+  });
+
+  test('says nothing when there is nothing to lose', async () => {
+    const blank = { blocks: [] as any, markdown: '  \n' };
+    recordingNotesDraft.set('meeting-2', blank);
+
+    expect(await reportUnsavedRecordingNotes('meeting-1', async () => null)).toBe(false);
+    expect(await reportUnsavedRecordingNotes('meeting-1', async () => blank)).toBe(false);
+    expect(await reportUnsavedRecordingNotes('meeting-2', async () => null)).toBe(false);
+    expect(await reportUnsavedRecordingNotes(null, async () => draft)).toBe(false);
+    expect(toastError).not.toHaveBeenCalled();
+  });
+
+  test('does not throw when the recovery record cannot be read', async () => {
+    const errorSpy = spyOn(console, 'error').mockImplementation(() => {});
+    const result = await reportUnsavedRecordingNotes('meeting-1', async () => {
+      throw new Error('idb closed');
+    });
+    errorSpy.mockRestore();
+
+    expect(result).toBe(false);
+    expect(toastError).not.toHaveBeenCalled();
   });
 });
