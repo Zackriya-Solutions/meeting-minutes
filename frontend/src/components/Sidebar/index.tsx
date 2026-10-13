@@ -32,6 +32,7 @@ import { Input } from '../ui/input';
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from '../ui/input-group';
 import { MeetingSections } from './MeetingSections';
 import { TagFilterChips } from './TagFilterChips';
+import { MeetingTagChips } from './MeetingTagChips';
 import { TagManager } from '@/components/organization/TagManager';
 import { NewFolderButton } from './NewFolderButton';
 import { MeetingItemMenu } from './MeetingItemMenu';
@@ -533,6 +534,8 @@ const Sidebar: React.FC = () => {
                 </div>
               )}
             </div>
+
+            <MeetingTagChips tagIds={meeting.tag_ids} tags={tags} selectedIds={selectedTagIds} onToggle={toggleTagFilter} />
 
             {/* Show transcript match snippet if available */}
             {hasTranscriptMatch && (
