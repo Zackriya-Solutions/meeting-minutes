@@ -1,5 +1,6 @@
 "use client";
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
 import { MeetingSummary, SummaryProcessResponse } from '@/types';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
@@ -8,12 +9,15 @@ import { invoke } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
 import { TranscriptPanel } from '@/components/MeetingDetails/TranscriptPanel';
 import { SummaryPanel } from '@/components/MeetingDetails/SummaryPanel';
+import { SummaryContextBox } from '@/components/MeetingDetails/SummaryContextBox';
 import { MeetingDetailsSplitView, type MeetingDetailsTab } from '@/components/MeetingDetails/MeetingDetailsSplitView';
 import { ModelConfig } from '@/components/ModelSettingsModal';
 
 // Custom hooks
 import { useMeetingData } from '@/hooks/meeting-details/useMeetingData';
 import { useSummaryGeneration } from '@/hooks/meeting-details/useSummaryGeneration';
+import { useSummaryContext } from '@/hooks/meeting-details/useSummaryContext';
+import type { InheritedContext } from '@/lib/summary-context';
 import { useTemplates } from '@/hooks/meeting-details/useTemplates';
 import { useCopyOperations } from '@/hooks/meeting-details/useCopyOperations';
 import { useMeetingOperations } from '@/hooks/meeting-details/useMeetingOperations';
@@ -57,7 +61,8 @@ export default function PageContent({
   });
 
   // State
-  const [customPrompt, setCustomPrompt] = useState<string>('');
+  const router = useRouter();
+  const summaryContext = useSummaryContext(meeting.id);
   const isRecording = false;
   const [activeTab, setActiveTab] = useState<MeetingDetailsTab>('transcript');
 
@@ -128,6 +133,33 @@ export default function PageContent({
     setAiSummary: meetingData.setAiSummary,
     onOpenModelSettings: handleOpenModelSettings,
   });
+
+  // Generate and Regenerate send what is on screen, after any pending save has been written.
+  const { flush: flushSummaryContext, text: summaryContextText, useInherited, isLoaded: summaryContextLoaded } = summaryContext;
+  const { handleGenerateSummary, handleRegenerateSummary } = summaryGeneration;
+
+  const whenContextSaved = useCallback(async (run: () => Promise<void>) => {
+    if (!summaryContextLoaded) {
+      toast.info('Loading summary context, please wait...');
+      return;
+    }
+    await flushSummaryContext();
+    await run();
+  }, [flushSummaryContext, summaryContextLoaded]);
+
+  const handleGenerateWithContext = useCallback(
+    (prompt: string) => whenContextSaved(() => handleGenerateSummary(prompt, useInherited)),
+    [whenContextSaved, handleGenerateSummary, useInherited],
+  );
+
+  const handleRegenerateWithContext = useCallback(
+    () => whenContextSaved(() => handleRegenerateSummary(summaryContextText, useInherited)),
+    [whenContextSaved, handleRegenerateSummary, summaryContextText, useInherited],
+  );
+
+  const handleEditInheritedContext = useCallback((level: InheritedContext) => {
+    if (level.scope === 'global') router.push('/settings?tab=summaryModels');
+  }, [router]);
 
   const copyOperations = useCopyOperations({
     meeting,
@@ -202,8 +234,17 @@ export default function PageContent({
           transcript={
             <TranscriptPanel
               transcripts={meetingData.transcripts}
-              customPrompt={customPrompt}
-              onPromptChange={setCustomPrompt}
+              summaryContextBox={
+                <SummaryContextBox
+                  text={summaryContext.text}
+                  onTextChange={summaryContext.setText}
+                  useInherited={summaryContext.useInherited}
+                  onUseInheritedChange={summaryContext.setUseInherited}
+                  inherited={summaryContext.inherited}
+                  isLoaded={summaryContext.isLoaded}
+                  onEditInherited={handleEditInheritedContext}
+                />
+              }
               onCopyTranscript={copyOperations.handleCopyTranscript}
               onOpenMeetingFolder={meetingOperations.handleOpenMeetingFolder}
               isRecording={isRecording}
@@ -235,14 +276,14 @@ export default function PageContent({
               modelConfig={modelConfig}
               setModelConfig={setModelConfig}
               onSaveModelConfig={handleSaveModelConfig}
-              onGenerateSummary={summaryGeneration.handleGenerateSummary}
+              onGenerateSummary={handleGenerateWithContext}
               onStopGeneration={summaryGeneration.handleStopGeneration}
-              customPrompt={customPrompt}
+              customPrompt={summaryContextText}
               onSaveSummary={meetingData.handleSaveSummary}
               onSummaryChange={meetingData.handleSummaryChange}
               onDirtyChange={meetingData.setIsSummaryDirty}
               summaryError={summaryGeneration.summaryError}
-              onRegenerateSummary={summaryGeneration.handleRegenerateSummary}
+              onRegenerateSummary={handleRegenerateWithContext}
               getSummaryStatusMessage={summaryGeneration.getSummaryStatusMessage}
               availableTemplates={templates.availableTemplates}
               selectedTemplate={templates.selectedTemplate}
