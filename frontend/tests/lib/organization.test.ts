@@ -2,7 +2,6 @@ import { describe, expect, test } from 'bun:test';
 import {
   buildSidebarSections,
   daysLeftLabel,
-  meetingRowTags,
   tagsForChips,
   UNFILED_ID,
   type Folder,
@@ -64,27 +63,6 @@ describe('tagsForChips', () => {
       { id: 'c', name: 'c', meeting_count: 0 },
     ];
     expect(tagsForChips(tags, ['c']).map(t => t.id)).toEqual(['a', 'c']);
-  });
-});
-
-describe('meetingRowTags', () => {
-  const tags: Tag[] = [
-    { id: 'z', name: 'zeta', meeting_count: 1 },
-    { id: 'a', name: 'Alpha', meeting_count: 1 },
-    { id: 'm', name: 'mid', meeting_count: 1 },
-    { id: 'b', name: 'beta', meeting_count: 1 },
-  ];
-
-  test('lists a meeting\'s tags A-Z and skips unknown ids', () => {
-    const row = meetingRowTags(['z', 'gone', 'a'], tags, 3);
-    expect(row.shown.map(t => t.name)).toEqual(['Alpha', 'zeta']);
-    expect(row.hidden).toEqual([]);
-  });
-
-  test('keeps the overflow separate', () => {
-    const row = meetingRowTags(['z', 'a', 'm', 'b'], tags, 3);
-    expect(row.shown.map(t => t.name)).toEqual(['Alpha', 'beta', 'mid']);
-    expect(row.hidden.map(t => t.name)).toEqual(['zeta']);
   });
 });
 

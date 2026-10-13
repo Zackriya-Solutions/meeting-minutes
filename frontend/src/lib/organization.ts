@@ -115,14 +115,6 @@ export function tagsForChips(tags: Tag[], selectedIds: string[]): Tag[] {
   return tags.filter(t => t.meeting_count > 0 || selectedIds.includes(t.id));
 }
 
-/** A meeting's tags A-Z for its sidebar row: the first `max`, and the rest. */
-export function meetingRowTags(tagIds: string[], tags: Tag[], max: number): { shown: Tag[]; hidden: Tag[] } {
-  const own = tags
-    .filter(t => tagIds.includes(t.id))
-    .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
-  return { shown: own.slice(0, max), hidden: own.slice(max) };
-}
-
 export function daysLeftLabel(daysLeft: number | null): string {
   if (daysLeft === null) return 'Kept until you empty Trash';
   if (daysLeft <= 0) return 'Deletes today';

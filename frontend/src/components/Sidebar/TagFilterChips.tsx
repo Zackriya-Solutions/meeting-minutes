@@ -2,6 +2,7 @@
 
 import { Settings2 } from 'lucide-react';
 import { tagsForChips, type Tag } from '@/lib/organization';
+import { TagChip } from './TagChip';
 
 interface TagFilterChipsProps {
   tags: Tag[];
@@ -15,24 +16,9 @@ export function TagFilterChips({ tags, selectedIds, onToggle, onManage }: TagFil
   if (chips.length === 0) return null;
   return (
     <div className="flex flex-wrap gap-1 px-3 pt-2">
-      {chips.map(tag => {
-        const selected = selectedIds.includes(tag.id);
-        return (
-          <button
-            key={tag.id}
-            type="button"
-            aria-pressed={selected}
-            onClick={() => onToggle(tag.id)}
-            className={`rounded-full border px-2 py-0.5 text-xs ${
-              selected
-                ? 'border-blue-300 bg-blue-100 text-blue-800'
-                : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'
-            }`}
-          >
-            #{tag.name}
-          </button>
-        );
-      })}
+      {chips.map(tag => (
+        <TagChip key={tag.id} tag={tag} selected={selectedIds.includes(tag.id)} onToggle={onToggle} />
+      ))}
       <button
         type="button"
         onClick={onManage}
