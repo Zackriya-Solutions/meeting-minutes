@@ -5,6 +5,7 @@ use log::{info, warn};
 use serde::Serialize;
 use sqlx::SqlitePool;
 
+const MEETING_HEADING: &str = "Context for this meeting:";
 const PRIORITY_NOTE: &str = "If these conflict, the more specific one takes priority: this meeting first, then the folder, then the general context.";
 
 /// One inherited level of summary context that applies to a meeting.
@@ -44,7 +45,7 @@ fn heading(level: &InheritedContext) -> String {
         (SummaryContextScope::Global, _) => "General context (applies to every meeting):".to_string(),
         (SummaryContextScope::Folder, Some(name)) => format!("Folder context (\"{}\"):", name),
         (SummaryContextScope::Folder, None) => "Folder context:".to_string(),
-        (SummaryContextScope::Meeting, _) => "Context for this meeting:".to_string(),
+        (SummaryContextScope::Meeting, _) => MEETING_HEADING.to_string(),
     }
 }
 
@@ -64,7 +65,7 @@ pub fn compose_summary_context(inherited: &[InheritedContext], meeting_text: &st
 
     let meeting = meeting_text.trim();
     if !meeting.is_empty() {
-        sections.push(format!("Context for this meeting:\n{}", meeting));
+        sections.push(format!("{}\n{}", MEETING_HEADING, meeting));
     }
 
     let mut composed = sections.join("\n\n");
@@ -83,29 +84,25 @@ pub async fn resolve_summary_context(
     meeting_text: &str,
     use_inherited: bool,
 ) -> String {
-    let mut inherited_levels = 0;
-    let composed = if use_inherited {
-        match load_inherited_contexts(pool, meeting_id).await {
-            Ok(inherited) => {
-                inherited_levels = inherited.len();
-                compose_summary_context(&inherited, meeting_text)
-            }
-            Err(e) => {
+    let inherited = if use_inherited {
+        load_inherited_contexts(pool, meeting_id)
+            .await
+            .unwrap_or_else(|e| {
                 warn!(
                     "Failed to load inherited summary context for meeting {}: {}",
                     meeting_id, e
                 );
-                meeting_text.to_string()
-            }
-        }
+                Vec::new()
+            })
     } else {
-        meeting_text.to_string()
+        Vec::new()
     };
+    let composed = compose_summary_context(&inherited, meeting_text);
     info!(
         "Summary context for meeting {}: use_inherited={}, inherited_levels={}, meeting_chars={}, composed_chars={}",
         meeting_id,
         use_inherited,
-        inherited_levels,
+        inherited.len(),
         meeting_text.chars().count(),
         composed.chars().count()
     );

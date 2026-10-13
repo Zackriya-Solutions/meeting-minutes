@@ -5,6 +5,7 @@ import { ChevronDown, ChevronRight } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import {
   SUMMARY_CONTEXT_MAX_CHARS,
+  SUMMARY_CONTEXT_TEXTAREA_CLASS,
   inheritedContextKey,
   inheritedContextName,
   summaryContextCounter,
@@ -81,7 +82,7 @@ export function SummaryContextBox({
       )}
       <textarea
         placeholder="Add context for AI summary. For example people involved, meeting overview, objective etc..."
-        className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 bg-white shadow-sm min-h-[80px] resize-y disabled:bg-gray-50"
+        className={`${SUMMARY_CONTEXT_TEXTAREA_CLASS} min-h-[80px]`}
         value={text}
         onChange={(e) => onTextChange(e.target.value)}
         disabled={!isLoaded}

@@ -38,7 +38,7 @@ export function createDebouncedSaver<V>(
       pending.set(key, { value, timer });
     },
     flush() {
-      for (const [key, { value, timer }] of [...pending]) {
+      for (const [key, { value, timer }] of pending) {
         clearTimeout(timer);
         pending.delete(key);
         run(key, value);

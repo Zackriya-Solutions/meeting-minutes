@@ -2,26 +2,22 @@
 
 import { useEffect, useState } from 'react';
 import { FileText } from 'lucide-react';
-import { toast } from 'sonner';
 import { createDebouncedSaver } from '@/lib/debouncedSaver';
 import {
   SUMMARY_CONTEXT_MAX_CHARS,
   SUMMARY_CONTEXT_SAVE_DELAY_MS,
+  SUMMARY_CONTEXT_TEXTAREA_CLASS,
+  reportSummaryContextError,
   summaryContextCounter,
 } from '@/lib/summary-context';
 import { summaryContextService } from '@/services/summaryContextService';
-
-const GLOBAL_KEY = 'global';
 
 export function SummaryContextSettings() {
   const [text, setText] = useState('');
   const [isLoaded, setIsLoaded] = useState(false);
   const [saver] = useState(() => createDebouncedSaver<string>(
     (_key, value) => summaryContextService.saveGlobal(value),
-    error => {
-      console.error('Failed to save summary context:', error);
-      toast.error('Failed to save summary context', { description: String(error) });
-    },
+    error => reportSummaryContextError('save', error),
     SUMMARY_CONTEXT_SAVE_DELAY_MS,
   ));
 
@@ -34,9 +30,7 @@ export function SummaryContextSettings() {
         setIsLoaded(true);
       })
       .catch(error => {
-        if (cancelled) return;
-        console.error('Failed to load summary context:', error);
-        toast.error('Failed to load summary context', { description: String(error) });
+        if (!cancelled) reportSummaryContextError('load', error);
       });
     return () => {
       cancelled = true;
@@ -57,11 +51,11 @@ export function SummaryContextSettings() {
       </p>
       <textarea
         aria-label="Summary context for every meeting"
-        className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 bg-white shadow-sm min-h-[120px] resize-y disabled:bg-gray-50"
+        className={`${SUMMARY_CONTEXT_TEXTAREA_CLASS} min-h-[120px]`}
         value={text}
         onChange={(e) => {
           setText(e.target.value);
-          saver.schedule(GLOBAL_KEY, e.target.value);
+          saver.schedule('global', e.target.value);
         }}
         disabled={!isLoaded}
         maxLength={SUMMARY_CONTEXT_MAX_CHARS}

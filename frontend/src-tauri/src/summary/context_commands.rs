@@ -43,9 +43,11 @@ pub(crate) async fn get_meeting_context(
     let inherited = load_inherited_contexts(pool, meeting_id)
         .await
         .map_err(|e| format!("Failed to load inherited summary context: {}", e))?;
+    let (context, use_inherited) =
+        row.map_or((String::new(), true), |r| (r.context, r.use_inherited));
     Ok(MeetingSummaryContext {
-        context: row.as_ref().map(|r| r.context.clone()).unwrap_or_default(),
-        use_inherited: row.map(|r| r.use_inherited).unwrap_or(true),
+        context,
+        use_inherited,
         inherited,
     })
 }

@@ -138,23 +138,24 @@ export default function PageContent({
   const { flush: flushSummaryContext, text: summaryContextText, useInherited, isLoaded: summaryContextLoaded } = summaryContext;
   const { handleGenerateSummary, handleRegenerateSummary } = summaryGeneration;
 
-  const handleGenerateWithContext = useCallback(async (prompt: string) => {
+  const whenContextSaved = useCallback(async (run: () => Promise<void>) => {
     if (!summaryContextLoaded) {
       toast.info('Loading summary context, please wait...');
       return;
     }
     await flushSummaryContext();
-    await handleGenerateSummary(prompt, useInherited);
-  }, [flushSummaryContext, handleGenerateSummary, summaryContextLoaded, useInherited]);
+    await run();
+  }, [flushSummaryContext, summaryContextLoaded]);
 
-  const handleRegenerateWithContext = useCallback(async () => {
-    if (!summaryContextLoaded) {
-      toast.info('Loading summary context, please wait...');
-      return;
-    }
-    await flushSummaryContext();
-    await handleRegenerateSummary(summaryContextText, useInherited);
-  }, [flushSummaryContext, handleRegenerateSummary, summaryContextLoaded, summaryContextText, useInherited]);
+  const handleGenerateWithContext = useCallback(
+    (prompt: string) => whenContextSaved(() => handleGenerateSummary(prompt, useInherited)),
+    [whenContextSaved, handleGenerateSummary, useInherited],
+  );
+
+  const handleRegenerateWithContext = useCallback(
+    () => whenContextSaved(() => handleRegenerateSummary(summaryContextText, useInherited)),
+    [whenContextSaved, handleRegenerateSummary, summaryContextText, useInherited],
+  );
 
   const handleEditInheritedContext = useCallback((level: InheritedContext) => {
     if (level.scope === 'global') router.push('/settings?tab=summaryModels');
@@ -277,7 +278,7 @@ export default function PageContent({
               onSaveModelConfig={handleSaveModelConfig}
               onGenerateSummary={handleGenerateWithContext}
               onStopGeneration={summaryGeneration.handleStopGeneration}
-              customPrompt={summaryContext.text}
+              customPrompt={summaryContextText}
               onSaveSummary={meetingData.handleSaveSummary}
               onSummaryChange={meetingData.handleSummaryChange}
               onDirtyChange={meetingData.setIsSummaryDirty}
