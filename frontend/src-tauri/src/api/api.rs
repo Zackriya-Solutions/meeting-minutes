@@ -408,7 +408,7 @@ async fn search_transcripts_and_notes(
     let mut results = TranscriptsRepository::search_transcripts(pool, query).await?;
     match MeetingNotesRepository::search(pool, query).await {
         Ok(note_matches) => results.extend(note_matches),
-        Err(_) => log_error!("Notes search failed; returning transcript matches only"),
+        Err(e) => log_error!("Notes search failed; returning transcript matches only: {}", e),
     }
     Ok(results)
 }

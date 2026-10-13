@@ -38,7 +38,8 @@ impl MeetingNotesRepository {
     }
 
     /// Saves the note for a meeting. A note with no text is removed.
-    /// Returns `false` when the meeting does not exist.
+    /// Returns `false` when the meeting does not exist, except that an empty note writes
+    /// nothing and returns `true` even for a meeting that does not exist.
     pub async fn upsert(
         pool: &SqlitePool,
         meeting_id: &str,
