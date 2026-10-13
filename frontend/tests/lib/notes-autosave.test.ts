@@ -81,4 +81,29 @@ describe('createNotesAutosaver', () => {
 
     expect(saved).toEqual(['first', 'second']);
   });
+
+  test('hasUnsaved is true until an edit is saved, and stays true after a failed save', async () => {
+    let fail = false;
+    const save = mock(async (_content: NotesContent) => {
+      if (fail) throw new Error('disk full');
+    });
+    const consoleError = console.error;
+    console.error = () => {};
+    try {
+      const autosaver = createNotesAutosaver({ save, delayMs: 10_000 });
+      expect(autosaver.hasUnsaved()).toBe(false);
+
+      autosaver.schedule(note('a'));
+      expect(autosaver.hasUnsaved()).toBe(true);
+      await autosaver.flush();
+      expect(autosaver.hasUnsaved()).toBe(false);
+
+      fail = true;
+      autosaver.schedule(note('b'));
+      await autosaver.flush();
+      expect(autosaver.hasUnsaved()).toBe(true);
+    } finally {
+      console.error = consoleError;
+    }
+  });
 });

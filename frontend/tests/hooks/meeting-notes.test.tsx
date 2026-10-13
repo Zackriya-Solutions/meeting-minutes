@@ -2,16 +2,25 @@ import { afterAll, afterEach, beforeEach, describe, expect, mock, test } from 'b
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 
 const originalCore = { ...await import('@tauri-apps/api/core') };
+const originalToast = { ...await import('sonner') };
 afterAll(() => {
   mock.module('@tauri-apps/api/core', () => originalCore);
+  mock.module('sonner', () => originalToast);
 });
 
 type Stored = { markdown: string; notes_json: string | null } | null;
 let readNotes: (meetingId: string) => Promise<Stored>;
 const saves: Array<Record<string, unknown>> = [];
+let failSaves = 0;
+const toastError = mock((..._args: unknown[]) => {});
+mock.module('sonner', () => ({ toast: { error: toastError } }));
 const invoke = mock(async (command: string, args?: Record<string, unknown>): Promise<unknown> => {
   if (command === 'api_get_meeting_notes') return readNotes(args!.meetingId as string);
   if (command === 'api_save_meeting_notes') {
+    if (failSaves > 0) {
+      failSaves -= 1;
+      throw new Error('database locked');
+    }
     saves.push(args!);
     return null;
   }
@@ -45,6 +54,8 @@ async function show(meetingId: string) {
 
 beforeEach(() => {
   saves.length = 0;
+  failSaves = 0;
+  toastError.mockClear();
   readNotes = async () => null;
 });
 afterEach(async () => {
@@ -111,12 +122,15 @@ describe('useMeetingNotes', () => {
     renderer = undefined;
     await new Promise((resolve) => setTimeout(resolve, 0));
 
-    expect(saves.length).toBe(1);
+    expect(saves).toEqual([
+      { meetingId: 'meeting-a', markdown: 'typed', notesJson: JSON.stringify([block('typed')]) },
+    ]);
   });
 
   test('a failed load reports an error and reload tries again', async () => {
     const consoleError = console.error;
     console.error = () => {};
+    try {
     let attempts = 0;
     readNotes = async () => {
       attempts += 1;
@@ -129,10 +143,12 @@ describe('useMeetingNotes', () => {
 
     act(() => { notes.reload(); });
     await settle();
-    console.error = consoleError;
 
     expect(notes.loadState).toBe('ready');
     expect(notes.initialMarkdown).toBe('Recovered');
+    } finally {
+      console.error = consoleError;
+    }
   });
 
   test('getMarkdown returns the newest edit, saved or not', async () => {
@@ -143,5 +159,78 @@ describe('useMeetingNotes', () => {
     act(() => { notes.handleChange({ blocks: [block('newer')] as any, markdown: 'newer' }); });
 
     expect(notes.getMarkdown()).toBe('newer');
+  });
+
+  test('a save that fails once while switching meeting is retried for the original meeting', async () => {
+    const consoleError = console.error;
+    console.error = () => {};
+    try {
+      await show('meeting-a');
+      await settle();
+      act(() => { notes.handleChange({ blocks: [block('for a')] as any, markdown: 'for a' }); });
+      failSaves = 1;
+
+      await show('meeting-b');
+      await settle();
+
+      expect(saves).toEqual([
+        { meetingId: 'meeting-a', markdown: 'for a', notesJson: JSON.stringify([block('for a')]) },
+      ]);
+      expect(toastError).not.toHaveBeenCalled();
+    } finally {
+      console.error = consoleError;
+    }
+  });
+
+  test('an edit that cannot be saved while switching meeting raises an error notice', async () => {
+    const consoleError = console.error;
+    console.error = () => {};
+    try {
+      await show('meeting-a');
+      await settle();
+      act(() => { notes.handleChange({ blocks: [block('for a')] as any, markdown: 'for a' }); });
+      failSaves = 2;
+
+      await show('meeting-b');
+      await settle();
+
+      expect(saves).toEqual([]);
+      expect(toastError).toHaveBeenCalledTimes(1);
+      expect(toastError.mock.calls[0][0]).toBe("Couldn't save notes");
+    } finally {
+      console.error = consoleError;
+    }
+  });
+
+  test('returning to a meeting before the other one loads reloads it instead of reusing old content', async () => {
+    let storedA = 'old A';
+    let releaseB!: (stored: Stored) => void;
+    let releaseA2!: (stored: Stored) => void;
+    let loadsOfA = 0;
+    readNotes = (meetingId) => {
+      if (meetingId === 'meeting-b') return new Promise<Stored>((resolve) => { releaseB = resolve; });
+      loadsOfA += 1;
+      if (loadsOfA === 1) return Promise.resolve({ markdown: storedA, notes_json: null });
+      return new Promise<Stored>((resolve) => { releaseA2 = resolve; });
+    };
+    await show('meeting-a');
+    await settle();
+    expect(notes.loadState).toBe('ready');
+    act(() => { notes.handleChange({ blocks: [block('edited A')] as any, markdown: 'edited A' }); });
+    storedA = 'edited A';
+
+    await show('meeting-b');
+    await settle();
+    await show('meeting-a');
+    await settle();
+
+    expect(notes.loadState).toBe('loading');
+    expect(notes.initialMarkdown).toBe('');
+
+    await act(async () => { releaseA2({ markdown: 'edited A', notes_json: null }); });
+    await settle();
+    expect(notes.loadState).toBe('ready');
+    expect(notes.initialMarkdown).toBe('edited A');
+    void releaseB;
   });
 });

@@ -18,6 +18,8 @@ export interface NotesAutosaver {
   retry: () => Promise<void>;
   /** The most recent edit, saved or not. */
   latest: () => NotesContent | null;
+  /** True when an edit has not been saved yet (still waiting, or its save failed). */
+  hasUnsaved: () => boolean;
 }
 
 export function createNotesAutosaver({ save, delayMs, onStateChange }: NotesAutosaverOptions): NotesAutosaver {
@@ -61,5 +63,6 @@ export function createNotesAutosaver({ save, delayMs, onStateChange }: NotesAuto
     flush: run,
     retry: run,
     latest: () => latest,
+    hasUnsaved: () => pending !== null,
   };
 }
