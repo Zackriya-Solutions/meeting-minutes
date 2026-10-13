@@ -43,6 +43,19 @@ export function blocksToPlainText(blocks: unknown[]): string {
     if (Array.isArray(content)) {
       const text = content.map(inlineText).join('');
       if (text.trim()) lines.push(text);
+    } else if (content && typeof content === 'object') {
+      const { rows } = content as { rows?: unknown };
+      if (Array.isArray(rows)) {
+        for (const row of rows) {
+          const cells = (row as { cells?: unknown } | null)?.cells;
+          if (!Array.isArray(cells)) continue;
+          const texts = cells.map((cell) => {
+            const cellContent = Array.isArray(cell) ? cell : (cell as { content?: unknown } | null)?.content;
+            return Array.isArray(cellContent) ? cellContent.map(inlineText).join('') : '';
+          });
+          if (texts.some((text) => text.trim())) lines.push(texts.join(' | '));
+        }
+      }
     }
     if (Array.isArray(children)) children.forEach(visit);
   };
@@ -92,7 +105,8 @@ export function createNotesChangeEmitter(
       let markdown: string | undefined;
       try {
         markdown = await toMarkdown(blocks);
-      } catch {
+      } catch (error) {
+        console.error('Failed to convert notes to markdown', error);
         markdown = undefined;
       }
       if (current !== sequence) return;

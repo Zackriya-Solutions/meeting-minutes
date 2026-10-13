@@ -6,6 +6,7 @@ import {
   parseNotesBlocks,
   type NotesContent,
 } from '../../src/lib/meeting-notes';
+import { withQuietConsoleError } from '../helpers/quiet-console';
 
 const paragraph = (text: string, children: unknown[] = []) => ({
   id: text,
@@ -50,6 +51,30 @@ describe('blocksToPlainText', () => {
     ];
     expect(blocksToPlainText(blocks)).toBe('Agenda\nBudget\nSee the doc');
   });
+
+  const inline = (text: string) => [{ type: 'text', text, styles: {} }];
+  const table = (rows: unknown[][]) => ({
+    id: 'table',
+    type: 'table',
+    content: { type: 'tableContent', rows: rows.map((cells) => ({ cells })) },
+    children: [],
+  });
+
+  test('collects table rows, joining cells with a bar, for object-shaped cells', () => {
+    const cell = (text: string) => ({ type: 'tableCell', content: inline(text), props: {} });
+    const blocks = [table([[cell('A'), cell('B')], [cell('C'), cell('D')]])];
+    expect(blocksToPlainText(blocks)).toBe('A | B\nC | D');
+  });
+
+  test('collects table rows for array-shaped cells', () => {
+    const blocks = [table([[inline('A'), inline('B')], [inline('C'), inline('D')]])];
+    expect(blocksToPlainText(blocks)).toBe('A | B\nC | D');
+  });
+
+  test('a table row whose cells are all empty adds no line', () => {
+    const blocks = [table([[inline(''), inline('')], [inline('C'), inline('D')]])];
+    expect(blocksToPlainText(blocks)).toBe('C | D');
+  });
 });
 
 describe('createNotesChangeEmitter', () => {
@@ -82,10 +107,12 @@ describe('createNotesChangeEmitter', () => {
     );
     const emitter = createNotesChangeEmitter(toMarkdown as any, (c) => emitted.push(c));
 
-    const first = emitter.handle([paragraph('first')] as any);
-    await emitter.handle([paragraph('second')] as any);
-    releaseFirst('first');
-    await first;
+    await withQuietConsoleError(async () => {
+      const first = emitter.handle([paragraph('first')] as any);
+      await emitter.handle([paragraph('second')] as any);
+      releaseFirst('first');
+      await first;
+    });
 
     expect(emitted.map((c) => c.markdown)).toEqual(['second']);
   });
@@ -103,7 +130,7 @@ describe('createNotesChangeEmitter', () => {
     const emitted: NotesContent[] = [];
     const emitter = createNotesChangeEmitter(async () => { throw new Error('boom'); }, (c) => emitted.push(c));
 
-    await emitter.handle([paragraph('Ship Friday')] as any);
+    await withQuietConsoleError(() => emitter.handle([paragraph('Ship Friday')] as any));
 
     expect(emitted.map((c) => c.markdown)).toEqual(['Ship Friday']);
   });
@@ -116,10 +143,12 @@ describe('createNotesChangeEmitter', () => {
       throw new Error('boom');
     }, (c) => emitted.push(c));
 
-    const first = emitter.handle([paragraph('first')] as any);
-    await emitter.handle([paragraph('second')] as any);
-    releaseFirst('first');
-    await first;
+    await withQuietConsoleError(async () => {
+      const first = emitter.handle([paragraph('first')] as any);
+      await emitter.handle([paragraph('second')] as any);
+      releaseFirst('first');
+      await first;
+    });
 
     expect(emitted.map((c) => c.markdown)).toEqual(['second']);
   });

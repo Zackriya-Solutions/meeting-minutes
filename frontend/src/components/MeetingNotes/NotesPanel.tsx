@@ -60,6 +60,7 @@ class EditorBoundary extends Component<{ onError: () => void; children: ReactNod
 function NotesEditor({ initialBlocks, initialMarkdown, onChange, editable, onFailed }: NotesEditorProps) {
   const startBlocks = initialBlocks && initialBlocks.length > 0 ? initialBlocks : null;
   const [fromMarkdown, setFromMarkdown] = useState(startBlocks === null);
+  const [markdownLoaded, setMarkdownLoaded] = useState(false);
   const editorRef = useRef<BlockNoteEditorInstance | null>(null);
   const editorReadyRef = useRef(false);
   const onChangeRef = useRef(onChange);
@@ -93,6 +94,7 @@ function NotesEditor({ initialBlocks, initialMarkdown, onChange, editable, onFai
           editor.replaceBlocks(editor.document, blocks);
           await new Promise((resolve) => setTimeout(resolve, 0));
           emitter.markLoaded(editor.document);
+          setMarkdownLoaded(true);
         })
         .catch((error) => {
           console.error('Failed to load notes from markdown', error);
@@ -117,13 +119,16 @@ function NotesEditor({ initialBlocks, initialMarkdown, onChange, editable, onFai
     }
   }, [fromMarkdown, onFailed]);
 
+  // Keys typed before the stored markdown replaces the content would be discarded.
+  const awaitingMarkdown = fromMarkdown && initialMarkdown.trim() !== '' && !markdownLoaded;
+
   return (
     <EditorBoundary key={fromMarkdown ? 'markdown' : 'blocks'} onError={handleEditorError}>
       <Editor
         initialContent={fromMarkdown ? undefined : startBlocks ?? undefined}
         onChange={handleBlocksChange}
         onEditorReady={handleEditorReady}
-        editable={editable}
+        editable={editable && !awaitingMarkdown}
       />
     </EditorBoundary>
   );
@@ -154,7 +159,7 @@ export function NotesPanel({
         <div className="flex items-center gap-2 text-sm font-medium text-gray-700">
           <NotebookPen className="h-4 w-4" />
           Notes
-          <span className="text-xs font-normal text-gray-500" aria-live="polite">
+          <span className="text-xs font-normal text-gray-500" aria-live={saveState === 'error' ? 'polite' : 'off'}>
             {SAVE_STATE_LABEL[saveState]}
           </span>
           {saveState === 'error' && onRetrySave && (

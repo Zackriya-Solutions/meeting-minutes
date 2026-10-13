@@ -101,7 +101,10 @@ export function useMeetingNotes(meetingId: string, saveDelayMs = 1000) {
   }, [autosaver]);
   const reload = useCallback(() => {
     // Pending edits are saved first so the reload cannot show older content over them.
-    void autosaver.flush().then(() => setLoadAttempt((attempt) => attempt + 1));
+    void autosaver.flush().then(() => {
+      // A failed save leaves the newer edit unsaved, and loading would show older content over it.
+      if (!autosaver.hasUnsaved()) setLoadAttempt((attempt) => attempt + 1);
+    });
   }, [autosaver]);
   const getMarkdown = useCallback(
     () => autosaver.latest()?.markdown ?? storedMarkdownRef.current,

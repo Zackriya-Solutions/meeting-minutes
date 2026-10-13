@@ -170,6 +170,31 @@ describe('useMeetingNotes', () => {
     expect(saveIndex).toBeLessThan(lastGet);
   });
 
+  test('reload does not load again while the pending edit could not be saved', async () => {
+    await withQuietConsoleError(async () => {
+      const gets = () => invoke.mock.calls.filter((c) => c[0] === 'api_get_meeting_notes').length;
+      await show('meeting-a');
+      await settle();
+      act(() => { notes.handleChange({ blocks: [block('pending')] as any, markdown: 'pending' }); });
+      failSaves = 100;
+      const getsBefore = gets();
+
+      act(() => { notes.reload(); });
+      await settle();
+
+      expect(gets()).toBe(getsBefore);
+      expect(notes.saveState).toBe('error');
+
+      failSaves = 0;
+      await act(async () => { notes.retrySave(); });
+      await settle();
+      act(() => { notes.reload(); });
+      await settle();
+
+      expect(gets()).toBe(getsBefore + 1);
+    });
+  });
+
   test('getMarkdown returns the newest edit, saved or not', async () => {
     readNotes = async () => ({ markdown: 'stored', notes_json: null });
     await show('meeting-a');

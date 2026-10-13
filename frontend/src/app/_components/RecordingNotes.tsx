@@ -36,13 +36,26 @@ const RecordingNotesPane = memo(function RecordingNotesPane({ recordingId, onCha
   );
 });
 
+const ignoreChange = () => {};
+
 /** Notes pane shown beside the live transcript while recording. */
 export function RecordingNotes({ editable, className }: RecordingNotesProps) {
   const { recordingId, isReady, handleChange } = useRecordingNotesDraft();
   const [attempt, setAttempt] = useState(0);
   const retryLoad = useCallback(() => setAttempt((current) => current + 1), []);
 
-  if (!recordingId || !isReady) return null;
+  if (!recordingId || !isReady) {
+    return (
+      <NotesPanel
+        loadState="loading"
+        initialBlocks={null}
+        initialMarkdown=""
+        saveState="idle"
+        onChange={ignoreChange}
+        className={className}
+      />
+    );
+  }
 
   return (
     <RecordingNotesPane

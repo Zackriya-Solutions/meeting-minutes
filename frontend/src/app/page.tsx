@@ -194,6 +194,11 @@ export default function Home() {
   // Notes are available while recording until the meeting is saved; the pane waits for the recording's recovery id.
   const showNotes = recordingState.isRecording || isStopping || isProcessingStop || isSaving;
 
+  // The next recording starts on the transcript, not on the pane last left open.
+  useEffect(() => {
+    if (!showNotes) setRecordingView('transcript');
+  }, [showNotes]);
+
   return (
     <div className="flex flex-col h-screen bg-gray-50">
       {/* All Modals supported*/}
