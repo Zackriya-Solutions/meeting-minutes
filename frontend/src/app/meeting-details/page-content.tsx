@@ -8,6 +8,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
 import { TranscriptPanel } from '@/components/MeetingDetails/TranscriptPanel';
 import { SummaryPanel } from '@/components/MeetingDetails/SummaryPanel';
+import { NotesPanel } from '@/components/MeetingNotes/NotesPanel';
 import { MeetingDetailsSplitView, type MeetingDetailsTab } from '@/components/MeetingDetails/MeetingDetailsSplitView';
 import { ModelConfig } from '@/components/ModelSettingsModal';
 
@@ -17,6 +18,7 @@ import { useSummaryGeneration } from '@/hooks/meeting-details/useSummaryGenerati
 import { useTemplates } from '@/hooks/meeting-details/useTemplates';
 import { useCopyOperations } from '@/hooks/meeting-details/useCopyOperations';
 import { useMeetingOperations } from '@/hooks/meeting-details/useMeetingOperations';
+import { useMeetingNotes } from '@/hooks/meeting-details/useMeetingNotes';
 import { useConfig } from '@/contexts/ConfigContext';
 
 export default function PageContent({
@@ -129,12 +131,15 @@ export default function PageContent({
     onOpenModelSettings: handleOpenModelSettings,
   });
 
+  const notes = useMeetingNotes(meeting.id);
+
   const copyOperations = useCopyOperations({
     meeting,
     transcripts: meetingData.transcripts,
     meetingTitle: meetingData.meetingTitle,
     aiSummary: meetingData.aiSummary,
     blockNoteSummaryRef: meetingData.blockNoteSummaryRef,
+    getNotesMarkdown: notes.getMarkdown,
   });
 
   const meetingOperations = useMeetingOperations({
@@ -249,6 +254,19 @@ export default function PageContent({
               onTemplateSelect={templates.handleTemplateSelection}
               isModelConfigLoading={isModelConfigLoading}
               onOpenModelSettings={handleRegisterModalOpen}
+            />
+          }
+          notes={
+            <NotesPanel
+              key={meeting.id}
+              loadState={notes.loadState}
+              initialBlocks={notes.initialBlocks}
+              initialMarkdown={notes.initialMarkdown}
+              saveState={notes.saveState}
+              onChange={notes.handleChange}
+              onRetryLoad={notes.reload}
+              onRetrySave={notes.retrySave}
+              onCopy={copyOperations.handleCopyNotes}
             />
           }
         />
