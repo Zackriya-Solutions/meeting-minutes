@@ -70,6 +70,11 @@ export function MeetingDetailsSplitView({
     if (activeTab !== 'transcript') setLastRightPane(activeTab);
   }, [activeTab]);
   const rightPane = resolveRightPane(activeTab, lastRightPane);
+  const [notesShown, setNotesShown] = useState(false);
+  useEffect(() => {
+    if (activeTab === 'notes') setNotesShown(true);
+  }, [activeTab]);
+  const notesMounted = notesShown || activeTab === 'notes';
 
   useEffect(() => {
     setRatio(readStoredRatio());
@@ -225,7 +230,7 @@ export function MeetingDetailsSplitView({
             className={`${rightPanelClass} ${rightPane === 'notes' ? 'md:data-[state=inactive]:flex' : ''}`}
             {...notesPanelProps}
           >
-            {notes}
+            {notesMounted ? notes : null}
           </TabsContent>
         </div>
       </div>
