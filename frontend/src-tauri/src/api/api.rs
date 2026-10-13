@@ -9,7 +9,9 @@ use crate::{
     database::{
         models::MeetingModel,
         repositories::{
-            meeting::MeetingsRepository, setting::SettingsRepository,
+            meeting::MeetingsRepository,
+            meeting_notes::{is_block_array, MeetingNotes, MeetingNotesRepository},
+            setting::SettingsRepository,
             transcript::TranscriptsRepository,
         },
     },
@@ -415,6 +417,51 @@ pub async fn api_search_transcripts<R: Runtime>(
         Err(e) => {
             log_error!("Transcript search failed");
             Err(format!("Failed to search transcripts: {}", e))
+        }
+    }
+}
+
+/// Returns the user-written note for a meeting, if it has one.
+#[tauri::command]
+pub async fn api_get_meeting_notes(
+    state: tauri::State<'_, AppState>,
+    meeting_id: String,
+) -> Result<Option<MeetingNotes>, String> {
+    MeetingNotesRepository::get(state.db_manager.pool(), &meeting_id)
+        .await
+        .map_err(|e| {
+            log_error!("Failed to load meeting notes for {}: {}", meeting_id, e);
+            e.to_string()
+        })
+}
+
+/// Saves the user-written note for a meeting. `notes_json` is a JSON array of editor blocks.
+#[tauri::command]
+pub async fn api_save_meeting_notes(
+    state: tauri::State<'_, AppState>,
+    meeting_id: String,
+    markdown: String,
+    notes_json: Option<String>,
+) -> Result<(), String> {
+    if let Some(json) = notes_json.as_deref() {
+        if !is_block_array(json) {
+            return Err("Notes content must be a JSON array of editor blocks".into());
+        }
+    }
+
+    match MeetingNotesRepository::upsert(
+        state.db_manager.pool(),
+        &meeting_id,
+        &markdown,
+        notes_json.as_deref(),
+    )
+    .await
+    {
+        Ok(true) => Ok(()),
+        Ok(false) => Err("Meeting not found".into()),
+        Err(e) => {
+            log_error!("Failed to save meeting notes for {}: {}", meeting_id, e);
+            Err(e.to_string())
         }
     }
 }
