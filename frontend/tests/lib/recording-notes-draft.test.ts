@@ -14,7 +14,7 @@ const invoke = mock(async (command: string, args?: Record<string, unknown>): Pro
   return null;
 });
 mock.module('@tauri-apps/api/core', () => ({ ...originalCore, invoke }));
-const { commitNotesDraft, recordingNotesDraft } = await import('../../src/services/recordingNotesDraft');
+const { commitNotesDraft, recordingNotesDraft, resolveNotesDraft, restoreRecordingNotesDraft } = await import('../../src/services/recordingNotesDraft');
 
 const blocks = [{ id: 'a', type: 'paragraph', content: [{ type: 'text', text: 'Ship Friday' }], children: [] }];
 const draft = { blocks: blocks as any, markdown: 'Ship Friday' };
@@ -74,9 +74,93 @@ describe('commitNotesDraft', () => {
     const consoleError = console.error;
     console.error = () => {};
 
-    const result = await commitNotesDraft(draft, 'saved-meeting');
-    console.error = consoleError;
+    let result;
+    try {
+      result = await commitNotesDraft(draft, 'saved-meeting');
+    } finally {
+      console.error = consoleError;
+    }
 
     expect(result).toEqual({ status: 'failed', markdown: 'Ship Friday' });
+  });
+});
+
+const stored = { blocks: blocks as any, markdown: 'Ship Friday' };
+const silenceConsole = async <T>(run: () => Promise<T>): Promise<T> => {
+  const original = { warn: console.warn, error: console.error };
+  console.warn = () => {};
+  console.error = () => {};
+  try {
+    return await run();
+  } finally {
+    console.warn = original.warn;
+    console.error = original.error;
+  }
+};
+const rejectingLoader = async () => {
+  throw new Error('idb closed');
+};
+
+describe('resolveNotesDraft', () => {
+  test('the in-memory draft wins and the loader is not needed', async () => {
+    recordingNotesDraft.set('meeting-1', { blocks: blocks as any, markdown: 'from memory' });
+    const loader = mock(async () => stored);
+
+    expect(await resolveNotesDraft('meeting-1', loader)).toEqual({ blocks: blocks as any, markdown: 'from memory' });
+    expect(loader).not.toHaveBeenCalled();
+  });
+
+  test('falls back to the stored draft when memory is empty', async () => {
+    const loader = mock(async (_id: string) => stored);
+
+    expect(await resolveNotesDraft('meeting-1', loader)).toEqual(stored);
+    expect(loader).toHaveBeenCalledWith('meeting-1');
+  });
+
+  test('a missing recording id gives null without loading', async () => {
+    const loader = mock(async () => stored);
+
+    expect(await resolveNotesDraft(null, loader)).toBeNull();
+    expect(loader).not.toHaveBeenCalled();
+  });
+
+  test('a loader that rejects gives null', async () => {
+    expect(await silenceConsole(() => resolveNotesDraft('meeting-1', rejectingLoader))).toBeNull();
+  });
+});
+
+describe('restoreRecordingNotesDraft', () => {
+  test('puts a stored draft back into memory', async () => {
+    expect(await restoreRecordingNotesDraft('meeting-1', async () => stored)).toBe(true);
+    expect(recordingNotesDraft.get('meeting-1')).toEqual(stored);
+  });
+
+  test('does nothing when memory already has a draft', async () => {
+    recordingNotesDraft.set('meeting-1', { blocks: blocks as any, markdown: 'newer' });
+
+    expect(await restoreRecordingNotesDraft('meeting-1', async () => stored)).toBe(false);
+    expect(recordingNotesDraft.get('meeting-1')?.markdown).toBe('newer');
+  });
+
+  test('does not overwrite a draft typed while the stored one was loading', async () => {
+    const result = await restoreRecordingNotesDraft('meeting-1', async () => {
+      recordingNotesDraft.set('meeting-1', { blocks: blocks as any, markdown: 'typed meanwhile' });
+      return stored;
+    });
+
+    expect(result).toBe(false);
+    expect(recordingNotesDraft.get('meeting-1')?.markdown).toBe('typed meanwhile');
+  });
+
+  test('ignores a blank or missing stored draft', async () => {
+    expect(await restoreRecordingNotesDraft('meeting-1', async () => ({ blocks: [], markdown: '  ' }))).toBe(false);
+    expect(await restoreRecordingNotesDraft('meeting-1', async () => null)).toBe(false);
+    expect(await restoreRecordingNotesDraft('meeting-1', async () => undefined)).toBe(false);
+    expect(recordingNotesDraft.get('meeting-1')).toBeNull();
+  });
+
+  test('a loader that rejects restores nothing', async () => {
+    expect(await silenceConsole(() => restoreRecordingNotesDraft('meeting-1', rejectingLoader))).toBe(false);
+    expect(recordingNotesDraft.get('meeting-1')).toBeNull();
   });
 });

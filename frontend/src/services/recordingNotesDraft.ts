@@ -26,6 +26,48 @@ export type NotesCommitResult =
   | { status: 'saved' }
   | { status: 'failed'; markdown: string };
 
+type RecoveryDraftLoader = (recordingId: string) => Promise<NotesDraft | null | undefined>;
+
+/**
+ * The draft for a recording: the in-memory one, or, after a reload has emptied
+ * memory, the one kept on the recovery record. Never throws.
+ */
+export async function resolveNotesDraft(
+  recordingId: string | null,
+  loadRecoveryDraft: RecoveryDraftLoader,
+): Promise<NotesDraft | null> {
+  const inMemory = recordingNotesDraft.get(recordingId);
+  if (inMemory) return inMemory;
+  if (!recordingId) return null;
+  try {
+    return (await loadRecoveryDraft(recordingId)) ?? null;
+  } catch (error) {
+    console.error('Failed to read the recording notes draft', error);
+    return null;
+  }
+}
+
+/**
+ * Puts the draft kept on the recovery record back into memory after a reload.
+ * Returns whether anything was restored. Never throws.
+ */
+export async function restoreRecordingNotesDraft(
+  recordingId: string,
+  loadRecoveryDraft: RecoveryDraftLoader,
+): Promise<boolean> {
+  if (recordingNotesDraft.get(recordingId)) return false;
+  try {
+    const stored = await loadRecoveryDraft(recordingId);
+    // Typing may have started while the stored draft was loading.
+    if (!stored || !stored.markdown.trim() || recordingNotesDraft.get(recordingId)) return false;
+    recordingNotesDraft.set(recordingId, { blocks: stored.blocks as Block[], markdown: stored.markdown });
+    return true;
+  } catch (error) {
+    console.error('Failed to restore the recording notes draft', error);
+    return false;
+  }
+}
+
 /** Writes notes typed during a recording to the meeting that was just saved. */
 export async function commitNotesDraft(
   draft: NotesDraft | null | undefined,

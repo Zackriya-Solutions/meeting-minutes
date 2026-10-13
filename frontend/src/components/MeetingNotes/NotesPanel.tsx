@@ -63,6 +63,7 @@ function NotesEditor({ initialBlocks, initialMarkdown, onChange, editable, onFai
   const editorRef = useRef<BlockNoteEditorInstance | null>(null);
   const loadedMarkdownRef = useRef(false);
   const editorReadyRef = useRef(false);
+  const markedLoadedRef = useRef(false);
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
 
@@ -79,18 +80,28 @@ function NotesEditor({ initialBlocks, initialMarkdown, onChange, editable, onFai
     [],
   );
 
+  // The document is snapshotted as the saved baseline once; a later ready event must not re-snapshot typed text.
+  const markLoadedOnce = useCallback(
+    (editor: BlockNoteEditorInstance) => {
+      if (markedLoadedRef.current) return;
+      markedLoadedRef.current = true;
+      emitter.markLoaded(editor.document);
+    },
+    [emitter],
+  );
+
   const handleEditorReady = useCallback(
     (editor: BlockNoteEditorInstance) => {
       editorRef.current = editor;
       editorReadyRef.current = true;
       if (!fromMarkdown) {
-        emitter.markLoaded(editor.document);
+        markLoadedOnce(editor);
         return;
       }
       if (loadedMarkdownRef.current) return;
       loadedMarkdownRef.current = true;
       if (!initialMarkdown.trim()) {
-        emitter.markLoaded(editor.document);
+        markLoadedOnce(editor);
         return;
       }
       // Loading stored markdown is not an edit: it must not trigger a save.
@@ -99,14 +110,14 @@ function NotesEditor({ initialBlocks, initialMarkdown, onChange, editable, onFai
           const blocks = await editor.tryParseMarkdownToBlocks(initialMarkdown);
           editor.replaceBlocks(editor.document, blocks);
           await new Promise((resolve) => setTimeout(resolve, 0));
-          emitter.markLoaded(editor.document);
+          markLoadedOnce(editor);
         })
         .catch((error) => {
           console.error('Failed to load notes from markdown', error);
           onFailed();
         });
     },
-    [emitter, fromMarkdown, initialMarkdown, onFailed],
+    [emitter, markLoadedOnce, fromMarkdown, initialMarkdown, onFailed],
   );
 
   const handleBlocksChange = useCallback(

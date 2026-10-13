@@ -1,16 +1,45 @@
-import { useCallback, useEffect, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranscripts } from '@/contexts/TranscriptContext';
 import type { NotesContent } from '@/lib/meeting-notes';
 import { createNotesAutosaver } from '@/lib/notes-autosave';
 import { indexedDBService } from '@/services/indexedDBService';
-import { recordingNotesDraft } from '@/services/recordingNotesDraft';
+import { recordingNotesDraft, restoreRecordingNotesDraft } from '@/services/recordingNotesDraft';
+
+const RECORDING_ID_KEY = 'indexeddb_current_meeting_id';
+
+// After a reload the context has no recording id until the next recording event,
+// but the id of the recording in progress is still in session storage.
+function storedRecordingId(): string | null {
+  try {
+    return typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(RECORDING_ID_KEY) : null;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Notes for the recording in progress. Edits go to the in-memory draft at once
- * and to the crash-recovery record shortly after.
+ * and to the crash-recovery record shortly after. `isReady` turns true once a
+ * draft kept from before a reload has been put back in memory.
  */
 export function useRecordingNotesDraft(persistDelayMs = 500) {
-  const { currentMeetingId: recordingId } = useTranscripts();
+  const { currentMeetingId } = useTranscripts();
+  const recordingId = currentMeetingId ?? storedRecordingId();
+  const [readyFor, setReadyFor] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!recordingId) return;
+    let cancelled = false;
+    void restoreRecordingNotesDraft(
+      recordingId,
+      async (id) => (await indexedDBService.getMeetingMetadata(id))?.notesDraft,
+    ).then(() => {
+      if (!cancelled) setReadyFor(recordingId);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [recordingId]);
 
   const autosaver = useMemo(
     () =>
@@ -39,11 +68,5 @@ export function useRecordingNotesDraft(persistDelayMs = 500) {
     [recordingId, autosaver],
   );
 
-  const stored = recordingNotesDraft.get(recordingId);
-  return {
-    recordingId,
-    initialBlocks: stored?.blocks ?? null,
-    initialMarkdown: stored?.markdown ?? '',
-    handleChange,
-  };
+  return { recordingId, isReady: recordingId !== null && readyFor === recordingId, handleChange };
 }

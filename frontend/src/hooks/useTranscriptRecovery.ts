@@ -10,6 +10,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { indexedDBService, MeetingMetadata, StoredTranscript } from '@/services/indexedDBService';
 import { storageService } from '@/services/storageService';
 import { commitNotesDraft } from '@/services/recordingNotesDraft';
+import { notifyUnsavedNotes } from '@/lib/notes-toast';
 import { applyPinnedSummaryLanguageToMeeting } from '@/lib/summary-language-preferences';
 import { toast } from 'sonner';
 
@@ -197,15 +198,11 @@ export function useTranscriptRecovery(): UseTranscriptRecoveryReturn {
       // Restore notes typed before the app closed.
       const notesResult = await commitNotesDraft(metadata.notesDraft, savedMeetingId);
       if (notesResult.status === 'failed') {
-        toast.warning('Could not restore notes', {
+        notifyUnsavedNotes({
+          level: 'warning',
+          title: 'Could not restore notes',
           description: 'The recovered meeting was saved, but its notes were not restored.',
-          action: {
-            label: 'Copy notes',
-            onClick: () => {
-              void navigator.clipboard.writeText(notesResult.markdown);
-            },
-          },
-          duration: Infinity,
+          markdown: notesResult.markdown,
         });
       }
 

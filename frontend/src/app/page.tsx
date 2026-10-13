@@ -31,7 +31,7 @@ export default function Home() {
   const [recordingView, setRecordingView] = useState<'transcript' | 'notes'>('transcript');
 
   // Use contexts for state management
-  const { meetingTitle, currentMeetingId } = useTranscripts();
+  const { meetingTitle } = useTranscripts();
   const { transcriptModelConfig, selectedDevices } = useConfig();
   const recordingState = useRecordingState();
 
@@ -191,9 +191,8 @@ export default function Home() {
   // Computed values using global status
   const isProcessingStop = status === RecordingStatus.PROCESSING_TRANSCRIPTS || isProcessing;
 
-  // Notes are available from the moment the recording has its recovery id until it is saved.
-  const showNotes = Boolean(currentMeetingId)
-    && (recordingState.isRecording || isStopping || isProcessingStop || isSaving);
+  // Notes are available while recording until the meeting is saved; the pane waits for the recording's recovery id.
+  const showNotes = recordingState.isRecording || isStopping || isProcessingStop || isSaving;
 
   return (
     <div className="flex flex-col h-screen bg-gray-50">

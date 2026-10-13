@@ -1,8 +1,10 @@
 'use client';
 
 import { useState } from 'react';
+import type { NotesContent } from '@/lib/meeting-notes';
 import { NotesPanel } from '@/components/MeetingNotes/NotesPanel';
 import { useRecordingNotesDraft } from '@/hooks/useRecordingNotesDraft';
+import { recordingNotesDraft } from '@/services/recordingNotesDraft';
 
 interface RecordingNotesProps {
   // False once the recording is stopping, so nothing is typed after the note is saved.
@@ -10,19 +12,41 @@ interface RecordingNotesProps {
   className?: string;
 }
 
-/** Notes pane shown beside the live transcript while recording. */
-export function RecordingNotes({ editable, className }: RecordingNotesProps) {
-  const { recordingId, initialBlocks, initialMarkdown, handleChange } = useRecordingNotesDraft();
-  const [attempt, setAttempt] = useState(0);
+interface RecordingNotesPaneProps extends RecordingNotesProps {
+  recordingId: string;
+  onChange: (content: NotesContent) => void;
+  onRetryLoad: () => void;
+}
 
-  if (!recordingId) return null;
+// The editor's starting content is read once per mount; the page re-renders
+// often while recording and must not hand the editor a new document each time.
+function RecordingNotesPane({ recordingId, onChange, onRetryLoad, editable, className }: RecordingNotesPaneProps) {
+  const [initial] = useState(() => recordingNotesDraft.get(recordingId));
 
   return (
     <NotesPanel
-      key={`${recordingId}:${attempt}`}
-      initialBlocks={initialBlocks}
-      initialMarkdown={initialMarkdown}
+      initialBlocks={initial?.blocks ?? null}
+      initialMarkdown={initial?.markdown ?? ''}
       saveState="idle"
+      onChange={onChange}
+      onRetryLoad={onRetryLoad}
+      editable={editable}
+      className={className}
+    />
+  );
+}
+
+/** Notes pane shown beside the live transcript while recording. */
+export function RecordingNotes({ editable, className }: RecordingNotesProps) {
+  const { recordingId, isReady, handleChange } = useRecordingNotesDraft();
+  const [attempt, setAttempt] = useState(0);
+
+  if (!recordingId || !isReady) return null;
+
+  return (
+    <RecordingNotesPane
+      key={`${recordingId}:${attempt}`}
+      recordingId={recordingId}
       onChange={handleChange}
       onRetryLoad={() => setAttempt((current) => current + 1)}
       editable={editable}

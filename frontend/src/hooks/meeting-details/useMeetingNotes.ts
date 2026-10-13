@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Block } from '@blocknote/core';
-import { toast } from 'sonner';
 import { parseNotesBlocks, type NotesContent } from '@/lib/meeting-notes';
+import { notifyUnsavedNotes } from '@/lib/notes-toast';
 import { createNotesAutosaver, type NotesSaveState } from '@/lib/notes-autosave';
 import { notesService } from '@/services/notesService';
 
@@ -49,15 +49,11 @@ export function useMeetingNotes(meetingId: string, saveDelayMs = 1000) {
       if (autosaver.hasUnsaved()) await autosaver.retry();
       if (!autosaver.hasUnsaved()) return;
       const markdown = autosaver.latest()?.markdown ?? '';
-      toast.error("Couldn't save notes", {
+      notifyUnsavedNotes({
+        level: 'error',
+        title: "Couldn't save notes",
         description: 'Your last edits to the previous meeting were not saved. Copy them now so they are not lost.',
-        action: {
-          label: 'Copy notes',
-          onClick: () => {
-            void navigator.clipboard.writeText(markdown);
-          },
-        },
-        duration: Infinity,
+        markdown,
       });
     };
     if (typeof window !== 'undefined') window.addEventListener('beforeunload', flush);

@@ -157,15 +157,19 @@ class IndexedDBService {
       await new Promise<void>((resolve, reject) => {
         const getRequest = store.get(meetingId);
         getRequest.onsuccess = () => {
-          const meeting = getRequest.result as MeetingMetadata | undefined;
-          if (!meeting) {
-            resolve();
-            return;
+          try {
+            const meeting = getRequest.result as MeetingMetadata | undefined;
+            if (!meeting) {
+              resolve();
+              return;
+            }
+            meeting.notesDraft = notesDraft;
+            const putRequest = store.put(meeting);
+            putRequest.onsuccess = () => resolve();
+            putRequest.onerror = () => reject(putRequest.error);
+          } catch (error) {
+            reject(error);
           }
-          meeting.notesDraft = notesDraft;
-          const putRequest = store.put(meeting);
-          putRequest.onsuccess = () => resolve();
-          putRequest.onerror = () => reject(putRequest.error);
         };
         getRequest.onerror = () => reject(getRequest.error);
       });
