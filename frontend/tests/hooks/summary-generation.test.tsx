@@ -22,6 +22,7 @@ const trackCompletion = mock(async (..._args: Parameters<typeof originalAnalytic
 mock.module('../../src/lib/analytics', () => ({ default: {
   trackBackendConnection() {}, trackSummaryGenerationStarted: async () => {},
   trackSummaryGenerationCompleted: trackCompletion,
+  trackCustomPromptUsed: async () => {},
 } }));
 let startProcess: () => Promise<{ process_id: string }>;
 let getSummary: (meetingId: string) => Promise<SummaryProcessResponse>;
@@ -269,5 +270,29 @@ describe('summary state restored when returning to a meeting', () => {
     await tick();
     expect(state.summaryStatus).toBe('completed');
     expect(text()).toContain('Finished summary');
+  });
+});
+
+describe('summary context sent with a run', () => {
+  const idle = () => response({ status: 'idle', start: null });
+  const processArgs = () =>
+    invoke.mock.calls.find(([command]) => command === 'api_process_transcript')?.[1];
+
+  test('Generate sends the meeting text and the inherit switch', async () => {
+    await show(idle());
+    await act(async () => state.handleGenerateSummary('Client: Initech', false));
+    expect(processArgs()).toMatchObject({ customPrompt: 'Client: Initech', useInheritedContext: false });
+  });
+
+  test('Regenerate sends the meeting text and the inherit switch', async () => {
+    await show(idle());
+    await act(async () => state.handleRegenerateSummary('Client: Initech', false));
+    expect(processArgs()).toMatchObject({ customPrompt: 'Client: Initech', useInheritedContext: false });
+  });
+
+  test('without arguments a run sends empty text and inherits', async () => {
+    await show(idle());
+    await act(async () => state.handleGenerateSummary());
+    expect(processArgs()).toMatchObject({ customPrompt: '', useInheritedContext: true });
   });
 });
