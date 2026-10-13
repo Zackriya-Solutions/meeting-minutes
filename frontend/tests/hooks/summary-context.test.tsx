@@ -155,5 +155,35 @@ describe('summary context for the open meeting', () => {
     expect(state.isLoaded).toBe(true);
     expect(state.text).toBe('');
     expect(state.inherited).toEqual([]);
+    await act(async () => { state.setText('typed after failure'); });
+    await act(async () => { await state.flush(); });
+    expect(saved).toEqual([{ meetingId: 'meeting-a', context: 'typed after failure', useInherited: true }]);
+  });
+
+  test('edits before the load has finished are ignored and save nothing', async () => {
+    let resolve!: (value: MeetingSummaryContext) => void;
+    load = () => new Promise(done => { resolve = done; });
+    await show('meeting-a');
+    await act(async () => { state.setText('too early'); state.setUseInherited(false); });
+    await settle(DELAY * 4);
+    expect(saved).toEqual([]);
+    resolve(context({ context: 'Saved text' }));
+    await settle();
+    expect(state.text).toBe('Saved text');
+    expect(state.useInherited).toBe(true);
+  });
+
+  test('after switching to a meeting whose load is pending, edits are ignored too', async () => {
+    let resolveB!: (value: MeetingSummaryContext) => void;
+    load = meetingId => meetingId === 'meeting-b'
+      ? new Promise(done => { resolveB = done; })
+      : Promise.resolve(context());
+    await show('meeting-a');
+    await show('meeting-b');
+    await act(async () => { state.setText('too early'); });
+    await settle(DELAY * 4);
+    expect(saved).toEqual([]);
+    resolveB(context());
+    await settle();
   });
 });

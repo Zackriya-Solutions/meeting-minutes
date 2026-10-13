@@ -20,6 +20,7 @@ export function useSummaryContext(
   const [inherited, setInherited] = useState<InheritedContext[]>([]);
   const [isLoaded, setIsLoaded] = useState(false);
   const valueRef = useRef<SavedValue>(EMPTY);
+  const loadedRef = useRef(false);
 
   const [saver] = useState(() => createDebouncedSaver<SavedValue>(
     (id, next) => summaryContextService.saveMeeting(id, next.context, next.useInherited),
@@ -40,6 +41,7 @@ export function useSummaryContext(
     apply(EMPTY);
     setInherited([]);
     setIsLoaded(false);
+    loadedRef.current = false;
 
     summaryContextService.getMeeting(meetingId)
       .then(result => {
@@ -53,7 +55,9 @@ export function useSummaryContext(
         toast.error('Failed to load summary context', { description: String(error) });
       })
       .finally(() => {
-        if (!cancelled) setIsLoaded(true);
+        if (cancelled) return;
+        loadedRef.current = true;
+        setIsLoaded(true);
       });
 
     return () => {
@@ -64,12 +68,14 @@ export function useSummaryContext(
   }, [meetingId, saver, apply]);
 
   const setText = useCallback((context: string) => {
+    if (!loadedRef.current) return;
     const next = { ...valueRef.current, context };
     apply(next);
     saver.schedule(meetingId, next);
   }, [apply, meetingId, saver]);
 
   const setUseInherited = useCallback((useInherited: boolean) => {
+    if (!loadedRef.current) return;
     const next = { ...valueRef.current, useInherited };
     apply(next);
     saver.schedule(meetingId, next);
