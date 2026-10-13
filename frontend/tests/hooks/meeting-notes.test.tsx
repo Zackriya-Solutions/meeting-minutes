@@ -151,6 +151,28 @@ describe('useMeetingNotes', () => {
     }
   });
 
+  test('reload saves a pending edit before it loads again', async () => {
+    const order: string[] = [];
+    readNotes = async () => {
+      order.push('get');
+      return null;
+    };
+    await show('meeting-a');
+    await settle();
+    act(() => { notes.handleChange({ blocks: [block('pending')] as any, markdown: 'pending' }); });
+
+    act(() => { notes.reload(); });
+    await settle();
+
+    expect(saves).toEqual([
+      { meetingId: 'meeting-a', markdown: 'pending', notesJson: JSON.stringify([block('pending')]) },
+    ]);
+    expect(order).toEqual(['get', 'get']);
+    const saveIndex = invoke.mock.calls.map((c) => c[0]).lastIndexOf('api_save_meeting_notes');
+    const lastGet = invoke.mock.calls.map((c) => c[0]).lastIndexOf('api_get_meeting_notes');
+    expect(saveIndex).toBeLessThan(lastGet);
+  });
+
   test('getMarkdown returns the newest edit, saved or not', async () => {
     readNotes = async () => ({ markdown: 'stored', notes_json: null });
     await show('meeting-a');

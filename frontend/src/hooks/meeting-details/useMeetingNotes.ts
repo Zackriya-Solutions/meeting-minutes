@@ -103,7 +103,10 @@ export function useMeetingNotes(meetingId: string, saveDelayMs = 1000) {
   const retrySave = useCallback(() => {
     void autosaver.retry();
   }, [autosaver]);
-  const reload = useCallback(() => setLoadAttempt((attempt) => attempt + 1), []);
+  const reload = useCallback(() => {
+    // Pending edits are saved first so the reload cannot show older content over them.
+    void autosaver.flush().then(() => setLoadAttempt((attempt) => attempt + 1));
+  }, [autosaver]);
   const getMarkdown = useCallback(
     () => autosaver.latest()?.markdown ?? storedMarkdownRef.current,
     [autosaver],

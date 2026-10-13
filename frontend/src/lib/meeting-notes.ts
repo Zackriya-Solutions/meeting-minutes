@@ -55,6 +55,19 @@ export interface NotesChangeEmitter {
   handle: (blocks: Block[]) => Promise<void>;
   /** Runs `work` while ignoring edits, for content the app loads into the editor itself. */
   suppress: <T>(work: () => Promise<T>) => Promise<T>;
+  /** Records the document the editor opened with; edits identical to it are ignored until one differs. */
+  markLoaded: (blocks: Block[]) => void;
+}
+
+/**
+ * Decides what to do when the editor fails: only a failure before the editor was ever
+ * ready, while opening stored blocks, is worth retrying from markdown.
+ */
+export function editorFailureAction(
+  editorWasReady: boolean,
+  fromMarkdown: boolean,
+): 'open-from-markdown' | 'show-error' {
+  return !editorWasReady && !fromMarkdown ? 'open-from-markdown' : 'show-error';
 }
 
 export function createNotesChangeEmitter(
@@ -63,10 +76,18 @@ export function createNotesChangeEmitter(
 ): NotesChangeEmitter {
   let sequence = 0;
   let suppressed = 0;
+  let loadedSnapshot: string | null = null;
 
   return {
+    markLoaded(blocks) {
+      loadedSnapshot = JSON.stringify(blocks);
+    },
     async handle(blocks) {
       if (suppressed > 0) return;
+      if (loadedSnapshot !== null) {
+        if (JSON.stringify(blocks) === loadedSnapshot) return;
+        loadedSnapshot = null;
+      }
       const current = ++sequence;
       let markdown: string | undefined;
       try {

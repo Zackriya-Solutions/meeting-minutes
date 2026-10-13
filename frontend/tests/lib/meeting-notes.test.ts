@@ -2,6 +2,7 @@ import { describe, expect, mock, test } from 'bun:test';
 import {
   blocksToPlainText,
   createNotesChangeEmitter,
+  editorFailureAction,
   parseNotesBlocks,
   type NotesContent,
 } from '../../src/lib/meeting-notes';
@@ -150,5 +151,29 @@ describe('createNotesChangeEmitter', () => {
 
     await emitter.handle([paragraph('typed')] as any);
     expect(emitted.length).toBe(1);
+  });
+
+  test('markLoaded ignores changes identical to the loaded document until one differs', async () => {
+    const emitted: NotesContent[] = [];
+    const emitter = createNotesChangeEmitter(async () => 'md', (c) => emitted.push(c));
+    emitter.markLoaded([paragraph('loaded')] as any);
+
+    await emitter.handle([paragraph('loaded')] as any);
+    expect(emitted).toEqual([]);
+
+    await emitter.handle([paragraph('edited')] as any);
+    expect(emitted.length).toBe(1);
+
+    await emitter.handle([paragraph('loaded')] as any);
+    expect(emitted.length).toBe(2);
+  });
+});
+
+describe('editorFailureAction', () => {
+  test('opens from markdown only when the editor failed before it was ever ready and was not already in markdown mode', () => {
+    expect(editorFailureAction(false, false)).toBe('open-from-markdown');
+    expect(editorFailureAction(false, true)).toBe('show-error');
+    expect(editorFailureAction(true, false)).toBe('show-error');
+    expect(editorFailureAction(true, true)).toBe('show-error');
   });
 });

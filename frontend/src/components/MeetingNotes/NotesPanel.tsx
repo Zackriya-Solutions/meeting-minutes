@@ -1,13 +1,13 @@
 'use client';
 
-import { Component, useCallback, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Component, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import dynamic from 'next/dynamic';
 import type { Block } from '@blocknote/core';
 import { Copy, NotebookPen } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { blocksToMarkdownSafely } from '@/lib/blocknote-markdown';
-import { createNotesChangeEmitter, type NotesContent } from '@/lib/meeting-notes';
+import { createNotesChangeEmitter, editorFailureAction, type NotesContent } from '@/lib/meeting-notes';
 import type { NotesSaveState } from '@/lib/notes-autosave';
 import type { NotesLoadState } from '@/hooks/meeting-details/useMeetingNotes';
 import type { BlockNoteEditorInstance } from '@/components/BlockNoteEditor/Editor';
@@ -26,9 +26,10 @@ interface NotesEditorProps {
   initialMarkdown: string;
   onChange: (content: NotesContent) => void;
   editable: boolean;
+  onFailed: () => void;
 }
 
-interface NotesPanelProps extends Omit<NotesEditorProps, 'editable'> {
+interface NotesPanelProps extends Omit<NotesEditorProps, 'editable' | 'onFailed'> {
   loadState?: NotesLoadState;
   saveState: NotesSaveState;
   onRetryLoad?: () => void;
@@ -56,11 +57,12 @@ class EditorBoundary extends Component<{ onError: () => void; children: ReactNod
   }
 }
 
-function NotesEditor({ initialBlocks, initialMarkdown, onChange, editable }: NotesEditorProps) {
+function NotesEditor({ initialBlocks, initialMarkdown, onChange, editable, onFailed }: NotesEditorProps) {
   const startBlocks = initialBlocks && initialBlocks.length > 0 ? initialBlocks : null;
   const [fromMarkdown, setFromMarkdown] = useState(startBlocks === null);
   const editorRef = useRef<BlockNoteEditorInstance | null>(null);
   const loadedMarkdownRef = useRef(false);
+  const editorReadyRef = useRef(false);
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
 
@@ -80,18 +82,31 @@ function NotesEditor({ initialBlocks, initialMarkdown, onChange, editable }: Not
   const handleEditorReady = useCallback(
     (editor: BlockNoteEditorInstance) => {
       editorRef.current = editor;
-      if (!fromMarkdown || loadedMarkdownRef.current || !initialMarkdown.trim()) return;
+      editorReadyRef.current = true;
+      if (!fromMarkdown) {
+        emitter.markLoaded(editor.document);
+        return;
+      }
+      if (loadedMarkdownRef.current) return;
       loadedMarkdownRef.current = true;
+      if (!initialMarkdown.trim()) {
+        emitter.markLoaded(editor.document);
+        return;
+      }
       // Loading stored markdown is not an edit: it must not trigger a save.
       emitter
         .suppress(async () => {
           const blocks = await editor.tryParseMarkdownToBlocks(initialMarkdown);
           editor.replaceBlocks(editor.document, blocks);
           await new Promise((resolve) => setTimeout(resolve, 0));
+          emitter.markLoaded(editor.document);
         })
-        .catch((error) => console.error('Failed to load notes from markdown', error));
+        .catch((error) => {
+          console.error('Failed to load notes from markdown', error);
+          onFailed();
+        });
     },
-    [emitter, fromMarkdown, initialMarkdown],
+    [emitter, fromMarkdown, initialMarkdown, onFailed],
   );
 
   const handleBlocksChange = useCallback(
@@ -101,8 +116,16 @@ function NotesEditor({ initialBlocks, initialMarkdown, onChange, editable }: Not
     [emitter],
   );
 
+  const handleEditorError = useCallback(() => {
+    if (editorFailureAction(editorReadyRef.current, fromMarkdown) === 'open-from-markdown') {
+      setFromMarkdown(true);
+    } else {
+      onFailed();
+    }
+  }, [fromMarkdown, onFailed]);
+
   return (
-    <EditorBoundary key={fromMarkdown ? 'markdown' : 'blocks'} onError={() => setFromMarkdown(true)}>
+    <EditorBoundary key={fromMarkdown ? 'markdown' : 'blocks'} onError={handleEditorError}>
       <Editor
         initialContent={fromMarkdown ? undefined : startBlocks ?? undefined}
         onChange={handleBlocksChange}
@@ -125,6 +148,13 @@ export function NotesPanel({
   editable = true,
   className,
 }: NotesPanelProps) {
+  const [editorFailed, setEditorFailed] = useState(false);
+  const handleEditorFailed = useCallback(() => setEditorFailed(true), []);
+  useEffect(() => {
+    if (loadState !== 'ready') setEditorFailed(false);
+  }, [loadState]);
+  const showError = loadState === 'error' || (loadState === 'ready' && editorFailed);
+
   return (
     <div className={cn('flex min-h-0 min-w-0 flex-1 flex-col bg-white', className)}>
       <div className="flex shrink-0 items-center justify-between gap-2 border-b border-gray-200 px-4 py-2">
@@ -149,7 +179,7 @@ export function NotesPanel({
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto py-3">
         {loadState === 'loading' && <p className="px-4 text-sm text-gray-500">Loading notes…</p>}
-        {loadState === 'error' && (
+        {showError && (
           <div className="px-4 text-sm text-gray-700">
             <p>Couldn&apos;t load notes.</p>
             {onRetryLoad && (
@@ -159,12 +189,13 @@ export function NotesPanel({
             )}
           </div>
         )}
-        {loadState === 'ready' && (
+        {loadState === 'ready' && !editorFailed && (
           <NotesEditor
             initialBlocks={initialBlocks}
             initialMarkdown={initialMarkdown}
             onChange={onChange}
             editable={editable}
+            onFailed={handleEditorFailed}
           />
         )}
       </div>
