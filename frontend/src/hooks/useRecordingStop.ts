@@ -431,10 +431,14 @@ export function useRecordingStop(
       } else {
         // No save needed, go back to IDLE
         setStatus(RecordingStatus.IDLE);
-        await reportUnsavedRecordingNotes(
-          sessionStorage.getItem('indexeddb_current_meeting_id'),
-          loadRecoveryNotesDraft,
-        );
+        // A stop called with false can arrive while the recording is still running
+        // (mid-recording transcription errors), so the notes must stay untouched then.
+        if (isCallApi) {
+          await reportUnsavedRecordingNotes(
+            sessionStorage.getItem('indexeddb_current_meeting_id'),
+            loadRecoveryNotesDraft,
+          );
+        }
       }
 
       setIsMeetingActive(false);
