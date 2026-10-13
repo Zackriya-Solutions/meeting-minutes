@@ -68,11 +68,18 @@ export function createNotesChangeEmitter(
     async handle(blocks) {
       if (suppressed > 0) return;
       const current = ++sequence;
-      const markdown = await toMarkdown(blocks);
+      let markdown: string | undefined;
+      try {
+        markdown = await toMarkdown(blocks);
+      } catch {
+        markdown = undefined;
+      }
       if (current !== sequence) return;
-      emit({ blocks, markdown: markdown ?? blocksToPlainText(blocks) });
+      emit({ blocks, markdown: markdown?.trim() ? markdown : blocksToPlainText(blocks) });
     },
     async suppress(work) {
+      // Conversions already running describe content the editor no longer holds.
+      sequence += 1;
       suppressed += 1;
       try {
         return await work();

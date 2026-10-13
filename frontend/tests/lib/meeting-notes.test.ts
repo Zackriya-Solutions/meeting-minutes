@@ -89,6 +89,56 @@ describe('createNotesChangeEmitter', () => {
     expect(emitted.map((c) => c.markdown)).toEqual(['second']);
   });
 
+  test('falls back to plain text when markdown conversion returns an empty string', async () => {
+    const emitted: NotesContent[] = [];
+    const emitter = createNotesChangeEmitter(async () => '  \n', (c) => emitted.push(c));
+
+    await emitter.handle([paragraph('Ship Friday')] as any);
+
+    expect(emitted[0].markdown).toBe('Ship Friday');
+  });
+
+  test('falls back to plain text when markdown conversion rejects', async () => {
+    const emitted: NotesContent[] = [];
+    const emitter = createNotesChangeEmitter(async () => { throw new Error('boom'); }, (c) => emitted.push(c));
+
+    await emitter.handle([paragraph('Ship Friday')] as any);
+
+    expect(emitted.map((c) => c.markdown)).toEqual(['Ship Friday']);
+  });
+
+  test('a rejected newer conversion does not leave an older edit dropped without a replacement', async () => {
+    const emitted: NotesContent[] = [];
+    let releaseFirst!: (markdown: string) => void;
+    const emitter = createNotesChangeEmitter(async (blocks: any[]) => {
+      if (blocks[0].id === 'first') return new Promise<string>((resolve) => { releaseFirst = resolve; });
+      throw new Error('boom');
+    }, (c) => emitted.push(c));
+
+    const first = emitter.handle([paragraph('first')] as any);
+    await emitter.handle([paragraph('second')] as any);
+    releaseFirst('first');
+    await first;
+
+    expect(emitted.map((c) => c.markdown)).toEqual(['second']);
+  });
+
+  test('drops a conversion that was in flight when content was loaded under suppress', async () => {
+    const emitted: NotesContent[] = [];
+    let release!: (markdown: string) => void;
+    const emitter = createNotesChangeEmitter(
+      () => new Promise<string>((resolve) => { release = resolve; }),
+      (c) => emitted.push(c),
+    );
+
+    const typed = emitter.handle([paragraph('typed')] as any);
+    await emitter.suppress(async () => {});
+    release('typed');
+    await typed;
+
+    expect(emitted).toEqual([]);
+  });
+
   test('emits nothing for changes made while suppressed, so opening a note does not rewrite it', async () => {
     const emitted: NotesContent[] = [];
     const emitter = createNotesChangeEmitter(async () => 'loaded', (c) => emitted.push(c));
