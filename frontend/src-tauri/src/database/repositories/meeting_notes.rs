@@ -1,3 +1,5 @@
+use crate::api::{SearchMatchSource, TranscriptSearchResult};
+use crate::database::repositories::transcript::TranscriptsRepository;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
@@ -77,6 +79,38 @@ impl MeetingNotesRepository {
         .execute(pool)
         .await?;
         Ok(true)
+    }
+
+    /// Finds notes containing `query`, ignoring case.
+    pub async fn search(
+        pool: &SqlitePool,
+        query: &str,
+    ) -> Result<Vec<TranscriptSearchResult>, sqlx::Error> {
+        if query.trim().is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let pattern = format!("%{}%", query.to_lowercase());
+        let rows = sqlx::query_as::<_, (String, String, String, String)>(
+            "SELECT m.id, m.title, n.notes_markdown, n.updated_at
+             FROM meeting_notes n
+             JOIN meetings m ON m.id = n.meeting_id
+             WHERE LOWER(n.notes_markdown) LIKE ?",
+        )
+        .bind(&pattern)
+        .fetch_all(pool)
+        .await?;
+
+        Ok(rows
+            .into_iter()
+            .map(|(id, title, markdown, updated_at)| TranscriptSearchResult {
+                id,
+                title,
+                match_context: TranscriptsRepository::get_match_context(&markdown, query),
+                timestamp: updated_at,
+                source: SearchMatchSource::Notes,
+            })
+            .collect())
     }
 }
 
@@ -214,5 +248,54 @@ mod tests {
         assert!(!is_block_array(r#"{"blocks":[]}"#));
         assert!(!is_block_array(r#"["text"]"#));
         assert!(!is_block_array("not json"));
+    }
+
+    #[tokio::test]
+    async fn search_finds_a_note_ignoring_case() {
+        let pool = test_pool().await;
+        seed_meeting(&pool, "m1", "Planning").await;
+        seed_meeting(&pool, "m2", "Retro").await;
+        MeetingNotesRepository::upsert(&pool, "m1", "Budget review moved to Friday", Some(BLOCKS))
+            .await
+            .unwrap();
+        MeetingNotesRepository::upsert(&pool, "m2", "Nothing relevant", Some(BLOCKS))
+            .await
+            .unwrap();
+
+        let results = MeetingNotesRepository::search(&pool, "BUDGET").await.unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].id, "m1");
+        assert_eq!(results[0].title, "Planning");
+        assert_eq!(results[0].source, SearchMatchSource::Notes);
+        assert!(results[0].match_context.contains("Budget review"));
+    }
+
+    #[tokio::test]
+    async fn search_with_a_blank_query_returns_nothing() {
+        let pool = test_pool().await;
+        seed_meeting(&pool, "m1", "Planning").await;
+        MeetingNotesRepository::upsert(&pool, "m1", "Budget review", Some(BLOCKS))
+            .await
+            .unwrap();
+        assert!(MeetingNotesRepository::search(&pool, "   ").await.unwrap().is_empty());
+    }
+
+    #[test]
+    fn match_context_survives_multi_byte_text() {
+        // 67 three-byte characters put the 100-byte look-back in the middle of a character.
+        let text = format!("{}budget review 🎯", "日".repeat(67));
+        let context = TranscriptsRepository::get_match_context(&text, "budget");
+        assert!(context.contains("budget review 🎯"));
+    }
+
+    #[test]
+    fn match_context_trims_long_text_with_ellipses() {
+        let text = format!("{}needle{}", "a".repeat(300), "b".repeat(300));
+        let context = TranscriptsRepository::get_match_context(&text, "NEEDLE");
+        assert!(context.starts_with("..."));
+        assert!(context.ends_with("..."));
+        assert!(context.contains("needle"));
+        assert_eq!(context.chars().count(), 3 + 100 + 6 + 100 + 3);
     }
 }

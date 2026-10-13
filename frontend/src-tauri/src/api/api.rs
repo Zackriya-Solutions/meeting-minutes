@@ -40,6 +40,14 @@ pub struct SearchRequest {
     pub query: String,
 }
 
+/// Where a search match was found.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SearchMatchSource {
+    Transcript,
+    Notes,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct TranscriptSearchResult {
     pub id: String,
@@ -47,6 +55,7 @@ pub struct TranscriptSearchResult {
     #[serde(rename = "matchContext")]
     pub match_context: String,
     pub timestamp: String,
+    pub source: SearchMatchSource,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -391,6 +400,19 @@ pub async fn api_get_meetings<R: Runtime>(
     }
 }
 
+/// Transcript matches first, then matches found in notes.
+async fn search_transcripts_and_notes(
+    pool: &sqlx::SqlitePool,
+    query: &str,
+) -> Result<Vec<TranscriptSearchResult>, sqlx::Error> {
+    let mut results = TranscriptsRepository::search_transcripts(pool, query).await?;
+    match MeetingNotesRepository::search(pool, query).await {
+        Ok(note_matches) => results.extend(note_matches),
+        Err(_) => log_error!("Notes search failed; returning transcript matches only"),
+    }
+    Ok(results)
+}
+
 #[tauri::command]
 pub async fn api_search_transcripts<R: Runtime>(
     _app: AppHandle<R>,
@@ -406,7 +428,7 @@ pub async fn api_search_transcripts<R: Runtime>(
 
     let pool = state.db_manager.pool();
 
-    match TranscriptsRepository::search_transcripts(pool, &query).await {
+    match search_transcripts_and_notes(pool, &query).await {
         Ok(results) => {
             log_info!(
                 "Search completed successfully with {} results.",
@@ -1446,5 +1468,76 @@ pub async fn api_test_custom_openai_connection<R: Runtime>(
                 Err(format!("Connection failed: {}", error))
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod search_tests {
+    use super::*;
+    use sqlx::sqlite::SqlitePoolOptions;
+
+    #[tokio::test]
+    async fn transcript_matches_come_before_note_matches() {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::query(
+            "CREATE TABLE meetings (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                folder_path TEXT
+            )",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "CREATE TABLE transcripts (
+                id TEXT PRIMARY KEY,
+                meeting_id TEXT NOT NULL,
+                transcript TEXT NOT NULL,
+                timestamp TEXT NOT NULL
+            )",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::raw_sql(include_str!(
+            "../../migrations/20251223000000_add_meeting_notes.sql"
+        ))
+        .execute(&pool)
+        .await
+        .unwrap();
+        for (id, title) in [("m1", "Spoken"), ("m2", "Written")] {
+            sqlx::query("INSERT INTO meetings (id, title, created_at, updated_at) VALUES (?, ?, 'now', 'now')")
+                .bind(id)
+                .bind(title)
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+        sqlx::query("INSERT INTO transcripts (id, meeting_id, transcript, timestamp) VALUES ('t1', 'm1', 'the budget is tight', '00:01')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        MeetingNotesRepository::upsert(&pool, "m2", "Budget follow-up", Some("[]"))
+            .await
+            .unwrap();
+
+        let results = search_transcripts_and_notes(&pool, "budget").await.unwrap();
+
+        let found: Vec<(&str, SearchMatchSource)> =
+            results.iter().map(|r| (r.id.as_str(), r.source)).collect();
+        assert_eq!(
+            found,
+            vec![
+                ("m1", SearchMatchSource::Transcript),
+                ("m2", SearchMatchSource::Notes)
+            ]
+        );
     }
 }

@@ -1,4 +1,4 @@
-use crate::api::{TranscriptSearchResult, TranscriptSegment};
+use crate::api::{SearchMatchSource, TranscriptSearchResult, TranscriptSegment};
 use chrono::Utc;
 use sqlx::{Connection, Error as SqlxError, SqlitePool};
 use log::{error, info};
@@ -110,6 +110,7 @@ impl TranscriptsRepository {
                     title,
                     match_context,
                     timestamp,
+                    source: SearchMatchSource::Transcript,
                 }
             })
             .collect();
@@ -117,27 +118,30 @@ impl TranscriptsRepository {
         Ok(results)
     }
 
-    /// Helper function to extract a snippet of text around the first match of a query.
-    fn get_match_context(transcript: &str, query: &str) -> String {
-        let transcript_lower = transcript.to_lowercase();
+    /// Extracts a snippet of text around the first match of a query.
+    /// Counts characters, not bytes, so multi-byte text is never cut mid-character.
+    pub(crate) fn get_match_context(text: &str, query: &str) -> String {
+        const CONTEXT_CHARS: usize = 100;
+        let text_lower = text.to_lowercase();
         let query_lower = query.to_lowercase();
 
-        match transcript_lower.find(&query_lower) {
-            Some(match_index) => {
-                let start_index = match_index.saturating_sub(100);
-                let end_index = (match_index + query.len() + 100).min(transcript.len());
+        let Some(match_byte) = text_lower.find(&query_lower) else {
+            return text.chars().take(200).collect(); // Fallback to the start of the text
+        };
 
-                let mut context = String::new();
-                if start_index > 0 {
-                    context.push_str("...");
-                }
-                context.push_str(&transcript[start_index..end_index]);
-                if end_index < transcript.len() {
-                    context.push_str("...");
-                }
-                context
-            }
-            None => transcript.chars().take(200).collect(), // Fallback to the start of the transcript
+        let total_chars = text.chars().count();
+        let match_char = text_lower[..match_byte].chars().count().min(total_chars);
+        let start = match_char.saturating_sub(CONTEXT_CHARS);
+        let end = (match_char + query.chars().count() + CONTEXT_CHARS).min(total_chars);
+
+        let mut context = String::new();
+        if start > 0 {
+            context.push_str("...");
         }
+        context.extend(text.chars().skip(start).take(end - start));
+        if end < total_chars {
+            context.push_str("...");
+        }
+        context
     }
 }
