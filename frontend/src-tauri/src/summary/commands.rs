@@ -3,6 +3,7 @@ use crate::database::repositories::{
     summary::SummaryProcessesRepository, transcript_chunk::TranscriptChunksRepository,
 };
 use crate::state::AppState;
+use crate::summary::context::resolve_summary_context;
 use crate::summary::metadata::{
     read_detected_summary_language_from_metadata, read_summary_language_from_metadata,
     write_detected_summary_language_to_metadata, write_summary_language_to_metadata,
@@ -469,6 +470,7 @@ pub async fn api_process_transcript<R: Runtime>(
     _chunk_size: Option<i32>,
     _overlap: Option<i32>,
     custom_prompt: Option<String>,
+    use_inherited_context: Option<bool>,
     template_id: Option<String>,
     summary_language: Option<String>,
     _auth_token: Option<String>,
@@ -483,7 +485,13 @@ pub async fn api_process_transcript<R: Runtime>(
     );
 
     let pool = state.db_manager.pool().clone();
-    let final_prompt = custom_prompt.unwrap_or_else(|| "".to_string());
+    let final_prompt = resolve_summary_context(
+        &pool,
+        &m_id,
+        &custom_prompt.unwrap_or_default(),
+        use_inherited_context.unwrap_or(true),
+    )
+    .await;
     let final_template_id = template_id.unwrap_or_else(|| "daily_standup".to_string());
 
     // Normalise empty / whitespace-only to None so "" and null behave identically
