@@ -1,7 +1,7 @@
 use crate::database::repositories::summary_context::{
     SummaryContextRepository, SummaryContextScope,
 };
-use log::warn;
+use log::{info, warn};
 use serde::Serialize;
 use sqlx::SqlitePool;
 
@@ -83,19 +83,33 @@ pub async fn resolve_summary_context(
     meeting_text: &str,
     use_inherited: bool,
 ) -> String {
-    if !use_inherited {
-        return meeting_text.to_string();
-    }
-    match load_inherited_contexts(pool, meeting_id).await {
-        Ok(inherited) => compose_summary_context(&inherited, meeting_text),
-        Err(e) => {
-            warn!(
-                "Failed to load inherited summary context for meeting {}: {}",
-                meeting_id, e
-            );
-            meeting_text.to_string()
+    let mut inherited_levels = 0;
+    let composed = if use_inherited {
+        match load_inherited_contexts(pool, meeting_id).await {
+            Ok(inherited) => {
+                inherited_levels = inherited.len();
+                compose_summary_context(&inherited, meeting_text)
+            }
+            Err(e) => {
+                warn!(
+                    "Failed to load inherited summary context for meeting {}: {}",
+                    meeting_id, e
+                );
+                meeting_text.to_string()
+            }
         }
-    }
+    } else {
+        meeting_text.to_string()
+    };
+    info!(
+        "Summary context for meeting {}: use_inherited={}, inherited_levels={}, meeting_chars={}, composed_chars={}",
+        meeting_id,
+        use_inherited,
+        inherited_levels,
+        meeting_text.chars().count(),
+        composed.chars().count()
+    );
+    composed
 }
 
 #[cfg(test)]
