@@ -7,6 +7,17 @@ interface UnsavedNotesOptions {
   markdown: string;
 }
 
+/** Copies notes markdown to the clipboard and tells the user whether it worked. */
+export async function copyNotesToClipboard(markdown: string): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(markdown);
+    toast.success('Notes copied to clipboard');
+  } catch (error) {
+    console.error('Failed to copy notes:', error);
+    toast.error('Failed to copy notes');
+  }
+}
+
 /**
  * Tells the user their notes were not saved and offers to copy them.
  * The toast stays open after copying, so the text can be copied again if needed.
@@ -19,10 +30,7 @@ export function notifyUnsavedNotes({ level, title, description, markdown }: Unsa
       label: 'Copy notes',
       onClick: (event) => {
         event.preventDefault();
-        Promise.resolve().then(() => navigator.clipboard.writeText(markdown)).then(
-          () => toast.success('Notes copied to clipboard'),
-          () => toast.error('Failed to copy notes'),
-        );
+        void copyNotesToClipboard(markdown);
       },
     },
     duration: Infinity,

@@ -14,7 +14,7 @@ export interface NotesAutosaver {
   schedule: (content: NotesContent) => void;
   /** Saves any pending edit now. Resolves when no save is running. */
   flush: () => Promise<void>;
-  /** Tries again after a failed save. */
+  /** The same operation as `flush`: a failed save keeps its edit pending, so this saves it again. */
   retry: () => Promise<void>;
   /** The most recent edit, saved or not. */
   latest: () => NotesContent | null;

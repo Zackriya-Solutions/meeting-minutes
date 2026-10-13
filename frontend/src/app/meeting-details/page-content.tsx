@@ -258,7 +258,6 @@ export default function PageContent({
           }
           notes={
             <NotesPanel
-              key={meeting.id}
               loadState={notes.loadState}
               initialBlocks={notes.initialBlocks}
               initialMarkdown={notes.initialMarkdown}

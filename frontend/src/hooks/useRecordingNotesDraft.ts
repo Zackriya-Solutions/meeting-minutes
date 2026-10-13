@@ -3,19 +3,7 @@ import { useTranscripts } from '@/contexts/TranscriptContext';
 import type { NotesContent } from '@/lib/meeting-notes';
 import { createNotesAutosaver } from '@/lib/notes-autosave';
 import { indexedDBService } from '@/services/indexedDBService';
-import { recordingNotesDraft, restoreRecordingNotesDraft } from '@/services/recordingNotesDraft';
-
-const RECORDING_ID_KEY = 'indexeddb_current_meeting_id';
-
-// After a reload the context has no recording id until the next recording event,
-// but the id of the recording in progress is still in session storage.
-function storedRecordingId(): string | null {
-  try {
-    return typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(RECORDING_ID_KEY) : null;
-  } catch {
-    return null;
-  }
-}
+import { recordingNotesDraft, restoreRecordingNotesDraft, storedRecordingId } from '@/services/recordingNotesDraft';
 
 /**
  * Notes for the recording in progress. Edits go to the in-memory draft at once
@@ -30,10 +18,7 @@ export function useRecordingNotesDraft(persistDelayMs = 500) {
   useEffect(() => {
     if (!recordingId) return;
     let cancelled = false;
-    void restoreRecordingNotesDraft(
-      recordingId,
-      async (id) => (await indexedDBService.getMeetingMetadata(id))?.notesDraft,
-    ).then(() => {
+    void restoreRecordingNotesDraft(recordingId).then(() => {
       if (!cancelled) setReadyFor(recordingId);
     });
     return () => {

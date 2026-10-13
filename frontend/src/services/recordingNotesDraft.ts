@@ -1,6 +1,6 @@
 import type { Block } from '@blocknote/core';
 import type { NotesContent } from '@/lib/meeting-notes';
-import type { NotesDraft } from '@/services/indexedDBService';
+import { indexedDBService, type NotesDraft } from '@/services/indexedDBService';
 import { notesService } from '@/services/notesService';
 import { notifyUnsavedNotes } from '@/lib/notes-toast';
 
@@ -29,13 +29,29 @@ export type NotesCommitResult =
 
 type RecoveryDraftLoader = (recordingId: string) => Promise<NotesDraft | null | undefined>;
 
+const RECORDING_ID_KEY = 'indexeddb_current_meeting_id';
+
+// After a reload the context has no recording id until the next recording event,
+// but the id of the recording in progress is still in session storage.
+export function storedRecordingId(): string | null {
+  try {
+    return typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(RECORDING_ID_KEY) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Reads the notes draft kept on the crash-recovery record. */
+export const loadRecoveryNotesDraft: RecoveryDraftLoader = async (id) =>
+  (await indexedDBService.getMeetingMetadata(id))?.notesDraft;
+
 /**
  * The draft for a recording: the in-memory one, or, after a reload has emptied
  * memory, the one kept on the recovery record. Never throws.
  */
 export async function resolveNotesDraft(
   recordingId: string | null,
-  loadRecoveryDraft: RecoveryDraftLoader,
+  loadRecoveryDraft: RecoveryDraftLoader = loadRecoveryNotesDraft,
 ): Promise<NotesDraft | null> {
   const inMemory = recordingNotesDraft.get(recordingId);
   if (inMemory) return inMemory;
@@ -54,7 +70,7 @@ export async function resolveNotesDraft(
  */
 export async function restoreRecordingNotesDraft(
   recordingId: string,
-  loadRecoveryDraft: RecoveryDraftLoader,
+  loadRecoveryDraft: RecoveryDraftLoader = loadRecoveryNotesDraft,
 ): Promise<boolean> {
   if (recordingNotesDraft.get(recordingId)) return false;
   try {
@@ -91,7 +107,7 @@ export async function commitNotesDraft(
  */
 export async function reportUnsavedRecordingNotes(
   recordingId: string | null,
-  loadRecoveryDraft: RecoveryDraftLoader,
+  loadRecoveryDraft: RecoveryDraftLoader = loadRecoveryNotesDraft,
 ): Promise<boolean> {
   const draft = await resolveNotesDraft(recordingId, loadRecoveryDraft);
   if (!draft || !draft.markdown.trim()) return false;
@@ -103,4 +119,27 @@ export async function reportUnsavedRecordingNotes(
   });
   if (recordingId) recordingNotesDraft.clear(recordingId);
   return true;
+}
+
+/**
+ * Writes the recording's notes draft to the meeting that was just saved and
+ * drops the draft. If the write fails, tells the user and keeps the draft.
+ */
+export async function saveRecordingNotesToMeeting(
+  recordingId: string | null,
+  meetingId: string,
+  loadRecoveryDraft: RecoveryDraftLoader = loadRecoveryNotesDraft,
+): Promise<void> {
+  const notesDraft = await resolveNotesDraft(recordingId, loadRecoveryDraft);
+  const notesResult = await commitNotesDraft(notesDraft, meetingId);
+  if (notesResult.status === 'saved' && recordingId) {
+    recordingNotesDraft.clear(recordingId);
+  } else if (notesResult.status === 'failed') {
+    notifyUnsavedNotes({
+      level: 'error',
+      title: 'Meeting saved, but your notes could not be saved',
+      description: 'Copy them now so they are not lost.',
+      markdown: notesResult.markdown,
+    });
+  }
 }

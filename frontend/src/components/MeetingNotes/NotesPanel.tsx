@@ -1,6 +1,6 @@
 'use client';
 
-import { Component, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Component, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import dynamic from 'next/dynamic';
 import type { Block } from '@blocknote/core';
 import { Copy, NotebookPen } from 'lucide-react';
@@ -39,7 +39,7 @@ interface NotesPanelProps extends Omit<NotesEditorProps, 'editable' | 'onFailed'
   className?: string;
 }
 
-/** Catches an editor that cannot open the stored blocks, so the pane can fall back to markdown. */
+/** Catches an editor that throws, so the pane can fall back to markdown or show the load error. */
 class EditorBoundary extends Component<{ onError: () => void; children: ReactNode }, { failed: boolean }> {
   state = { failed: false };
 
@@ -48,7 +48,7 @@ class EditorBoundary extends Component<{ onError: () => void; children: ReactNod
   }
 
   componentDidCatch(error: unknown) {
-    console.error('Notes editor could not open the stored blocks', error);
+    console.error('Notes editor failed to render', error);
     this.props.onError();
   }
 
@@ -61,47 +61,29 @@ function NotesEditor({ initialBlocks, initialMarkdown, onChange, editable, onFai
   const startBlocks = initialBlocks && initialBlocks.length > 0 ? initialBlocks : null;
   const [fromMarkdown, setFromMarkdown] = useState(startBlocks === null);
   const editorRef = useRef<BlockNoteEditorInstance | null>(null);
-  const loadedMarkdownRef = useRef(false);
   const editorReadyRef = useRef(false);
-  const markedLoadedRef = useRef(false);
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
 
-  const emitter = useMemo(
-    () =>
-      createNotesChangeEmitter(
-        async (blocks) => {
-          const editor = editorRef.current;
-          if (!editor) return undefined;
-          return (await blocksToMarkdownSafely(editor, blocks, { source: 'meeting-notes' })).markdown;
-        },
-        (content) => onChangeRef.current(content),
-      ),
-    [],
-  );
-
-  // The document is snapshotted as the saved baseline once; a later ready event must not re-snapshot typed text.
-  const markLoadedOnce = useCallback(
-    (editor: BlockNoteEditorInstance) => {
-      if (markedLoadedRef.current) return;
-      markedLoadedRef.current = true;
-      emitter.markLoaded(editor.document);
-    },
-    [emitter],
+  const [emitter] = useState(() =>
+    createNotesChangeEmitter(
+      async (blocks) => {
+        const editor = editorRef.current;
+        if (!editor) return undefined;
+        return (await blocksToMarkdownSafely(editor, blocks, { source: 'meeting-notes' })).markdown;
+      },
+      (content) => onChangeRef.current(content),
+    ),
   );
 
   const handleEditorReady = useCallback(
     (editor: BlockNoteEditorInstance) => {
       editorRef.current = editor;
+      // Only the first ready event loads the document; a later one must not re-snapshot typed text.
+      if (editorReadyRef.current) return;
       editorReadyRef.current = true;
-      if (!fromMarkdown) {
-        markLoadedOnce(editor);
-        return;
-      }
-      if (loadedMarkdownRef.current) return;
-      loadedMarkdownRef.current = true;
-      if (!initialMarkdown.trim()) {
-        markLoadedOnce(editor);
+      if (!fromMarkdown || !initialMarkdown.trim()) {
+        emitter.markLoaded(editor.document);
         return;
       }
       // Loading stored markdown is not an edit: it must not trigger a save.
@@ -110,14 +92,14 @@ function NotesEditor({ initialBlocks, initialMarkdown, onChange, editable, onFai
           const blocks = await editor.tryParseMarkdownToBlocks(initialMarkdown);
           editor.replaceBlocks(editor.document, blocks);
           await new Promise((resolve) => setTimeout(resolve, 0));
-          markLoadedOnce(editor);
+          emitter.markLoaded(editor.document);
         })
         .catch((error) => {
           console.error('Failed to load notes from markdown', error);
           onFailed();
         });
     },
-    [emitter, markLoadedOnce, fromMarkdown, initialMarkdown, onFailed],
+    [emitter, fromMarkdown, initialMarkdown, onFailed],
   );
 
   const handleBlocksChange = useCallback(

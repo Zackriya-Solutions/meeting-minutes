@@ -1,5 +1,6 @@
 import { afterAll, afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
+import { withQuietConsoleError } from '../helpers/quiet-console';
 
 const originalCore = { ...await import('@tauri-apps/api/core') };
 const originalToast = { ...await import('sonner') };
@@ -128,27 +129,23 @@ describe('useMeetingNotes', () => {
   });
 
   test('a failed load reports an error and reload tries again', async () => {
-    const consoleError = console.error;
-    console.error = () => {};
-    try {
-    let attempts = 0;
-    readNotes = async () => {
-      attempts += 1;
-      if (attempts === 1) throw new Error('database locked');
-      return { markdown: 'Recovered', notes_json: null };
-    };
-    await show('meeting-a');
-    await settle();
-    expect(notes.loadState).toBe('error');
+    await withQuietConsoleError(async () => {
+      let attempts = 0;
+      readNotes = async () => {
+        attempts += 1;
+        if (attempts === 1) throw new Error('database locked');
+        return { markdown: 'Recovered', notes_json: null };
+      };
+      await show('meeting-a');
+      await settle();
+      expect(notes.loadState).toBe('error');
 
-    act(() => { notes.reload(); });
-    await settle();
+      act(() => { notes.reload(); });
+      await settle();
 
-    expect(notes.loadState).toBe('ready');
-    expect(notes.initialMarkdown).toBe('Recovered');
-    } finally {
-      console.error = consoleError;
-    }
+      expect(notes.loadState).toBe('ready');
+      expect(notes.initialMarkdown).toBe('Recovered');
+    });
   });
 
   test('reload saves a pending edit before it loads again', async () => {
@@ -184,9 +181,7 @@ describe('useMeetingNotes', () => {
   });
 
   test('a save that fails once while switching meeting is retried for the original meeting', async () => {
-    const consoleError = console.error;
-    console.error = () => {};
-    try {
+    await withQuietConsoleError(async () => {
       await show('meeting-a');
       await settle();
       act(() => { notes.handleChange({ blocks: [block('for a')] as any, markdown: 'for a' }); });
@@ -199,15 +194,11 @@ describe('useMeetingNotes', () => {
         { meetingId: 'meeting-a', markdown: 'for a', notesJson: JSON.stringify([block('for a')]) },
       ]);
       expect(toastError).not.toHaveBeenCalled();
-    } finally {
-      console.error = consoleError;
-    }
+    });
   });
 
   test('an edit that cannot be saved while switching meeting raises an error notice', async () => {
-    const consoleError = console.error;
-    console.error = () => {};
-    try {
+    await withQuietConsoleError(async () => {
       await show('meeting-a');
       await settle();
       act(() => { notes.handleChange({ blocks: [block('for a')] as any, markdown: 'for a' }); });
@@ -219,18 +210,15 @@ describe('useMeetingNotes', () => {
       expect(saves).toEqual([]);
       expect(toastError).toHaveBeenCalledTimes(1);
       expect(toastError.mock.calls[0][0]).toBe("Couldn't save notes");
-    } finally {
-      console.error = consoleError;
-    }
+    });
   });
 
   test('returning to a meeting before the other one loads reloads it instead of reusing old content', async () => {
     let storedA = 'old A';
-    let releaseB!: (stored: Stored) => void;
     let releaseA2!: (stored: Stored) => void;
     let loadsOfA = 0;
     readNotes = (meetingId) => {
-      if (meetingId === 'meeting-b') return new Promise<Stored>((resolve) => { releaseB = resolve; });
+      if (meetingId === 'meeting-b') return new Promise<Stored>(() => {});
       loadsOfA += 1;
       if (loadsOfA === 1) return Promise.resolve({ markdown: storedA, notes_json: null });
       return new Promise<Stored>((resolve) => { releaseA2 = resolve; });
@@ -253,6 +241,5 @@ describe('useMeetingNotes', () => {
     await settle();
     expect(notes.loadState).toBe('ready');
     expect(notes.initialMarkdown).toBe('edited A');
-    void releaseB;
   });
 });

@@ -1,6 +1,7 @@
 import { describe, expect, mock, test } from 'bun:test';
 import { createNotesAutosaver, type NotesSaveState } from '../../src/lib/notes-autosave';
 import type { NotesContent } from '../../src/lib/meeting-notes';
+import { withQuietConsoleError } from '../helpers/quiet-console';
 
 const note = (markdown: string): NotesContent => ({ blocks: [] as any, markdown });
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -45,17 +46,16 @@ describe('createNotesAutosaver', () => {
     const save = mock(async (_content: NotesContent) => {
       if (fail) throw new Error('disk full');
     });
-    const consoleError = console.error;
-    console.error = () => {};
     const autosaver = createNotesAutosaver({ save, delayMs: 10_000, onStateChange: (s) => states.push(s) });
 
-    autosaver.schedule(note('keep me'));
-    await autosaver.flush();
-    expect(states).toEqual(['saving', 'error']);
+    await withQuietConsoleError(async () => {
+      autosaver.schedule(note('keep me'));
+      await autosaver.flush();
+      expect(states).toEqual(['saving', 'error']);
 
-    fail = false;
-    await autosaver.retry();
-    console.error = consoleError;
+      fail = false;
+      await autosaver.retry();
+    });
 
     expect(save).toHaveBeenCalledTimes(2);
     expect(save.mock.calls[1][0].markdown).toBe('keep me');
@@ -87,9 +87,7 @@ describe('createNotesAutosaver', () => {
     const save = mock(async (_content: NotesContent) => {
       if (fail) throw new Error('disk full');
     });
-    const consoleError = console.error;
-    console.error = () => {};
-    try {
+    await withQuietConsoleError(async () => {
       const autosaver = createNotesAutosaver({ save, delayMs: 10_000 });
       expect(autosaver.hasUnsaved()).toBe(false);
 
@@ -102,8 +100,6 @@ describe('createNotesAutosaver', () => {
       autosaver.schedule(note('b'));
       await autosaver.flush();
       expect(autosaver.hasUnsaved()).toBe(true);
-    } finally {
-      console.error = consoleError;
-    }
+    });
   });
 });

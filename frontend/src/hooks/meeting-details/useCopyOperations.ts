@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import Analytics from '@/lib/analytics';
 import { invoke as invokeTauri } from '@tauri-apps/api/core';
 import { hasVisibleSummaryContent } from '@/lib/summary-content';
+import { copyNotesToClipboard } from '@/lib/notes-toast';
 
 interface UseCopyOperationsProps {
   meeting: any;
@@ -203,13 +204,7 @@ export function useCopyOperations({
       toast.error('No notes to copy');
       return;
     }
-    try {
-      await navigator.clipboard.writeText(markdown);
-      toast.success('Notes copied to clipboard');
-    } catch (error) {
-      console.error('Failed to copy notes:', error);
-      toast.error('Failed to copy notes');
-    }
+    await copyNotesToClipboard(markdown);
   }, [getNotesMarkdown]);
 
   return {

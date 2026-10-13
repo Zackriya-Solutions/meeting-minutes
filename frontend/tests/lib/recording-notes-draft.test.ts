@@ -1,5 +1,7 @@
 import { afterAll, beforeEach, describe, expect, mock, spyOn, test } from 'bun:test';
 
+import { withQuietConsoleError } from '../helpers/quiet-console';
+
 const originalCore = { ...await import('@tauri-apps/api/core') };
 afterAll(() => {
   mock.module('@tauri-apps/api/core', () => originalCore);
@@ -21,7 +23,7 @@ const invoke = mock(async (command: string, args?: Record<string, unknown>): Pro
   return null;
 });
 mock.module('@tauri-apps/api/core', () => ({ ...originalCore, invoke }));
-const { commitNotesDraft, recordingNotesDraft, reportUnsavedRecordingNotes, resolveNotesDraft, restoreRecordingNotesDraft } = await import('../../src/services/recordingNotesDraft');
+const { commitNotesDraft, recordingNotesDraft, reportUnsavedRecordingNotes, resolveNotesDraft, restoreRecordingNotesDraft, saveRecordingNotesToMeeting } = await import('../../src/services/recordingNotesDraft');
 
 const blocks = [{ id: 'a', type: 'paragraph', content: [{ type: 'text', text: 'Ship Friday' }], children: [] }];
 const draft = { blocks: blocks as any, markdown: 'Ship Friday' };
@@ -79,15 +81,8 @@ describe('commitNotesDraft', () => {
 
   test('hands the note text back when saving fails, so it can still be copied', async () => {
     failSave = true;
-    const consoleError = console.error;
-    console.error = () => {};
 
-    let result;
-    try {
-      result = await commitNotesDraft(draft, 'saved-meeting');
-    } finally {
-      console.error = consoleError;
-    }
+    const result = await withQuietConsoleError(() => commitNotesDraft(draft, 'saved-meeting'));
 
     expect(result).toEqual({ status: 'failed', markdown: 'Ship Friday' });
   });
@@ -211,5 +206,49 @@ describe('reportUnsavedRecordingNotes', () => {
 
     expect(result).toBe(false);
     expect(toastError).not.toHaveBeenCalled();
+  });
+});
+
+describe('saveRecordingNotesToMeeting', () => {
+  test('writes the in-memory draft to the meeting and clears it', async () => {
+    recordingNotesDraft.set('meeting-1', draft);
+
+    await saveRecordingNotesToMeeting('meeting-1', 'saved-meeting', async () => null);
+
+    expect(saves).toEqual([
+      { meetingId: 'saved-meeting', markdown: 'Ship Friday', notesJson: JSON.stringify(blocks) },
+    ]);
+    expect(recordingNotesDraft.get('meeting-1')).toBeNull();
+    expect(toastError).not.toHaveBeenCalled();
+  });
+
+  test('takes the draft from the loader when memory is empty', async () => {
+    const loader = mock(async (_id: string) => stored);
+
+    await saveRecordingNotesToMeeting('meeting-1', 'saved-meeting', loader);
+
+    expect(loader).toHaveBeenCalledWith('meeting-1');
+    expect(saves).toEqual([
+      { meetingId: 'saved-meeting', markdown: 'Ship Friday', notesJson: JSON.stringify(blocks) },
+    ]);
+  });
+
+  test('saves and shows nothing when there is no draft', async () => {
+    await saveRecordingNotesToMeeting('meeting-1', 'saved-meeting', async () => null);
+    await saveRecordingNotesToMeeting(null, 'saved-meeting', async () => draft);
+
+    expect(saves).toEqual([]);
+    expect(toastError).not.toHaveBeenCalled();
+  });
+
+  test('a failed save shows one error and keeps the draft', async () => {
+    failSave = true;
+    recordingNotesDraft.set('meeting-1', draft);
+
+    await withQuietConsoleError(() => saveRecordingNotesToMeeting('meeting-1', 'saved-meeting', async () => null));
+
+    expect(toastError).toHaveBeenCalledTimes(1);
+    expect(toastError.mock.calls[0][0]).toBe('Meeting saved, but your notes could not be saved');
+    expect(recordingNotesDraft.get('meeting-1')).toEqual(draft);
   });
 });
