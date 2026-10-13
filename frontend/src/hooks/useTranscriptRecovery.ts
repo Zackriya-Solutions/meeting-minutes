@@ -9,6 +9,7 @@ import { useState, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { indexedDBService, MeetingMetadata, StoredTranscript } from '@/services/indexedDBService';
 import { storageService } from '@/services/storageService';
+import { commitNotesDraft } from '@/services/recordingNotesDraft';
 import { applyPinnedSummaryLanguageToMeeting } from '@/lib/summary-language-preferences';
 import { toast } from 'sonner';
 
@@ -190,6 +191,21 @@ export function useTranscriptRecovery(): UseTranscriptRecoveryReturn {
         console.warn('Failed to apply pinned summary language to recovered meeting:', error);
         toast.warning('Could not apply default summary language', {
           description: 'The recovered meeting was saved, but the default summary language was not applied.',
+        });
+      }
+
+      // Restore notes typed before the app closed.
+      const notesResult = await commitNotesDraft(metadata.notesDraft, savedMeetingId);
+      if (notesResult.status === 'failed') {
+        toast.warning('Could not restore notes', {
+          description: 'The recovered meeting was saved, but its notes were not restored.',
+          action: {
+            label: 'Copy notes',
+            onClick: () => {
+              void navigator.clipboard.writeText(notesResult.markdown);
+            },
+          },
+          duration: Infinity,
         });
       }
 

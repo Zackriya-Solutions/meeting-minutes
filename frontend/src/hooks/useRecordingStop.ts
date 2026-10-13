@@ -7,6 +7,7 @@ import { useSidebar } from '@/components/Sidebar/SidebarProvider';
 import { useRecordingState, RecordingStatus } from '@/contexts/RecordingStateContext';
 import { storageService } from '@/services/storageService';
 import { transcriptService } from '@/services/transcriptService';
+import { commitNotesDraft, recordingNotesDraft } from '@/services/recordingNotesDraft';
 import Analytics from '@/lib/analytics';
 import {
   applyPinnedSummaryLanguageToMeeting,
@@ -263,6 +264,25 @@ export function useRecordingStop(
           if (!meetingId) {
             console.error('No meeting_id in response:', responseData);
             throw new Error('No meeting ID received from save operation');
+          }
+
+          // Notes typed during the recording can be written now that the meeting exists.
+          const recordingId = sessionStorage.getItem('indexeddb_current_meeting_id');
+          const notesDraft = recordingNotesDraft.get(recordingId);
+          const notesResult = await commitNotesDraft(notesDraft, meetingId);
+          if (notesResult.status === 'saved' && recordingId) {
+            recordingNotesDraft.clear(recordingId);
+          } else if (notesResult.status === 'failed') {
+            toast.error('Meeting saved, but your notes could not be saved', {
+              description: 'Copy them now so they are not lost.',
+              action: {
+                label: 'Copy notes',
+                onClick: () => {
+                  void navigator.clipboard.writeText(notesResult.markdown);
+                },
+              },
+              duration: Infinity,
+            });
           }
 
           let shouldDetectSummaryLanguage = false;
