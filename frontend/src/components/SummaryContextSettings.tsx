@@ -29,15 +29,14 @@ export function SummaryContextSettings() {
     let cancelled = false;
     summaryContextService.getGlobal()
       .then(saved => {
-        if (!cancelled) setText(saved);
+        if (cancelled) return;
+        setText(saved);
+        setIsLoaded(true);
       })
       .catch(error => {
         if (cancelled) return;
         console.error('Failed to load summary context:', error);
         toast.error('Failed to load summary context', { description: String(error) });
-      })
-      .finally(() => {
-        if (!cancelled) setIsLoaded(true);
       });
     return () => {
       cancelled = true;
