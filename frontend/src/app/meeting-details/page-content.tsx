@@ -135,18 +135,26 @@ export default function PageContent({
   });
 
   // Generate and Regenerate send what is on screen, after any pending save has been written.
-  const { flush: flushSummaryContext, text: summaryContextText, useInherited } = summaryContext;
+  const { flush: flushSummaryContext, text: summaryContextText, useInherited, isLoaded: summaryContextLoaded } = summaryContext;
   const { handleGenerateSummary, handleRegenerateSummary } = summaryGeneration;
 
   const handleGenerateWithContext = useCallback(async (prompt: string) => {
+    if (!summaryContextLoaded) {
+      toast.info('Loading summary context, please wait...');
+      return;
+    }
     await flushSummaryContext();
     await handleGenerateSummary(prompt, useInherited);
-  }, [flushSummaryContext, handleGenerateSummary, useInherited]);
+  }, [flushSummaryContext, handleGenerateSummary, summaryContextLoaded, useInherited]);
 
   const handleRegenerateWithContext = useCallback(async () => {
+    if (!summaryContextLoaded) {
+      toast.info('Loading summary context, please wait...');
+      return;
+    }
     await flushSummaryContext();
     await handleRegenerateSummary(summaryContextText, useInherited);
-  }, [flushSummaryContext, handleRegenerateSummary, summaryContextText, useInherited]);
+  }, [flushSummaryContext, handleRegenerateSummary, summaryContextLoaded, summaryContextText, useInherited]);
 
   const handleEditInheritedContext = useCallback((level: InheritedContext) => {
     if (level.scope === 'global') router.push('/settings?tab=summaryModels');
