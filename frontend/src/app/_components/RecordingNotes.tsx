@@ -45,6 +45,8 @@ export function RecordingNotes({ editable, className }: RecordingNotesProps) {
   const retryLoad = useCallback(() => setAttempt((current) => current + 1), []);
 
   if (!recordingId || !isReady) {
+    // The id is only legitimately pending while recording starts; it is cleared again as the meeting is saved.
+    if (!editable) return null;
     return (
       <NotesPanel
         loadState="loading"

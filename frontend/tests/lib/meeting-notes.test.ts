@@ -107,12 +107,10 @@ describe('createNotesChangeEmitter', () => {
     );
     const emitter = createNotesChangeEmitter(toMarkdown as any, (c) => emitted.push(c));
 
-    await withQuietConsoleError(async () => {
-      const first = emitter.handle([paragraph('first')] as any);
-      await emitter.handle([paragraph('second')] as any);
-      releaseFirst('first');
-      await first;
-    });
+    const first = emitter.handle([paragraph('first')] as any);
+    await emitter.handle([paragraph('second')] as any);
+    releaseFirst('first');
+    await first;
 
     expect(emitted.map((c) => c.markdown)).toEqual(['second']);
   });
