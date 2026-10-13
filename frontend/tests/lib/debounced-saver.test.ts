@@ -80,6 +80,25 @@ describe('debounced saver', () => {
     expect(errors).toHaveLength(1);
   });
 
+  test('an error handler that throws does not stop the saver', async () => {
+    let fail = true;
+    const calls: Array<[string, string]> = [];
+    const saver = createDebouncedSaver<string>(
+      async (key, value) => {
+        calls.push([key, value]);
+        if (fail) throw new Error('disk full');
+      },
+      () => { throw new Error('handler broke'); },
+      DELAY,
+    );
+    saver.schedule('a', 'lost');
+    await saver.flush();
+    fail = false;
+    saver.schedule('a', 'kept');
+    await saver.flush();
+    expect(calls).toEqual([['a', 'lost'], ['a', 'kept']]);
+  });
+
   test('flush with nothing pending resolves', async () => {
     const { saver, calls } = harness();
     await saver.flush();

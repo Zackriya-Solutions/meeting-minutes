@@ -18,7 +18,13 @@ export function createDebouncedSaver<V>(
   let queue: Promise<void> = Promise.resolve();
 
   const run = (key: string, value: V) => {
-    queue = queue.then(() => save(key, value)).catch(onError);
+    queue = queue.then(() => save(key, value)).catch(error => {
+      try {
+        onError(error);
+      } catch {
+        // The handler is the last place to report a failure; nothing is left to tell.
+      }
+    });
   };
 
   return {
