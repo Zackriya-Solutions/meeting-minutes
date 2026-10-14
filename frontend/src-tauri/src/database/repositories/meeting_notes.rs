@@ -1,5 +1,5 @@
 use crate::api::{SearchMatchSource, TranscriptSearchResult};
-use crate::database::repositories::transcript::TranscriptsRepository;
+use crate::database::repositories::search_snippet::match_context;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
@@ -100,7 +100,7 @@ impl MeetingNotesRepository {
             .map(|(id, title, markdown, updated_at)| TranscriptSearchResult {
                 id,
                 title,
-                match_context: TranscriptsRepository::get_match_context(&markdown, query),
+                match_context: match_context(&markdown, query),
                 timestamp: updated_at,
                 source: SearchMatchSource::Notes,
             })
@@ -264,23 +264,5 @@ mod tests {
             .await
             .unwrap();
         assert!(MeetingNotesRepository::search(&pool, "   ").await.unwrap().is_empty());
-    }
-
-    #[test]
-    fn match_context_survives_multi_byte_text() {
-        // 67 three-byte characters put the 100-byte look-back in the middle of a character.
-        let text = format!("{}budget review 🎯", "日".repeat(67));
-        let context = TranscriptsRepository::get_match_context(&text, "budget");
-        assert!(context.contains("budget review 🎯"));
-    }
-
-    #[test]
-    fn match_context_trims_long_text_with_ellipses() {
-        let text = format!("{}needle{}", "a".repeat(300), "b".repeat(300));
-        let context = TranscriptsRepository::get_match_context(&text, "NEEDLE");
-        assert!(context.starts_with("..."));
-        assert!(context.ends_with("..."));
-        assert!(context.contains("needle"));
-        assert_eq!(context.chars().count(), 3 + 100 + 6 + 100 + 3);
     }
 }

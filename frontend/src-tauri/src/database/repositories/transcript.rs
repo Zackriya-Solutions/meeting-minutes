@@ -1,4 +1,5 @@
 use crate::api::{SearchMatchSource, TranscriptSearchResult, TranscriptSegment};
+use crate::database::repositories::search_snippet;
 use chrono::Utc;
 use sqlx::{Connection, Error as SqlxError, SqlitePool};
 use log::{error, info};
@@ -104,7 +105,7 @@ impl TranscriptsRepository {
         let results = rows
             .into_iter()
             .map(|(id, title, transcript, timestamp)| {
-                let match_context = Self::get_match_context(&transcript, query);
+                let match_context = search_snippet::match_context(&transcript, query);
                 TranscriptSearchResult {
                     id,
                     title,
@@ -116,32 +117,5 @@ impl TranscriptsRepository {
             .collect();
 
         Ok(results)
-    }
-
-    /// Extracts a snippet of text around the first match of a query.
-    /// Counts characters, not bytes, so multi-byte text is never cut mid-character.
-    pub(crate) fn get_match_context(text: &str, query: &str) -> String {
-        const CONTEXT_CHARS: usize = 100;
-        let text_lower = text.to_lowercase();
-        let query_lower = query.to_lowercase();
-
-        let Some(match_byte) = text_lower.find(&query_lower) else {
-            return text.chars().take(200).collect(); // Fallback to the start of the text
-        };
-
-        let total_chars = text.chars().count();
-        let match_char = text_lower[..match_byte].chars().count().min(total_chars);
-        let start = match_char.saturating_sub(CONTEXT_CHARS);
-        let end = (match_char + query.chars().count() + CONTEXT_CHARS).min(total_chars);
-
-        let mut context = String::new();
-        if start > 0 {
-            context.push_str("...");
-        }
-        context.extend(text.chars().skip(start).take(end - start));
-        if end < total_chars {
-            context.push_str("...");
-        }
-        context
     }
 }
