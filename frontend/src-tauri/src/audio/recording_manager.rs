@@ -271,6 +271,7 @@ impl RecordingManager {
             mic_kind,
             sys_name,
             sys_kind,
+            microphone_device.is_some() && system_device.is_some(), // Mic echo cancellation needs both
         ) {
             self.state.stop_recording();
             return Err(RecordingStartError::TranscriptionRuntime(error));
