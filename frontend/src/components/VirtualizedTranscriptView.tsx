@@ -9,6 +9,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 import { RecordingStatusBar } from "./RecordingStatusBar";
 import { motion, AnimatePresence } from "framer-motion";
 import { TranscriptSegmentData } from "@/types";
+import { speakerLabelClass } from '@/lib/transcript-speakers';
 
 export interface VirtualizedTranscriptViewProps {
     /** Transcript segments to display */
@@ -101,7 +102,7 @@ const TranscriptSegment = memo(function TranscriptSegment({
                 <div className="flex-1">
                     {speaker && (
                         <span
-                            className={`text-xs font-medium ${speaker === 'Mic-In' ? 'text-blue-600' : 'text-emerald-600'}`}
+                            className={`text-xs font-medium ${speakerLabelClass(speaker)}`}
                             data-testid="transcript-speaker"
                         >
                             {speaker}
