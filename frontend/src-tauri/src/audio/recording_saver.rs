@@ -22,6 +22,9 @@ pub struct TranscriptSegment {
     pub display_time: String,   // Formatted time for display like "[02:15]"
     pub confidence: f32,
     pub sequence_id: u64,
+    /// Audio source ("Mic-In" / "Speaker-Out"); None for a mixed-audio segment.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speaker: Option<String>,
 }
 
 /// Meeting metadata structure
@@ -127,6 +130,7 @@ impl RecordingSaver {
             display_time: "[00:00]".to_string(),
             confidence: 1.0,
             sequence_id: 0,
+            speaker: None,
         };
         self.add_transcript_segment(segment);
     }
@@ -475,5 +479,37 @@ impl RecordingSaver {
 impl Default for RecordingSaver {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn segment(speaker: Option<&str>) -> TranscriptSegment {
+        TranscriptSegment {
+            id: "seg_1".to_string(),
+            text: "Hello".to_string(),
+            audio_start_time: 1.0,
+            audio_end_time: 2.0,
+            duration: 1.0,
+            display_time: "12:00:00".to_string(),
+            confidence: 0.9,
+            sequence_id: 1,
+            speaker: speaker.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn transcripts_json_carries_speaker_and_omits_it_when_absent() {
+        let labelled = serde_json::to_value(segment(Some("Speaker-Out"))).unwrap();
+        assert_eq!(labelled["speaker"], "Speaker-Out");
+        let mixed = serde_json::to_value(segment(None)).unwrap();
+        assert!(mixed.get("speaker").is_none());
+        // Files written before this field existed still load.
+        let mut old = mixed.clone();
+        old.as_object_mut().unwrap().remove("speaker");
+        let parsed: TranscriptSegment = serde_json::from_value(old).unwrap();
+        assert_eq!(parsed.speaker, None);
     }
 }

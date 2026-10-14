@@ -513,6 +513,8 @@ pub fn transcript_to_segments(
             audio_start_time: Some(0.0),
             audio_end_time: Some(total_duration),
             duration: Some(total_duration),
+            // Prerecorded files are transcribed as one mixed signal.
+            speaker: None,
         });
     }
     segments

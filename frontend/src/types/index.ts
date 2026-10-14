@@ -16,6 +16,7 @@ export interface Transcript {
   audio_start_time?: number; // Seconds from recording start (e.g., 125.3)
   audio_end_time?: number;   // Seconds from recording start (e.g., 128.6)
   duration?: number;          // Segment duration in seconds (e.g., 3.3)
+  speaker?: string;          // Audio source: "Mic-In" / "Speaker-Out" (absent for mixed audio)
 }
 
 export interface TranscriptUpdate {
@@ -30,6 +31,7 @@ export interface TranscriptUpdate {
   audio_start_time: number; // Seconds from recording start
   audio_end_time: number;   // Seconds from recording start
   duration: number;          // Segment duration in seconds
+  speaker?: string;          // Audio source: "Mic-In" / "Speaker-Out" (absent for mixed audio)
 }
 
 export interface Block {
@@ -141,4 +143,5 @@ export interface TranscriptSegmentData {
   endTime?: number; // audio_end_time in seconds
   text: string;
   confidence?: number;
+  speaker?: string; // Audio source label, rendered before the text when present
 }
