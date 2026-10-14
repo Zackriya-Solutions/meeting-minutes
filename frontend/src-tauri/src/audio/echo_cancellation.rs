@@ -27,7 +27,7 @@ use std::collections::VecDeque;
 use super::neural_echo::{self, NeuralEcho};
 
 /// Delay of both output tracks relative to the input windows.
-const LEAD_MS: usize = 160;
+const LEAD_MS: usize = 750;
 /// Log reduction about every 10 s of audio.
 const STATS_EVERY_MS: usize = 10_000;
 /// The model's sample rate is a third of the pipeline's.
@@ -164,10 +164,15 @@ const DEFAULT_LAG_MS: i64 = 100;
 /// The model works best with the reference 5-40 ms ahead of its echo
 /// (measured plateau); aim for the middle so estimator error stays inside it.
 const REFERENCE_LEAD_MS: i64 = 20;
-/// The mic waits this long for its reference, so echo up to
-/// `MIC_HOLD_MS - REFERENCE_LEAD_MS` *ahead* of the system window still gets
-/// its reference in time.
-const MIC_HOLD_MS: i64 = 100;
+/// The mic waits this long before the model sees it. The lag estimator runs
+/// on the incoming audio, so when the echo delay changes (a new playback
+/// stream), the new lag is known before the model reaches that audio and is
+/// applied from where the change happened: no echo leaks while re-locking.
+/// Locking takes up to ~0.63 s after a change (see `LagEstimator::observe`).
+const MIC_HOLD_MS: i64 = 700;
+/// Shortest echo lag searched and supported (echo before its reference, as
+/// the system window can trail the mic).
+const MIN_LAG_MS: i64 = -80;
 /// Longest echo lag searched and supported.
 const MAX_LAG_MS: i64 = 500;
 /// Smaller estimate changes are measurement jitter.
@@ -187,6 +192,8 @@ struct NeuralPath {
     lag: LagEstimator,
     /// Echo lag in use, in 16 kHz samples.
     lag_in_use: i64,
+    /// Lag changes waiting for the model to reach the mic index they start at.
+    lag_changes: VecDeque<(i64, i64)>,
     /// Cleaned 48 kHz mic awaiting output.
     out48: VecDeque<f32>,
     #[cfg(test)]
@@ -213,6 +220,7 @@ impl NeuralPath {
             ref_base: 0,
             lag: LagEstimator::new(),
             lag_in_use: ms16(DEFAULT_LAG_MS),
+            lag_changes: VecDeque::new(),
             out48: std::iter::repeat(0.0).take(lead48 - chain).collect(),
             #[cfg(test)]
             missing_reference: 0,
@@ -226,13 +234,15 @@ impl NeuralPath {
     fn process(&mut self, mic48: &[f32], sys48: &[f32]) -> Vec<f32> {
         let mic16 = self.down_mic.process(mic48);
         let ref16 = self.down_ref.process(sys48);
-        if let Some(lag) = self.lag.observe(&mic16, &ref16) {
-            if (lag - self.lag_in_use).abs() >= ms16(LAG_HYSTERESIS_MS) {
+        if let Some((lag, from)) = self.lag.observe(&mic16, &ref16) {
+            let current = self.lag_changes.back().map_or(self.lag_in_use, |&(_, l)| l);
+            if (lag - current).abs() >= ms16(LAG_HYSTERESIS_MS) {
                 info!("🔇 Echo lag locked at {} ms", lag * 1000 / 16_000);
-                // The model keeps its state: resetting it on a new lag leaked
-                // more echo after a delay jump and hurt the voice after a
-                // false lock (measured in real_recordings_report).
-                self.lag_in_use = lag;
+                // Applied when the model reaches `from`. The model keeps its
+                // state: resetting it on a new lag leaked more echo after a
+                // delay jump and hurt the voice after a false lock (measured
+                // in real_recordings_report).
+                self.lag_changes.push_back((from, lag));
             }
         }
         self.mic16.extend(mic16);
@@ -244,6 +254,13 @@ impl NeuralPath {
         let hold = ms16(MIC_HOLD_MS) as usize;
         let mut cleaned16 = Vec::new();
         while self.mic16.len() >= hold + hop {
+            while let Some(&(from, lag)) = self.lag_changes.front() {
+                if from > self.mic_next {
+                    break;
+                }
+                self.lag_in_use = lag;
+                self.lag_changes.pop_front();
+            }
             let ref_start = self.mic_next - self.lag_in_use + ms16(REFERENCE_LEAD_MS);
             let reference: Vec<f32> = (ref_start..ref_start + hop as i64)
                 .map(|i| {
@@ -421,18 +438,28 @@ struct LagEstimator {
     reference: VecDeque<f32>,
     since: usize,
     last: Option<i64>,
+    /// Samples observed so far: the absolute 16 kHz index of the next one.
+    seen: i64,
+    /// The lag last returned.
+    agreed: Option<i64>,
+    /// Where the first estimate that differs from `agreed` was made.
+    first_change: Option<i64>,
     planner: RealFftPlanner<f32>,
 }
 
 impl LagEstimator {
     fn new() -> Self {
-        Self { mic: VecDeque::new(), reference: VecDeque::new(), since: 0, last: None, planner: RealFftPlanner::new() }
+        Self { mic: VecDeque::new(), reference: VecDeque::new(), since: 0, last: None, seen: 0, agreed: None, first_change: None, planner: RealFftPlanner::new() }
     }
 
     /// Feed new 16 kHz samples (same span for both). Returns a lag (16 kHz
     /// samples, echo after reference is positive) once two consecutive
-    /// confident estimates agree within 2 ms.
-    fn observe(&mut self, mic: &[f32], reference: &[f32]) -> Option<i64> {
+    /// confident estimates agree within 2 ms, with the absolute sample index
+    /// it most likely starts at. The first estimate that sees a new lag ends
+    /// a 0.5 s window that is mostly past the change, so the change lies
+    /// 0.25-0.5 s before it: the middle, 0.375 s, is returned. The agreement
+    /// comes one step (0.25 s) later, so the start is ~0.63 s back.
+    fn observe(&mut self, mic: &[f32], reference: &[f32]) -> Option<(i64, i64)> {
         // In LAG_EVERY steps, so the estimate rate does not depend on how
         // large the caller's windows are (the pipeline's are 600 ms).
         let mut agreed = None;
@@ -442,7 +469,8 @@ impl LagEstimator {
         agreed
     }
 
-    fn observe_step(&mut self, mic: &[f32], reference: &[f32]) -> Option<i64> {
+    fn observe_step(&mut self, mic: &[f32], reference: &[f32]) -> Option<(i64, i64)> {
+        self.seen += mic.len() as i64;
         self.mic.extend(mic);
         self.reference.extend(reference);
         while self.mic.len() > LAG_WINDOW { self.mic.pop_front(); }
@@ -453,12 +481,21 @@ impl LagEstimator {
         }
         self.since = 0;
         let estimate = self.estimate();
-        let agreed = match (estimate, self.last) {
-            (Some(now), Some(before)) if (now - before).abs() <= ms16(2) => Some((now + before) / 2),
+        let near = |a: i64, b: i64| (a - b).abs() <= ms16(2);
+        match (estimate, self.agreed) {
+            (Some(now), Some(agreed)) if near(now, agreed) => self.first_change = None,
+            (Some(_), _) if self.first_change.is_none() => self.first_change = Some(self.seen),
+            _ => {}
+        }
+        let lag = match (estimate, self.last) {
+            (Some(now), Some(before)) if near(now, before) => Some((now + before) / 2),
             _ => None,
         };
         self.last = estimate;
-        agreed
+        let lag = lag.filter(|&lag| self.agreed.map_or(true, |agreed| !near(lag, agreed)))?;
+        let from = self.first_change.take().unwrap_or(self.seen) - ms16(375);
+        self.agreed = Some(lag);
+        Some((lag, from))
     }
 
     fn estimate(&mut self) -> Option<i64> {
@@ -479,7 +516,7 @@ impl LagEstimator {
         let mut corr = vec![0.0f32; n];
         ifft.process(&mut cross, &mut corr).ok()?;
         let at = |lag: i64| corr[lag.rem_euclid(n as i64) as usize];
-        let range = ms16(REFERENCE_LEAD_MS - MIC_HOLD_MS)..=ms16(MAX_LAG_MS);
+        let range = ms16(MIN_LAG_MS)..=ms16(MAX_LAG_MS);
         let (best, peak) = range.clone().map(|l| (l, at(l))).max_by(|x, y| x.1.total_cmp(&y.1))?;
         let values: Vec<f32> = range.filter(|l| (l - best).abs() > ms16(5)).map(|l| at(l).abs()).collect();
         let mean = values.iter().sum::<f32>() / values.len() as f32;
@@ -573,7 +610,7 @@ mod tests {
             let mut est = LagEstimator::new();
             let mut locked = None;
             for (m, r) in mic.chunks(800).zip(reference.chunks(800)) {
-                if let Some(l) = est.observe(m, r) { locked = Some(l); }
+                if let Some((l, _)) = est.observe(m, r) { locked = Some(l); }
             }
             let l = locked.expect("no lock");
             assert!((l - delay as i64).abs() <= 32, "delay {delay}: locked at {l}");
@@ -587,7 +624,7 @@ mod tests {
         let mut est = LagEstimator::new();
         let mut locked = None;
         for (m, r) in mic.chunks(800).zip(reference.chunks(800)) {
-            if let Some(l) = est.observe(m, r) { locked = Some(l); }
+            if let Some((l, _)) = est.observe(m, r) { locked = Some(l); }
         }
         let l = locked.expect("no lock");
         assert!((l - 1_712).abs() <= 32, "locked at {l}");
@@ -595,7 +632,7 @@ mod tests {
 
     #[test]
     fn reference_arrives_in_time_for_every_supported_lag() {
-        for lag_ms in [REFERENCE_LEAD_MS - MIC_HOLD_MS, 0, 10, 107, MAX_LAG_MS] {
+        for lag_ms in [MIN_LAG_MS, 0, 10, 107, MAX_LAG_MS] {
             let mut path = NeuralPath::new(LEAD).unwrap();
             path.lag_in_use = ms16(lag_ms);
             let x = bursts(48_000 * 2, 1);
@@ -612,8 +649,8 @@ mod tests {
         let mut aec = MicEchoCanceller::new(48_000).unwrap();
         // A noise burst on the mic with silent speakers comes out `LEAD` later.
         let burst = bursts(2_400, 9);
-        let mic: Vec<f32> = (0..48_000).map(|i| if (20_000..22_400).contains(&i) { burst[i - 20_000] } else { 0.0 }).collect();
-        let sys: Vec<f32> = (0..48_000).map(|i| i as f32 * 1e-9).collect();
+        let mic: Vec<f32> = (0..96_000).map(|i| if (20_000..22_400).contains(&i) { burst[i - 20_000] } else { 0.0 }).collect();
+        let sys: Vec<f32> = (0..96_000).map(|i| i as f32 * 1e-9).collect();
         let (mo, so) = run(&mut aec, &mic, &sys);
         assert_eq!(so[LEAD + 1], 1e-9, "system track delay");
         assert_eq!(best_lag(&mo, &mic, LEAD + 400), LEAD, "cleaned mic delay");

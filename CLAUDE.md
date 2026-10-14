@@ -96,7 +96,7 @@ Raw Audio (Mic + System)
 
 **Key Insight**: The pipeline performs **professional audio mixing** (RMS-based ducking, clipping prevention) for recording, while simultaneously applying **Voice Activity Detection (VAD)** to send only speech segments to Whisper for transcription.
 
-**Mic conditioning before the mix**: capture applies only the high-pass filter (and optional RNNoise) to the mic. For each aligned (mic, system) window, the pipeline then runs echo cancellation on macOS (`echo_cancellation.rs`: DTLN-aec, system audio as the reference, only when both sources record; `MEETILY_AEC=off` disables it), and after that the EBU R128 mic loudness normalization. Keep this order: a canceller must see the mic before any time-varying gain or limiting. The canceller delays both tracks by 160 ms; the flush releases that tail once.
+**Mic conditioning before the mix**: capture applies only the high-pass filter (and optional RNNoise) to the mic. For each aligned (mic, system) window, the pipeline then runs echo cancellation on macOS (`echo_cancellation.rs`: DTLN-aec, system audio as the reference, only when both sources record; `MEETILY_AEC=off` disables it), and after that the EBU R128 mic loudness normalization. Keep this order: a canceller must see the mic before any time-varying gain or limiting. The canceller delays both tracks by 750 ms: the mic waits 700 ms before the model, so the echo-lag estimator (which runs on the incoming audio) locks onto a delay change before the model reaches that audio. The flush releases that tail once.
 
 ### Audio Device Modularization (Recently Completed)
 
