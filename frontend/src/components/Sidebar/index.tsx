@@ -39,6 +39,13 @@ interface SidebarItem {
   children?: SidebarItem[];
 }
 
+/** What `api_delete_meeting` reports about the meeting's recording folder. */
+interface DeleteMeetingResult {
+  audio_trashed?: boolean;
+  /** Set when the meeting had a recording folder that was left in place. */
+  audio_kept_reason?: string | null;
+}
+
 const Sidebar: React.FC = () => {
   const router = useRouter();
   const pathname = usePathname();
@@ -326,7 +333,7 @@ const Sidebar: React.FC = () => {
 
     try {
       const { invoke } = await import('@tauri-apps/api/core');
-      await invoke('api_delete_meeting', {
+      const result = await invoke<DeleteMeetingResult | null>('api_delete_meeting', {
         meetingId: itemId,
       });
       console.log('Meeting deleted successfully');
@@ -336,10 +343,18 @@ const Sidebar: React.FC = () => {
       // Track meeting deletion
       Analytics.trackMeetingDeleted(itemId);
 
-      // Show success toast
-      toast.success("Meeting deleted successfully", {
-        description: "All associated data has been removed"
-      });
+      // The confirm dialog says the audio goes to the Trash; say so when it did not.
+      if (result?.audio_kept_reason) {
+        toast.warning("Meeting deleted, but its audio was kept", {
+          description: `Not moved to the Trash because ${result.audio_kept_reason}.`
+        });
+      } else {
+        toast.success("Meeting deleted successfully", {
+          description: result?.audio_trashed
+            ? "The audio was moved to the Trash"
+            : "All associated data has been removed"
+        });
+      }
 
       // If deleting the active meeting, navigate to home
       if (currentMeeting?.id === itemId) {
@@ -820,7 +835,7 @@ const Sidebar: React.FC = () => {
       {/* Confirmation Modal for Delete */}
       <ConfirmationModal
         isOpen={deleteModalState.isOpen}
-        text="Are you sure you want to delete this meeting? This action cannot be undone."
+        text="Are you sure you want to delete this meeting? The transcript and summary cannot be restored. The audio is moved to the Trash."
         onConfirm={handleDeleteConfirm}
         onCancel={() => setDeleteModalState({ isOpen: false, itemId: null })}
       />

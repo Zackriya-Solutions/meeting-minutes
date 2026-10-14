@@ -168,6 +168,7 @@ Generate meeting summaries with your choice of AI provider. **Ollama** (local) i
 ### 🔒 Privacy-First Design
 
 All data stays on your machine. Transcription models, recordings, and transcripts are stored locally.
+Deleting a meeting moves its recording folder to the Trash (Recycle Bin on Windows), so you can still restore the audio from there. If the folder cannot be moved, for example because it is outside the recordings folders, Meetily tells you and leaves it in place.
 
 <p align="center">
     <img src="docs/settings.png" width="650" style="border-radius: 10px;" alt="Local Transcription and storage" />
