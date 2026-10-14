@@ -1,13 +1,13 @@
 'use client';
 
-import { Component, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { Component, useCallback, useEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react';
 import dynamic from 'next/dynamic';
 import type { Block } from '@blocknote/core';
 import { Copy, NotebookPen } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { blocksToMarkdownSafely } from '@/lib/blocknote-markdown';
-import { createNotesChangeEmitter, editorFailureAction, type NotesContent } from '@/lib/meeting-notes';
+import { createNotesChangeEmitter, editorFailureAction, isEmptyTextBlock, type NotesContent } from '@/lib/meeting-notes';
 import type { NotesSaveState } from '@/lib/notes-autosave';
 import type { NotesLoadState } from '@/hooks/meeting-details/useMeetingNotes';
 import type { BlockNoteEditorInstance } from '@/components/BlockNoteEditor/Editor';
@@ -121,16 +121,39 @@ function NotesEditor({ initialBlocks, initialMarkdown, onChange, editable, onFai
 
   // Keys typed before the stored markdown replaces the content would be discarded.
   const awaitingMarkdown = fromMarkdown && initialMarkdown.trim() !== '' && !markdownLoaded;
+  const isEditable = editable && !awaitingMarkdown;
+
+  // A click on the empty space below the content puts the cursor at the end of the note.
+  const handleEmptySpaceMouseDown = (event: MouseEvent<HTMLDivElement>) => {
+    if (event.target !== event.currentTarget) return;
+    const editor = editorRef.current;
+    if (!editor || !isEditable) return;
+    event.preventDefault();
+    try {
+      const last = editor.document[editor.document.length - 1];
+      if (isEmptyTextBlock(last)) {
+        editor.setTextCursorPosition(last, 'end');
+      } else {
+        const [added] = editor.insertBlocks([{ type: 'paragraph' }], last, 'after');
+        editor.setTextCursorPosition(added, 'end');
+      }
+      editor.focus();
+    } catch (error) {
+      console.error('Failed to focus the end of the notes', error);
+    }
+  };
 
   return (
-    <EditorBoundary key={fromMarkdown ? 'markdown' : 'blocks'} onError={handleEditorError}>
-      <Editor
-        initialContent={fromMarkdown ? undefined : startBlocks ?? undefined}
-        onChange={handleBlocksChange}
-        onEditorReady={handleEditorReady}
-        editable={editable && !awaitingMarkdown}
-      />
-    </EditorBoundary>
+    <div className="min-h-full" onMouseDown={handleEmptySpaceMouseDown}>
+      <EditorBoundary key={fromMarkdown ? 'markdown' : 'blocks'} onError={handleEditorError}>
+        <Editor
+          initialContent={fromMarkdown ? undefined : startBlocks ?? undefined}
+          onChange={handleBlocksChange}
+          onEditorReady={handleEditorReady}
+          editable={isEditable}
+        />
+      </EditorBoundary>
+    </div>
   );
 }
 

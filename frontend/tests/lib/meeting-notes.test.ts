@@ -3,6 +3,7 @@ import {
   blocksToPlainText,
   createNotesChangeEmitter,
   editorFailureAction,
+  isEmptyTextBlock,
   parseNotesBlocks,
   type NotesContent,
 } from '../../src/lib/meeting-notes';
@@ -202,5 +203,32 @@ describe('editorFailureAction', () => {
     expect(editorFailureAction(false, true)).toBe('show-error');
     expect(editorFailureAction(true, false)).toBe('show-error');
     expect(editorFailureAction(true, true)).toBe('show-error');
+  });
+});
+
+describe('isEmptyTextBlock', () => {
+  test('is true for an empty paragraph', () => {
+    expect(isEmptyTextBlock({ type: 'paragraph', content: [], children: [] })).toBe(true);
+  });
+
+  test('is true for a paragraph holding only spaces', () => {
+    expect(isEmptyTextBlock({ type: 'paragraph', content: [{ type: 'text', text: '  ' }], children: [] })).toBe(true);
+  });
+
+  test('is false for a paragraph with text', () => {
+    expect(isEmptyTextBlock(paragraph('hello'))).toBe(false);
+  });
+
+  test('is false for an empty paragraph with a child block', () => {
+    expect(isEmptyTextBlock({ type: 'paragraph', content: [], children: [paragraph('child')] })).toBe(false);
+  });
+
+  test('is false for a block whose content is not an array', () => {
+    expect(isEmptyTextBlock({ type: 'table', content: { type: 'tableContent', rows: [] }, children: [] })).toBe(false);
+  });
+
+  test('is false for values that are not blocks', () => {
+    expect(isEmptyTextBlock(null)).toBe(false);
+    expect(isEmptyTextBlock('text')).toBe(false);
   });
 });

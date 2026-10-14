@@ -34,6 +34,15 @@ function inlineText(node: unknown): string {
   return Array.isArray(content) ? content.map(inlineText).join('') : '';
 }
 
+/** True for a block that can hold text, holds none, and has no child blocks. */
+export function isEmptyTextBlock(block: unknown): boolean {
+  if (!block || typeof block !== 'object') return false;
+  const { content, children } = block as { content?: unknown; children?: unknown };
+  if (!Array.isArray(content)) return false;
+  if (Array.isArray(children) && children.length > 0) return false;
+  return content.map(inlineText).join('').trim() === '';
+}
+
 /** Plain text of a block tree, one line per block that has text. */
 export function blocksToPlainText(blocks: unknown[]): string {
   const lines: string[] = [];
