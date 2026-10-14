@@ -272,7 +272,10 @@ impl RecordingManager {
             mic_kind,
             sys_name,
             sys_kind,
-            send_continuous_transcription,
+            super::pipeline::TranscriptionPipelineMode::for_recording(
+                send_continuous_transcription,
+                system_device.is_some(),
+            ),
         ) {
             self.state.stop_recording();
             return Err(RecordingStartError::TranscriptionRuntime(error));

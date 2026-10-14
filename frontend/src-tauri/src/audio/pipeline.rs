@@ -9,7 +9,7 @@ use super::batch_processor::AudioMetricsBatcher;
 use rubato::{Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType, WindowFunction};
 
 use super::devices::AudioDevice;
-use super::recording_state::{AudioChunk, AudioError, RecordingState, DeviceType};
+use super::recording_state::{AudioChunk, AudioError, AudioLayout, RecordingState, DeviceType};
 use super::audio_processing::{audio_to_mono, interleave_stereo, LoudnessNormalizer, NoiseSuppressionProcessor, HighPassFilter};
 use super::vad::{ContinuousVadProcessor};
 
@@ -27,14 +27,30 @@ use super::vad::{ContinuousVadProcessor};
 const VAD_REDEMPTION_TIME_MS: u32 = 500;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum TranscriptionPipelineMode {
+pub enum TranscriptionPipelineMode {
     /// Local engines (Whisper/Parakeet): VAD-cut mixed-mono speech segments.
     VadSpeechOnly,
-    /// Realtime cloud provider (Deepgram): an uninterrupted stream of
-    /// interleaved stereo frames [mic, system], so each source is transcribed
-    /// on its own channel and can be labelled. Continuous (not VAD-gated) keeps
-    /// the provider's endpointing / turn detection stable.
+    /// Realtime cloud provider (Deepgram) with a system-audio stream: an
+    /// uninterrupted stream of interleaved stereo frames [mic, system], so each
+    /// source is transcribed on its own channel and can be labelled. Continuous
+    /// (not VAD-gated) keeps the provider's endpointing / turn detection stable.
     ContinuousStereo,
+    /// Realtime cloud provider with no system-audio stream: the mic alone,
+    /// mono. Sending a silent second channel would double the per-channel
+    /// cost for nothing.
+    ContinuousMicOnly,
+}
+
+impl TranscriptionPipelineMode {
+    /// `continuous` is true for a realtime cloud provider (chosen by
+    /// `transcription::is_deepgram_transcription_provider`, on every platform).
+    pub fn for_recording(continuous: bool, has_system_audio: bool) -> Self {
+        match (continuous, has_system_audio) {
+            (false, _) => Self::VadSpeechOnly,
+            (true, true) => Self::ContinuousStereo,
+            (true, false) => Self::ContinuousMicOnly,
+        }
+    }
 }
 
 /// Ring buffer for synchronized audio mixing
@@ -637,7 +653,7 @@ impl AudioCapture {
             timestamp,
             chunk_id,
             device_type: self.device_type.clone(),
-            channels: 1,
+            layout: AudioLayout::Mono,
         };
 
         // NOTE: Raw audio is NOT sent to recording saver to prevent echo
@@ -734,7 +750,7 @@ impl AudioPipeline {
         mic_device_kind: super::device_detection::InputDeviceKind,
         system_device_name: String,
         system_device_kind: super::device_detection::InputDeviceKind,
-        send_continuous_transcription: bool,
+        transcription_mode: TranscriptionPipelineMode,
     ) -> Result<Self> {
         // Log device characteristics for adaptive buffering
         info!("🎛️ AudioPipeline initializing with device characteristics:");
@@ -800,11 +816,7 @@ impl AudioPipeline {
             ring_buffer,
             mixer,
             recording_sender_for_mixed: None,  // Will be set by manager
-            transcription_mode: if send_continuous_transcription {
-                TranscriptionPipelineMode::ContinuousStereo
-            } else {
-                TranscriptionPipelineMode::VadSpeechOnly
-            },
+            transcription_mode,
             stereo_transcription_next_timestamp: None,
         })
     }
@@ -881,11 +893,17 @@ impl AudioPipeline {
                             // Local engines still receive VAD speech segments, while a
                             // realtime cloud provider receives a continuous stream to keep
                             // its endpointing / turn detection stable.
-                            if self.transcription_mode == TranscriptionPipelineMode::ContinuousStereo {
+                            if self.transcription_mode != TranscriptionPipelineMode::VadSpeechOnly {
                                 // Built from the aligned pre-mix windows, not from the
                                 // mix: the mix is what makes the sources inseparable.
-                                let stereo = interleave_stereo(&mic_window, &sys_window);
-                                let frames = stereo.len() / 2;
+                                let (data, layout) = if self.transcription_mode
+                                    == TranscriptionPipelineMode::ContinuousStereo
+                                {
+                                    (interleave_stereo(&mic_window, &sys_window), AudioLayout::MicSystemStereo)
+                                } else {
+                                    (mic_window.clone(), AudioLayout::MicOnly)
+                                };
+                                let frames = data.len() / layout.channels() as usize;
                                 let duration = frames as f64 / self.sample_rate as f64;
                                 let timestamp = self
                                     .stereo_transcription_next_timestamp
@@ -893,16 +911,16 @@ impl AudioPipeline {
                                 self.stereo_transcription_next_timestamp = Some(timestamp + duration);
 
                                 let transcription_chunk = AudioChunk {
-                                    data: stereo,
+                                    data,
                                     sample_rate: self.sample_rate,
                                     timestamp,
                                     chunk_id: self.chunk_id_counter,
                                     device_type: DeviceType::Microphone,
-                                    channels: 2,
+                                    layout,
                                 };
 
                                 if let Err(e) = self.transcription_sender.send(transcription_chunk) {
-                                    warn!("Failed to send stereo continuous transcription chunk: {}", e);
+                                    warn!("Failed to send continuous transcription chunk: {}", e);
                                 } else {
                                     self.chunk_id_counter += 1;
                                 }
@@ -922,7 +940,7 @@ impl AudioPipeline {
                                                     timestamp: segment.start_timestamp_ms / 1000.0,
                                                     chunk_id: self.chunk_id_counter,
                                                     device_type: DeviceType::Microphone,  // Mixed audio
-                                                    channels: 1,
+                                                    layout: AudioLayout::Mono,
                                                 };
 
                                                 if let Err(e) = self.transcription_sender.send(transcription_chunk) {
@@ -950,7 +968,7 @@ impl AudioPipeline {
                                     timestamp: chunk.timestamp,
                                     chunk_id: self.chunk_id_counter,
                                     device_type: DeviceType::Microphone,  // Mixed audio
-                                    channels: 1,
+                                    layout: AudioLayout::Mono,
                                 };
                                 let _ = sender.send(recording_chunk);
                             }
@@ -997,7 +1015,7 @@ impl AudioPipeline {
                             timestamp: segment.start_timestamp_ms / 1000.0,
                             chunk_id: self.chunk_id_counter,
                             device_type: DeviceType::Microphone,
-                            channels: 1,
+                            layout: AudioLayout::Mono,
                         };
 
                         if let Err(e) = self.transcription_sender.send(transcription_chunk) {
@@ -1047,12 +1065,13 @@ impl AudioPipelineManager {
         mic_device_kind: super::device_detection::InputDeviceKind,
         system_device_name: String,
         system_device_kind: super::device_detection::InputDeviceKind,
-        send_continuous_transcription: bool,
+        transcription_mode: TranscriptionPipelineMode,
     ) -> Result<()> {
         // Log device information for adaptive buffering
         info!("🎙️ Starting pipeline with device info:");
         info!("   Microphone: '{}' ({:?})", mic_device_name, mic_device_kind);
         info!("   System Audio: '{}' ({:?})", system_device_name, system_device_kind);
+        info!("   Transcription mode: {:?}", transcription_mode);
 
         // Create audio processing channel
         let (audio_sender, audio_receiver) = mpsc::unbounded_channel::<AudioChunk>();
@@ -1069,7 +1088,7 @@ impl AudioPipelineManager {
             mic_device_kind,
             system_device_name,
             system_device_kind,
-            send_continuous_transcription,
+            transcription_mode,
         )?;
         state.set_audio_sender(audio_sender.clone());
 
@@ -1121,7 +1140,7 @@ impl AudioPipelineManager {
                 timestamp: 0.0,
                 chunk_id: u64::MAX, // Special ID to indicate flush
                 device_type: super::recording_state::DeviceType::Microphone,
-                channels: 1,
+                layout: AudioLayout::Mono,
             };
 
             if let Err(e) = sender.send(flush_chunk) {
@@ -1142,7 +1161,7 @@ impl AudioPipelineManager {
                         timestamp: 0.0,
                         chunk_id: u64::MAX - (i as u64),
                         device_type: super::recording_state::DeviceType::Microphone,
-                        channels: 1,
+                        layout: AudioLayout::Mono,
                     };
                     let _ = sender.send(additional_flush);
                 }
@@ -1165,6 +1184,16 @@ impl Default for AudioPipelineManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn realtime_mode_is_stereo_only_when_system_audio_exists() {
+        use TranscriptionPipelineMode::*;
+        assert_eq!(TranscriptionPipelineMode::for_recording(true, true), ContinuousStereo);
+        // No system stream: mono mic, not a silent second channel billed per channel.
+        assert_eq!(TranscriptionPipelineMode::for_recording(true, false), ContinuousMicOnly);
+        assert_eq!(TranscriptionPipelineMode::for_recording(false, true), VadSpeechOnly);
+        assert_eq!(TranscriptionPipelineMode::for_recording(false, false), VadSpeechOnly);
+    }
 
     #[test]
     fn test_live_vad_redemption_matches_pro_policy() {

@@ -39,8 +39,8 @@ use crate::api::TranscriptSegment;
 use crate::database::repositories::setting::SettingsRepository;
 use crate::state::AppState;
 
-use super::audio_processing::{deinterleave, interleave_stereo, resample_audio};
-use super::recording_state::AudioChunk;
+use super::audio_processing::{deinterleave, interleave_stereo};
+use super::recording_state::{AudioChunk, AudioLayout};
 use super::transcription::TranscriptUpdate;
 
 pub const PROVIDER: &str = "deepgram";
@@ -187,9 +187,11 @@ struct RealtimeMessage {
     channel: Option<RealtimeChannel>,
     #[serde(default)]
     is_final: bool,
-    /// `[channel, total_channels]` on a multichannel stream (`[0, 1]` on mono).
+    /// `[channel, total_channels]` (`[0, 1]` on mono). Kept as raw JSON and
+    /// read by `parse_channel_index`, so an unexpected shape cannot reject the
+    /// whole message.
     #[serde(default)]
-    channel_index: Vec<usize>,
+    channel_index: serde_json::Value,
     #[serde(default)]
     start: f64,
     #[serde(default)]
@@ -231,31 +233,46 @@ struct FinalSeg {
     start_ms: f64,
     end_ms: f64,
     confidence: f32,
-    /// Channel index within the socket that produced it (0 on a mono socket).
-    channel: usize,
 }
 
-/// Reduce a nova `Results` message to a finalized segment (None for interim/other).
-fn nova_result_to_final(m: RealtimeMessage) -> Option<FinalSeg> {
+/// A final nova `Results` message: which channel it covers, how far that
+/// channel is now finalized (stream ms), and its segment if it had words.
+/// Empty finals still matter: they advance the channel's watermark.
+struct NovaFinal {
+    channel_index: Option<(usize, usize)>,
+    finalized_through_ms: f64,
+    seg: Option<FinalSeg>,
+}
+
+/// Reduce a nova message to a final (None for interim and non-Results).
+fn nova_final(m: RealtimeMessage) -> Option<NovaFinal> {
     if m.msg_type.as_deref() != Some("Results") || !m.is_final {
         return None;
     }
-    let channel = m.channel_index.first().copied().unwrap_or(0);
-    let alternative = m.channel.and_then(|c| c.alternatives.into_iter().next())?;
-    let transcript = alternative.transcript.trim();
-    if transcript.is_empty() {
-        return None;
-    }
-    let confidence = alternative
-        .confidence
-        .unwrap_or_else(|| average_confidence(alternative.words.iter().filter_map(|w| w.confidence)));
-    Some(FinalSeg {
-        transcript: transcript.to_string(),
-        start_ms: m.start * 1000.0,
-        end_ms: (m.start + m.duration) * 1000.0,
-        confidence,
-        channel,
-    })
+    let channel_index = parse_channel_index(&m.channel_index);
+    let start_ms = m.start * 1000.0;
+    let end_ms = (m.start + m.duration) * 1000.0;
+    let seg = m
+        .channel
+        .and_then(|c| c.alternatives.into_iter().next())
+        .and_then(|alternative| {
+            let transcript = alternative.transcript.trim();
+            if transcript.is_empty() {
+                return None;
+            }
+            let confidence = alternative.confidence.unwrap_or_else(|| {
+                average_confidence(alternative.words.iter().filter_map(|w| w.confidence))
+            });
+            Some(FinalSeg { transcript: transcript.to_string(), start_ms, end_ms, confidence })
+        });
+    Some(NovaFinal { channel_index, finalized_through_ms: end_ms, seg })
+}
+
+/// Reduce a nova `Results` message to a finalized segment (None for interim/other).
+/// Test shorthand: the realtime reader uses `nova_final` for the progress too.
+#[cfg(test)]
+fn nova_result_to_final(m: RealtimeMessage) -> Option<FinalSeg> {
+    nova_final(m)?.seg
 }
 
 /// Reduce a Flux `TurnInfo` to a finalized segment (only on `EndOfTurn`).
@@ -272,8 +289,6 @@ fn flux_turn_to_final(m: &FluxTurnInfo) -> Option<FinalSeg> {
         start_ms: m.audio_window_start * 1000.0,
         end_ms: m.audio_window_end * 1000.0,
         confidence: average_confidence(m.words.iter().filter_map(|w| w.confidence)),
-        // Flux sockets are always mono; the lane supplies the real channel.
-        channel: 0,
     })
 }
 
@@ -581,28 +596,31 @@ fn words_to_tuples(words: &[DeepgramWord]) -> Vec<(String, f64, f64)> {
 }
 
 // ============================================================================
-// SOURCE LABELS (stereo realtime layout)
+// SOURCE LABELS
 // ============================================================================
 
-/// Transcript label for the microphone channel (channel 0 of the stereo stream).
+/// Transcript label for the microphone channel.
+/// DO NOT change without frontend/src/lib/transcript-speakers.ts
+/// (`ts_speaker_labels_match_rust_constants` enforces they match).
 pub const MIC_IN_LABEL: &str = "Mic-In";
-/// Transcript label for the system-output channel (channel 1 of the stereo stream).
+/// Transcript label for the system-output channel. Same constraint as above.
 pub const SPEAKER_OUT_LABEL: &str = "Speaker-Out";
 
 /// The single mapping from a realtime channel to its transcript label.
-/// DO NOT reorder: the pipeline interleaves frames as [mic, system]
-/// (pipeline.rs `ContinuousStereo`), so channel 0 is the mic. A mono stream
-/// carries a mixed signal and gets no label.
-pub fn channel_label(channel: usize, total_channels: usize) -> Option<&'static str> {
-    if total_channels < 2 {
-        return None;
-    }
-    match channel {
-        0 => Some(MIC_IN_LABEL),
-        1 => Some(SPEAKER_OUT_LABEL),
+/// DO NOT reorder: the pipeline interleaves stereo frames as [mic, system]
+/// (pipeline.rs `ContinuousStereo`), so channel 0 is the mic. A `Mono` stream
+/// has no single source and gets no label.
+pub fn channel_label(layout: AudioLayout, channel: usize) -> Option<&'static str> {
+    match (layout, channel) {
+        (AudioLayout::MicOnly, 0) | (AudioLayout::MicSystemStereo, 0) => Some(MIC_IN_LABEL),
+        (AudioLayout::MicSystemStereo, 1) => Some(SPEAKER_OUT_LABEL),
         _ => None,
     }
 }
+
+/// The global channel carrying the far side, whose progress gates held Mic-In
+/// finals (see `BleedSuppressor`).
+const SPEAKER_OUT_CHANNEL: usize = 1;
 
 /// One realtime WebSocket and the input channels it carries. nova takes every
 /// channel on a single socket (`channels=N&multichannel=true`). Flux has no
@@ -626,33 +644,103 @@ fn plan_lanes(flux: bool, input_channels: usize) -> Vec<Lane> {
     }
 }
 
+/// Global input channel of a result, from the lane and the `channel_index`
+/// Deepgram reported. A mono socket is unambiguous. On a multichannel socket a
+/// missing or out-of-range index yields None: the line is emitted unlabelled
+/// rather than guessed (a guess of 0 would call the far side "Mic-In").
+fn resolve_channel(lane: Lane, reported: Option<(usize, usize)>) -> Option<usize> {
+    if lane.channels == 1 {
+        return Some(lane.first_channel);
+    }
+    match reported {
+        Some((channel, total)) if channel < lane.channels && total == lane.channels => {
+            Some(lane.first_channel + channel)
+        }
+        _ => None,
+    }
+}
+
+/// Lenient read of `channel_index` (`[channel, total]`). Any other shape is
+/// None instead of failing the whole Results message, which would drop its
+/// transcript.
+fn parse_channel_index(value: &serde_json::Value) -> Option<(usize, usize)> {
+    match value.as_array()?.as_slice() {
+        [channel, total] => Some((channel.as_u64()? as usize, total.as_u64()? as usize)),
+        _ => None,
+    }
+}
+
+/// Resampled channels may differ by a sample or two (rounding); more than this
+/// means the conversion went wrong and the chunk is dropped.
+const MAX_CHANNEL_LENGTH_SKEW: usize = 2;
+
 /// Convert one pipeline chunk into a lane's 16 kHz samples, interleaved when
 /// the lane carries two channels. Each channel is resampled on its own:
 /// resampling interleaved data would smear the two sources into each other.
-fn lane_samples(chunk: &AudioChunk, lane: Lane) -> Vec<f32> {
-    let mut picked: Vec<Vec<f32>> = deinterleave(&chunk.data, chunk.channels)
+/// None means the chunk must be dropped (logged): a channel failed to
+/// resample, or the channels came out at different lengths. Sending audio at
+/// the wrong rate, or interleaving mismatched rates, would garble the
+/// transcript and skew every later timestamp.
+fn lane_samples(chunk: &AudioChunk, lane: Lane) -> Option<Vec<f32>> {
+    lane_samples_with(chunk, lane, |samples, from, to| {
+        super::audio_processing::resample(samples, from, to)
+    })
+}
+
+fn lane_samples_with<F>(chunk: &AudioChunk, lane: Lane, resample: F) -> Option<Vec<f32>>
+where
+    F: Fn(&[f32], u32, u32) -> Result<Vec<f32>>,
+{
+    let mut picked = Vec::with_capacity(lane.channels);
+    for (offset, samples) in deinterleave(&chunk.data, chunk.layout.channels())
         .into_iter()
         .skip(lane.first_channel)
         .take(lane.channels)
-        .map(|samples| {
-            if chunk.sample_rate != PCM_SAMPLE_RATE {
-                resample_audio(&samples, chunk.sample_rate, PCM_SAMPLE_RATE)
-            } else {
-                samples
+        .enumerate()
+    {
+        if chunk.sample_rate == PCM_SAMPLE_RATE {
+            picked.push(samples);
+            continue;
+        }
+        match resample(&samples, chunk.sample_rate, PCM_SAMPLE_RATE) {
+            Ok(resampled) => picked.push(resampled),
+            Err(e) => {
+                error!(
+                    "Deepgram realtime: dropping chunk {}: channel {} failed to resample {} -> {} Hz: {}",
+                    chunk.chunk_id,
+                    lane.first_channel + offset,
+                    chunk.sample_rate,
+                    PCM_SAMPLE_RATE,
+                    e
+                );
+                return None;
             }
-        })
-        .collect();
+        }
+    }
     match picked.len() {
-        0 => Vec::new(),
-        1 => picked.pop().unwrap_or_default(),
-        _ => interleave_stereo(&picked[0], &picked[1]),
+        0 => Some(Vec::new()),
+        1 => picked.pop(),
+        _ => {
+            let (left, right) = (&picked[0], &picked[1]);
+            let skew = left.len().abs_diff(right.len());
+            if skew > MAX_CHANNEL_LENGTH_SKEW {
+                warn!(
+                    "Deepgram realtime: dropping chunk {}: channels resampled to {} vs {} samples",
+                    chunk.chunk_id,
+                    left.len(),
+                    right.len()
+                );
+                return None;
+            }
+            Some(interleave_stereo(left, right))
+        }
     }
 }
 
 /// Recording-relative duration of a chunk in ms, counted in frames so an
 /// interleaved stereo chunk is not reported as twice its real length.
 fn chunk_duration_ms(chunk: &AudioChunk) -> f64 {
-    let frames = chunk.data.len() / chunk.channels.max(1) as usize;
+    let frames = chunk.data.len() / chunk.layout.channels() as usize;
     frames as f64 / chunk.sample_rate as f64 * 1000.0
 }
 
@@ -660,9 +748,12 @@ fn chunk_duration_ms(chunk: &AudioChunk) -> f64 {
 // BLEED SUPPRESSION
 // ============================================================================
 
-/// How long a Mic-In final is held back waiting for a matching Speaker-Out
-/// final. The two channels finalize independently, so either can arrive first.
-const BLEED_HOLD_MS: f64 = 2500.0;
+/// A held Mic-In final is released once the Speaker-Out channel has finalized
+/// audio this far past the mic segment's end: by then any Speaker-Out final
+/// that could contain the same words has arrived.
+const BLEED_WATERMARK_MARGIN_MS: f64 = 500.0;
+/// Safety cap so a stalled Speaker-Out channel cannot hold mic lines forever.
+const BLEED_MAX_HOLD_MS: f64 = 15_000.0;
 /// Recording-time slack when deciding two segments are the same utterance.
 const BLEED_MAX_GAP_MS: f64 = 2000.0;
 /// Token Jaccard at or above which two segments are the same words.
@@ -672,6 +763,12 @@ const BLEED_MIN_JACCARD: f64 = 0.8;
 /// that a coincidental overlap is implausible.
 const BLEED_MIN_CONTAINMENT: f64 = 0.9;
 const BLEED_MIN_CONTAINMENT_TOKENS: usize = 4;
+/// Segments shorter than this ("Okay.", "Yeah, sure.") match genuine replies
+/// too easily, so they also have to coincide in time: acoustic bleed is
+/// near-instant, a reply comes after the far side.
+const BLEED_SHORT_TOKENS: usize = 3;
+const BLEED_SHORT_MAX_START_DELTA_MS: f64 = 300.0;
+const BLEED_SHORT_MIN_OVERLAP: f64 = 0.5;
 /// How long Speaker-Out finals are remembered for matching late Mic-In finals.
 const SPEAKER_MEMORY_MS: f64 = 30_000.0;
 
@@ -710,16 +807,32 @@ fn is_bleed(mic: &LabeledSegment, speaker: &LabeledSegment) -> bool {
     let shared = a.intersection(&b).count() as f64;
     let jaccard = shared / a.union(&b).count() as f64;
     let smaller = a.len().min(b.len());
-    jaccard >= BLEED_MIN_JACCARD
-        || (smaller >= BLEED_MIN_CONTAINMENT_TOKENS && shared / smaller as f64 >= BLEED_MIN_CONTAINMENT)
+    let same_words = jaccard >= BLEED_MIN_JACCARD
+        || (smaller >= BLEED_MIN_CONTAINMENT_TOKENS && shared / smaller as f64 >= BLEED_MIN_CONTAINMENT);
+    if !same_words {
+        return false;
+    }
+    if smaller < BLEED_SHORT_TOKENS {
+        let start_delta = (mic.start_ms - speaker.start_ms).abs();
+        let overlap = (mic.end_ms.min(speaker.end_ms) - mic.start_ms.max(speaker.start_ms)).max(0.0);
+        let mic_duration = (mic.end_ms - mic.start_ms).max(1.0);
+        return start_delta <= BLEED_SHORT_MAX_START_DELTA_MS
+            && overlap / mic_duration >= BLEED_SHORT_MIN_OVERLAP;
+    }
+    true
 }
 
 /// Drops Mic-In segments that duplicate a Speaker-Out segment, whichever
-/// arrives first. Pure: the caller supplies a monotonic clock in ms.
+/// arrives first. A Mic-In final is held until the Speaker-Out channel has
+/// finalized past it (a watermark), not for a fixed time: the two channels
+/// finalize independently and a long far-side turn can finish well after the
+/// mic copy of its first words. Pure: the caller supplies a monotonic clock.
 #[derive(Default)]
 struct BleedSuppressor {
     pending_mic: Vec<(f64, LabeledSegment)>,
     recent_speaker: Vec<(f64, LabeledSegment)>,
+    /// Recording ms up to which the Speaker-Out channel has no pending audio.
+    speaker_finalized_ms: f64,
 }
 
 impl BleedSuppressor {
@@ -735,6 +848,7 @@ impl BleedSuppressor {
             }
             Some(SPEAKER_OUT_LABEL) => {
                 self.pending_mic.retain(|(_, m)| !is_bleed(m, &seg));
+                self.speaker_finalized_ms = self.speaker_finalized_ms.max(seg.end_ms);
                 self.recent_speaker.push((now_ms, seg.clone()));
                 ready.push(seg);
             }
@@ -744,13 +858,24 @@ impl BleedSuppressor {
         ready
     }
 
-    /// Release Mic-In segments that waited out the hold without a match.
+    /// The Speaker-Out channel has finalized everything before `recording_ms`
+    /// (including stretches that produced no words).
+    fn speaker_progress(&mut self, recording_ms: f64, now_ms: f64) -> Vec<LabeledSegment> {
+        self.speaker_finalized_ms = self.speaker_finalized_ms.max(recording_ms);
+        self.drain_ready(now_ms)
+    }
+
+    /// Release Mic-In segments the Speaker-Out channel has finalized past, or
+    /// that hit the safety cap.
     fn drain_ready(&mut self, now_ms: f64) -> Vec<LabeledSegment> {
         self.recent_speaker
             .retain(|(at, _)| now_ms - at <= SPEAKER_MEMORY_MS);
+        let watermark = self.speaker_finalized_ms;
         let (ready, waiting): (Vec<_>, Vec<_>) = std::mem::take(&mut self.pending_mic)
             .into_iter()
-            .partition(|(at, _)| now_ms - at >= BLEED_HOLD_MS);
+            .partition(|(at, seg)| {
+                watermark >= seg.end_ms + BLEED_WATERMARK_MARGIN_MS || now_ms - at >= BLEED_MAX_HOLD_MS
+            });
         self.pending_mic = waiting;
         ready.into_iter().map(|(_, seg)| seg).collect()
     }
@@ -764,14 +889,62 @@ impl BleedSuppressor {
     }
 }
 
+/// Tracks how far a Flux socket has finalized: while a turn is open its audio
+/// is still pending from the turn's start; between turns everything up to the
+/// latest window end is final.
+#[derive(Default)]
+struct FluxProgress {
+    open_turn_start_ms: Option<f64>,
+}
+
+impl FluxProgress {
+    /// Observe a TurnInfo; returns stream ms through which audio is finalized.
+    fn observe(&mut self, m: &FluxTurnInfo) -> f64 {
+        let start_ms = m.audio_window_start * 1000.0;
+        let end_ms = m.audio_window_end * 1000.0;
+        match m.event.as_deref() {
+            Some("EndOfTurn") => self.open_turn_start_ms = None,
+            Some("StartOfTurn") | Some("TurnResumed") => {
+                self.open_turn_start_ms.get_or_insert(start_ms);
+            }
+            _ if !m.transcript.trim().is_empty() => {
+                self.open_turn_start_ms.get_or_insert(start_ms);
+            }
+            _ => {}
+        }
+        self.open_turn_start_ms.unwrap_or(end_ms)
+    }
+}
+
 // ============================================================================
 // REALTIME (WebSocket)
 // ============================================================================
+
+/// Where the realtime sockets connect. Production uses `DEEPGRAM`; tests point
+/// it at a local server to exercise failure paths.
+#[derive(Debug, Clone)]
+struct RealtimeEndpoints {
+    nova: String,
+    flux: String,
+}
+
+impl RealtimeEndpoints {
+    fn deepgram() -> Self {
+        Self { nova: LISTEN_WS_URL.to_string(), flux: FLUX_WS_URL.to_string() }
+    }
+}
 
 /// One chunk's worth of audio for one lane, plus where it sits in the recording.
 struct LaneFrame {
     bytes: Vec<u8>,
     entry: AudioTimeMapEntry,
+}
+
+/// What lane readers report to the emitter, in arrival order.
+enum LaneEvent {
+    Final(LabeledSegment),
+    /// The Speaker-Out channel is finalized through this recording ms.
+    SpeakerProgress(f64),
 }
 
 pub async fn run_realtime_transcription<R: Runtime>(
@@ -785,16 +958,25 @@ pub async fn run_realtime_transcription<R: Runtime>(
     let language = crate::get_language_preference_internal();
 
     let emitter_app = app.clone();
-    run_realtime_core(api_key, options, language, transcription_receiver, move |seg| {
-        emit_labeled_segment(&emitter_app, seg)
-    })
+    run_realtime_core(
+        RealtimeEndpoints::deepgram(),
+        api_key,
+        options,
+        language,
+        transcription_receiver,
+        move |seg| emit_labeled_segment(&emitter_app, seg),
+    )
     .await
 }
 
 /// The realtime session itself, free of Tauri state so it can be driven
-/// directly (see the live test `live_stereo_realtime_labels_each_channel`).
-/// `emit` receives every finalized segment after bleed suppression.
+/// directly (see `live_stereo_realtime_labels_each_channel`).
+/// `emit` receives every finalized segment after bleed suppression. It is
+/// never called after this function returns, on success or error: the
+/// worker emits `transcription-error` after an Err, and a late transcript
+/// line after that would be out of order.
 async fn run_realtime_core<F>(
+    endpoints: RealtimeEndpoints,
     api_key: String,
     options: DeepgramOptions,
     language: Option<String>,
@@ -818,31 +1000,28 @@ where
             }
         }
     };
-    let input_channels = first_chunk.channels.max(1) as usize;
+    let layout = first_chunk.layout;
+    let input_channels = layout.channels() as usize;
 
     // Flux is a distinct realtime API: /v2/listen with turn-based `TurnInfo` events
     // and its own model-selected language handling. nova uses /v1/listen `Results`.
     let flux = is_flux_model(&options.model);
     let lanes = plan_lanes(flux, input_channels);
     info!(
-        "Connecting to Deepgram realtime transcription ({}, {} channel(s) over {} socket(s))",
+        "Connecting to Deepgram realtime transcription ({}, {:?}, {} socket(s))",
         options.model,
-        input_channels,
+        layout,
         lanes.len()
     );
 
-    let shutdown = Arc::new(AtomicBool::new(false));
-    let (segment_tx, mut segment_rx) = mpsc::unbounded_channel::<LabeledSegment>();
-    let mut lane_senders = Vec::with_capacity(lanes.len());
-    let mut writer_handles = Vec::with_capacity(lanes.len());
-    let mut reader_handles = Vec::with_capacity(lanes.len());
-
+    // Connect every lane before spawning anything, so a failed connection
+    // (e.g. the second Flux socket) leaves no running task behind.
+    let mut sockets = Vec::with_capacity(lanes.len());
     for lane in &lanes {
-        let lane = *lane;
         let url = if flux {
-            build_flux_url(&options, language.clone())
+            build_flux_url(&endpoints.flux, &options, language.clone())
         } else {
-            build_realtime_url(&options, language.clone(), lane.channels)
+            build_realtime_url(&endpoints.nova, &options, language.clone(), lane.channels)
         };
         let mut request = url
             .into_client_request()
@@ -851,12 +1030,20 @@ where
         let auth_header = HeaderValue::from_str(&format!("Token {}", api_key))
             .map_err(|e| format!("Failed to build Deepgram auth header: {}", e))?;
         request.headers_mut().insert("Authorization", auth_header);
-
         let (ws_stream, _) = connect_async(request)
             .await
             .map_err(|e| format!("Failed to connect to Deepgram realtime API: {}", e))?;
-        let (mut write, mut read) = ws_stream.split();
+        sockets.push((*lane, ws_stream));
+    }
 
+    let shutdown = Arc::new(AtomicBool::new(false));
+    let (event_tx, mut event_rx) = mpsc::unbounded_channel::<LaneEvent>();
+    let mut lane_senders = Vec::with_capacity(lanes.len());
+    let mut writer_handles = Vec::with_capacity(lanes.len());
+    let mut reader_handles = Vec::with_capacity(lanes.len());
+
+    for (lane, ws_stream) in sockets {
+        let (mut write, mut read) = ws_stream.split();
         let time_map = Arc::new(Mutex::new(Vec::<AudioTimeMapEntry>::new()));
         let (lane_tx, mut lane_rx) = mpsc::unbounded_channel::<LaneFrame>();
         lane_senders.push((lane, lane_tx));
@@ -899,8 +1086,9 @@ where
             // Flux only ends a turn after it hears silence: neither CloseStream nor a
             // WebSocket close flushes the in-progress turn (verified live), and
             // dropping the write half leaves the socket open until Deepgram's 60s
-            // no-ping timeout. So feed trailing silence at realtime pace first.
-            if flux {
+            // no-ping timeout. So feed trailing silence at realtime pace first,
+            // unless the session is already failing.
+            if flux && !writer_shutdown.load(Ordering::SeqCst) {
                 let silence = f32_to_pcm16le(&vec![0.0; FLUX_SILENCE_FRAME_SAMPLES * lane.channels]);
                 for _ in 0..FLUX_TRAILING_SILENCE_FRAMES {
                     if write.send(Message::Binary(silence.clone())).await.is_err() {
@@ -917,8 +1105,9 @@ where
 
         let reader_time_map = time_map;
         let reader_shutdown = shutdown.clone();
-        let reader_segments = segment_tx.clone();
+        let reader_events = event_tx.clone();
         reader_handles.push(tokio::spawn(async move {
+            let mut flux_progress = FluxProgress::default();
             while let Some(message) = read.next().await {
                 let message = match message {
                     Ok(message) => message,
@@ -927,68 +1116,72 @@ where
                         return Err(anyhow!("Deepgram realtime WebSocket error: {}", e));
                     }
                 };
-
-                match message {
-                    Message::Text(text) => {
-                        // Parse per protocol and reduce to an optional finalized segment
-                        // (interim/Metadata/StartOfTurn/Update/etc. produce None). Both
-                        // report a `type:"Error"` control message on failure.
-                        let final_seg = if flux {
-                            match serde_json::from_str::<FluxTurnInfo>(&text) {
-                                Ok(m) => {
-                                    if m.msg_type.as_deref() == Some("Error") {
-                                        let err = m
-                                            .description
-                                            .or(m.message)
-                                            .unwrap_or_else(|| "unknown error".to_string());
-                                        reader_shutdown.store(true, Ordering::SeqCst);
-                                        return Err(anyhow!("Deepgram Flux realtime error: {}", err));
-                                    }
-                                    flux_turn_to_final(&m)
-                                }
-                                Err(e) => {
-                                    warn!("Failed to parse Deepgram Flux response: {} ({})", e, text);
-                                    None
-                                }
-                            }
-                        } else {
-                            match serde_json::from_str::<RealtimeMessage>(&text) {
-                                Ok(m) => {
-                                    if m.msg_type.as_deref() == Some("Error") {
-                                        let err = m
-                                            .description
-                                            .or(m.message)
-                                            .unwrap_or_else(|| "unknown error".to_string());
-                                        reader_shutdown.store(true, Ordering::SeqCst);
-                                        return Err(anyhow!("Deepgram realtime error: {}", err));
-                                    }
-                                    nova_result_to_final(m)
-                                }
-                                Err(e) => {
-                                    warn!("Failed to parse Deepgram realtime response: {} ({})", e, text);
-                                    None
-                                }
-                            }
-                        };
-
-                        if let Some(seg) = final_seg {
-                            let entries = reader_time_map.lock().await.clone();
-                            let start_ms = map_stream_ms_to_original(&entries, seg.start_ms);
-                            let end_ms =
-                                map_stream_ms_to_original(&entries, seg.end_ms).max(start_ms);
-                            // `seg.channel` is the index within this socket.
-                            let channel = lane.first_channel + seg.channel;
-                            let _ = reader_segments.send(LabeledSegment {
-                                text: seg.transcript,
-                                start_ms,
-                                end_ms,
-                                confidence: seg.confidence,
-                                speaker: channel_label(channel, input_channels),
-                            });
-                        }
+                let Message::Text(text) = message else {
+                    if matches!(message, Message::Close(_)) {
+                        break;
                     }
-                    Message::Close(_) => break,
-                    _ => {}
+                    continue;
+                };
+
+                // Reduce per protocol to (global channel, finalized-through ms,
+                // optional final). Both report `type:"Error"` on failure.
+                let (channel, finalized_through_ms, final_seg) = if flux {
+                    let m = match serde_json::from_str::<FluxTurnInfo>(&text) {
+                        Ok(m) => m,
+                        Err(e) => {
+                            warn!("Failed to parse Deepgram Flux response: {} ({})", e, text);
+                            continue;
+                        }
+                    };
+                    if m.msg_type.as_deref() == Some("Error") {
+                        let err = m.description.or(m.message).unwrap_or_else(|| "unknown error".to_string());
+                        reader_shutdown.store(true, Ordering::SeqCst);
+                        return Err(anyhow!("Deepgram Flux realtime error: {}", err));
+                    }
+                    if m.msg_type.as_deref() != Some("TurnInfo") {
+                        continue;
+                    }
+                    let through = flux_progress.observe(&m);
+                    (resolve_channel(lane, None), through, flux_turn_to_final(&m))
+                } else {
+                    let m = match serde_json::from_str::<RealtimeMessage>(&text) {
+                        Ok(m) => m,
+                        Err(e) => {
+                            warn!("Failed to parse Deepgram realtime response: {} ({})", e, text);
+                            continue;
+                        }
+                    };
+                    if m.msg_type.as_deref() == Some("Error") {
+                        let err = m.description.or(m.message).unwrap_or_else(|| "unknown error".to_string());
+                        reader_shutdown.store(true, Ordering::SeqCst);
+                        return Err(anyhow!("Deepgram realtime error: {}", err));
+                    }
+                    let Some(fin) = nova_final(m) else { continue };
+                    let channel = resolve_channel(lane, fin.channel_index);
+                    if channel.is_none() {
+                        warn!(
+                            "Deepgram realtime: Results on a {}-channel socket with channel_index {:?}; emitting unlabelled",
+                            lane.channels, fin.channel_index
+                        );
+                    }
+                    (channel, fin.finalized_through_ms, fin.seg)
+                };
+
+                let entries = reader_time_map.lock().await.clone();
+                if let Some(seg) = final_seg {
+                    let start_ms = map_stream_ms_to_original(&entries, seg.start_ms);
+                    let end_ms = map_stream_ms_to_original(&entries, seg.end_ms).max(start_ms);
+                    let _ = reader_events.send(LaneEvent::Final(LabeledSegment {
+                        text: seg.transcript,
+                        start_ms,
+                        end_ms,
+                        confidence: seg.confidence,
+                        speaker: channel.and_then(|c| channel_label(layout, c)),
+                    }));
+                }
+                if layout == AudioLayout::MicSystemStereo && channel == Some(SPEAKER_OUT_CHANNEL) {
+                    let through = map_stream_ms_to_original(&entries, finalized_through_ms);
+                    let _ = reader_events.send(LaneEvent::SpeakerProgress(through));
                 }
             }
 
@@ -997,8 +1190,11 @@ where
         }));
     }
     // Only the readers hold senders now, so the emitter ends when they do.
-    drop(segment_tx);
+    drop(event_tx);
 
+    // Bleed is only possible when there is a Speaker-Out channel to copy from;
+    // a mic-only or mono stream is emitted as it arrives.
+    let suppress_bleed = layout == AudioLayout::MicSystemStereo;
     let emitter_handle = tokio::spawn(async move {
         let started = std::time::Instant::now();
         let now_ms = || started.elapsed().as_secs_f64() * 1000.0;
@@ -1006,8 +1202,10 @@ where
         let mut tick = tokio::time::interval(Duration::from_millis(250));
         loop {
             let ready = tokio::select! {
-                maybe_seg = segment_rx.recv() => match maybe_seg {
-                    Some(seg) => suppressor.push(seg, now_ms()),
+                maybe_event = event_rx.recv() => match maybe_event {
+                    Some(LaneEvent::Final(seg)) if !suppress_bleed => vec![seg],
+                    Some(LaneEvent::Final(seg)) => suppressor.push(seg, now_ms()),
+                    Some(LaneEvent::SpeakerProgress(ms)) => suppressor.speaker_progress(ms, now_ms()),
                     None => break,
                 },
                 _ = tick.tick() => suppressor.drain_ready(now_ms()),
@@ -1022,7 +1220,8 @@ where
     });
 
     // Dispatcher: fan each pipeline chunk out to every lane's socket.
-    let dispatch_result: Result<(), String> = async {
+    let mut first_error: Option<String> = None;
+    {
         let mut cursors_ms = vec![0.0f64; lane_senders.len()];
         let mut next = Some(first_chunk);
         let mut shutdown_check = tokio::time::interval(Duration::from_millis(250));
@@ -1045,10 +1244,10 @@ where
             if chunk.data.is_empty() {
                 continue;
             }
-            if chunk.channels.max(1) as usize != input_channels {
+            if chunk.layout != layout {
                 warn!(
-                    "Deepgram realtime: dropping {}-channel chunk on a {}-channel stream",
-                    chunk.channels, input_channels
+                    "Deepgram realtime: dropping {:?} chunk on a {:?} stream",
+                    chunk.layout, layout
                 );
                 continue;
             }
@@ -1057,7 +1256,9 @@ where
             let original_end_ms = original_start_ms + chunk_duration_ms(&chunk);
 
             for ((lane, lane_tx), cursor) in lane_senders.iter().zip(cursors_ms.iter_mut()) {
-                let samples = lane_samples(&chunk, *lane);
+                let Some(samples) = lane_samples(&chunk, *lane) else {
+                    continue;
+                };
                 if samples.is_empty() {
                     continue;
                 }
@@ -1079,48 +1280,65 @@ where
                 }
             }
         }
-        Ok(())
     }
-    .await;
     // Closing the lane senders tells each writer to finalize its socket.
     drop(lane_senders);
-    dispatch_result?;
 
     for writer_handle in writer_handles {
-        let writer_result = writer_handle
-            .await
-            .map_err(|e| format!("Deepgram realtime writer task failed: {}", e))?;
-        // On any error we return Err; the transcription worker owns the single
-        // `transcription-error` emit, so we do not emit here (avoids double events).
-        if let Err(e) = writer_result {
+        match writer_handle.await {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => {
+                first_error.get_or_insert_with(|| e.to_string());
+            }
+            Err(e) => {
+                first_error.get_or_insert_with(|| format!("Deepgram realtime writer task failed: {}", e));
+            }
+        }
+        if first_error.is_some() {
             shutdown.store(true, Ordering::SeqCst);
-            return Err(e.to_string());
         }
     }
 
-    // One shared deadline: waiting 30s per socket in turn would stack.
+    // Readers: on success, give the final responses a shared 30s deadline
+    // (waiting 30s per socket in turn would stack). On any error, stop every
+    // reader now; nothing they would still produce may reach `emit`.
+    let reader_aborts: Vec<_> = reader_handles.iter().map(|h| h.abort_handle()).collect();
+    if first_error.is_some() {
+        reader_aborts.iter().for_each(|h| h.abort());
+    }
     let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
     for mut reader_handle in reader_handles {
         match tokio::time::timeout_at(deadline, &mut reader_handle).await {
-            Ok(join_result) => {
-                let reader_result = join_result
-                    .map_err(|e| format!("Deepgram realtime reader task failed: {}", e))?;
-                if let Err(e) = reader_result {
-                    return Err(e.to_string());
-                }
+            Ok(Ok(Ok(()))) => {}
+            Ok(Ok(Err(e))) => {
+                first_error.get_or_insert_with(|| e.to_string());
+                reader_aborts.iter().for_each(|h| h.abort());
+            }
+            Ok(Err(e)) if e.is_cancelled() => {}
+            Ok(Err(e)) => {
+                first_error.get_or_insert_with(|| format!("Deepgram realtime reader task failed: {}", e));
+                reader_aborts.iter().for_each(|h| h.abort());
             }
             Err(_) => {
-                reader_handle.abort();
                 warn!("Timed out waiting for Deepgram realtime final response");
+                reader_handle.abort();
+                let _ = reader_handle.await;
             }
         }
     }
 
-    // Readers are done, so the emitter drains what the suppressor still holds.
+    // Every reader has ended, so the event channel is closed: the emitter
+    // releases what the suppressor still holds and exits. Await it so no
+    // emit can happen after we return.
     let _ = emitter_handle.await;
 
-    info!("Deepgram realtime transcription task completed");
-    Ok(())
+    match first_error {
+        Some(e) => Err(e),
+        None => {
+            info!("Deepgram realtime transcription task completed");
+            Ok(())
+        }
+    }
 }
 
 fn emit_labeled_segment<R: Runtime>(app: &AppHandle<R>, seg: LabeledSegment) {
@@ -1165,7 +1383,7 @@ fn is_flux_model(model: &str) -> bool {
     model.starts_with("flux")
 }
 
-fn build_realtime_url(options: &DeepgramOptions, language: Option<String>, channels: usize) -> String {
+fn build_realtime_url(base: &str, options: &DeepgramOptions, language: Option<String>, channels: usize) -> String {
     let channels = channels.max(1);
     let mut query: Vec<(String, String)> = vec![
         ("encoding".to_string(), "linear16".to_string()),
@@ -1196,14 +1414,14 @@ fn build_realtime_url(options: &DeepgramOptions, language: Option<String>, chann
     let lang = options.language.as_deref().or(language.as_deref());
     apply_language(&mut query, lang, &options.model);
     apply_keyterms(&mut query, &options.keyterms);
-    encode_ws_url(LISTEN_WS_URL, &query)
+    encode_ws_url(base, &query)
 }
 
 /// Build the Flux v2 realtime URL. Flux does its own turn detection and
 /// formatting, so it takes none of the nova knobs (smart_format/punctuate/
 /// diarize/endpointing/language). The multilingual model accepts `language_hint`;
 /// language is otherwise selected by the model name, not a `language` param.
-fn build_flux_url(options: &DeepgramOptions, language: Option<String>) -> String {
+fn build_flux_url(base: &str, options: &DeepgramOptions, language: Option<String>) -> String {
     let mut query: Vec<(String, String)> = vec![
         ("model".to_string(), options.model.clone()),
         ("encoding".to_string(), "linear16".to_string()),
@@ -1217,7 +1435,7 @@ fn build_flux_url(options: &DeepgramOptions, language: Option<String>) -> String
         }
     }
     apply_keyterms(&mut query, &options.keyterms);
-    encode_ws_url(FLUX_WS_URL, &query)
+    encode_ws_url(base, &query)
 }
 
 fn encode_ws_url(base: &str, query: &[(String, String)]) -> String {
@@ -1578,7 +1796,7 @@ mod tests {
             mip_opt_out: true,
             language: None,
         };
-        let url = build_realtime_url(&options, Some("en".to_string()), 1);
+        let url = build_realtime_url(LISTEN_WS_URL, &options, Some("en".to_string()), 1);
         assert!(url.starts_with("wss://api.deepgram.com/v1/listen?"));
         assert!(url.contains("encoding=linear16"));
         assert!(url.contains("model=nova-3"));
@@ -1625,7 +1843,7 @@ mod tests {
         };
         // Even when the caller passes a global hint ("es"), the Deepgram-specific
         // language ("multi") wins, so global values never override the provider setting.
-        let url = build_realtime_url(&opts, Some("es".to_string()), 1);
+        let url = build_realtime_url(LISTEN_WS_URL, &opts, Some("es".to_string()), 1);
         assert!(url.contains("language=multi"));
         assert!(!url.contains("language=es"));
     }
@@ -1647,7 +1865,7 @@ mod tests {
             mip_opt_out: false,
             language: None,
         };
-        let url = build_realtime_url(&options, None, 1);
+        let url = build_realtime_url(LISTEN_WS_URL, &options, None, 1);
         assert!(url.contains("keyterm=Acme%20Corp"));
         assert!(!url.contains("diarize="));
         assert!(!url.contains("mip_opt_out")); // off -> param omitted
@@ -1733,7 +1951,7 @@ mod tests {
                 }],
             }),
             is_final,
-            channel_index: vec![0, 1],
+            channel_index: serde_json::json!([0, 1]),
             start: 1.0,
             duration: 0.5,
             description: None,
@@ -1811,7 +2029,7 @@ mod tests {
             mip_opt_out: false,
             language: None,
         };
-        let url = build_flux_url(&opts, Some("en".to_string()));
+        let url = build_flux_url(FLUX_WS_URL, &opts, Some("en".to_string()));
         assert!(url.starts_with("wss://api.deepgram.com/v2/listen?"));
         assert!(url.contains("model=flux-general-multi"));
         assert!(url.contains("language_hint=en")); // multi model biases via hint
@@ -1831,7 +2049,7 @@ mod tests {
             mip_opt_out: false,
             language: None,
         };
-        let url = build_flux_url(&opts, Some("en".to_string()));
+        let url = build_flux_url(FLUX_WS_URL, &opts, Some("en".to_string()));
         assert!(!url.contains("language_hint"));
     }
 
@@ -1860,18 +2078,45 @@ mod tests {
     // Multichannel realtime: labels, lanes, channel parsing, time mapping
     // ------------------------------------------------------------------
 
+    use super::super::recording_state::DeviceType;
+
     #[test]
-    fn channel_labels_follow_mic_then_system_order() {
-        assert_eq!(channel_label(0, 2), Some("Mic-In"));
-        assert_eq!(channel_label(1, 2), Some("Speaker-Out"));
-        // A mono stream is the mixed signal: no source label.
-        assert_eq!(channel_label(0, 1), None);
-        assert_eq!(channel_label(2, 3), None);
+    fn channel_labels_follow_layout() {
+        use AudioLayout::*;
+        assert_eq!(channel_label(MicSystemStereo, 0), Some("Mic-In"));
+        assert_eq!(channel_label(MicSystemStereo, 1), Some("Speaker-Out"));
+        // Mic-only recording: the one channel is the mic.
+        assert_eq!(channel_label(MicOnly, 0), Some("Mic-In"));
+        // A mixed or raw mono stream has no single source.
+        assert_eq!(channel_label(Mono, 0), None);
+        assert_eq!(channel_label(MicSystemStereo, 2), None);
+    }
+
+    /// Finding 7: the frontend keeps its own copy of the labels for styling and
+    /// export. Read it and require exactly these two values.
+    #[test]
+    fn ts_speaker_labels_match_rust_constants() {
+        let ts = include_str!("../../../src/lib/transcript-speakers.ts");
+        let labels: Vec<(&str, &str)> = ts
+            .lines()
+            .filter_map(|line| {
+                let rest = line.trim().strip_prefix("export const ")?;
+                let (name, value) = rest.split_once(" = ")?;
+                if !name.ends_with("_LABEL") {
+                    return None;
+                }
+                Some((name, value.trim_end_matches(';').trim_matches('\'')))
+            })
+            .collect();
+        assert_eq!(
+            labels,
+            vec![("MIC_IN_LABEL", MIC_IN_LABEL), ("SPEAKER_OUT_LABEL", SPEAKER_OUT_LABEL)]
+        );
     }
 
     #[test]
     fn stereo_realtime_url_requests_multichannel() {
-        let url = build_realtime_url(&DeepgramOptions::default(), None, 2);
+        let url = build_realtime_url(LISTEN_WS_URL, &DeepgramOptions::default(), None, 2);
         assert!(url.contains("channels=2"));
         assert!(url.contains("multichannel=true"));
     }
@@ -1897,41 +2142,59 @@ mod tests {
             "is_final": true,
             "channel": { "alternatives": [ { "transcript": "Life moves pretty fast.", "words": [] } ] }
         }"#;
-        let msg: RealtimeMessage = serde_json::from_str(json).unwrap();
-        let seg = nova_result_to_final(msg).unwrap();
-        assert_eq!(seg.channel, 1);
-        assert_eq!(seg.transcript, "Life moves pretty fast.");
+        let fin = nova_final(serde_json::from_str(json).unwrap()).unwrap();
+        assert_eq!(fin.channel_index, Some((1, 2)));
+        assert_eq!(fin.finalized_through_ms, 3000.0);
+        assert_eq!(fin.seg.unwrap().transcript, "Life moves pretty fast.");
     }
 
     #[test]
-    fn nova_final_without_channel_index_is_channel_zero() {
-        let json = r#"{ "type": "Results", "start": 0.0, "duration": 1.0, "is_final": true,
-            "channel": { "alternatives": [ { "transcript": "Hi.", "words": [] } ] } }"#;
-        let seg = nova_result_to_final(serde_json::from_str(json).unwrap()).unwrap();
-        assert_eq!(seg.channel, 0);
+    fn empty_final_still_reports_progress() {
+        // A silent channel produces empty finals; they must advance its watermark.
+        let json = r#"{ "type": "Results", "channel_index": [1, 2], "start": 4.0, "duration": 2.0,
+            "is_final": true, "channel": { "alternatives": [ { "transcript": "", "words": [] } ] } }"#;
+        let fin = nova_final(serde_json::from_str(json).unwrap()).unwrap();
+        assert!(fin.seg.is_none());
+        assert_eq!(fin.finalized_through_ms, 6000.0);
     }
 
-    fn chunk(data: Vec<f32>, sample_rate: u32, channels: u16) -> AudioChunk {
+    /// Finding 6: on a multichannel socket a missing or invalid channel_index
+    /// is unlabelled, never defaulted to channel 0 (= Mic-In).
+    #[test]
+    fn stereo_result_without_valid_channel_index_is_unlabelled() {
+        let stereo = Lane { first_channel: 0, channels: 2 };
+        assert_eq!(resolve_channel(stereo, Some((1, 2))), Some(1));
+        assert_eq!(resolve_channel(stereo, None), None);
+        assert_eq!(resolve_channel(stereo, Some((2, 2))), None);
+        assert_eq!(resolve_channel(stereo, Some((0, 1))), None);
+        // A mono socket is unambiguous whatever it reports.
+        assert_eq!(resolve_channel(Lane { first_channel: 1, channels: 1 }, None), Some(1));
+        assert_eq!(parse_channel_index(&serde_json::json!("oops")), None);
+        assert_eq!(parse_channel_index(&serde_json::json!([1.5, 2])), None);
+        assert_eq!(parse_channel_index(&serde_json::json!([1, 2])), Some((1, 2)));
+    }
+
+    fn chunk(data: Vec<f32>, sample_rate: u32, layout: AudioLayout) -> AudioChunk {
         AudioChunk {
             data,
             sample_rate,
             timestamp: 0.0,
             chunk_id: 0,
-            device_type: super::super::recording_state::DeviceType::Microphone,
-            channels,
+            device_type: DeviceType::Microphone,
+            layout,
         }
     }
 
     #[test]
     fn lane_samples_keeps_channels_apart_at_native_rate() {
         // 16 kHz input needs no resampling, so samples must pass through exactly.
-        let stereo = chunk(vec![0.1, -0.5, 0.2, -0.6, 0.3, -0.7], 16_000, 2);
+        let stereo = chunk(vec![0.1, -0.5, 0.2, -0.6, 0.3, -0.7], 16_000, AudioLayout::MicSystemStereo);
         assert_eq!(
-            lane_samples(&stereo, Lane { first_channel: 0, channels: 2 }),
+            lane_samples(&stereo, Lane { first_channel: 0, channels: 2 }).unwrap(),
             vec![0.1, -0.5, 0.2, -0.6, 0.3, -0.7]
         );
-        assert_eq!(lane_samples(&stereo, Lane { first_channel: 0, channels: 1 }), vec![0.1, 0.2, 0.3]);
-        assert_eq!(lane_samples(&stereo, Lane { first_channel: 1, channels: 1 }), vec![-0.5, -0.6, -0.7]);
+        assert_eq!(lane_samples(&stereo, Lane { first_channel: 0, channels: 1 }).unwrap(), vec![0.1, 0.2, 0.3]);
+        assert_eq!(lane_samples(&stereo, Lane { first_channel: 1, channels: 1 }).unwrap(), vec![-0.5, -0.6, -0.7]);
     }
 
     #[test]
@@ -1945,7 +2208,7 @@ mod tests {
             data.push(0.5);
             data.push(0.0);
         }
-        let out = lane_samples(&chunk(data, 48_000, 2), Lane { first_channel: 0, channels: 2 });
+        let out = lane_samples(&chunk(data, 48_000, AudioLayout::MicSystemStereo), Lane { first_channel: 0, channels: 2 }).unwrap();
         let split = deinterleave(&out, 2);
         assert_eq!(split[0].len(), split[1].len());
         let n = split[0].len();
@@ -1957,24 +2220,61 @@ mod tests {
 
     #[test]
     fn mono_chunk_passes_through_unchanged() {
-        let mono = chunk(vec![0.1, 0.2, 0.3], 16_000, 1);
-        assert_eq!(lane_samples(&mono, Lane { first_channel: 0, channels: 1 }), vec![0.1, 0.2, 0.3]);
+        let mono = chunk(vec![0.1, 0.2, 0.3], 16_000, AudioLayout::MicOnly);
+        assert_eq!(lane_samples(&mono, Lane { first_channel: 0, channels: 1 }).unwrap(), vec![0.1, 0.2, 0.3]);
+    }
+
+    /// Finding 8: a channel that fails to resample drops the chunk instead of
+    /// sending 48 kHz samples labelled as 16 kHz next to a resampled channel.
+    #[test]
+    fn resample_failure_on_one_channel_drops_the_chunk() {
+        let stereo = chunk(vec![0.1, 0.2, 0.3, 0.4], 48_000, AudioLayout::MicSystemStereo);
+        let fail_right = |samples: &[f32], _: u32, _: u32| -> Result<Vec<f32>> {
+            if samples[0] == 0.2 {
+                Err(anyhow!("resampler exploded"))
+            } else {
+                Ok(samples.to_vec())
+            }
+        };
+        assert_eq!(lane_samples_with(&stereo, Lane { first_channel: 0, channels: 2 }, fail_right), None);
+        // The mono lane for the healthy channel is unaffected.
+        assert_eq!(
+            lane_samples_with(&stereo, Lane { first_channel: 0, channels: 1 }, fail_right),
+            Some(vec![0.1, 0.3])
+        );
+    }
+
+    /// Finding 8: channels that resample to different lengths are padded when
+    /// the skew is rounding-sized, dropped when it is not.
+    #[test]
+    fn unequal_resampled_lengths_pad_small_skew_and_drop_large() {
+        let stereo = chunk(vec![1.0; 200], 48_000, AudioLayout::MicSystemStereo);
+        let lane = Lane { first_channel: 0, channels: 2 };
+        let call = std::sync::atomic::AtomicUsize::new(0);
+        let skewed = |short_by: usize| {
+            call.store(0, Ordering::SeqCst);
+            lane_samples_with(&stereo, lane, |_s: &[f32], _: u32, _: u32| {
+                let n = if call.fetch_add(1, Ordering::SeqCst) == 0 { 30 } else { 30 - short_by };
+                Ok(vec![1.0; n])
+            })
+        };
+        let small = skewed(1).unwrap();
+        assert_eq!(small.len(), 60, "1-sample skew is padded to equal frames");
+        assert_eq!(small[59], 0.0, "the pad is silence on the short channel");
+        assert_eq!(skewed(10), None, "a large skew drops the chunk");
     }
 
     #[test]
     fn stereo_chunk_duration_counts_frames_not_samples() {
         // 1600 stereo frames at 16 kHz = 100 ms, even though data holds 3200 samples.
-        let stereo = chunk(vec![0.0; 3200], 16_000, 2);
+        let stereo = chunk(vec![0.0; 3200], 16_000, AudioLayout::MicSystemStereo);
         assert_eq!(chunk_duration_ms(&stereo), 100.0);
-        let mono = chunk(vec![0.0; 3200], 16_000, 1);
+        let mono = chunk(vec![0.0; 3200], 16_000, AudioLayout::MicOnly);
         assert_eq!(chunk_duration_ms(&mono), 200.0);
     }
 
     #[test]
     fn stereo_time_map_maps_stream_time_to_recording_time() {
-        // Two 100 ms stereo chunks at recording times 5.0s and 5.1s; the
-        // stream cursor advances per frame, so 150 ms into the stream is
-        // 5.15s into the recording.
         let entries = vec![
             AudioTimeMapEntry { stream_start_ms: 0.0, stream_end_ms: 100.0, original_start_ms: 5000.0, original_end_ms: 5100.0 },
             AudioTimeMapEntry { stream_start_ms: 100.0, stream_end_ms: 200.0, original_start_ms: 5100.0, original_end_ms: 5200.0 },
@@ -1993,10 +2293,10 @@ mod tests {
     #[test]
     fn bleed_dropped_when_speaker_copy_arrives_first() {
         let mut s = BleedSuppressor::default();
-        let out = s.push(seg("Thanks, Jake.", 1000.0, 1800.0, Some(SPEAKER_OUT_LABEL)), 0.0);
+        let out = s.push(seg("Thanks for joining, Jake.", 1000.0, 1800.0, Some(SPEAKER_OUT_LABEL)), 0.0);
         assert_eq!(out.len(), 1);
-        assert!(s.push(seg("Thanks, Jake.", 1050.0, 1800.0, Some(MIC_IN_LABEL)), 100.0).is_empty());
-        assert!(s.drain_ready(10_000.0).is_empty());
+        assert!(s.push(seg("Thanks for joining, Jake.", 1050.0, 1800.0, Some(MIC_IN_LABEL)), 100.0).is_empty());
+        assert!(s.drain_ready(20_000.0).is_empty());
         assert!(s.flush().is_empty());
     }
 
@@ -2006,7 +2306,7 @@ mod tests {
         assert!(s.push(seg("Bye bye.", 3000.0, 3500.0, Some(MIC_IN_LABEL)), 0.0).is_empty());
         let out = s.push(seg("Bye bye.", 3000.0, 3600.0, Some(SPEAKER_OUT_LABEL)), 500.0);
         assert_eq!(out, vec![seg("Bye bye.", 3000.0, 3600.0, Some(SPEAKER_OUT_LABEL))]);
-        assert!(s.drain_ready(10_000.0).is_empty());
+        assert!(s.drain_ready(20_000.0).is_empty());
     }
 
     #[test]
@@ -2022,28 +2322,60 @@ mod tests {
     }
 
     #[test]
-    fn genuine_mic_speech_is_released_after_hold() {
+    fn genuine_mic_speech_released_once_speaker_channel_passes_it() {
         let mut s = BleedSuppressor::default();
-        s.push(seg("Life moves pretty fast.", 1000.0, 2000.0, Some(SPEAKER_OUT_LABEL)), 0.0);
-        assert!(s.push(seg("Sounds good, let's ship it.", 1500.0, 2500.0, Some(MIC_IN_LABEL)), 100.0).is_empty());
-        // Still held before the hold expires...
-        assert!(s.drain_ready(100.0 + BLEED_HOLD_MS - 1.0).is_empty());
-        // ...and released after.
-        let out = s.drain_ready(100.0 + BLEED_HOLD_MS);
+        assert!(s.push(seg("Sounds good, let's ship it.", 1500.0, 2500.0, Some(MIC_IN_LABEL)), 0.0).is_empty());
+        // Speaker-Out finalized only up to the mic segment's end: keep holding.
+        assert!(s.speaker_progress(2500.0, 100.0).is_empty());
+        // Past the end plus margin: release.
+        let out = s.speaker_progress(2500.0 + BLEED_WATERMARK_MARGIN_MS, 200.0);
         assert_eq!(out, vec![seg("Sounds good, let's ship it.", 1500.0, 2500.0, Some(MIC_IN_LABEL))]);
     }
 
     #[test]
+    fn speaker_final_advances_the_watermark() {
+        let mut s = BleedSuppressor::default();
+        s.push(seg("Different words entirely here.", 1000.0, 2000.0, Some(MIC_IN_LABEL)), 0.0);
+        let out = s.push(seg("Life moves pretty fast.", 1000.0, 4000.0, Some(SPEAKER_OUT_LABEL)), 100.0);
+        assert_eq!(out.len(), 2, "speaker line plus the released mic line");
+    }
+
+    #[test]
+    fn stalled_speaker_channel_releases_mic_at_the_cap() {
+        let mut s = BleedSuppressor::default();
+        s.push(seg("Anyone there?", 0.0, 800.0, Some(MIC_IN_LABEL)), 0.0);
+        assert!(s.drain_ready(BLEED_MAX_HOLD_MS - 1.0).is_empty());
+        assert_eq!(s.drain_ready(BLEED_MAX_HOLD_MS).len(), 1);
+    }
+
+    #[test]
+    fn flux_progress_holds_at_open_turn_start() {
+        let mk = |event: &str, transcript: &str, start: f64, end: f64| FluxTurnInfo {
+            msg_type: Some("TurnInfo".to_string()),
+            event: Some(event.to_string()),
+            transcript: transcript.to_string(),
+            audio_window_start: start,
+            audio_window_end: end,
+            words: vec![],
+            description: None,
+            message: None,
+        };
+        let mut p = FluxProgress::default();
+        assert_eq!(p.observe(&mk("Update", "", 0.0, 1.0)), 1000.0, "silence: final through window end");
+        assert_eq!(p.observe(&mk("StartOfTurn", "Life", 1.0, 1.5)), 1000.0);
+        assert_eq!(p.observe(&mk("Update", "Life moves", 1.0, 3.0)), 1000.0, "open turn: pending from its start");
+        assert_eq!(p.observe(&mk("EndOfTurn", "Life moves pretty fast.", 1.0, 4.0)), 4000.0);
+    }
+
+    #[test]
     fn same_words_far_apart_in_time_are_not_bleed() {
-        let mic = seg("Thanks, Jake.", 60_000.0, 61_000.0, Some(MIC_IN_LABEL));
-        let spk = seg("Thanks, Jake.", 1000.0, 2000.0, Some(SPEAKER_OUT_LABEL));
+        let mic = seg("Thanks for joining, Jake.", 60_000.0, 61_000.0, Some(MIC_IN_LABEL));
+        let spk = seg("Thanks for joining, Jake.", 1000.0, 2000.0, Some(SPEAKER_OUT_LABEL));
         assert!(!is_bleed(&mic, &spk));
     }
 
     #[test]
     fn short_word_inside_long_speaker_segment_is_not_bleed() {
-        // "Yeah." is 1 token: too short for the containment rule, and its
-        // Jaccard against a long sentence is tiny.
         let mic = seg("Yeah.", 1000.0, 1300.0, Some(MIC_IN_LABEL));
         let spk = seg("Yeah, so the plan for the demo is next week.", 900.0, 4000.0, Some(SPEAKER_OUT_LABEL));
         assert!(!is_bleed(&mic, &spk));
@@ -2063,6 +2395,241 @@ mod tests {
         assert_eq!(s.flush().len(), 1);
     }
 
+    /// Finding 1: a Mic-In copy must not be released just because a fixed hold
+    /// elapsed; the Speaker-Out final that contains it can arrive later.
+    #[test]
+    fn mic_copy_survives_until_late_longer_speaker_final() {
+        let mut s = BleedSuppressor::default();
+        assert!(s
+            .push(seg("Thanks, Jake. See you then.", 10_000.0, 11_500.0, Some(MIC_IN_LABEL)), 0.0)
+            .is_empty());
+        // The old fixed 2.5s hold released the copy here.
+        assert!(
+            s.drain_ready(3_000.0).is_empty(),
+            "mic copy released before the speaker lane finalized past it"
+        );
+        let out = s.push(
+            seg("Alright. Thanks, Jake. See you then, bye.", 9_000.0, 12_500.0, Some(SPEAKER_OUT_LABEL)),
+            4_000.0,
+        );
+        assert_eq!(out.len(), 1, "only the Speaker-Out line should be emitted");
+        assert_eq!(out[0].speaker, Some(SPEAKER_OUT_LABEL));
+        assert!(s.flush().is_empty(), "the held mic copy must have been dropped");
+    }
+
+    /// Finding 3: a genuine short reply comes after the far side, not on top of it.
+    #[test]
+    fn short_reply_after_the_far_side_is_not_bleed() {
+        let spk = seg("Okay.", 5_000.0, 5_400.0, Some(SPEAKER_OUT_LABEL));
+        let mic = seg("Okay.", 5_800.0, 6_200.0, Some(MIC_IN_LABEL));
+        assert!(!is_bleed(&mic, &spk));
+    }
+
+    /// Finding 3 (guard): acoustic bleed of a short word is near-instant.
+    #[test]
+    fn short_simultaneous_copy_is_still_bleed() {
+        let spk = seg("Okay.", 5_000.0, 5_400.0, Some(SPEAKER_OUT_LABEL));
+        let mic = seg("Okay.", 5_050.0, 5_400.0, Some(MIC_IN_LABEL));
+        assert!(is_bleed(&mic, &spk));
+    }
+
+    /// Finding 6: an unexpected `channel_index` shape must not reject the whole
+    /// Results message (the transcript would be lost).
+    #[test]
+    fn results_with_malformed_channel_index_still_parse() {
+        for bad in [r#""oops""#, "null", r#"[1.5, "x"]"#, "{}"] {
+            let json = format!(
+                r#"{{ "type": "Results", "channel_index": {}, "start": 0.0, "duration": 1.0,
+                     "is_final": true,
+                     "channel": {{ "alternatives": [ {{ "transcript": "Still here.", "words": [] }} ] }} }}"#,
+                bad
+            );
+            let msg: RealtimeMessage = serde_json::from_str(&json)
+                .unwrap_or_else(|e| panic!("channel_index {} rejected the message: {}", bad, e));
+            assert!(nova_result_to_final(msg).is_some());
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Failure paths (finding 5), against a local WebSocket server
+    // ------------------------------------------------------------------
+
+    /// Serve `script` to each accepted socket in turn: Ok(messages) sends those
+    /// text frames then keeps reading; Err(()) rejects the handshake.
+    async fn mock_deepgram(
+        script: Vec<std::result::Result<Vec<String>, ()>>,
+    ) -> (String, tokio::task::JoinHandle<()>) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("ws://{}/listen", listener.local_addr().unwrap());
+        let handle = tokio::spawn(async move {
+            for step in script {
+                let Ok((stream, _)) = listener.accept().await else { return };
+                match step {
+                    Err(()) => {
+                        // Not a WebSocket upgrade: the client's handshake fails.
+                        use tokio::io::AsyncWriteExt;
+                        let mut stream = stream;
+                        let _ = stream
+                            .write_all(b"HTTP/1.1 400 Bad Request\r\ncontent-length: 0\r\n\r\n")
+                            .await;
+                    }
+                    Ok(messages) => {
+                        tokio::spawn(async move {
+                            let Ok(ws) = tokio_tungstenite::accept_async(stream).await else { return };
+                            let (mut tx, mut rx) = ws.split();
+                            for m in messages {
+                                // "__sleep:<ms>" pauses the script instead of sending.
+                                if let Some(ms) = m.strip_prefix("__sleep:") {
+                                    tokio::time::sleep(Duration::from_millis(ms.parse().unwrap())).await;
+                                    continue;
+                                }
+                                tokio::time::sleep(Duration::from_millis(50)).await;
+                                if tx.send(Message::Text(m)).await.is_err() {
+                                    return;
+                                }
+                            }
+                            while let Some(Ok(_)) = rx.next().await {}
+                        });
+                    }
+                }
+            }
+        });
+        (base, handle)
+    }
+
+    fn feed(layout: AudioLayout) -> mpsc::UnboundedReceiver<AudioChunk> {
+        let (tx, rx) = mpsc::unbounded_channel();
+        tokio::spawn(async move {
+            for i in 0..200u64 {
+                let data = vec![0.0; 1600 * layout.channels() as usize];
+                let chunk = AudioChunk {
+                    data,
+                    sample_rate: 16_000,
+                    timestamp: i as f64 * 0.1,
+                    chunk_id: i,
+                    device_type: DeviceType::Microphone,
+                    layout,
+                };
+                if tx.send(chunk).is_err() {
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        });
+        rx
+    }
+
+    fn results(channel: usize, start: f64, text: &str) -> String {
+        serde_json::json!({
+            "type": "Results", "channel_index": [channel, 2], "start": start, "duration": 1.0,
+            "is_final": true, "channel": { "alternatives": [ { "transcript": text, "words": [] } ] }
+        })
+        .to_string()
+    }
+
+    type Emitted = Arc<std::sync::Mutex<Vec<LabeledSegment>>>;
+
+    async fn run_against(
+        endpoints: RealtimeEndpoints,
+        model: String,
+        layout: AudioLayout,
+        emitted: Emitted,
+    ) -> (std::result::Result<(), String>, Emitted) {
+        run_against_slow(endpoints, model, layout, emitted, Duration::ZERO).await
+    }
+
+    /// `emit_delay` makes every emit slow, so an emit racing the return of
+    /// `run_realtime_core` lands visibly after it.
+    async fn run_against_slow(
+        endpoints: RealtimeEndpoints,
+        model: String,
+        layout: AudioLayout,
+        emitted: Emitted,
+        emit_delay: Duration,
+    ) -> (std::result::Result<(), String>, Emitted) {
+        let sink = emitted.clone();
+        let options = DeepgramOptions { model, ..DeepgramOptions::default() };
+        let result = tokio::time::timeout(
+            Duration::from_secs(10),
+            run_realtime_core(endpoints, "k".to_string(), options, None, feed(layout), move |s| {
+                std::thread::sleep(emit_delay);
+                sink.lock().unwrap().push(s)
+            }),
+        )
+        .await
+        .expect("core must return promptly on error, not wait out the 30s reader deadline");
+        (result, emitted)
+    }
+
+    /// A reader error ends the session with nothing emitted afterwards: the
+    /// held Mic-In line is released before return, never after.
+    // Multi-threaded: on a current-thread runtime the emitter always finishes
+    // before the session can resume, which would hide a missing await.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn reader_error_stops_every_task_before_returning() {
+        let (base, _server) = mock_deepgram(vec![Ok(vec![
+            // The mic line ends past the far side's watermark, so it is still
+            // held when the Error lands and must be flushed before return.
+            results(1, 0.0, "Far side line here."),
+            results(0, 10.0, "Held mic line here."),
+            serde_json::json!({ "type": "Error", "description": "boom" }).to_string(),
+        ])])
+        .await;
+        let endpoints = RealtimeEndpoints { nova: base.clone(), flux: base };
+        let (result, emitted) = run_against_slow(
+            endpoints,
+            "nova-3".into(),
+            AudioLayout::MicSystemStereo,
+            Emitted::default(),
+            Duration::from_millis(300),
+        )
+        .await;
+        assert!(result.unwrap_err().contains("boom"));
+        let at_return = emitted.lock().unwrap().len();
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        assert_eq!(emitted.lock().unwrap().len(), at_return, "emit after return");
+        let texts: Vec<String> = emitted.lock().unwrap().iter().map(|s| s.text.clone()).collect();
+        assert!(texts.contains(&"Held mic line here.".to_string()), "held line flushed before return: {:?}", texts);
+    }
+
+    /// A Flux lane that fails to connect leaves no task running.
+    #[tokio::test]
+    async fn flux_second_lane_connect_failure_spawns_nothing() {
+        let (base, _server) = mock_deepgram(vec![Ok(vec![]), Err(())]).await;
+        let endpoints = RealtimeEndpoints { nova: base.clone(), flux: base };
+        let (result, emitted) = run_against(endpoints, "flux-general-en".into(), AudioLayout::MicSystemStereo, Emitted::default()).await;
+        assert!(result.unwrap_err().contains("Failed to connect"));
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert!(emitted.lock().unwrap().is_empty());
+    }
+
+    /// Finding 2: a mic-only stream uses one mono socket and emits Mic-In lines
+    /// immediately (no bleed hold: there is no far side to copy).
+    #[tokio::test]
+    async fn mic_only_stream_is_mono_and_unheld() {
+        let mono_result = serde_json::json!({
+            "type": "Results", "channel_index": [0, 1], "start": 0.0, "duration": 1.0,
+            "is_final": true, "channel": { "alternatives": [ { "transcript": "Just me talking.", "words": [] } ] }
+        })
+        .to_string();
+        let (base, _server) = mock_deepgram(vec![Ok(vec![
+            mono_result,
+            "__sleep:2000".to_string(),
+            serde_json::json!({ "type": "Error", "description": "end" }).to_string(),
+        ])])
+        .await;
+        let endpoints = RealtimeEndpoints { nova: base.clone(), flux: base };
+        let emitted = Emitted::default();
+        let session = tokio::spawn(run_against(endpoints, "nova-3".into(), AudioLayout::MicOnly, emitted.clone()));
+        // The Error (which would flush any held line) is 2s away; an unheld
+        // line is already out.
+        tokio::time::sleep(Duration::from_millis(1000)).await;
+        let early = emitted.lock().unwrap().clone();
+        assert_eq!(early.len(), 1, "mic-only line was held");
+        assert_eq!(early[0].speaker, Some(MIC_IN_LABEL));
+        let _ = session.await.unwrap();
+    }
+
     /// Live wire test against api.deepgram.com through the production realtime
     /// core. Needs ~/.config/meetily-dgkey and MEETILY_STEREO_PCM pointing at
     /// 16 kHz s16le stereo (left = one talker, right = another).
@@ -2070,6 +2637,35 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn live_stereo_realtime_labels_each_channel() {
+        let (key, samples) = live_inputs();
+        for model in ["nova-3", "flux-general-en"] {
+            let segs = live_run(&key, model, &samples, AudioLayout::MicSystemStereo).await;
+            let mic: String = segs.iter().filter(|s| s.speaker == Some(MIC_IN_LABEL)).map(|s| s.text.to_lowercase()).collect();
+            let spk: String = segs.iter().filter(|s| s.speaker == Some(SPEAKER_OUT_LABEL)).map(|s| s.text.to_lowercase()).collect();
+            assert!(mic.contains("spacewalk") || mic.contains("space walk"), "{}: mic channel missing spacewalk: {}", model, mic);
+            assert!(spk.contains("life moves pretty fast"), "{}: speaker channel missing Bueller: {}", model, spk);
+            assert!(!mic.contains("life moves"), "{}: Bueller leaked into Mic-In", model);
+            assert!(!spk.contains("spacewalk"), "{}: spacewalk leaked into Speaker-Out", model);
+            assert!(segs.iter().all(|s| s.speaker.is_some()), "{}: unlabelled line on a stereo stream", model);
+        }
+    }
+
+    /// Live mic-only run: the left channel alone as a mono MicOnly stream.
+    #[tokio::test]
+    #[ignore]
+    async fn live_mic_only_realtime_is_mono_mic_in() {
+        let (key, samples) = live_inputs();
+        let left: Vec<f32> = samples.chunks_exact(2).map(|f| f[0]).collect();
+        for model in ["nova-3", "flux-general-en"] {
+            let segs = live_run(&key, model, &left, AudioLayout::MicOnly).await;
+            assert!(!segs.is_empty());
+            assert!(segs.iter().all(|s| s.speaker == Some(MIC_IN_LABEL)), "{}: {:?}", model, segs);
+            let text: String = segs.iter().map(|s| s.text.to_lowercase()).collect();
+            assert!(text.contains("spacewalk") || text.contains("space walk"), "{}: {}", model, text);
+        }
+    }
+
+    fn live_inputs() -> (String, Vec<f32>) {
         let key = std::fs::read_to_string(
             std::path::Path::new(&std::env::var("HOME").unwrap()).join(".config/meetily-dgkey"),
         )
@@ -2077,45 +2673,56 @@ mod tests {
         .trim()
         .to_string();
         let pcm = std::fs::read(std::env::var("MEETILY_STEREO_PCM").unwrap()).unwrap();
-        let samples: Vec<f32> = pcm
+        let samples = pcm
             .chunks_exact(2)
             .map(|b| i16::from_le_bytes([b[0], b[1]]) as f32 / 32768.0)
             .collect();
+        (key, samples)
+    }
 
-        for model in ["nova-3", "flux-general-en"] {
-            let (tx, rx) = mpsc::unbounded_channel();
-            let collected = Arc::new(std::sync::Mutex::new(Vec::<LabeledSegment>::new()));
-            let sink = collected.clone();
-            let options = DeepgramOptions { model: model.to_string(), ..DeepgramOptions::default() };
-            let session = tokio::spawn(run_realtime_core(key.clone(), options, None, rx, move |s| {
+    async fn live_run(key: &str, model: &str, samples: &[f32], layout: AudioLayout) -> Vec<LabeledSegment> {
+        let (tx, rx) = mpsc::unbounded_channel();
+        let collected: Emitted = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink = collected.clone();
+        let started = std::time::Instant::now();
+        let options = DeepgramOptions { model: model.to_string(), ..DeepgramOptions::default() };
+        let session = tokio::spawn(run_realtime_core(
+            RealtimeEndpoints::deepgram(),
+            key.to_string(),
+            options,
+            None,
+            rx,
+            move |s| {
+                println!(
+                    "[{} {:?}] emitted at {:>5.1}s  audio {:>5.1}s  {:<11} {}",
+                    "live",
+                    layout,
+                    started.elapsed().as_secs_f64(),
+                    s.start_ms / 1000.0,
+                    s.speaker.unwrap_or("-"),
+                    s.text
+                );
                 sink.lock().unwrap().push(s)
-            }));
-            // 100 ms stereo frames, paced near realtime (faster overruns the socket).
-            let frames_per_chunk = 1600;
-            for (i, block) in samples.chunks(frames_per_chunk * 2).enumerate() {
-                tx.send(AudioChunk {
-                    data: block.to_vec(),
-                    sample_rate: 16_000,
-                    timestamp: i as f64 * 0.1,
-                    chunk_id: i as u64,
-                    device_type: super::super::recording_state::DeviceType::Microphone,
-                    channels: 2,
-                })
-                .unwrap();
-                tokio::time::sleep(Duration::from_millis(100)).await;
-            }
-            drop(tx);
-            session.await.unwrap().unwrap();
-            let segs = collected.lock().unwrap().clone();
-            for s in &segs {
-                println!("[{}] {:>6.1}s {:<11} {}", model, s.start_ms / 1000.0, s.speaker.unwrap_or("-"), s.text);
-            }
-            let mic: String = segs.iter().filter(|s| s.speaker == Some(MIC_IN_LABEL)).map(|s| s.text.to_lowercase()).collect();
-            let spk: String = segs.iter().filter(|s| s.speaker == Some(SPEAKER_OUT_LABEL)).map(|s| s.text.to_lowercase()).collect();
-            assert!(mic.contains("spacewalk") || mic.contains("space walk"), "{}: mic channel missing spacewalk: {}", model, mic);
-            assert!(spk.contains("life moves pretty fast"), "{}: speaker channel missing Bueller: {}", model, spk);
-            assert!(!mic.contains("life moves"), "{}: Bueller leaked into Mic-In", model);
-            assert!(!spk.contains("spacewalk"), "{}: spacewalk leaked into Speaker-Out", model);
+            },
+        ));
+        // 100 ms frames, paced near realtime (faster overruns the socket).
+        let per_chunk = 1600 * layout.channels() as usize;
+        for (i, block) in samples.chunks(per_chunk).enumerate() {
+            tx.send(AudioChunk {
+                data: block.to_vec(),
+                sample_rate: 16_000,
+                timestamp: i as f64 * 0.1,
+                chunk_id: i as u64,
+                device_type: DeviceType::Microphone,
+                layout,
+            })
+            .unwrap();
+            tokio::time::sleep(Duration::from_millis(100)).await;
         }
+        drop(tx);
+        session.await.unwrap().unwrap();
+        println!("[{}] ---", model);
+        let segs = collected.lock().unwrap().clone();
+        segs
     }
 }
