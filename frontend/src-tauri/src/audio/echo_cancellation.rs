@@ -172,8 +172,6 @@ const MIC_HOLD_MS: i64 = 100;
 const MAX_LAG_MS: i64 = 500;
 /// Smaller estimate changes are measurement jitter.
 const LAG_HYSTERESIS_MS: i64 = 1;
-/// A larger change means a new echo path: start the model fresh.
-const LAG_RESET_MS: i64 = 15;
 
 struct NeuralPath {
     model: NeuralEcho,
@@ -229,13 +227,11 @@ impl NeuralPath {
         let mic16 = self.down_mic.process(mic48);
         let ref16 = self.down_ref.process(sys48);
         if let Some(lag) = self.lag.observe(&mic16, &ref16) {
-            let change = (lag - self.lag_in_use).abs();
-            if change >= ms16(LAG_HYSTERESIS_MS) {
+            if (lag - self.lag_in_use).abs() >= ms16(LAG_HYSTERESIS_MS) {
                 info!("🔇 Echo lag locked at {} ms", lag * 1000 / 16_000);
-                // A shift inside the model's 5-40 ms tolerance keeps its state.
-                if change > ms16(LAG_RESET_MS) {
-                    self.model.reset();
-                }
+                // The model keeps its state: resetting it on a new lag leaked
+                // more echo after a delay jump and hurt the voice after a
+                // false lock (measured in real_recordings_report).
                 self.lag_in_use = lag;
             }
         }
@@ -412,8 +408,11 @@ impl BandSplit {
 // Echo lag estimation (GCC-PHAT on 16 kHz mic and reference)
 // ---------------------------------------------------------------------------
 
-const LAG_WINDOW: usize = 16_384; // ~1 s
-const LAG_EVERY: usize = 8_000; // 0.5 s
+// Half-second windows, re-estimated every quarter second: after a new
+// playback stream moves the echo by 50 ms, cancellation is back within
+// 0.5 s (1 s windows every 0.5 s took 1.5-2 s; see real_recordings_report).
+const LAG_WINDOW: usize = 8_192; // ~0.5 s
+const LAG_EVERY: usize = 4_000; // 0.25 s
 /// Peak height over the correlation's spread needed to trust an estimate.
 const LAG_MIN_CONFIDENCE: f32 = 8.0;
 
@@ -434,6 +433,16 @@ impl LagEstimator {
     /// samples, echo after reference is positive) once two consecutive
     /// confident estimates agree within 2 ms.
     fn observe(&mut self, mic: &[f32], reference: &[f32]) -> Option<i64> {
+        // In LAG_EVERY steps, so the estimate rate does not depend on how
+        // large the caller's windows are (the pipeline's are 600 ms).
+        let mut agreed = None;
+        for (mic, reference) in mic.chunks(LAG_EVERY).zip(reference.chunks(LAG_EVERY)) {
+            agreed = self.observe_step(mic, reference).or(agreed);
+        }
+        agreed
+    }
+
+    fn observe_step(&mut self, mic: &[f32], reference: &[f32]) -> Option<i64> {
         self.mic.extend(mic);
         self.reference.extend(reference);
         while self.mic.len() > LAG_WINDOW { self.mic.pop_front(); }
@@ -556,6 +565,22 @@ mod tests {
     }
 
     #[test]
+    fn lag_estimator_locks_on_long_delays() {
+        // Bluetooth or AirPlay speakers: 300 and 450 ms.
+        for delay in [4_800usize, 7_200] {
+            let reference = bursts(16_000 * 6, 4);
+            let mic = delayed(&reference, delay, 0.4);
+            let mut est = LagEstimator::new();
+            let mut locked = None;
+            for (m, r) in mic.chunks(800).zip(reference.chunks(800)) {
+                if let Some(l) = est.observe(m, r) { locked = Some(l); }
+            }
+            let l = locked.expect("no lock");
+            assert!((l - delay as i64).abs() <= 32, "delay {delay}: locked at {l}");
+        }
+    }
+
+    #[test]
     fn lag_estimator_locks_on_the_echo_delay() {
         let reference = bursts(16_000 * 6, 3);
         let mic = delayed(&reference, 1_712, 0.4); // 107 ms
@@ -615,6 +640,23 @@ mod tests {
         let shifted = |s: &[f32], r: &std::ops::Range<usize>| s[r.start - LEAD..r.end - LEAD].to_vec();
 
         let (echo_out, _) = run(&mut fresh(), &echo_mic[..n], &echo_ref[..n]);
+        // A new playback stream can reach the speakers with a different delay:
+        // move the echo 50 ms later (and earlier) at 10 s and see how fast the
+        // canceller recovers.
+        for jump in [2_400i64, -2_400] {
+            let at = 48_000 * 10;
+            let mic: Vec<f32> = (0..n)
+                .map(|i| if i < at { echo_mic[i] } else { echo_mic.get((i as i64 - jump) as usize).copied().unwrap_or(0.0) })
+                .collect();
+            let (out, _) = run(&mut fresh(), &mic, &echo_ref[..n]);
+            let report: Vec<String> = (0..8)
+                .map(|k| {
+                    let w = at + 24_000 * k + LEAD..at + 24_000 * (k + 1) + LEAD;
+                    format!("{:.0}", 10.0 * (e(&shifted(&mic, &w)) / e(&out[w])).log10())
+                })
+                .collect();
+            println!("lag jump {:+} ms at 10 s, dB removed per 0.5 s after: {}", jump / 48, report.join(" "));
+        }
         for (a, b) in [(0usize, 1usize), (1, 2), (2, 3), (3, 4)] {
             let w = 48_000 * a + LEAD..48_000 * b + LEAD;
             println!("  second {a}-{b}: echo removed {:.1} dB", 10.0 * (e(&shifted(&echo_mic, &w)) / e(&echo_out[w])).log10());

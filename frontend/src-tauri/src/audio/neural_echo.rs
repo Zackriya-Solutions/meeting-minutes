@@ -78,13 +78,6 @@ impl NeuralEcho {
         })
     }
 
-    /// Forget the LSTM state (after the echo path changes). The audio blocks
-    /// stay, so the output continues without a gap.
-    pub fn reset(&mut self) {
-        self.states_1.fill(0.0);
-        self.states_2.fill(0.0);
-    }
-
     /// Feed aligned 16 kHz mic and reference of equal length; returns one
     /// output sample per input sample once a full hop is available (the
     /// remainder waits for the next call). A hop the model fails on passes the
