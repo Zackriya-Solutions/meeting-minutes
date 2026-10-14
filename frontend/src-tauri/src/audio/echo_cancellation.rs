@@ -170,9 +170,12 @@ const REFERENCE_LEAD_MS: i64 = 20;
 /// applied from where the change happened: no echo leaks while re-locking.
 /// Locking takes up to ~0.63 s after a change (see `LagEstimator::observe`).
 const MIC_HOLD_MS: i64 = 700;
-/// Shortest echo lag searched and supported (echo before its reference, as
-/// the system window can trail the mic).
-const MIN_LAG_MS: i64 = -80;
+/// Shortest echo lag searched. Speaker echo always arrives some ms after
+/// its reference (output latency plus the acoustic path; measured 48-166 ms
+/// live). Lags near 0 came only from edges both streams share (the start of
+/// a recording, padding): the estimator locked on 0 ms in a live recording
+/// and in the no-echo test.
+const MIN_LAG_MS: i64 = 5;
 /// Longest echo lag searched and supported.
 const MAX_LAG_MS: i64 = 500;
 /// Smaller estimate changes are measurement jitter.
