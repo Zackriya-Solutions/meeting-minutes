@@ -88,9 +88,31 @@ impl AudioMixerRingBuffer {
         dropped
     }
 
+    /// Mix only when both sources have a full window, so the two tracks stay
+    /// aligned sample for sample. Mixing as soon as one source had a window
+    /// padded the other with silence at every callback jitter, and each pad
+    /// shifted that source later (tens of ms of drift within a minute). A
+    /// source that is a full window behind the other has stalled or is not
+    /// recorded: then pad it, as before.
     fn can_mix(&self) -> bool {
-        self.mic_buffer.len() >= self.window_size_samples ||
-        self.system_buffer.len() >= self.window_size_samples
+        let (mic, system, window) = (self.mic_buffer.len(), self.system_buffer.len(), self.window_size_samples);
+        (mic >= window && system >= window) || mic.max(system) >= 2 * window
+    }
+
+    /// The samples left at a flush, padded to the same length.
+    fn extract_remaining(&mut self) -> Option<(Vec<f32>, Vec<f32>)> {
+        let len = self.mic_buffer.len().max(self.system_buffer.len()).min(self.window_size_samples);
+        if len == 0 {
+            return None;
+        }
+        let mut take = |buffer: &mut VecDeque<f32>| -> Vec<f32> {
+            let mut window: Vec<f32> = buffer.drain(..buffer.len().min(len)).collect();
+            window.resize(len, 0.0);
+            window
+        };
+        let mic = take(&mut self.mic_buffer);
+        let system = take(&mut self.system_buffer);
+        Some((mic, system))
     }
 
     fn extract_window(&mut self) -> Option<(Vec<f32>, Vec<f32>)> {
@@ -857,53 +879,7 @@ impl AudioPipeline {
                     // STEP 2: Mix audio in fixed windows when both streams have sufficient data
                     while self.ring_buffer.can_mix() {
                         if let Some((mic_window, sys_window)) = self.ring_buffer.extract_window() {
-                            // Simple mixing without aggressive ducking
-                            let mixed_clean = self.mixer.mix_window(&mic_window, &sys_window);
-
-                            // NO POST-GAIN NEEDED: Microphone already normalized by EBU R128 to -23 LUFS
-                            // This is broadcast-standard loudness (Netflix/YouTube/Spotify level)
-                            // System audio at natural levels
-                            // Previous 2x gain was causing excessive limiting/distortion
-                            let mixed_with_gain = mixed_clean;
-
-                            // STEP 3: Send mixed audio for transcription (VAD + Whisper)
-                            match self.vad_processor.process_audio(&mixed_with_gain) {
-                                Ok(speech_segments) => {
-                                    for segment in speech_segments {
-                                        let duration_ms = segment.end_timestamp_ms - segment.start_timestamp_ms;
-                                        if segment.samples.len() >= 800 {
-                                            self.log_stats.record_segment(duration_ms);
-                                            let transcription_chunk = AudioChunk {
-                                                data: segment.samples,
-                                                sample_rate: 16000,
-                                                timestamp: segment.start_timestamp_ms / 1000.0,
-                                                chunk_id: self.chunk_id_counter,
-                                                device_type: DeviceType::Microphone,
-                                            };
-                                            if self.transcription_sender.send(transcription_chunk).is_err() {
-                                                self.log_stats.send_failures += 1;
-                                            } else {
-                                                self.chunk_id_counter += 1;
-                                            }
-                                        } else {
-                                            self.log_stats.short += 1;
-                                        }
-                                    }
-                                }
-                                Err(error) => self.log_stats.record_vad_failure(VadOperation::Process, &error),
-                            }
-
-                            // STEP 4: Send mixed audio for recording (WAV file)
-                            if let Some(ref sender) = self.recording_sender_for_mixed {
-                                let recording_chunk = AudioChunk {
-                                    data: mixed_with_gain.clone(),
-                                    sample_rate: self.sample_rate,
-                                    timestamp: chunk.timestamp,
-                                    chunk_id: self.chunk_id_counter,
-                                    device_type: DeviceType::Microphone,  // Mixed audio
-                                };
-                                let _ = sender.send(recording_chunk);
-                            }
+                            self.mix_and_dispatch(&mic_window, &sys_window, chunk.timestamp);
                         }
                     }
                 }
@@ -921,7 +897,64 @@ impl AudioPipeline {
         Ok(())
     }
 
+    /// Mix one window and send it to the VAD (transcription) and the recording.
+    fn mix_and_dispatch(&mut self, mic_window: &[f32], sys_window: &[f32], timestamp: f64) {
+        // Simple mixing without aggressive ducking
+        let mixed_clean = self.mixer.mix_window(mic_window, sys_window);
+
+        // NO POST-GAIN NEEDED: Microphone already normalized by EBU R128 to -23 LUFS
+        // This is broadcast-standard loudness (Netflix/YouTube/Spotify level)
+        // System audio at natural levels
+        // Previous 2x gain was causing excessive limiting/distortion
+        let mixed_with_gain = mixed_clean;
+
+        // STEP 3: Send mixed audio for transcription (VAD + Whisper)
+        match self.vad_processor.process_audio(&mixed_with_gain) {
+            Ok(speech_segments) => {
+                for segment in speech_segments {
+                    let duration_ms = segment.end_timestamp_ms - segment.start_timestamp_ms;
+                    if segment.samples.len() >= 800 {
+                        self.log_stats.record_segment(duration_ms);
+                        let transcription_chunk = AudioChunk {
+                            data: segment.samples,
+                            sample_rate: 16000,
+                            timestamp: segment.start_timestamp_ms / 1000.0,
+                            chunk_id: self.chunk_id_counter,
+                            device_type: DeviceType::Microphone,
+                        };
+                        if self.transcription_sender.send(transcription_chunk).is_err() {
+                            self.log_stats.send_failures += 1;
+                        } else {
+                            self.chunk_id_counter += 1;
+                        }
+                    } else {
+                        self.log_stats.short += 1;
+                    }
+                }
+            }
+            Err(error) => self.log_stats.record_vad_failure(VadOperation::Process, &error),
+        }
+
+        // STEP 4: Send mixed audio for recording (WAV file)
+        if let Some(ref sender) = self.recording_sender_for_mixed {
+            let recording_chunk = AudioChunk {
+                data: mixed_with_gain.clone(),
+                sample_rate: self.sample_rate,
+                timestamp,
+                chunk_id: self.chunk_id_counter,
+                device_type: DeviceType::Microphone,  // Mixed audio
+            };
+            let _ = sender.send(recording_chunk);
+        }
+    }
+
     fn flush_remaining_audio(&mut self) -> Result<()> {
+        // Mix the samples still waiting for a full window, so the end of the
+        // recording is not lost.
+        while let Some((mic_window, sys_window)) = self.ring_buffer.extract_remaining() {
+            self.mix_and_dispatch(&mic_window, &sys_window, 0.0);
+        }
+
         match self.vad_processor.flush() {
             Ok(final_segments) => {
                 for segment in final_segments {
@@ -1099,6 +1132,76 @@ impl AudioPipelineManager {
 
         // Now stop normally
         self.stop().await
+    }
+}
+
+#[cfg(test)]
+mod ring_buffer_tests {
+    use super::*;
+
+    fn noise(n: usize, seed: &mut u64) -> Vec<f32> {
+        (0..n)
+            .map(|_| {
+                *seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+                ((*seed >> 33) % 2000) as f32 / 1000.0 - 1.0
+            })
+            .collect()
+    }
+
+    #[test]
+    fn jittered_callbacks_keep_the_tracks_aligned() {
+        // The same signal on both sources, in real time: every 10 ms each
+        // source delivers what it has, up to 200 ms late, in random order.
+        let mut seed = 1;
+        let total = 48_000 * 30;
+        let signal = noise(total, &mut seed);
+        let mut ring = AudioMixerRingBuffer::new(48_000);
+        let mut sent = [0usize; 2];
+        let (mut mic_out, mut sys_out) = (Vec::new(), Vec::new());
+        let mut now = 0usize;
+        while sent[0] < total || sent[1] < total {
+            now += 480;
+            let order = if noise(1, &mut seed)[0] > 0.0 { [0, 1] } else { [1, 0] };
+            for source in order {
+                let late = ((noise(1, &mut seed)[0] + 1.0) * 4_800.0) as usize;
+                let due = now.saturating_sub(late).min(total);
+                if due > sent[source] {
+                    let kind = if source == 0 { DeviceType::Microphone } else { DeviceType::System };
+                    ring.add_samples(kind, signal[sent[source]..due].to_vec());
+                    sent[source] = due;
+                }
+            }
+            while let Some((mic, sys)) = ring.extract_window() {
+                mic_out.extend(mic);
+                sys_out.extend(sys);
+            }
+        }
+        while let Some((mic, sys)) = ring.extract_remaining() {
+            mic_out.extend(mic);
+            sys_out.extend(sys);
+        }
+        assert!(mic_out == signal && sys_out == signal, "tracks no longer aligned");
+    }
+
+    #[test]
+    fn a_single_source_is_still_mixed() {
+        let mut ring = AudioMixerRingBuffer::new(48_000);
+        let window = ring.window_size_samples;
+        ring.add_samples(DeviceType::Microphone, vec![0.5; 2 * window]);
+        let (mic, sys) = ring.extract_window().expect("mixes once a window behind");
+        assert_eq!((mic.len(), sys), (window, vec![0.0; window]));
+    }
+
+    #[test]
+    fn a_flush_returns_the_tail() {
+        let mut ring = AudioMixerRingBuffer::new(48_000);
+        ring.add_samples(DeviceType::Microphone, vec![0.5; 100]);
+        ring.add_samples(DeviceType::System, vec![0.25; 60]);
+        assert!(ring.extract_window().is_none());
+        let (mic, sys) = ring.extract_remaining().unwrap();
+        assert_eq!((mic.len(), sys.len()), (100, 100));
+        assert_eq!(sys[59..61], [0.25, 0.0]);
+        assert!(ring.extract_remaining().is_none());
     }
 }
 
