@@ -18,6 +18,10 @@ pub mod ffmpeg_mixer;  // NEW: FFmpeg-style adaptive audio mixer
 // New simplified audio system
 pub mod recording_state;
 pub mod pipeline;
+#[cfg(target_os = "macos")]
+pub mod echo_cancellation;
+#[cfg(target_os = "macos")]
+pub mod neural_echo;
 pub mod stream;
 pub mod recording_manager;
 pub mod recording_commands;
