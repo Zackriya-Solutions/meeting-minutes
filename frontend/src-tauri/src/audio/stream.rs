@@ -32,6 +32,8 @@ unsafe impl Send for StreamBackend {}
 pub struct AudioStream {
     device: Arc<AudioDevice>,
     backend: StreamBackend,
+    /// Drained after the backend stops so a resampled tail reaches the pipeline.
+    capture: AudioCapture,
 }
 
 // SAFETY: AudioStream contains StreamBackend which we've marked as Send
@@ -137,6 +139,7 @@ impl AudioStream {
         Ok(Self {
             device,
             backend: StreamBackend::Cpal(stream),
+            capture,
         })
     }
 
@@ -230,6 +233,7 @@ impl AudioStream {
             backend: StreamBackend::CoreAudio {
                 task: Some(task),
             },
+            capture,
         })
     }
 
@@ -344,6 +348,11 @@ impl AudioStream {
                 }
             }
         }
+
+        // The backend no longer delivers callbacks. The drain waits for one still
+        // in progress and rejects later ones. Callers must stop streams before
+        // RecordingState::stop_recording() clears the pipeline sender.
+        self.capture.drain();
 
         // Explicitly drop self.device Arc reference
         drop(self.device);
