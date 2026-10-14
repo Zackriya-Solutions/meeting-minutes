@@ -314,13 +314,12 @@ impl RecordingManager {
             monitor.stop_monitoring().await;
         }
 
-        // Stop recording state first
-        self.state.stop_recording();
-
-        // Stop audio streams
+        // Stop audio streams first so each drains its resampler tail while
+        // the pipeline sender is still open (#773)
         if let Err(e) = self.stream_manager.stop_streams() {
             error!("Error stopping audio streams: {}", e);
         }
+        self.state.stop_recording();
 
         // Stop audio pipeline
         if let Err(e) = self.pipeline_manager.stop().await {
@@ -342,13 +341,14 @@ impl RecordingManager {
             monitor.stop_monitoring().await;
         }
 
-        // Stop recording state first - this clears device references
-        self.state.stop_recording();
-
-        // Stop audio streams immediately
+        // Stop audio streams first: each one drains its resampler tail while
+        // the pipeline sender is still open (#773)
         if let Err(e) = self.stream_manager.stop_streams() {
             error!("Error stopping audio streams: {}", e);
         }
+
+        // Stop recording state - this clears device references and the sender
+        self.state.stop_recording();
 
         // CRITICAL: Force pipeline to flush ALL accumulated audio before stopping
         debug!("💨 Forcing pipeline to flush accumulated audio immediately");
@@ -398,13 +398,12 @@ impl RecordingManager {
         let recording_duration = self.state.get_active_recording_duration();
         info!("Recording duration before stop: {:?}s", recording_duration);
 
-        // Stop recording state first
-        self.state.stop_recording();
-
-        // Stop audio streams
+        // Stop audio streams first so each drains its resampler tail while
+        // the pipeline sender is still open (#773)
         if let Err(e) = self.stream_manager.stop_streams() {
             error!("Error stopping audio streams: {}", e);
         }
+        self.state.stop_recording();
 
         // Stop audio pipeline
         if let Err(e) = self.pipeline_manager.stop().await {
