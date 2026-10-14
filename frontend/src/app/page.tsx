@@ -11,6 +11,8 @@ import { StatusOverlays } from '@/app/_components/StatusOverlays';
 import Analytics from '@/lib/analytics';
 import { SettingsModals } from './_components/SettingsModal';
 import { TranscriptPanel } from './_components/TranscriptPanel';
+import { RecordingNotes } from './_components/RecordingNotes';
+import { cn } from '@/lib/utils';
 import { useModalState } from '@/hooks/useModalState';
 import { useRecordingStateSync } from '@/hooks/useRecordingStateSync';
 import { useRecordingStart } from '@/hooks/useRecordingStart';
@@ -26,6 +28,7 @@ export default function Home() {
   const [isRecording, setIsRecordingState] = useState(false);
   const [barHeights, setBarHeights] = useState(['58%', '76%', '58%']);
   const [showRecoveryDialog, setShowRecoveryDialog] = useState(false);
+  const [recordingView, setRecordingView] = useState<'transcript' | 'notes'>('transcript');
 
   // Use contexts for state management
   const { meetingTitle } = useTranscripts();
@@ -188,6 +191,14 @@ export default function Home() {
   // Computed values using global status
   const isProcessingStop = status === RecordingStatus.PROCESSING_TRANSCRIPTS || isProcessing;
 
+  // Notes are available while recording until the meeting is saved; the pane waits for the recording's recovery id.
+  const showNotes = recordingState.isRecording || isStopping || isProcessingStop || isSaving;
+
+  // The next recording starts on the transcript, not on the pane last left open.
+  useEffect(() => {
+    if (!showNotes) setRecordingView('transcript');
+  }, [showNotes]);
+
   return (
     <div className="flex flex-col h-screen bg-gray-50">
       {/* All Modals supported*/}
@@ -206,12 +217,52 @@ export default function Home() {
         onDelete={deleteRecoverableMeeting}
         onLoadPreview={loadMeetingTranscripts}
       />
-      <div className="flex flex-1 overflow-hidden">
-        <TranscriptPanel
-          isProcessingStop={isProcessingStop}
-          isStopping={isStopping}
-          showModal={showModal}
-        />
+      <div className="flex flex-1 flex-col overflow-hidden">
+        {showNotes && (
+          <div
+            role="group"
+            aria-label="Transcript or notes"
+            className="flex shrink-0 justify-center gap-1 border-b border-gray-200 bg-white py-1.5 md:hidden"
+          >
+            {(['transcript', 'notes'] as const).map((view) => (
+              <button
+                key={view}
+                type="button"
+                aria-pressed={recordingView === view}
+                onClick={() => setRecordingView(view)}
+                className={cn(
+                  'rounded-md px-3 py-1 text-sm',
+                  recordingView === view ? 'bg-blue-50 text-blue-600' : 'text-gray-600 hover:text-gray-900',
+                )}
+              >
+                {view === 'transcript' ? 'Transcript' : 'Notes'}
+              </button>
+            ))}
+          </div>
+        )}
+        <div className="flex min-h-0 flex-1 overflow-hidden">
+          <div
+            className={cn(
+              'min-h-0 min-w-0 flex-1',
+              showNotes && recordingView === 'notes' ? 'hidden md:flex' : 'flex',
+            )}
+          >
+            <TranscriptPanel
+              isProcessingStop={isProcessingStop}
+              isStopping={isStopping}
+              showModal={showModal}
+            />
+          </div>
+          {showNotes && (
+            <RecordingNotes
+              editable={recordingState.isRecording && !isStopping}
+              className={cn(
+                'border-l border-gray-200 pb-28 md:flex md:w-2/5 md:flex-none',
+                recordingView === 'notes' ? 'flex' : 'hidden',
+              )}
+            />
+          )}
+        </div>
 
         {/* Recording controls - only show when permissions are granted or already recording and not showing status messages */}
         {(hasMicrophone || isRecording) &&
