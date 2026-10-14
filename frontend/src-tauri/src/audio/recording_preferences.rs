@@ -1,6 +1,6 @@
 use log::{info, warn};
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Runtime};
 use tauri_plugin_store::StoreExt;
 
@@ -203,6 +203,108 @@ pub async fn get_default_recordings_folder_path() -> Result<String, String> {
     Ok(path.to_string_lossy().to_string())
 }
 
+/// Canonical `folder_path` if it is a meeting folder of one of the recordings
+/// roots; `None` if it does not exist.
+///
+/// The roots are where meeting folders are created: the configured save
+/// folder and the platform default (recordings and imported audio). The app
+/// data folder is deliberately not one: it holds models, never meeting audio.
+async fn meeting_folder_within_roots<R: Runtime>(
+    app: &AppHandle<R>,
+    folder_path: &str,
+) -> Result<Option<PathBuf>, String> {
+    let path = PathBuf::from(folder_path);
+    if folder_path.trim().is_empty() || !path.exists() {
+        return Ok(None);
+    }
+
+    let path_canon = path.canonicalize().map_err(|e| e.to_string())?;
+
+    let preferences = load_recording_preferences(app)
+        .await
+        .map_err(|e| format!("the recording preferences could not be read ({e})"))?;
+    let home = dirs::home_dir();
+    let roots: Vec<PathBuf> = [preferences.save_folder, get_default_recordings_folder()]
+        .iter()
+        .filter_map(|root| usable_recordings_root(root, home.as_deref()))
+        .collect();
+    if !is_meeting_folder(&path_canon, &roots) {
+        return Err("it is outside the recordings folders".into());
+    }
+    Ok(Some(path_canon))
+}
+
+/// Canonical form of a recordings root, or `None` when it cannot safely bound
+/// a delete: empty or relative (the default falls back to `"."` when the
+/// platform folders are unknown), unresolvable, a filesystem root, or the home
+/// folder. Any of those would make unrelated folders look like meeting folders.
+fn usable_recordings_root(root: &Path, home: Option<&Path>) -> Option<PathBuf> {
+    if root.as_os_str().is_empty() || !root.is_absolute() {
+        return None;
+    }
+    let canon = root.canonicalize().ok()?;
+    if canon.parent().is_none() {
+        return None;
+    }
+    if home.and_then(|home| home.canonicalize().ok()).is_some_and(|home| home == canon) {
+        return None;
+    }
+    Some(canon)
+}
+
+/// `create_meeting_folder` makes each meeting folder a direct child of a
+/// root. Anything else, including a root itself (a custom root may sit inside
+/// the default one), is not a meeting folder.
+fn is_meeting_folder(path_canon: &Path, roots_canon: &[PathBuf]) -> bool {
+    !roots_canon.iter().any(|root| root == path_canon)
+        && path_canon
+            .parent()
+            .is_some_and(|parent| roots_canon.iter().any(|root| root == parent))
+}
+
+/// Move a deleted meeting's recording folder to the system Trash (recoverable).
+/// Only a meeting folder of a recordings root qualifies; `Ok(false)` if
+/// nothing was there. `Err` is the reason the audio was kept, worded for the user.
+pub async fn trash_meeting_folder<R: Runtime>(
+    app: &AppHandle<R>,
+    folder_path: &str,
+) -> Result<bool, String> {
+    let Some(path_canon) = meeting_folder_within_roots(app, folder_path).await? else {
+        return Ok(false);
+    };
+    move_to_trash(path_canon).await?;
+    info!("Moved deleted meeting's recording folder to the Trash");
+    Ok(true)
+}
+
+/// Trash a path without blocking the async runtime.
+///
+/// macOS: `NsFileManager`, not the default Finder method, which drives Finder
+/// over Apple Events; a hardened, signed app without the Apple Events
+/// entitlement is refused.
+/// Windows: `trash` initialises COM as single-threaded and fails if the
+/// thread already joined the multithreaded apartment, so the call runs on a
+/// fresh OS thread whose COM state is clean.
+async fn move_to_trash(path: PathBuf) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        std::thread::spawn(move || {
+            #[allow(unused_mut)]
+            let mut context = trash::TrashContext::new();
+            #[cfg(target_os = "macos")]
+            {
+                use trash::macos::{DeleteMethod, TrashContextExtMacos};
+                context.set_delete_method(DeleteMethod::NsFileManager);
+            }
+            context.delete(&path)
+        })
+        .join()
+    })
+    .await
+    .map_err(|e| format!("the move to the Trash did not finish ({e})"))?
+    .map_err(|_| "the move to the Trash failed unexpectedly".to_string())?
+    .map_err(|e| format!("the system refused to move it ({e})"))
+}
+
 #[tauri::command]
 pub async fn open_recordings_folder<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
     let preferences = load_recording_preferences(&app)
@@ -385,3 +487,58 @@ pub async fn get_audio_backend_info() -> Result<Vec<BackendInfo>, String> {
     }
 }
 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unsafe_recordings_roots_are_rejected() {
+        let temp = tempfile::tempdir().unwrap();
+        let home = temp.path().join("home");
+        let recordings = home.join("Movies/meetily-recordings");
+        std::fs::create_dir_all(&recordings).unwrap();
+        let home = Some(home.as_path());
+
+        assert_eq!(usable_recordings_root(Path::new(""), home), None);
+        assert_eq!(usable_recordings_root(Path::new("./meetily-recordings"), home), None);
+        assert_eq!(usable_recordings_root(Path::new("/"), home), None);
+        assert_eq!(usable_recordings_root(&temp.path().join("missing"), home), None);
+        assert_eq!(usable_recordings_root(&temp.path().join("home"), home), None);
+        assert_eq!(
+            usable_recordings_root(&recordings, home),
+            Some(recordings.canonicalize().unwrap())
+        );
+    }
+
+    #[test]
+    fn only_direct_children_of_a_root_are_meeting_folders() {
+        let temp = tempfile::tempdir().unwrap();
+        let default_root = temp.path().join("meetily-recordings");
+        // A custom root nested inside the default one.
+        let custom_root = default_root.join("work");
+        let meeting = default_root.join("Standup_2026-10-14_09-00");
+        let custom_meeting = custom_root.join("Review_2026-10-14_10-00");
+        let nested = meeting.join(".checkpoints");
+        let outside = temp.path().join("elsewhere/Standup");
+        for dir in [&custom_meeting, &nested, &outside] {
+            std::fs::create_dir_all(dir).unwrap();
+        }
+        let roots: Vec<PathBuf> = [&default_root, &custom_root]
+            .iter()
+            .filter_map(|root| usable_recordings_root(root, None))
+            .collect();
+        let check = |path: &PathBuf| is_meeting_folder(&path.canonicalize().unwrap(), &roots);
+
+        assert!(check(&meeting));
+        assert!(check(&custom_meeting));
+        assert!(!check(&default_root), "never a root itself");
+        assert!(!check(&custom_root), "never a root, even inside another root");
+        assert!(!check(&nested));
+        assert!(!check(&outside));
+        assert!(
+            !is_meeting_folder(&meeting.canonicalize().unwrap(), &[]),
+            "no usable root, nothing qualifies"
+        );
+    }
+}

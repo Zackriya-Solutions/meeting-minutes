@@ -38,4 +38,5 @@ graph TD
 *   **Audio Engine:** Captures audio from the microphone and system, processes it, and prepares it for transcription.
 *   **Transcription Engine:** Uses local speech-to-text models (Whisper or Parakeet) to transcribe the captured audio. It can be accelerated with a GPU.
 *   **Database:** A local SQLite database that stores meeting metadata, transcripts, and summaries.
+*   **Recording folders:** Each meeting's audio, transcripts, and metadata live in a folder directly inside the recordings folder (`meetings.folder_path`). Deleting a meeting (`api_delete_meeting`) removes the database rows first, then moves that folder to the system Trash. Only a direct child of the configured or default recordings folder is moved, never the recordings folder itself, and not if another meeting still uses the folder. If the move does not happen, the deletion still succeeds and the response gives `audio_kept_reason`, which the UI shows.
 *   **Summary Engine:** Generates meeting summaries using various Large Language Models (LLMs), including local models via Ollama.
