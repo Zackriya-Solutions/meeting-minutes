@@ -22,6 +22,11 @@ pub struct AudioChunk {
     pub timestamp: f64,
     pub chunk_id: u64,
     pub device_type: DeviceType,
+    /// Interleaved channel count of `data`. 1 everywhere except the Deepgram
+    /// realtime path, which sends 2 (frame = [mic, system]) so each source is
+    /// transcribed on its own channel. `data.len() / channels` is the frame count;
+    /// never derive durations from `data.len()` alone.
+    pub channels: u16,
 }
 
 /// Processed audio chunk (post-VAD) for recording
