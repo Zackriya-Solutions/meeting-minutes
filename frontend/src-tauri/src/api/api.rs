@@ -1098,6 +1098,7 @@ pub async fn api_save_transcript<R: Runtime>(
                 "Successfully saved transcript and created meeting with id: {}",
                 meeting_id
             );
+            crate::audio::transcript_files::write_saved_transcript_files(pool, &meeting_id).await;
 
             let preference = crate::audio::recording_preferences::load_recording_preferences(&_app)
                 .await

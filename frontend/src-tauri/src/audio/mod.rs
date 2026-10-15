@@ -40,6 +40,9 @@ pub mod transcription;
 // Shared utilities for import and retranscription
 pub(crate) mod common;
 
+// Plain-text and WebVTT copies of a saved transcript
+pub mod transcript_files;
+
 // Shared constants
 pub mod constants;
 

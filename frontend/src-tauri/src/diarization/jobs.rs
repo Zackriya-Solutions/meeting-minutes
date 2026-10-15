@@ -691,9 +691,16 @@ async fn write_json_from_db(pool: &SqlitePool, meeting_id: &str, folder: PathBuf
     let segments: Vec<TranscriptSegment> =
         transcripts_in_order(pool, meeting_id).await?.into_iter().map(TranscriptSegment::from).collect();
     let labels = SpeakersRepository::labels(pool, meeting_id).await?;
-    tokio::task::spawn_blocking(move || write_transcripts_json(&folder, &segments, &labels))
-        .await
-        .map_err(|e| anyhow!("transcripts.json write task panicked: {}", e))?
+    let meeting_id = meeting_id.to_string();
+    tokio::task::spawn_blocking(move || {
+        write_transcripts_json(&folder, &segments, &labels)?;
+        if let Err(e) = crate::audio::transcript_files::write_transcript_files_for_segments(&folder, &segments, &labels) {
+            log::warn!("Failed to write transcript.txt and transcript.vtt for {}: {:#}", meeting_id, e);
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|e| anyhow!("transcripts.json write task panicked: {}", e))?
 }
 
 /// The meeting's folder as stored in the database; `fallback` when it has none.
