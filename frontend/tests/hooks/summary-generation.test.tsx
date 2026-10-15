@@ -295,5 +295,16 @@ describe('summary context sent with a run', () => {
     await show(idle());
     await act(async () => state.handleGenerateSummary());
     expect(processArgs()).toMatchObject({ customPrompt: '', useInheritedContext: true });
+    expect(processArgs()).not.toHaveProperty('notes');
+  });
+
+  test('Generate and Regenerate send notes when they are on screen', async () => {
+    await show(idle());
+    await act(async () => state.handleGenerateSummary('Client: Initech', true, 'Ship Friday'));
+    expect(processArgs()).toMatchObject({ notes: 'Ship Friday' });
+
+    invoke.mockClear();
+    await act(async () => state.handleRegenerateSummary('Client: Initech', true, 'Ship Friday'));
+    expect(processArgs()).toMatchObject({ notes: 'Ship Friday' });
   });
 });

@@ -313,12 +313,14 @@ export function useSummaryGeneration({
     transcriptTexts,
     customPrompt = '',
     useInheritedContext = true,
+    notesMarkdown,
     isRegeneration = false,
   }: {
     transcriptText: string;
     transcriptTexts?: string[];
     customPrompt?: string;
     useInheritedContext?: boolean;
+    notesMarkdown?: string;
     isRegeneration?: boolean;
   }) => {
     const previousAttempt = trackedAttemptRef.current;
@@ -378,6 +380,7 @@ export function useSummaryGeneration({
         useInheritedContext,
         templateId: selectedTemplate,
         summaryLanguage,
+        ...(notesMarkdown !== undefined ? { notes: notesMarkdown } : {}),
       });
       const processId = result.process_id;
       if (!mountedRef.current || visibleMeetingIdRef.current !== meeting.id) return;
@@ -466,6 +469,7 @@ export function useSummaryGeneration({
   const handleGenerateSummary = useCallback(async (
     customPrompt: string = '',
     useInheritedContext: boolean = true,
+    notesMarkdown?: string,
   ) => {
     if (isModelConfigLoading) {
       toast.info('Loading model configuration, please wait...');
@@ -513,6 +517,7 @@ export function useSummaryGeneration({
       ...buildSummaryTranscriptPayload(allTranscripts, speakerNames ?? await fetchSpeakerNames(meeting.id)),
       customPrompt,
       useInheritedContext,
+      notesMarkdown,
     });
   }, [
     buildSummaryTranscriptPayload,
@@ -530,6 +535,7 @@ export function useSummaryGeneration({
   const handleRegenerateSummary = useCallback(async (
     customPrompt: string = '',
     useInheritedContext: boolean = true,
+    notesMarkdown?: string,
   ) => {
     const allTranscripts = await fetchAllTranscripts(meeting.id);
 
@@ -543,6 +549,7 @@ export function useSummaryGeneration({
       ...buildSummaryTranscriptPayload(allTranscripts, speakerNames ?? await fetchSpeakerNames(meeting.id)),
       customPrompt,
       useInheritedContext,
+      notesMarkdown,
       isRegeneration: true
     });
   }, [meeting.id, fetchAllTranscripts, buildSummaryTranscriptPayload, processSummary, speakerNames]);
