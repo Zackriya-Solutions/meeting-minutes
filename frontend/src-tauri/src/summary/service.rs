@@ -63,10 +63,17 @@ fn strip_title_if_present(markdown: &str) -> String {
 
 const ENGLISH_CACHE_FIELD: &str = "english_cache";
 
+fn empty_notes_fingerprint() -> String {
+    stable_text_fingerprint("")
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 struct SummaryCacheSource {
     transcript_fingerprint: String,
     custom_prompt_fingerprint: String,
+    /// Missing on summaries saved before notes were part of generation. Those match a run with no notes.
+    #[serde(default = "empty_notes_fingerprint")]
+    notes_fingerprint: String,
     template_id: String,
     template_fingerprint: String,
     token_threshold: usize,
@@ -99,9 +106,11 @@ fn stable_text_fingerprint(text: &str) -> String {
 }
 
 #[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments)]
 fn build_summary_cache_source(
     text: &str,
     custom_prompt: &str,
+    notes: &str,
     template_id: &str,
     template_fingerprint: &str,
     token_threshold: usize,
@@ -116,6 +125,7 @@ fn build_summary_cache_source(
     SummaryCacheSource {
         transcript_fingerprint: stable_text_fingerprint(text),
         custom_prompt_fingerprint: stable_text_fingerprint(custom_prompt),
+        notes_fingerprint: stable_text_fingerprint(notes),
         template_id: template_id.to_string(),
         template_fingerprint: template_fingerprint.to_string(),
         token_threshold,
@@ -526,6 +536,7 @@ impl SummaryService {
     /// * `model_provider` - LLM provider name (e.g., "ollama", "openai")
     /// * `model_name` - Specific model (e.g., "gpt-4", "llama3.2:latest")
     /// * `custom_prompt` - Optional user-provided context
+    /// * `notes` - Meeting notes to include in the final report. Empty when the meeting has none.
     /// * `template_id` - Template identifier (e.g., "daily_standup", "standard_meeting")
     pub async fn process_transcript_background<R: tauri::Runtime>(
         _app: AppHandle<R>,
@@ -537,6 +548,7 @@ impl SummaryService {
         model_provider: String,
         model_name: String,
         custom_prompt: String,
+        notes: String,
         template_id: String,
         summary_language: Option<String>,
     ) {
@@ -589,9 +601,16 @@ impl SummaryService {
         };
         let template_fingerprint = template_cache_fingerprint(&template);
 
+        info!(
+            "Meeting notes for summary {}: {} chars",
+            meeting_id,
+            notes.chars().count()
+        );
+
         let cache_source = build_summary_cache_source(
             &text,
             &custom_prompt,
+            &notes,
             &template_id,
             &template_fingerprint,
             token_threshold,
@@ -639,6 +658,7 @@ impl SummaryService {
             &final_api_key,
             &text,
             &custom_prompt,
+            &notes,
             &template_id,
             &template,
             token_threshold,
@@ -975,6 +995,7 @@ mod tests {
         build_summary_cache_source(
             "transcript body",
             "custom prompt",
+            "",
             "standard_meeting",
             &template_fingerprint,
             3700,
@@ -1083,6 +1104,7 @@ mod tests {
             build_summary_cache_source(
                 "changed transcript",
                 "custom prompt",
+                "",
                 "standard_meeting",
                 &template_fingerprint,
                 3700,
@@ -1097,6 +1119,7 @@ mod tests {
             build_summary_cache_source(
                 "transcript body",
                 "changed prompt",
+                "",
                 "standard_meeting",
                 &template_fingerprint,
                 3700,
@@ -1111,6 +1134,22 @@ mod tests {
             build_summary_cache_source(
                 "transcript body",
                 "custom prompt",
+                "Ship Friday",
+                "standard_meeting",
+                &template_fingerprint,
+                3700,
+                "ollama",
+                "gemma3:1b",
+                Some("http://localhost:11434"),
+                None,
+                None,
+                None,
+                None,
+            ),
+            build_summary_cache_source(
+                "transcript body",
+                "custom prompt",
+                "",
                 "daily_standup",
                 &template_fingerprint,
                 3700,
@@ -1125,6 +1164,7 @@ mod tests {
             build_summary_cache_source(
                 "transcript body",
                 "custom prompt",
+                "",
                 "standard_meeting",
                 &template_fingerprint,
                 3700,
@@ -1139,6 +1179,7 @@ mod tests {
             build_summary_cache_source(
                 "transcript body",
                 "custom prompt",
+                "",
                 "standard_meeting",
                 &template_fingerprint,
                 3700,
@@ -1153,6 +1194,7 @@ mod tests {
             build_summary_cache_source(
                 "transcript body",
                 "custom prompt",
+                "",
                 "standard_meeting",
                 &template_fingerprint,
                 3700,
@@ -1167,6 +1209,7 @@ mod tests {
             build_summary_cache_source(
                 "transcript body",
                 "custom prompt",
+                "",
                 "standard_meeting",
                 &template_fingerprint,
                 3700,
@@ -1186,6 +1229,29 @@ mod tests {
                 None
             );
         }
+    }
+
+    #[test]
+    fn missing_notes_fingerprint_matches_empty_notes() {
+        let source = sample_cache_source();
+        let mut result = build_summary_result_json(
+            "# Reunion\n## Points\nBonjour",
+            "# Meeting\n## Points\nHello",
+            source.clone(),
+            Some("fr"),
+            false,
+            false,
+        )
+        .unwrap();
+        result["english_cache"]["source"]
+            .as_object_mut()
+            .unwrap()
+            .remove("notes_fingerprint");
+
+        assert_eq!(
+            extract_cached_english_markdown(&result.to_string(), &source, Some("de")).unwrap(),
+            Some("# Meeting\n## Points\nHello".to_string())
+        );
     }
 
     #[test]

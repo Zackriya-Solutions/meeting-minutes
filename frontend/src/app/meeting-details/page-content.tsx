@@ -267,27 +267,33 @@ export default function PageContent({
   });
 
   const notes = useMeetingNotes(meeting.id);
+  const { flush: flushNotes, getMarkdown: getNotesMarkdown, loadState: notesLoadState } = notes;
 
   // Generate and Regenerate send what is on screen, after any pending save has been written.
   const { flush: flushSummaryContext, text: summaryContextText, useInherited, isLoaded: summaryContextLoaded } = summaryContext;
   const { handleGenerateSummary, handleRegenerateSummary } = summaryGeneration;
 
-  const whenContextSaved = useCallback(async (run: () => Promise<void>) => {
+  const whenContextSaved = useCallback(async (run: (notesMarkdown?: string) => Promise<void>) => {
     if (!summaryContextLoaded) {
       toast.info('Loading summary context, please wait...');
       return;
     }
     await flushSummaryContext();
-    await run();
-  }, [flushSummaryContext, summaryContextLoaded]);
+    let notesMarkdown: string | undefined;
+    if (notesLoadState === 'ready') {
+      await flushNotes();
+      notesMarkdown = getNotesMarkdown();
+    }
+    await run(notesMarkdown);
+  }, [flushNotes, flushSummaryContext, getNotesMarkdown, notesLoadState, summaryContextLoaded]);
 
   const handleGenerateWithContext = useCallback(
-    (prompt: string) => whenContextSaved(() => handleGenerateSummary(prompt, useInherited)),
+    (prompt: string) => whenContextSaved((notesMarkdown) => handleGenerateSummary(prompt, useInherited, notesMarkdown)),
     [whenContextSaved, handleGenerateSummary, useInherited],
   );
 
   const handleRegenerateWithContext = useCallback(
-    () => whenContextSaved(() => handleRegenerateSummary(summaryContextText, useInherited)),
+    () => whenContextSaved((notesMarkdown) => handleRegenerateSummary(summaryContextText, useInherited, notesMarkdown)),
     [whenContextSaved, handleRegenerateSummary, summaryContextText, useInherited],
   );
 
@@ -302,7 +308,7 @@ export default function PageContent({
     aiSummary: meetingData.aiSummary,
     blockNoteSummaryRef: meetingData.blockNoteSummaryRef,
     speakerNames,
-    getNotesMarkdown: notes.getMarkdown,
+    getNotesMarkdown,
   });
 
   const meetingOperations = useMeetingOperations({

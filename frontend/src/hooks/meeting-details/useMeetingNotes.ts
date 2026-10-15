@@ -110,6 +110,7 @@ export function useMeetingNotes(meetingId: string, saveDelayMs = 1000) {
     () => autosaver.latest()?.markdown ?? storedMarkdownRef.current,
     [autosaver],
   );
+  const flush = useCallback(() => autosaver.flush(), [autosaver]);
 
   return {
     loadState,
@@ -120,5 +121,6 @@ export function useMeetingNotes(meetingId: string, saveDelayMs = 1000) {
     retrySave,
     reload,
     getMarkdown,
+    flush,
   };
 }

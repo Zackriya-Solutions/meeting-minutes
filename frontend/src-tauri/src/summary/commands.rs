@@ -1,5 +1,5 @@
 use crate::database::repositories::{
-    meeting::MeetingsRepository,
+    meeting::MeetingsRepository, meeting_notes::MeetingNotesRepository,
     summary::SummaryProcessesRepository, transcript_chunk::TranscriptChunksRepository,
 };
 use crate::state::AppState;
@@ -25,6 +25,41 @@ static SUMMARY_START_LOCK: LazyLock<tokio::sync::Mutex<()>> =
     LazyLock::new(|| tokio::sync::Mutex::new(()));
 static LAST_SUMMARY_START: LazyLock<Mutex<Option<DateTime<Utc>>>> =
     LazyLock::new(|| Mutex::new(None));
+
+/// Whitespace-only notes are no notes. Other notes keep their trimmed text.
+fn normalise_summary_notes(notes: &str) -> String {
+    let trimmed = notes.trim();
+    if trimmed.is_empty() {
+        String::new()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+/// Notes for this summary run. A value from the client is what is on screen, including
+/// edits that could not be saved. When the client omits notes, the saved note is loaded.
+async fn resolve_summary_notes(
+    pool: &sqlx::SqlitePool,
+    meeting_id: &str,
+    notes: Option<String>,
+) -> String {
+    let raw = match notes {
+        Some(notes) => notes,
+        None => match MeetingNotesRepository::get(pool, meeting_id).await {
+            Ok(Some(stored)) => stored.markdown,
+            Ok(None) => String::new(),
+            Err(error) => {
+                log_warn!(
+                    "Failed to load meeting notes for {}: {}. Continuing without notes.",
+                    meeting_id, error
+                );
+                String::new()
+            }
+        },
+    };
+    normalise_summary_notes(&raw)
+}
+
 fn next_summary_start(now: DateTime<Utc>) -> DateTime<Utc> {
     let mut last = LAST_SUMMARY_START
         .lock()
@@ -479,6 +514,7 @@ pub async fn api_process_transcript<R: Runtime>(
     _overlap: Option<i32>,
     custom_prompt: Option<String>,
     use_inherited_context: Option<bool>,
+    notes: Option<String>,
     template_id: Option<String>,
     summary_language: Option<String>,
     _auth_token: Option<String>,
@@ -500,6 +536,7 @@ pub async fn api_process_transcript<R: Runtime>(
         use_inherited_context.unwrap_or(true),
     )
     .await;
+    let summary_notes = resolve_summary_notes(&pool, &m_id, notes).await;
     let final_template_id = template_id.unwrap_or_else(|| "daily_standup".to_string());
 
     // Normalise empty / whitespace-only to None so "" and null behave identically
@@ -553,6 +590,7 @@ pub async fn api_process_transcript<R: Runtime>(
             model,
             model_name,
             final_prompt,
+            summary_notes,
             final_template_id,
             summary_language,
         )
