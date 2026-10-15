@@ -9,6 +9,8 @@ import { useState, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { indexedDBService, MeetingMetadata, StoredTranscript } from '@/services/indexedDBService';
 import { storageService } from '@/services/storageService';
+import { commitNotesDraft } from '@/services/recordingNotesDraft';
+import { notifyUnsavedNotes } from '@/lib/notes-toast';
 import { applyPinnedSummaryLanguageToMeeting } from '@/lib/summary-language-preferences';
 import { toast } from 'sonner';
 import { loadBetaFeatures } from '@/types/betaFeatures';
@@ -120,6 +122,14 @@ export function useTranscriptRecovery(): UseTranscriptRecoveryReturn {
       // 2. Load all transcripts
       const transcripts = await loadMeetingTranscripts(meetingId);
       if (transcripts.length === 0) {
+        if (metadata.notesDraft?.markdown.trim()) {
+          notifyUnsavedNotes({
+            level: 'warning',
+            title: 'This recording has notes but no transcript',
+            description: 'It cannot be recovered as a meeting. Copy your notes now so they are not lost.',
+            markdown: metadata.notesDraft.markdown,
+          });
+        }
         throw new Error('No transcripts found for this meeting');
       }
 
@@ -192,6 +202,17 @@ export function useTranscriptRecovery(): UseTranscriptRecoveryReturn {
         console.warn('Failed to apply pinned summary language to recovered meeting:', error);
         toast.warning('Could not apply default summary language', {
           description: 'The recovered meeting was saved, but the default summary language was not applied.',
+        });
+      }
+
+      // Restore notes typed before the app closed.
+      const notesResult = await commitNotesDraft(metadata.notesDraft, savedMeetingId);
+      if (notesResult.status === 'failed') {
+        notifyUnsavedNotes({
+          level: 'warning',
+          title: 'Could not restore notes',
+          description: 'The recovered meeting was saved, but its notes were not restored.',
+          markdown: notesResult.markdown,
         });
       }
 

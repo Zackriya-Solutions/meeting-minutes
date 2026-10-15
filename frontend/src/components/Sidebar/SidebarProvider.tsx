@@ -6,6 +6,7 @@ import Analytics from '@/lib/analytics';
 import { invoke } from '@tauri-apps/api/core';
 import { useRecordingState } from '@/contexts/RecordingStateContext';
 import type { SummaryProcessResponse } from '@/types';
+import type { SearchMatchSource } from '@/lib/search-match';
 
 
 
@@ -27,6 +28,7 @@ interface TranscriptSearchResult {
   title: string;
   matchContext: string;
   timestamp: string;
+  source?: SearchMatchSource;
 }
 
 interface SummaryPoll {

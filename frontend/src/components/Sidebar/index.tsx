@@ -10,6 +10,7 @@ import { ModelConfig } from '@/components/ModelSettingsModal';
 import { SettingTabs } from '../SettingTabs';
 import { TranscriptModelProps } from '@/components/TranscriptSettings';
 import Analytics from '@/lib/analytics';
+import { searchMatchLabel } from '@/lib/search-match';
 import { invoke } from '@tauri-apps/api/core';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { toast } from 'sonner';
@@ -645,7 +646,7 @@ const Sidebar: React.FC = () => {
               {/* Show transcript match snippet if available */}
               {hasTranscriptMatch && (
                 <div className="mt-1 ml-8 text-xs text-gray-500 bg-yellow-50 p-1.5 rounded border border-yellow-100 line-clamp-2">
-                  <span className="font-medium text-yellow-600">Match:</span> {matchingResult.matchContext}
+                  <span className="font-medium text-yellow-600">{searchMatchLabel(matchingResult.source)}</span> {matchingResult.matchContext}
                 </div>
               )}
             </div>
