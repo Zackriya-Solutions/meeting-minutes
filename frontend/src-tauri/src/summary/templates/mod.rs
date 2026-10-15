@@ -43,8 +43,9 @@ mod types;
 
 // Re-export public API
 pub use loader::{
-    get_template, list_template_ids, list_templates, set_bundled_templates_dir,
-    validate_and_parse_template,
+    delete_template, get_template, hidden_template_count, list_template_ids, list_templates,
+    reset_template, restore_hidden_templates, save_template, set_bundled_templates_dir,
+    template_kind, validate_and_parse_template, ListedTemplate,
 };
 pub use types::{Template, TemplateSection};
 
@@ -74,10 +75,14 @@ mod tests {
         let templates = list_templates();
         assert!(!templates.is_empty());
 
-        for (id, name, description) in templates {
-            assert!(!id.is_empty());
-            assert!(!name.is_empty());
-            assert!(!description.is_empty());
+        for template in templates {
+            assert!(!template.id.is_empty());
+            assert!(!template.name.is_empty());
+            assert!(!template.description.is_empty());
+            assert!(matches!(
+                template.kind.as_str(),
+                "builtin" | "custom" | "edited"
+            ));
         }
     }
 }

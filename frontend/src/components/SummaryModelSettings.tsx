@@ -6,6 +6,7 @@ import { toast } from 'sonner';
 import { ModelConfig, ModelSettingsModal } from '@/components/ModelSettingsModal';
 import { SummaryLanguageSettings } from '@/components/SummaryLanguageSettings';
 import { SummaryContextSettings } from '@/components/SummaryContextSettings';
+import { SummaryTemplateSettings } from '@/components/SummaryTemplateSettings';
 import { Switch } from './ui/switch';
 import { useConfig } from '@/contexts/ConfigContext';
 
@@ -138,6 +139,8 @@ export function SummaryModelSettings({ refetchTrigger }: SummaryModelSettingsPro
       <SummaryLanguageSettings />
 
       <SummaryContextSettings />
+
+      <SummaryTemplateSettings />
 
       <div className="bg-white rounded-lg border border-gray-200 p-6 shadow-sm">
         <h3 className="text-lg font-semibold mb-4">Summary Model Configuration</h3>

@@ -1,10 +1,11 @@
-use crate::summary::templates;
+use crate::summary::templates::{self, Template, TemplateSection};
+use log::{info, warn};
 use serde::{Deserialize, Serialize};
 use tauri::Runtime;
-use log::{info, warn};
 
 /// Template metadata for UI display
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TemplateInfo {
     /// Template identifier (e.g., "daily_standup", "standard_meeting")
     pub id: String,
@@ -14,6 +15,9 @@ pub struct TemplateInfo {
 
     /// Brief description of the template's purpose
     pub description: String,
+
+    /// `builtin`, `custom`, or `edited`
+    pub kind: String,
 }
 
 /// Detailed template structure for preview/debugging
@@ -30,6 +34,89 @@ pub struct TemplateDetails {
 
     /// List of section titles in order
     pub sections: Vec<String>,
+}
+
+/// One section sent to and from the template editor.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TemplateSectionPayload {
+    pub title: String,
+    pub instruction: String,
+    pub format: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub item_format: Option<String>,
+}
+
+/// Template fields the editor can change.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TemplatePayload {
+    pub name: String,
+    pub description: String,
+    pub sections: Vec<TemplateSectionPayload>,
+}
+
+/// A template plus the id and origin the editor needs.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TemplateEditorState {
+    pub id: String,
+    pub kind: String,
+    pub name: String,
+    pub description: String,
+    pub sections: Vec<TemplateSectionPayload>,
+}
+
+fn trimmed_optional(value: Option<String>) -> Option<String> {
+    value.and_then(|text| {
+        let trimmed = text.trim().to_string();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed)
+        }
+    })
+}
+
+fn template_from_payload(payload: TemplatePayload) -> Template {
+    Template {
+        name: payload.name.trim().to_string(),
+        description: payload.description.trim().to_string(),
+        sections: payload
+            .sections
+            .into_iter()
+            .map(|section| TemplateSection {
+                title: section.title.trim().to_string(),
+                instruction: section.instruction.trim().to_string(),
+                format: section.format.trim().to_string(),
+                item_format: trimmed_optional(section.item_format),
+                example_item_format: None,
+            })
+            .collect(),
+    }
+}
+
+fn section_payload(section: &TemplateSection) -> TemplateSectionPayload {
+    TemplateSectionPayload {
+        title: section.title.clone(),
+        instruction: section.instruction.clone(),
+        format: section.format.clone(),
+        item_format: section
+            .item_format
+            .clone()
+            .or_else(|| section.example_item_format.clone()),
+    }
+}
+
+fn editor_state(template_id: &str) -> Result<TemplateEditorState, String> {
+    let template = templates::get_template(template_id)?;
+    Ok(TemplateEditorState {
+        id: template_id.to_string(),
+        kind: templates::template_kind(template_id),
+        name: template.name,
+        description: template.description,
+        sections: template.sections.iter().map(section_payload).collect(),
+    })
 }
 
 /// Lists all available templates
@@ -49,10 +136,11 @@ pub async fn api_list_templates<R: Runtime>(
 
     let template_infos: Vec<TemplateInfo> = templates
         .into_iter()
-        .map(|(id, name, description)| TemplateInfo {
-            id,
-            name,
-            description,
+        .map(|template| TemplateInfo {
+            id: template.id,
+            name: template.name,
+            description: template.description,
+            kind: template.kind,
         })
         .collect();
 
@@ -73,7 +161,10 @@ pub async fn api_get_template_details<R: Runtime>(
     _app: tauri::AppHandle<R>,
     template_id: String,
 ) -> Result<TemplateDetails, String> {
-    info!("api_get_template_details called for template_id: {}", template_id);
+    info!(
+        "api_get_template_details called for template_id: {}",
+        template_id
+    );
 
     let template = templates::get_template(&template_id)?;
 
@@ -93,6 +184,71 @@ pub async fn api_get_template_details<R: Runtime>(
     info!("Retrieved template details for '{}'", details.name);
 
     Ok(details)
+}
+
+/// Returns the full template, including section instructions, for the editor.
+#[tauri::command]
+pub async fn api_get_template<R: Runtime>(
+    _app: tauri::AppHandle<R>,
+    template_id: String,
+) -> Result<TemplateEditorState, String> {
+    info!("api_get_template called for template_id: {}", template_id);
+    editor_state(&template_id)
+}
+
+/// Saves a new template or overwrites an existing one in the user templates directory.
+///
+/// Pass an empty id to allocate a new id from the template name.
+#[tauri::command]
+pub async fn api_save_template<R: Runtime>(
+    _app: tauri::AppHandle<R>,
+    id: Option<String>,
+    template: TemplatePayload,
+) -> Result<TemplateEditorState, String> {
+    info!("api_save_template called");
+    let saved_id = templates::save_template(id.as_deref(), &template_from_payload(template))?;
+    editor_state(&saved_id)
+}
+
+/// Deletes a custom template, or hides a shipped template.
+#[tauri::command]
+pub async fn api_delete_template<R: Runtime>(
+    _app: tauri::AppHandle<R>,
+    template_id: String,
+) -> Result<(), String> {
+    info!(
+        "api_delete_template called for template_id: {}",
+        template_id
+    );
+    templates::delete_template(&template_id)
+}
+
+/// Drops a user override and returns the shipped template.
+#[tauri::command]
+pub async fn api_reset_template<R: Runtime>(
+    _app: tauri::AppHandle<R>,
+    template_id: String,
+) -> Result<TemplateEditorState, String> {
+    info!("api_reset_template called for template_id: {}", template_id);
+    templates::reset_template(&template_id)?;
+    editor_state(&template_id)
+}
+
+/// Restores every hidden shipped template and returns their ids.
+#[tauri::command]
+pub async fn api_restore_builtin_templates<R: Runtime>(
+    _app: tauri::AppHandle<R>,
+) -> Result<Vec<String>, String> {
+    info!("api_restore_builtin_templates called");
+    templates::restore_hidden_templates()
+}
+
+/// Returns how many shipped templates are hidden.
+#[tauri::command]
+pub async fn api_hidden_template_count<R: Runtime>(
+    _app: tauri::AppHandle<R>,
+) -> Result<usize, String> {
+    Ok(templates::hidden_template_count())
 }
 
 /// Validates a custom template JSON string
