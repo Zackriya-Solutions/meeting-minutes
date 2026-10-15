@@ -236,6 +236,13 @@ impl RecordingManager {
         // Set up transcription channel
         let (transcription_sender, transcription_receiver) = mpsc::unbounded_channel::<AudioChunk>();
         let (recording_sender, recording_receiver) = mpsc::unbounded_channel::<AudioChunk>();
+        // Optional unmixed stereo recording (L = mic, R = system); needs audio saving enabled
+        let (stereo_sender, stereo_receiver) = if auto_save && self.recording_saver.save_separate_channels() {
+            let (tx, rx) = mpsc::unbounded_channel::<AudioChunk>();
+            (Some(tx), Some(rx))
+        } else {
+            (None, None)
+        };
 
         // Start recording state first
         self.state.start_recording()?;
@@ -267,6 +274,7 @@ impl RecordingManager {
             0, // Ignored - using dynamic sizing internally
             48000, // 48kHz sample rate
             Some(recording_sender), // CRITICAL: Pass recording sender to receive pre-mixed audio
+            stereo_sender,
             mic_name,
             mic_kind,
             sys_name,
@@ -276,7 +284,7 @@ impl RecordingManager {
             return Err(RecordingStartError::TranscriptionRuntime(error));
         }
 
-        self.recording_saver.start_accumulation(auto_save, recording_receiver);
+        self.recording_saver.start_accumulation(auto_save, recording_receiver, stereo_receiver);
         self.recording_saver.set_device_info(
             microphone_device.as_ref().map(|d| d.name.clone()),
             system_device.as_ref().map(|d| d.name.clone())
@@ -512,6 +520,12 @@ impl RecordingManager {
     /// Set the meeting name for this recording session
     pub fn set_meeting_name(&mut self, name: Option<String>) {
         self.recording_saver.set_meeting_name(name);
+    }
+
+    /// Also save microphone and system audio unmixed as `audio_stereo.mp4`
+    /// (L = mic, R = system). Must be called before `start_recording`.
+    pub fn set_save_separate_channels(&mut self, enabled: bool) {
+        self.recording_saver.set_save_separate_channels(enabled);
     }
 
     /// Add a structured transcript segment to be saved later

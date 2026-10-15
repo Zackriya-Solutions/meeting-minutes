@@ -312,11 +312,13 @@ export function useSummaryGeneration({
     transcriptText,
     transcriptTexts,
     customPrompt = '',
+    useInheritedContext = true,
     isRegeneration = false,
   }: {
     transcriptText: string;
     transcriptTexts?: string[];
     customPrompt?: string;
+    useInheritedContext?: boolean;
     isRegeneration?: boolean;
   }) => {
     const previousAttempt = trackedAttemptRef.current;
@@ -373,6 +375,7 @@ export function useSummaryGeneration({
         chunkSize: 40000,
         overlap: 1000,
         customPrompt,
+        useInheritedContext,
         templateId: selectedTemplate,
         summaryLanguage,
       });
@@ -460,7 +463,10 @@ export function useSummaryGeneration({
     toast.error(message);
   }, []);
 
-  const handleGenerateSummary = useCallback(async (customPrompt: string = '') => {
+  const handleGenerateSummary = useCallback(async (
+    customPrompt: string = '',
+    useInheritedContext: boolean = true,
+  ) => {
     if (isModelConfigLoading) {
       toast.info('Loading model configuration, please wait...');
       return;
@@ -506,6 +512,7 @@ export function useSummaryGeneration({
     await processSummary({
       ...buildSummaryTranscriptPayload(allTranscripts, speakerNames ?? await fetchSpeakerNames(meeting.id)),
       customPrompt,
+      useInheritedContext,
     });
   }, [
     buildSummaryTranscriptPayload,
@@ -520,7 +527,10 @@ export function useSummaryGeneration({
   ]);
 
   // Public API: Regenerate summary from the current saved transcript
-  const handleRegenerateSummary = useCallback(async () => {
+  const handleRegenerateSummary = useCallback(async (
+    customPrompt: string = '',
+    useInheritedContext: boolean = true,
+  ) => {
     const allTranscripts = await fetchAllTranscripts(meeting.id);
 
     if (!allTranscripts.length) {
@@ -531,6 +541,8 @@ export function useSummaryGeneration({
 
     await processSummary({
       ...buildSummaryTranscriptPayload(allTranscripts, speakerNames ?? await fetchSpeakerNames(meeting.id)),
+      customPrompt,
+      useInheritedContext,
       isRegeneration: true
     });
   }, [meeting.id, fetchAllTranscripts, buildSummaryTranscriptPayload, processSummary, speakerNames]);

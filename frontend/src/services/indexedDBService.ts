@@ -5,6 +5,12 @@
  */
 
 // Database schema interfaces
+/** Notes typed during a recording, kept for crash recovery. */
+export interface NotesDraft {
+  blocks: unknown[];              // Editor blocks
+  markdown: string;               // The same content as markdown
+}
+
 export interface MeetingMetadata {
   meetingId: string;          // Primary key: "meeting-{timestamp}"
   title: string;              // Meeting title
@@ -13,6 +19,7 @@ export interface MeetingMetadata {
   transcriptCount: number;    // Number of transcript segments
   savedToSQLite: boolean;     // Flag: saved to backend DB
   folderPath?: string;        // Path to recording folder
+  notesDraft?: NotesDraft;    // Notes typed while recording
 }
 
 export interface StoredTranscript {
@@ -133,6 +140,42 @@ class IndexedDBService {
     } catch (error) {
       console.error('Failed to get meeting metadata from IndexedDB:', error);
       return null;
+    }
+  }
+
+  /**
+   * Store the notes draft on a meeting's recovery record.
+   * Reads and writes in one transaction so other metadata is not overwritten.
+   */
+  async saveNotesDraft(meetingId: string, notesDraft: NotesDraft): Promise<void> {
+    try {
+      if (!this.db) await this.init();
+
+      const transaction = this.db!.transaction(['meetings'], 'readwrite');
+      const store = transaction.objectStore('meetings');
+
+      await new Promise<void>((resolve, reject) => {
+        const getRequest = store.get(meetingId);
+        getRequest.onsuccess = () => {
+          try {
+            const meeting = getRequest.result as MeetingMetadata | undefined;
+            if (!meeting) {
+              resolve();
+              return;
+            }
+            meeting.notesDraft = notesDraft;
+            const putRequest = store.put(meeting);
+            putRequest.onsuccess = () => resolve();
+            putRequest.onerror = () => reject(putRequest.error);
+          } catch (error) {
+            reject(error);
+          }
+        };
+        getRequest.onerror = () => reject(getRequest.error);
+      });
+    } catch (error) {
+      console.warn('Failed to save notes draft to IndexedDB:', error);
+      // Fail silently - don't interrupt recording
     }
   }
 

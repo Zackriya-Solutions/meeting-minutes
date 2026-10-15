@@ -860,6 +860,8 @@ pub fn run() {
             api::api_get_meeting_transcripts,
             api::api_save_meeting_title,
             api::api_save_transcript,
+            api::api_get_meeting_notes,
+            api::api_save_meeting_notes,
             api::open_meeting_folder,
             api::test_backend_connection,
             api::debug_backend_connection,
@@ -882,6 +884,15 @@ pub fn run() {
             summary::template_commands::api_list_templates,
             summary::template_commands::api_get_template_details,
             summary::template_commands::api_validate_template,
+            // Terminology commands
+            summary::terminology::api_get_terminology,
+            summary::terminology::api_save_terminology,
+            summary::terminology::api_add_terminology_entry,
+            // Summary context commands
+            summary::context_commands::api_get_meeting_summary_context,
+            summary::context_commands::api_save_meeting_summary_context,
+            summary::context_commands::api_get_global_summary_context,
+            summary::context_commands::api_save_global_summary_context,
             // Built-in AI commands
             summary::summary_engine::commands::builtin_ai_list_models,
             summary::summary_engine::commands::builtin_ai_get_model_info,

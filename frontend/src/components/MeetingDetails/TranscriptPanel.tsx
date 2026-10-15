@@ -4,7 +4,7 @@ import { MeetingSpeaker, SpeakerJobStatus, Transcript, TranscriptSegmentData } f
 import { TranscriptView } from '@/components/TranscriptView';
 import { VirtualizedTranscriptView, type RenderSpeaker } from '@/components/VirtualizedTranscriptView';
 import { TranscriptButtonGroup } from './TranscriptButtonGroup';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { toast } from 'sonner';
 import { rowSpeakerControl } from '@/lib/speakers';
 import { followAlong, needsMoreRows, rowIndexAtTime, type FollowState } from '@/lib/playback';
@@ -38,8 +38,8 @@ export type SpeakerToolsInput = Omit<SpeakerTools, 'onPlaySample'>;
 
 interface TranscriptPanelProps {
   transcripts: Transcript[];
-  customPrompt: string;
-  onPromptChange: (value: string) => void;
+  /** Shown under the transcript once the meeting has transcript text. */
+  summaryContextBox?: ReactNode;
   onCopyTranscript: () => void;
   onOpenMeetingFolder: () => Promise<void>;
   isRecording: boolean;
@@ -66,8 +66,7 @@ interface TranscriptPanelProps {
 
 export function TranscriptPanel({
   transcripts,
-  customPrompt,
-  onPromptChange,
+  summaryContextBox,
   onCopyTranscript,
   onOpenMeetingFolder,
   isRecording,
@@ -246,17 +245,8 @@ export function TranscriptPanel({
 
       <PlayerBar playback={playback} />
 
-      {/* Custom prompt input at bottom of transcript section */}
-      {!isRecording && convertedSegments.length > 0 && (
-        <div className="p-1 border-t border-gray-200">
-          <textarea
-            placeholder="Add context for AI summary. For example people involved, meeting overview, objective etc..."
-            className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 bg-white shadow-sm min-h-[80px] resize-y"
-            value={customPrompt}
-            onChange={(e) => onPromptChange(e.target.value)}
-          />
-        </div>
-      )}
+      {/* Summary context at bottom of transcript section */}
+      {!isRecording && convertedSegments.length > 0 && summaryContextBox}
     </div>
   );
 }

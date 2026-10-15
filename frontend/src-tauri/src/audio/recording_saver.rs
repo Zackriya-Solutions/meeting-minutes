@@ -11,6 +11,10 @@ use super::recording_state::AudioChunk;
 use super::audio_processing::create_meeting_folder;
 use super::incremental_saver::IncrementalAudioSaver;
 
+/// Unmixed stereo recording written when "save separate channels" is enabled
+pub const STEREO_AUDIO_FILE: &str = "audio_stereo.mp4";
+const STEREO_CHECKPOINTS_DIR: &str = ".checkpoints_stereo";
+
 /// Structured transcript segment for JSON export
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TranscriptSegment {
@@ -38,6 +42,15 @@ pub struct MeetingMetadata {
     pub transcript_file: String,
     pub sample_rate: u32,
     pub status: String,  // "recording", "completed", "error"
+    /// Unmixed stereo file (L = microphone, R = system audio), when enabled
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audio_file_stereo: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audio_file_stereo_channels: Option<Vec<String>>,
+    /// How audio.mp4 was produced (`single_stream` since recordings are encoded once);
+    /// absent for recordings made by older versions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audio_layout: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -49,6 +62,8 @@ pub struct DeviceInfo {
 /// New recording saver using incremental saving strategy
 pub struct RecordingSaver {
     incremental_saver: Option<Arc<AsyncMutex<IncrementalAudioSaver>>>,
+    stereo_saver: Option<Arc<AsyncMutex<IncrementalAudioSaver>>>,
+    save_separate_channels: bool,
     meeting_folder: Option<PathBuf>,
     meeting_name: Option<String>,
     metadata: Option<MeetingMetadata>,
@@ -60,6 +75,8 @@ impl RecordingSaver {
     pub fn new() -> Self {
         Self {
             incremental_saver: None,
+            stereo_saver: None,
+            save_separate_channels: false,
             meeting_folder: None,
             meeting_name: None,
             metadata: None,
@@ -71,6 +88,15 @@ impl RecordingSaver {
     /// Set the meeting name for this recording session
     pub fn set_meeting_name(&mut self, name: Option<String>) {
         self.meeting_name = name;
+    }
+
+    /// Enable the additional unmixed stereo recording (L = mic, R = system)
+    pub fn set_save_separate_channels(&mut self, enabled: bool) {
+        self.save_separate_channels = enabled;
+    }
+
+    pub fn save_separate_channels(&self) -> bool {
+        self.save_separate_channels
     }
 
     /// Set device information in metadata
@@ -135,10 +161,12 @@ impl RecordingSaver {
     ///
     /// # Arguments
     /// * `auto_save` - If true, creates checkpoints and enables saving. If false, audio chunks are discarded.
+    /// * `stereo_receiver` - Interleaved stereo chunks for `audio_stereo.mp4` (separate channels enabled)
     pub fn start_accumulation(
         &mut self,
         auto_save: bool,
         mut receiver: mpsc::UnboundedReceiver<AudioChunk>,
+        stereo_receiver: Option<mpsc::UnboundedReceiver<AudioChunk>>,
     ) {
         if auto_save {
             info!("Initializing incremental audio saver for recording (auto-save ENABLED)");
@@ -210,6 +238,23 @@ impl RecordingSaver {
             info!("Recording saver accumulation task ended");
         });
 
+        // Separate-channels recording: independent saver and task so a failure here
+        // never affects the mixed audio.mp4
+        if let (Some(mut stereo_receiver), Some(stereo_saver)) = (stereo_receiver, self.stereo_saver.clone()) {
+            let is_saving_clone = self.is_saving.clone();
+            tokio::spawn(async move {
+                while let Some(chunk) = stereo_receiver.recv().await {
+                    if !is_saving_clone.lock().map(|s| *s).unwrap_or(false) {
+                        break;
+                    }
+                    if stereo_saver.lock().await.add_chunk(chunk).is_err() {
+                        error!("Failed to add chunk to stereo saver");
+                    }
+                }
+                info!("Stereo recording accumulation task ended");
+            });
+        }
+
         // Set saving flag
         if let Ok(mut is_saving) = self.is_saving.lock() {
             *is_saving = true;
@@ -233,27 +278,26 @@ impl RecordingSaver {
             let incremental_saver = IncrementalAudioSaver::new(meeting_folder.clone(), 48000)?;
             self.incremental_saver = Some(Arc::new(AsyncMutex::new(incremental_saver)));
             info!("Incremental audio saver initialized");
+
+            if self.save_separate_channels {
+                let stereo_saver = std::fs::create_dir_all(meeting_folder.join(STEREO_CHECKPOINTS_DIR))
+                    .map_err(anyhow::Error::from)
+                    .and_then(|_| IncrementalAudioSaver::with_layout(
+                        meeting_folder.clone(), 48000, 2, STEREO_CHECKPOINTS_DIR, STEREO_AUDIO_FILE));
+                match stereo_saver {
+                    Ok(saver) => {
+                        self.stereo_saver = Some(Arc::new(AsyncMutex::new(saver)));
+                        info!("Separate-channels saver initialized ({} : L=microphone, R=system)", STEREO_AUDIO_FILE);
+                    }
+                    Err(e) => warn!("Separate-channels recording disabled for this meeting: {}", e),
+                }
+            }
         } else {
             info!("⚠️  Skipped incremental audio saver (auto-save disabled)");
         }
 
         // Create initial metadata
-        let metadata = MeetingMetadata {
-            version: "1.0".to_string(),
-            meeting_id: None,  // Will be set by backend
-            meeting_name: Some(meeting_name.to_string()),
-            created_at: chrono::Utc::now().to_rfc3339(),
-            completed_at: None,
-            duration_seconds: None,
-            devices: DeviceInfo {
-                microphone: None,  // Could be enhanced to store actual device names
-                system_audio: None,
-            },
-            audio_file: if create_checkpoints { "audio.mp4".to_string() } else { "".to_string() },
-            transcript_file: "transcripts.json".to_string(),
-            sample_rate: 48000,
-            status: "recording".to_string(),
-        };
+        let metadata = initial_metadata(meeting_name, create_checkpoints);
 
         // Write initial metadata.json
         self.write_metadata(&meeting_folder, &metadata)?;
@@ -390,6 +434,19 @@ impl RecordingSaver {
             return Err("No incremental saver initialized".to_string());
         };
 
+        // Finalize the separate-channels file; failures only cost the stereo file
+        let stereo_audio_path = if let Some(saver_arc) = &self.stereo_saver {
+            match saver_arc.lock().await.finalize().await {
+                Ok(path) => Some(path),
+                Err(e) => {
+                    warn!("Failed to finalize separate-channels audio: {}", e);
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
         // Save final transcripts.json with validation
         if let Some(folder) = &self.meeting_folder {
             if let Err(e) = self.write_transcripts_json(folder) {
@@ -410,6 +467,10 @@ impl RecordingSaver {
         if let (Some(folder), Some(mut metadata)) = (&self.meeting_folder, self.metadata.clone()) {
             metadata.status = "completed".to_string();
             metadata.completed_at = Some(chrono::Utc::now().to_rfc3339());
+            if stereo_audio_path.is_some() {
+                metadata.audio_file_stereo = Some(STEREO_AUDIO_FILE.to_string());
+                metadata.audio_file_stereo_channels = Some(vec!["microphone".to_string(), "system".to_string()]);
+            }
 
             // Use actual recording duration from RecordingState (more accurate than transcript segments)
             // Falls back to last transcript segment if duration not provided
@@ -474,5 +535,44 @@ impl RecordingSaver {
 impl Default for RecordingSaver {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// metadata.json of a new recording. Its audio is saved as lossless checkpoints that become one
+/// AAC stream, whether the recording stops normally or is recovered after a crash, so the layout
+/// is recorded from the start.
+fn initial_metadata(meeting_name: &str, create_checkpoints: bool) -> MeetingMetadata {
+    MeetingMetadata {
+        version: "1.0".to_string(),
+        meeting_id: None,  // Will be set by backend
+        meeting_name: Some(meeting_name.to_string()),
+        created_at: chrono::Utc::now().to_rfc3339(),
+        completed_at: None,
+        duration_seconds: None,
+        devices: DeviceInfo {
+            microphone: None,  // Could be enhanced to store actual device names
+            system_audio: None,
+        },
+        audio_file: if create_checkpoints { "audio.mp4".to_string() } else { "".to_string() },
+        transcript_file: "transcripts.json".to_string(),
+        sample_rate: 48000,
+        status: "recording".to_string(),
+        audio_file_stereo: None,
+        audio_file_stereo_channels: None,
+        audio_layout: create_checkpoints
+            .then(|| super::incremental_saver::AUDIO_LAYOUT_SINGLE_STREAM.to_string()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn recordings_with_audio_are_marked_single_stream_from_the_start() {
+        let metadata = initial_metadata("Standup", true);
+        assert_eq!(metadata.audio_layout.as_deref(), Some(super::super::incremental_saver::AUDIO_LAYOUT_SINGLE_STREAM));
+        assert_eq!(metadata.audio_file, "audio.mp4");
+        assert_eq!(initial_metadata("Standup", false).audio_layout, None);
     }
 }

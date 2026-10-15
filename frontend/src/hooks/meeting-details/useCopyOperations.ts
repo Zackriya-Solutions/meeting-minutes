@@ -6,6 +6,7 @@ import Analytics from '@/lib/analytics';
 import { invoke as invokeTauri } from '@tauri-apps/api/core';
 import { hasVisibleSummaryContent } from '@/lib/summary-content';
 import { fetchSpeakerNames, speakerLabel } from '@/lib/speakers';
+import { copyNotesToClipboard } from '@/lib/notes-toast';
 
 interface UseCopyOperationsProps {
   meeting: any;
@@ -15,6 +16,7 @@ interface UseCopyOperationsProps {
   blockNoteSummaryRef: RefObject<BlockNoteSummaryViewRef>;
   /** Names the caller already holds; fetched per copy when absent. */
   speakerNames?: Record<string, string>;
+  getNotesMarkdown?: () => string;
 }
 
 export function useCopyOperations({
@@ -24,6 +26,7 @@ export function useCopyOperations({
   aiSummary,
   blockNoteSummaryRef,
   speakerNames,
+  getNotesMarkdown,
 }: UseCopyOperationsProps) {
 
   // Helper function to fetch ALL transcripts for copying (not just paginated data)
@@ -199,8 +202,19 @@ export function useCopyOperations({
     }
   }, [aiSummary, meetingTitle, meeting, blockNoteSummaryRef]);
 
+  // Copy notes to clipboard, including edits that are not saved yet
+  const handleCopyNotes = useCallback(async () => {
+    const markdown = getNotesMarkdown?.() ?? '';
+    if (!markdown.trim()) {
+      toast.error('No notes to copy');
+      return;
+    }
+    await copyNotesToClipboard(markdown);
+  }, [getNotesMarkdown]);
+
   return {
     handleCopyTranscript,
     handleCopySummary,
+    handleCopyNotes,
   };
 }

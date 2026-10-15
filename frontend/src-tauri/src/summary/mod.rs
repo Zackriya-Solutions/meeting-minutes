@@ -30,6 +30,8 @@ pub struct CustomOpenAIConfig {
     pub top_p: Option<f32>,
 }
 
+pub mod context;
+pub mod context_commands;
 pub mod commands;
 pub(crate) mod language_detection;
 pub mod llm_client;
@@ -39,6 +41,7 @@ pub mod service;
 pub mod summary_engine;
 pub mod template_commands;
 pub mod templates;
+pub mod terminology;
 
 // Re-export Tauri commands (with their generated __cmd__ variants)
 pub use commands::{
