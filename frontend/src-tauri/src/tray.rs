@@ -219,6 +219,15 @@ pub fn update_tray_menu<R: Runtime>(app: &AppHandle<R>) {
     });
 }
 
+/// Rebuild the tray menu from the real recording state. The frontend calls
+/// this when it declines a tray-initiated start (e.g. no transcription model):
+/// the tray already switched to "Starting Recording..." and no backend start
+/// will ever run to reset it.
+#[tauri::command]
+pub fn refresh_tray_menu<R: Runtime>(app: AppHandle<R>) {
+    update_tray_menu(&app);
+}
+
 pub fn set_tray_state<R: Runtime>(app: &AppHandle<R>, state: RecordingState) {
     log::info!("Tray: Setting intermediate state: {:?}", state);
     // During recording state transitions, we assume recording is allowed (we're already recording)

@@ -610,6 +610,7 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            tray::refresh_tray_menu,
             start_recording,
             stop_recording,
             is_recording,
