@@ -3,7 +3,7 @@
 import { useEffect } from "react";
 import type { PartialBlock, Block } from "@blocknote/core";
 import { useCreateBlockNote } from "@blocknote/react";
-import { BlockNoteView } from "@blocknote/shadcn";
+import { TerminologyBlockNoteView } from "./TerminologyBlockNoteView";
 import "@blocknote/shadcn/style.css";
 import "@blocknote/core/fonts/inter.css";
 
@@ -47,5 +47,5 @@ export default function Editor({ initialContent, onChange, editable = true }: Ed
     };
   }, [editor, onChange]);
 
-  return <BlockNoteView editor={editor} editable={editable} theme="light" />;
+  return <TerminologyBlockNoteView editor={editor} editable={editable} />;
 }

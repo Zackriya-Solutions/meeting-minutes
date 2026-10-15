@@ -9,6 +9,7 @@ use crate::summary::processor::{
     language_name_from_code, require_visible_markdown,
 };
 use crate::summary::templates::{self, Template};
+use crate::summary::terminology;
 use crate::ollama::metadata::ModelMetadataCache;
 use crate::utils::url_origin_for_log;
 use chrono::{DateTime, Utc};
@@ -622,9 +623,17 @@ impl SummaryService {
                     "✓ Successfully processed {} chunks for meeting_id: {}. Duration: {:.2}s",
                     generated.successful_chunk_count, meeting_id, duration
                 );
-                let result_json = match build_summary_result_json(
+                let final_markdown = terminology::apply_stored_corrections(
+                    app_data_dir.as_ref(),
                     &generated.final_markdown,
+                );
+                let english_markdown = terminology::apply_stored_corrections(
+                    app_data_dir.as_ref(),
                     &generated.english_markdown,
+                );
+                let result_json = match build_summary_result_json(
+                    &final_markdown,
+                    &english_markdown,
                     cache_source,
                     summary_language.as_deref(),
                     generated.reasoning_stripped,
@@ -650,7 +659,7 @@ impl SummaryService {
                 {
                     Ok(true) => {
                         if let Some(name) =
-                            extract_meeting_name_from_markdown(&generated.final_markdown)
+                            extract_meeting_name_from_markdown(&final_markdown)
                                 .filter(|name| !name.is_empty())
                         {
                             if let Err(error) =

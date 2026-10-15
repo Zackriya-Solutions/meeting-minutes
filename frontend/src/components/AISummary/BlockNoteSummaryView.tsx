@@ -6,7 +6,7 @@ import { Summary, SummaryDataResponse, SummaryFormat, BlockNoteBlock } from '@/t
 import { AISummary } from './index';
 import { Block } from '@blocknote/core';
 import { useCreateBlockNote } from '@blocknote/react';
-import { BlockNoteView } from '@blocknote/shadcn';
+import { TerminologyBlockNoteView } from '../BlockNoteEditor/TerminologyBlockNoteView';
 import { blocksToMarkdownSafely } from '@/lib/blocknote-markdown';
 import "@blocknote/shadcn/style.css";
 
@@ -257,7 +257,7 @@ export const BlockNoteSummaryView = forwardRef<BlockNoteSummaryViewRef, BlockNot
     return (
       <div className="flex flex-col w-full">
         <div className="w-full">
-          <BlockNoteView
+          <TerminologyBlockNoteView
             editor={editor}
             editable={true}
             onChange={() => {
@@ -265,7 +265,6 @@ export const BlockNoteSummaryView = forwardRef<BlockNoteSummaryViewRef, BlockNot
                 handleEditorChange(editor.document);
               }
             }}
-            theme="light"
           />
         </div>
       </div>
