@@ -15,6 +15,7 @@ import { PeopleContext } from '@/components/Speakers/PeopleContext';
 import { decideAutoGuessNames, isWaitingForSpeakers } from '@/lib/speakerNaming';
 import { useSpeakerIdentification } from '@/hooks/useSpeakerIdentification';
 import { SummaryPanel } from '@/components/MeetingDetails/SummaryPanel';
+import { NotesPanel } from '@/components/MeetingNotes/NotesPanel';
 import { SummaryContextBox } from '@/components/MeetingDetails/SummaryContextBox';
 import { MeetingDetailsSplitView, type MeetingDetailsTab } from '@/components/MeetingDetails/MeetingDetailsSplitView';
 import { ModelConfig } from '@/components/ModelSettingsModal';
@@ -27,6 +28,7 @@ import type { InheritedContext } from '@/lib/summary-context';
 import { useTemplates } from '@/hooks/meeting-details/useTemplates';
 import { useCopyOperations } from '@/hooks/meeting-details/useCopyOperations';
 import { useMeetingOperations } from '@/hooks/meeting-details/useMeetingOperations';
+import { useMeetingNotes } from '@/hooks/meeting-details/useMeetingNotes';
 import { useConfig } from '@/contexts/ConfigContext';
 
 export default function PageContent({
@@ -264,6 +266,8 @@ export default function PageContent({
     speakerNames,
   });
 
+  const notes = useMeetingNotes(meeting.id);
+
   // Generate and Regenerate send what is on screen, after any pending save has been written.
   const { flush: flushSummaryContext, text: summaryContextText, useInherited, isLoaded: summaryContextLoaded } = summaryContext;
   const { handleGenerateSummary, handleRegenerateSummary } = summaryGeneration;
@@ -298,6 +302,7 @@ export default function PageContent({
     aiSummary: meetingData.aiSummary,
     blockNoteSummaryRef: meetingData.blockNoteSummaryRef,
     speakerNames,
+    getNotesMarkdown: notes.getMarkdown,
   });
 
   const meetingOperations = useMeetingOperations({
@@ -427,6 +432,18 @@ export default function PageContent({
               onTemplateSelect={templates.handleTemplateSelection}
               isModelConfigLoading={isModelConfigLoading}
               onOpenModelSettings={handleRegisterModalOpen}
+            />
+          }
+          notes={
+            <NotesPanel
+              loadState={notes.loadState}
+              initialBlocks={notes.initialBlocks}
+              initialMarkdown={notes.initialMarkdown}
+              saveState={notes.saveState}
+              onChange={notes.handleChange}
+              onRetryLoad={notes.reload}
+              onRetrySave={notes.retrySave}
+              onCopy={copyOperations.handleCopyNotes}
             />
           }
         />

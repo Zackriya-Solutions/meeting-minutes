@@ -9,7 +9,9 @@ use crate::{
     database::{
         models::MeetingModel,
         repositories::{
-            meeting::MeetingsRepository, setting::SettingsRepository,
+            meeting::MeetingsRepository,
+            meeting_notes::{is_block_array, MeetingNotes, MeetingNotesRepository},
+            setting::SettingsRepository,
             transcript::TranscriptsRepository,
         },
     },
@@ -38,6 +40,14 @@ pub struct SearchRequest {
     pub query: String,
 }
 
+/// Where a search match was found.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SearchMatchSource {
+    Transcript,
+    Notes,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct TranscriptSearchResult {
     pub id: String,
@@ -45,6 +55,7 @@ pub struct TranscriptSearchResult {
     #[serde(rename = "matchContext")]
     pub match_context: String,
     pub timestamp: String,
+    pub source: SearchMatchSource,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -393,6 +404,19 @@ pub async fn api_get_meetings<R: Runtime>(
     }
 }
 
+/// Transcript matches first, then matches found in notes.
+async fn search_transcripts_and_notes(
+    pool: &sqlx::SqlitePool,
+    query: &str,
+) -> Result<Vec<TranscriptSearchResult>, sqlx::Error> {
+    let mut results = TranscriptsRepository::search_transcripts(pool, query).await?;
+    match MeetingNotesRepository::search(pool, query).await {
+        Ok(note_matches) => results.extend(note_matches),
+        Err(e) => log_error!("Notes search failed; returning transcript matches only: {}", e),
+    }
+    Ok(results)
+}
+
 #[tauri::command]
 pub async fn api_search_transcripts<R: Runtime>(
     _app: AppHandle<R>,
@@ -408,7 +432,7 @@ pub async fn api_search_transcripts<R: Runtime>(
 
     let pool = state.db_manager.pool();
 
-    match TranscriptsRepository::search_transcripts(pool, &query).await {
+    match search_transcripts_and_notes(pool, &query).await {
         Ok(results) => {
             log_info!(
                 "Search completed successfully with {} results.",
@@ -419,6 +443,51 @@ pub async fn api_search_transcripts<R: Runtime>(
         Err(e) => {
             log_error!("Transcript search failed");
             Err(format!("Failed to search transcripts: {}", e))
+        }
+    }
+}
+
+/// Returns the user-written note for a meeting, if it has one.
+#[tauri::command]
+pub async fn api_get_meeting_notes(
+    state: tauri::State<'_, AppState>,
+    meeting_id: String,
+) -> Result<Option<MeetingNotes>, String> {
+    MeetingNotesRepository::get(state.db_manager.pool(), &meeting_id)
+        .await
+        .map_err(|e| {
+            log_error!("Failed to load meeting notes for {}: {}", meeting_id, e);
+            e.to_string()
+        })
+}
+
+/// Saves the user-written note for a meeting. `notes_json` is a JSON array of editor blocks.
+#[tauri::command]
+pub async fn api_save_meeting_notes(
+    state: tauri::State<'_, AppState>,
+    meeting_id: String,
+    markdown: String,
+    notes_json: Option<String>,
+) -> Result<(), String> {
+    if let Some(json) = notes_json.as_deref() {
+        if !is_block_array(json) {
+            return Err("Notes content must be a JSON array of editor blocks".into());
+        }
+    }
+
+    match MeetingNotesRepository::upsert(
+        state.db_manager.pool(),
+        &meeting_id,
+        &markdown,
+        notes_json.as_deref(),
+    )
+    .await
+    {
+        Ok(true) => Ok(()),
+        Ok(false) => Err("Meeting not found".into()),
+        Err(e) => {
+            log_error!("Failed to save meeting notes for {}: {}", meeting_id, e);
+            Err(e.to_string())
         }
     }
 }
@@ -1484,5 +1553,37 @@ mod speaker_tests {
         let folder = dir.path().to_str().unwrap();
         assert!(folder_owned_by_other_meeting(&pool, folder, "new").await);
         assert!(!folder_owned_by_other_meeting(&pool, folder, "someone-else").await);
+    }
+}
+
+#[cfg(test)]
+mod search_tests {
+    use super::*;
+    use crate::database::repositories::meeting_notes::test_support::{seed_meeting, test_pool};
+
+    #[tokio::test]
+    async fn transcript_matches_come_before_note_matches() {
+        let pool = test_pool().await;
+        seed_meeting(&pool, "m1", "Spoken").await;
+        seed_meeting(&pool, "m2", "Written").await;
+        sqlx::query("INSERT INTO transcripts (id, meeting_id, transcript, timestamp) VALUES ('t1', 'm1', 'the budget is tight', '00:01')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        MeetingNotesRepository::upsert(&pool, "m2", "Budget follow-up", Some("[]"))
+            .await
+            .unwrap();
+
+        let results = search_transcripts_and_notes(&pool, "budget").await.unwrap();
+
+        let found: Vec<(&str, SearchMatchSource)> =
+            results.iter().map(|r| (r.id.as_str(), r.source)).collect();
+        assert_eq!(
+            found,
+            vec![
+                ("m1", SearchMatchSource::Transcript),
+                ("m2", SearchMatchSource::Notes)
+            ]
+        );
     }
 }

@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
-import { FileText, Sparkles } from 'lucide-react';
+import { FileText, NotebookPen, Sparkles } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 const STORAGE_KEY = 'meetily.meetingDetails.transcriptPaneRatio';
 const DEFAULT_RATIO = 0.3;
@@ -11,7 +11,9 @@ const MAX_RATIO = 0.5;
 const TABS = [
   { value: 'transcript' as const, label: 'Transcript', icon: FileText },
   { value: 'summary' as const, label: 'Summary', icon: Sparkles },
+  { value: 'notes' as const, label: 'Notes', icon: NotebookPen },
 ];
+const RIGHT_PANES = TABS.filter((tab) => tab.value !== 'transcript');
 
 function readStoredRatio(): number {
   if (typeof window === 'undefined') return DEFAULT_RATIO;
@@ -32,11 +34,21 @@ function writeStoredRatio(value: number): void {
   }
 }
 
-export type MeetingDetailsTab = 'transcript' | 'summary';
+export type MeetingDetailsTab = 'transcript' | 'summary' | 'notes';
+export type MeetingDetailsRightPane = Exclude<MeetingDetailsTab, 'transcript'>;
+
+/** On wide windows the transcript is always visible; this picks what sits beside it. */
+export function resolveRightPane(
+  activeTab: MeetingDetailsTab,
+  lastRightPane: MeetingDetailsRightPane,
+): MeetingDetailsRightPane {
+  return activeTab === 'transcript' ? lastRightPane : activeTab;
+}
 
 interface MeetingDetailsSplitViewProps {
   transcript: ReactNode;
   summary: ReactNode;
+  notes: ReactNode;
   activeTab: MeetingDetailsTab;
   onTabChange: (tab: MeetingDetailsTab) => void;
 }
@@ -44,6 +56,7 @@ interface MeetingDetailsSplitViewProps {
 export function MeetingDetailsSplitView({
   transcript,
   summary,
+  notes,
   activeTab,
   onTabChange,
 }: MeetingDetailsSplitViewProps) {
@@ -52,6 +65,16 @@ export function MeetingDetailsSplitView({
   const [isDesktop, setIsDesktop] = useState(true);
   const dragging = useRef(false);
   const clampRatio = (value: number) => Math.min(MAX_RATIO, Math.max(MIN_RATIO, value));
+  const [lastRightPane, setLastRightPane] = useState<MeetingDetailsRightPane>('summary');
+  useEffect(() => {
+    if (activeTab !== 'transcript') setLastRightPane(activeTab);
+  }, [activeTab]);
+  const rightPane = resolveRightPane(activeTab, lastRightPane);
+  const [notesShown, setNotesShown] = useState(false);
+  useEffect(() => {
+    if (activeTab === 'notes') setNotesShown(true);
+  }, [activeTab]);
+  const notesMounted = notesShown || activeTab === 'notes';
 
   useEffect(() => {
     setRatio(readStoredRatio());
@@ -106,6 +129,11 @@ export function MeetingDetailsSplitView({
   const summaryPanelProps = isDesktop
     ? { role: 'region' as const, 'aria-label': 'Summary', tabIndex: -1 }
     : {};
+  const notesPanelProps = isDesktop
+    ? { role: 'region' as const, 'aria-label': 'Notes', tabIndex: -1 }
+    : {};
+  const rightPanelClass =
+    'mt-0 flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden data-[state=inactive]:hidden';
 
   return (
     <Tabs
@@ -153,7 +181,7 @@ export function MeetingDetailsSplitView({
           aria-valuemin={Math.round(MIN_RATIO * 100)}
           aria-valuemax={Math.round(MAX_RATIO * 100)}
           aria-valuetext={`Transcript panel ${Math.round(ratio * 100)} percent`}
-          aria-label="Resize transcript and summary"
+          aria-label={rightPane === 'notes' ? 'Resize transcript and notes' : 'Resize transcript and summary'}
           tabIndex={0}
           className="group relative z-10 hidden w-2 flex-shrink-0 cursor-col-resize items-stretch justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-inset md:flex"
           onPointerDown={onPointerDown}
@@ -161,14 +189,50 @@ export function MeetingDetailsSplitView({
         >
           <div className="h-full w-px bg-gray-200 transition-[width,background-color] duration-150 ease-out group-hover:w-1 group-hover:bg-blue-400 group-active:w-1 group-active:bg-blue-500" />
         </div>
-        <TabsContent
-          value="summary"
-          forceMount
-          className="mt-0 flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden data-[state=inactive]:hidden md:data-[state=inactive]:flex"
-          {...summaryPanelProps}
+        <div
+          className={`${activeTab === 'transcript' ? 'hidden md:flex' : 'flex'} min-h-0 min-w-0 flex-1 flex-col overflow-hidden`}
         >
-          {summary}
-        </TabsContent>
+          <div
+            role="group"
+            aria-label="Summary or notes"
+            className="hidden shrink-0 items-center justify-center gap-1 border-b border-gray-200 bg-white px-2 py-1.5 md:flex"
+          >
+            {RIGHT_PANES.map((pane) => {
+              const Icon = pane.icon;
+              const selected = rightPane === pane.value;
+              return (
+                <button
+                  key={pane.value}
+                  type="button"
+                  aria-pressed={selected}
+                  onClick={() => onTabChange(pane.value)}
+                  className={`flex items-center gap-2 rounded-md px-3 py-1 text-sm ${
+                    selected ? 'bg-blue-50 text-blue-600' : 'text-gray-600 hover:text-gray-900'
+                  }`}
+                >
+                  <Icon className="h-4 w-4" />
+                  {pane.label}
+                </button>
+              );
+            })}
+          </div>
+          <TabsContent
+            value="summary"
+            forceMount
+            className={`${rightPanelClass} ${rightPane === 'summary' ? 'md:data-[state=inactive]:flex' : ''}`}
+            {...summaryPanelProps}
+          >
+            {summary}
+          </TabsContent>
+          <TabsContent
+            value="notes"
+            forceMount
+            className={`${rightPanelClass} ${rightPane === 'notes' ? 'md:data-[state=inactive]:flex' : ''}`}
+            {...notesPanelProps}
+          >
+            {notesMounted ? notes : null}
+          </TabsContent>
+        </div>
       </div>
     </Tabs>
   );

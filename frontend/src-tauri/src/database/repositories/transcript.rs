@@ -1,4 +1,5 @@
-use crate::api::{TranscriptSearchResult, TranscriptSegment};
+use crate::api::{SearchMatchSource, TranscriptSearchResult, TranscriptSegment};
+use crate::database::repositories::search_snippet;
 use chrono::Utc;
 use sqlx::{Connection, Error as SqlxError, SqlitePool};
 use log::{error, info};
@@ -129,41 +130,18 @@ impl TranscriptsRepository {
         let results = rows
             .into_iter()
             .map(|(id, title, transcript, timestamp)| {
-                let match_context = Self::get_match_context(&transcript, query);
+                let match_context = search_snippet::match_context(&transcript, query);
                 TranscriptSearchResult {
                     id,
                     title,
                     match_context,
                     timestamp,
+                    source: SearchMatchSource::Transcript,
                 }
             })
             .collect();
 
         Ok(results)
-    }
-
-    /// Helper function to extract a snippet of text around the first match of a query.
-    fn get_match_context(transcript: &str, query: &str) -> String {
-        let transcript_lower = transcript.to_lowercase();
-        let query_lower = query.to_lowercase();
-
-        match transcript_lower.find(&query_lower) {
-            Some(match_index) => {
-                let start_index = match_index.saturating_sub(100);
-                let end_index = (match_index + query.len() + 100).min(transcript.len());
-
-                let mut context = String::new();
-                if start_index > 0 {
-                    context.push_str("...");
-                }
-                context.push_str(&transcript[start_index..end_index]);
-                if end_index < transcript.len() {
-                    context.push_str("...");
-                }
-                context
-            }
-            None => transcript.chars().take(200).collect(), // Fallback to the start of the transcript
-        }
     }
 }
 
