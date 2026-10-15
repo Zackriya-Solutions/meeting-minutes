@@ -38,6 +38,10 @@ pub struct MeetingMetadata {
     pub transcript_file: String,
     pub sample_rate: u32,
     pub status: String,  // "recording", "completed", "error"
+    /// How audio.mp4 was produced (`single_stream` since recordings are encoded once);
+    /// absent for recordings made by older versions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audio_layout: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -238,22 +242,7 @@ impl RecordingSaver {
         }
 
         // Create initial metadata
-        let metadata = MeetingMetadata {
-            version: "1.0".to_string(),
-            meeting_id: None,  // Will be set by backend
-            meeting_name: Some(meeting_name.to_string()),
-            created_at: chrono::Utc::now().to_rfc3339(),
-            completed_at: None,
-            duration_seconds: None,
-            devices: DeviceInfo {
-                microphone: None,  // Could be enhanced to store actual device names
-                system_audio: None,
-            },
-            audio_file: if create_checkpoints { "audio.mp4".to_string() } else { "".to_string() },
-            transcript_file: "transcripts.json".to_string(),
-            sample_rate: 48000,
-            status: "recording".to_string(),
-        };
+        let metadata = initial_metadata(meeting_name, create_checkpoints);
 
         // Write initial metadata.json
         self.write_metadata(&meeting_folder, &metadata)?;
@@ -474,5 +463,42 @@ impl RecordingSaver {
 impl Default for RecordingSaver {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// metadata.json of a new recording. Its audio is saved as lossless checkpoints that become one
+/// AAC stream, whether the recording stops normally or is recovered after a crash, so the layout
+/// is recorded from the start.
+fn initial_metadata(meeting_name: &str, create_checkpoints: bool) -> MeetingMetadata {
+    MeetingMetadata {
+        version: "1.0".to_string(),
+        meeting_id: None,  // Will be set by backend
+        meeting_name: Some(meeting_name.to_string()),
+        created_at: chrono::Utc::now().to_rfc3339(),
+        completed_at: None,
+        duration_seconds: None,
+        devices: DeviceInfo {
+            microphone: None,  // Could be enhanced to store actual device names
+            system_audio: None,
+        },
+        audio_file: if create_checkpoints { "audio.mp4".to_string() } else { "".to_string() },
+        transcript_file: "transcripts.json".to_string(),
+        sample_rate: 48000,
+        status: "recording".to_string(),
+        audio_layout: create_checkpoints
+            .then(|| super::incremental_saver::AUDIO_LAYOUT_SINGLE_STREAM.to_string()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn recordings_with_audio_are_marked_single_stream_from_the_start() {
+        let metadata = initial_metadata("Standup", true);
+        assert_eq!(metadata.audio_layout.as_deref(), Some(super::super::incremental_saver::AUDIO_LAYOUT_SINGLE_STREAM));
+        assert_eq!(metadata.audio_file, "audio.mp4");
+        assert_eq!(initial_metadata("Standup", false).audio_layout, None);
     }
 }
