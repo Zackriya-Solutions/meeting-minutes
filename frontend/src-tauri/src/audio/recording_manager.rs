@@ -230,6 +230,7 @@ impl RecordingManager {
         microphone_device: Option<Arc<AudioDevice>>,
         system_device: Option<Arc<AudioDevice>>,
         auto_save: bool,
+        send_continuous_transcription: bool,
     ) -> std::result::Result<mpsc::UnboundedReceiver<AudioChunk>, RecordingStartError> {
         info!("Starting recording manager (auto_save: {})", auto_save);
 
@@ -271,6 +272,10 @@ impl RecordingManager {
             mic_kind,
             sys_name,
             sys_kind,
+            super::pipeline::TranscriptionPipelineMode::for_recording(
+                send_continuous_transcription,
+                system_device.is_some(),
+            ),
         ) {
             self.state.stop_recording();
             return Err(RecordingStartError::TranscriptionRuntime(error));
@@ -517,6 +522,12 @@ impl RecordingManager {
     /// Add a structured transcript segment to be saved later
     pub fn add_transcript_segment(&self, segment: super::recording_saver::TranscriptSegment) {
         self.recording_saver.add_transcript_segment(segment);
+    }
+
+    /// The live transcript log, for listeners that must outlive this manager's
+    /// slot in RECORDING_MANAGER (it is taken out before stop drains).
+    pub fn transcript_log(&self) -> super::recording_saver::TranscriptLog {
+        self.recording_saver.transcript_log()
     }
 
     /// Add a transcript chunk to be saved later (legacy method)

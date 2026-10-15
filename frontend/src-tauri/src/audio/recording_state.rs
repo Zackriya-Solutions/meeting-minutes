@@ -22,6 +22,31 @@ pub struct AudioChunk {
     pub timestamp: f64,
     pub chunk_id: u64,
     pub device_type: DeviceType,
+    /// What `data` holds, and therefore how it may be labelled downstream.
+    /// Never derive durations from `data.len()` alone: divide by
+    /// `layout.channels()` to get frames.
+    pub layout: AudioLayout,
+}
+
+/// Channel layout and source meaning of an `AudioChunk`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AudioLayout {
+    /// One channel with no single source (a mix, or a raw per-device stream
+    /// before mixing). Transcripts of it carry no source label.
+    Mono,
+    /// One channel that is the microphone alone (no system audio exists).
+    MicOnly,
+    /// Two interleaved channels, frame = [mic, system].
+    MicSystemStereo,
+}
+
+impl AudioLayout {
+    pub fn channels(self) -> u16 {
+        match self {
+            AudioLayout::Mono | AudioLayout::MicOnly => 1,
+            AudioLayout::MicSystemStereo => 2,
+        }
+    }
 }
 
 /// Processed audio chunk (post-VAD) for recording

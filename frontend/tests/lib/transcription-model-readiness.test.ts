@@ -3,6 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   getProviderCommands,
   hasDownloadingModel,
+  isCloudProvider,
 } from '../../src/lib/transcription-model-readiness';
 
 describe('transcription model readiness', () => {
@@ -24,6 +25,14 @@ describe('transcription model readiness', () => {
 
   test('does not silently treat an unsupported provider as Parakeet', () => {
     expect(getProviderCommands('deepgram')).toBeNull();
+  });
+
+  test('treats Deepgram as a cloud provider that needs no downloaded model', () => {
+    expect(isCloudProvider('deepgram')).toBeTrue();
+    expect(isCloudProvider('parakeet')).toBeFalse();
+    expect(isCloudProvider('localWhisper')).toBeFalse();
+    // Not accepted by the Rust start path, so it must not skip the local check.
+    expect(isCloudProvider('openai')).toBeFalse();
   });
 
   test('recognizes only active downloads', () => {

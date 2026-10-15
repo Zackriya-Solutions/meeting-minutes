@@ -63,6 +63,8 @@ pub(crate) fn create_transcript_segments(transcripts: &[(String, f64, f64)]) -> 
                 audio_start_time: Some(start_seconds),
                 audio_end_time: Some(end_seconds),
                 duration: Some(duration),
+                // Batch (import/retranscription) audio is one mixed signal.
+                speaker: None,
             }
         })
         .collect()

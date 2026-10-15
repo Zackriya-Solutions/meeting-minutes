@@ -12,6 +12,7 @@ import {
   applyPinnedSummaryLanguageToMeeting,
   detectAndCacheSummaryLanguage,
 } from '@/lib/summary-language-preferences';
+import { formatTranscriptLine } from '@/lib/transcript-speakers';
 
 type SummaryStatus = 'idle' | 'processing' | 'summarizing' | 'regenerating' | 'completed' | 'error';
 
@@ -279,7 +280,7 @@ export function useRecordingStop(
             try {
               await detectAndCacheSummaryLanguage(
                 meetingId,
-                freshTranscripts.map(t => t.text)
+                freshTranscripts.map(t => formatTranscriptLine(t.text, t.speaker))
               );
             } catch (error) {
               console.warn('Failed to detect summary language for new meeting:', error);

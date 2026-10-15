@@ -499,6 +499,32 @@ pub fn audio_to_mono(audio: &[f32], channels: u16) -> Vec<f32> {
     mono_samples
 }
 
+/// Interleave two mono streams into stereo frames `[left, right, left, right, ...]`.
+/// A shorter side is zero-padded so no audio from the longer side is dropped.
+pub fn interleave_stereo(left: &[f32], right: &[f32]) -> Vec<f32> {
+    let frames = left.len().max(right.len());
+    let mut out = Vec::with_capacity(frames * 2);
+    for i in 0..frames {
+        out.push(left.get(i).copied().unwrap_or(0.0));
+        out.push(right.get(i).copied().unwrap_or(0.0));
+    }
+    out
+}
+
+/// Split interleaved audio into one Vec per channel (the inverse of
+/// `interleave_stereo` for `channels == 2`). A trailing partial frame is dropped.
+pub fn deinterleave(audio: &[f32], channels: u16) -> Vec<Vec<f32>> {
+    let channels = channels.max(1) as usize;
+    let frames = audio.len() / channels;
+    let mut out = vec![Vec::with_capacity(frames); channels];
+    for frame in audio.chunks_exact(channels) {
+        for (ch, sample) in frame.iter().enumerate() {
+            out[ch].push(*sample);
+        }
+    }
+    out
+}
+
 /// High-quality audio resampling with adaptive parameters based on sample rate ratio
 ///
 /// This function automatically selects the best resampling parameters based on:
@@ -736,4 +762,30 @@ pub fn write_transcript_json_to_file(
     std::fs::write(&file_path, json_string)?;
 
     Ok(file_path.to_string_lossy().to_string())
+}
+
+#[cfg(test)]
+mod channel_layout_tests {
+    use super::*;
+
+    #[test]
+    fn interleave_then_deinterleave_round_trips() {
+        let left = [1.0, 2.0, 3.0];
+        let right = [-1.0, -2.0, -3.0];
+        let stereo = interleave_stereo(&left, &right);
+        assert_eq!(stereo, vec![1.0, -1.0, 2.0, -2.0, 3.0, -3.0]);
+        let split = deinterleave(&stereo, 2);
+        assert_eq!(split, vec![left.to_vec(), right.to_vec()]);
+    }
+
+    #[test]
+    fn interleave_pads_shorter_side_with_silence() {
+        assert_eq!(interleave_stereo(&[1.0, 2.0], &[9.0]), vec![1.0, 9.0, 2.0, 0.0]);
+    }
+
+    #[test]
+    fn deinterleave_mono_is_identity_and_drops_partial_frames() {
+        assert_eq!(deinterleave(&[1.0, 2.0, 3.0], 1), vec![vec![1.0, 2.0, 3.0]]);
+        assert_eq!(deinterleave(&[1.0, 2.0, 3.0], 2), vec![vec![1.0], vec![2.0]]);
+    }
 }

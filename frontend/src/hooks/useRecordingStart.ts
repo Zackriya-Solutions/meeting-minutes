@@ -10,6 +10,7 @@ import { showRecordingNotification } from '@/lib/recordingNotification';
 import {
   getProviderCommands,
   hasDownloadingModel,
+  isCloudProvider,
   type ModelWithStatus,
 } from '@/lib/transcription-model-readiness';
 import { toast } from 'sonner';
@@ -82,6 +83,7 @@ export function useRecordingStart(
   const checkTranscriptionModelReady = useCallback(async (): Promise<boolean> => {
     try {
       const provider = await getTranscriptionProvider();
+      if (isCloudProvider(provider)) return true;
       const commands = getProviderCommands(provider);
 
       if (commands) {
@@ -115,6 +117,31 @@ export function useRecordingStart(
   // The Rust recording command validates the same provider again before capture.
   const checkModelReady = checkTranscriptionModelReady;
 
+  // The start was refused before reaching the backend: tell the user why and
+  // put the tray back, since a tray-initiated start already set it to
+  // "Starting Recording..." and no backend start will run to reset it.
+  const reportStartBlocked = useCallback(async (source: string) => {
+    const isDownloading = await checkIfModelDownloading();
+    if (isDownloading) {
+      toast.info('Model download in progress', {
+        description: 'Please wait for the transcription model to finish downloading before recording.',
+        duration: 5000,
+      });
+      Analytics.trackButtonClick('start_recording_blocked_downloading', source);
+    } else {
+      toast.error('Transcription model not ready', {
+        description: 'Please download a transcription model before recording.',
+        duration: 5000,
+      });
+      showModal?.('modelSelector', 'Transcription model setup required');
+      Analytics.trackButtonClick('start_recording_blocked_missing', source);
+    }
+    setStatus(RecordingStatus.IDLE);
+    invoke('refresh_tray_menu').catch((error) => {
+      console.error('Failed to refresh tray menu:', error);
+    });
+  }, [checkIfModelDownloading, showModal, setStatus]);
+
   // Handle manual recording start (from button click)
   const handleRecordingStart = useCallback(async () => {
     if (isStartingRef.current) {
@@ -128,22 +155,7 @@ export function useRecordingStart(
       // Check the selected transcription model before starting.
       const modelReady = await checkModelReady();
       if (!modelReady) {
-        const isDownloading = await checkIfModelDownloading();
-        if (isDownloading) {
-          toast.info('Model download in progress', {
-            description: 'Please wait for the transcription model to finish downloading before recording.',
-            duration: 5000,
-          });
-          Analytics.trackButtonClick('start_recording_blocked_downloading', 'home_page');
-        } else {
-          toast.error('Transcription model not ready', {
-            description: 'Please download a transcription model before recording.',
-            duration: 5000,
-          });
-          showModal?.('modelSelector', 'Transcription model setup required');
-          Analytics.trackButtonClick('start_recording_blocked_missing', 'home_page');
-        }
-        setStatus(RecordingStatus.IDLE);
+        await reportStartBlocked('home_page');
         return;
       }
 
@@ -205,7 +217,7 @@ export function useRecordingStart(
     } finally {
       isStartingRef.current = false;
     }
-  }, [generateMeetingTitle, setMeetingTitle, setIsRecording, clearTranscripts, setIsMeetingActive, checkModelReady, checkIfModelDownloading, selectedDevices, showModal, setStatus]);
+  }, [generateMeetingTitle, setMeetingTitle, setIsRecording, clearTranscripts, setIsMeetingActive, checkModelReady, reportStartBlocked, selectedDevices, setStatus]);
 
   // Check for autoStartRecording flag and start recording automatically
   useEffect(() => {
@@ -220,22 +232,7 @@ export function useRecordingStart(
           // Check the selected transcription model before starting.
           const modelReady = await checkModelReady();
           if (!modelReady) {
-            const isDownloading = await checkIfModelDownloading();
-            if (isDownloading) {
-              toast.info('Model download in progress', {
-                description: 'Please wait for the transcription model to finish downloading before recording.',
-                duration: 5000,
-              });
-              Analytics.trackButtonClick('start_recording_blocked_downloading', 'sidebar_auto');
-            } else {
-              toast.error('Transcription model not ready', {
-                description: 'Please download a transcription model before recording.',
-                duration: 5000,
-              });
-              showModal?.('modelSelector', 'Transcription model setup required');
-              Analytics.trackButtonClick('start_recording_blocked_missing', 'sidebar_auto');
-            }
-            setStatus(RecordingStatus.IDLE);
+            await reportStartBlocked('sidebar_auto');
             setIsAutoStarting(false);
             return;
           }
@@ -300,8 +297,7 @@ export function useRecordingStart(
     clearTranscripts,
     setIsMeetingActive,
     checkModelReady,
-    checkIfModelDownloading,
-    showModal,
+    reportStartBlocked,
     setStatus,
   ]);
 
@@ -319,22 +315,7 @@ export function useRecordingStart(
       // Check the selected transcription model before starting.
       const modelReady = await checkModelReady();
       if (!modelReady) {
-        const isDownloading = await checkIfModelDownloading();
-        if (isDownloading) {
-          toast.info('Model download in progress', {
-            description: 'Please wait for the transcription model to finish downloading before recording.',
-            duration: 5000,
-          });
-          Analytics.trackButtonClick('start_recording_blocked_downloading', 'sidebar_direct');
-        } else {
-          toast.error('Transcription model not ready', {
-            description: 'Please download a transcription model before recording.',
-            duration: 5000,
-          });
-          showModal?.('modelSelector', 'Transcription model setup required');
-          Analytics.trackButtonClick('start_recording_blocked_missing', 'sidebar_direct');
-        }
-        setStatus(RecordingStatus.IDLE);
+        await reportStartBlocked('sidebar_direct');
         setIsAutoStarting(false);
         return;
       }
@@ -400,8 +381,7 @@ export function useRecordingStart(
     clearTranscripts,
     setIsMeetingActive,
     checkModelReady,
-    checkIfModelDownloading,
-    showModal,
+    reportStartBlocked,
     setStatus,
   ]);
 

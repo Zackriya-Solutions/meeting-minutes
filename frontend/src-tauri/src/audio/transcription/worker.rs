@@ -42,6 +42,10 @@ pub struct TranscriptUpdate {
     pub audio_start_time: f64, // Seconds from recording start (e.g., 125.3)
     pub audio_end_time: f64,   // Seconds from recording start (e.g., 128.6)
     pub duration: f64,          // Segment duration in seconds (e.g., 3.3)
+    /// Speaker label (see deepgram::segment_label): "Mic-In" / "Speaker-Out",
+    /// numbered when diarized ("Speaker-Out 2"). None for a single mixed stream.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speaker: Option<String>,
 }
 
 // NOTE: get_transcript_history and get_recording_meeting_name functions
@@ -54,6 +58,24 @@ pub fn start_transcription_task<R: Runtime>(
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         info!("🚀 Starting optimized parallel transcription task - guaranteeing zero chunk loss");
+
+        if super::engine::is_deepgram_transcription_provider(&app).await {
+            info!("☁️ Starting Deepgram realtime transcription task");
+            if let Err(e) = crate::audio::deepgram::run_realtime_transcription(
+                app.clone(),
+                transcription_receiver,
+            )
+            .await
+            {
+                error!("Deepgram realtime transcription failed: {}", e);
+                let _ = app.emit("transcription-error", serde_json::json!({
+                    "error": e,
+                    "userMessage": "Deepgram transcription failed. Check your API key and network connection.",
+                    "actionable": true
+                }));
+            }
+            return;
+        }
 
         // Initialize transcription engine (Whisper or Parakeet based on config)
         let transcription_engine = match super::engine::get_or_init_transcription_engine(&app).await {
@@ -215,6 +237,8 @@ pub fn start_transcription_task<R: Runtime>(
                                             audio_start_time,
                                             audio_end_time,
                                             duration: chunk_duration,
+                                            // Local engines transcribe the mixed signal.
+                                            speaker: None,
                                         };
 
                                         if let Err(e) = app_clone.emit("transcript-update", &update)

@@ -173,6 +173,7 @@ export function useTranscriptRecovery(): UseTranscriptRecoveryReturn {
         audio_start_time: (t as any).audio_start_time,
         audio_end_time: (t as any).audio_end_time,
         duration: (t as any).duration,
+        speaker: (t as any).speaker,
       }));
 
       // 6. Save to backend database using existing save utilities

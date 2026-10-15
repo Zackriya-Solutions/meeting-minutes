@@ -610,6 +610,7 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            tray::refresh_tray_menu,
             start_recording,
             stop_recording,
             is_recording,
@@ -725,6 +726,8 @@ pub fn run() {
             api::api_get_transcript_config,
             api::api_save_transcript_config,
             api::api_get_transcript_api_key,
+            api::api_get_deepgram_options,
+            api::api_save_deepgram_options,
             api::api_delete_meeting,
             api::api_get_meeting,
             api::api_get_meeting_metadata,

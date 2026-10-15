@@ -2,14 +2,18 @@ use anyhow::Result;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use log::error;
 
-use super::configuration::{AudioDevice, DeviceType};
+use super::configuration::AudioDevice;
+#[cfg(not(target_os = "linux"))]
+use super::configuration::DeviceType;
 use super::platform;
 
 /// List all available audio devices on the system
 pub async fn list_audio_devices() -> Result<Vec<AudioDevice>> {
     let host = cpal::default_host();
 
-    // Platform-specific device enumeration
+    // Platform-specific device enumeration. Only the non-Linux branch below
+    // appends to it, hence the cfg-dependent mutability.
+    #[cfg_attr(target_os = "linux", allow(unused_mut))]
     let mut devices = {
         #[cfg(target_os = "windows")]
         {
@@ -27,7 +31,12 @@ pub async fn list_audio_devices() -> Result<Vec<AudioDevice>> {
         }
     };
 
-    // Add any additional devices from the default host
+    // Add any additional devices from the default host.
+    // DO NOT run this on Linux: system audio there is captured by looking up
+    // an ALSA *input* by name, so output-only PCMs added here as Output would
+    // be offered in the picker and then always fail with "Device not found".
+    // configure_linux_audio already lists every capturable monitor.
+    #[cfg(not(target_os = "linux"))]
     if let Ok(other_devices) = host.devices() {
         for device in other_devices {
             if let Ok(name) = device.name() {

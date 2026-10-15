@@ -32,7 +32,8 @@ export interface StoredTranscript {
 class IndexedDBService {
   private db: IDBDatabase | null = null;
   private readonly DB_NAME = 'MeetilyRecoveryDB';
-  private readonly DB_VERSION = 1;
+  // v2: transcripts index [meetingId, sequenceId] for retracting one row.
+  private readonly DB_VERSION = 2;
   private initPromise: Promise<void> | null = null;
 
   /**
@@ -81,6 +82,12 @@ class IndexedDBService {
             });
             transcriptsStore.createIndex('meetingId', 'meetingId', { unique: false });
             transcriptsStore.createIndex('storedAt', 'storedAt', { unique: false });
+          }
+
+          // v2 (also applied to v1 databases): find a row by meeting + sequence id.
+          const transcriptsStore = (event.target as IDBOpenDBRequest).transaction!.objectStore('transcripts');
+          if (!transcriptsStore.indexNames.contains('meetingSequence')) {
+            transcriptsStore.createIndex('meetingSequence', ['meetingId', 'sequenceId'], { unique: false });
           }
         };
       } catch (error) {
@@ -233,6 +240,9 @@ class IndexedDBService {
 
       const storedTranscript: StoredTranscript = {
         ...transcript,
+        // Callers pass a TranscriptUpdate, whose id is `sequence_id`; recovery
+        // orders by and deleteTranscript matches on `sequenceId`.
+        sequenceId: transcript.sequenceId ?? transcript.sequence_id,
         meetingId,
         storedAt: Date.now()
       };
@@ -266,6 +276,49 @@ class IndexedDBService {
       }
     } catch (error) {
       console.warn('Failed to save transcript to IndexedDB:', error);
+      // Fail silently - don't interrupt recording
+    }
+  }
+
+  /**
+   * Remove one transcript row (a live line the transcriber retracted).
+   */
+  async deleteTranscript(meetingId: string, sequenceId: number): Promise<void> {
+    try {
+      if (!this.db) await this.init();
+
+      const transaction = this.db!.transaction(['transcripts', 'meetings'], 'readwrite');
+      const transcriptsStore = transaction.objectStore('transcripts');
+      const meetingsStore = transaction.objectStore('meetings');
+
+      const keys = await new Promise<IDBValidKey[]>((resolve, reject) => {
+        const request = transcriptsStore.index('meetingSequence').getAllKeys(IDBKeyRange.only([meetingId, sequenceId]));
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      for (const key of keys) {
+        transcriptsStore.delete(key);
+      }
+      const deleted = keys.length;
+
+      if (deleted > 0) {
+        const meeting = await new Promise<MeetingMetadata | null>((resolve, reject) => {
+          const request = meetingsStore.get(meetingId);
+          request.onsuccess = () => resolve(request.result || null);
+          request.onerror = () => reject(request.error);
+        });
+        if (meeting) {
+          meeting.lastUpdated = Date.now();
+          meeting.transcriptCount = Math.max(0, meeting.transcriptCount - deleted);
+          await new Promise<void>((resolve, reject) => {
+            const request = meetingsStore.put(meeting);
+            request.onsuccess = () => resolve();
+            request.onerror = () => reject(request.error);
+          });
+        }
+      }
+    } catch (error) {
+      console.warn('Failed to delete transcript from IndexedDB:', error);
       // Fail silently - don't interrupt recording
     }
   }

@@ -7,6 +7,8 @@ import { useRecordingState } from './RecordingStateContext';
 import { transcriptService } from '@/services/transcriptService';
 import { recordingService } from '@/services/recordingService';
 import { indexedDBService } from '@/services/indexedDBService';
+import { formatTranscriptLine } from '@/lib/transcript-speakers';
+import { mergeHistory, withoutRetracted } from '@/lib/transcript-retract';
 
 interface TranscriptContextType {
   transcripts: Transcript[];
@@ -34,6 +36,8 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
 
   // Refs for transcript management
   const transcriptsRef = useRef<Transcript[]>(transcripts);
+  // Sequence ids retracted this session, so a reload sync cannot bring one back.
+  const retractedIdsRef = useRef<Set<number>>(new Set());
   const isUserAtBottomRef = useRef<boolean>(true);
   const transcriptContainerRef = useRef<HTMLDivElement>(null);
   const finalFlushRef = useRef<(() => void) | null>(null);
@@ -180,6 +184,7 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
   // Main transcript buffering logic with sequence_id ordering
   useEffect(() => {
     let unlistenFn: (() => void) | undefined;
+    let unlistenRetractFn: (() => void) | undefined;
     let transcriptCounter = 0;
     let transcriptBuffer = new Map<number, Transcript>();
     let lastProcessedSequence = 0;
@@ -315,6 +320,7 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
             audio_start_time: update.audio_start_time,
             audio_end_time: update.audio_end_time,
             duration: update.duration,
+            speaker: update.speaker,
           };
 
           // Add to buffer
@@ -334,6 +340,16 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
 
           // Process buffer with minimal delay for immediate UI updates (serial workers = sequential order)
           processingTimer = setTimeout(processBufferedTranscripts, 10);
+        });
+        unlistenRetractFn = await transcriptService.onTranscriptRetract(({ sequence_id }) => {
+          // Still buffered or already shown: drop it either way.
+          retractedIdsRef.current.add(sequence_id);
+          transcriptBuffer.delete(sequence_id);
+          setTranscripts(prev => withoutRetracted(prev, sequence_id));
+          if (currentMeetingId) {
+            indexedDBService.deleteTranscript(currentMeetingId, sequence_id)
+              .catch(err => console.warn('IndexedDB delete failed:', err));
+          }
         });
         console.log('✅ MAIN transcript listener setup complete');
       } catch (error) {
@@ -355,6 +371,7 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
         unlistenFn();
         console.log('🧹 CLEANUP: MAIN transcript listener cleaned up');
       }
+      unlistenRetractFn?.();
     };
   }, [currentMeetingId]); // Add currentMeetingId dependency
 
@@ -383,9 +400,10 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
             audio_start_time: segment.audio_start_time,
             audio_end_time: segment.audio_end_time,
             duration: segment.duration,
+            speaker: segment.speaker,
           }));
 
-          setTranscripts(formattedTranscripts);
+          setTranscripts(prev => mergeHistory(formattedTranscripts, prev, retractedIdsRef.current));
           console.log('[Reload Sync] ✅ Transcript history synced successfully');
 
           // Fetch meeting name from backend
@@ -424,6 +442,7 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
       audio_start_time: update.audio_start_time,
       audio_end_time: update.audio_end_time,
       duration: update.duration,
+      speaker: update.speaker,
     };
 
     setTranscripts(prev => {
@@ -465,7 +484,7 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
     };
 
     const fullTranscript = transcripts
-      .map(t => `${formatTime(t.audio_start_time)} ${t.text}`)
+      .map(t => `${formatTime(t.audio_start_time)} ${formatTranscriptLine(t.text, t.speaker)}`)
       .join('\n');
     navigator.clipboard.writeText(fullTranscript);
 
@@ -483,6 +502,7 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
   // Clear transcripts (used when starting new recording)
   const clearTranscripts = useCallback(() => {
     setTranscripts([]);
+    retractedIdsRef.current.clear();
     // Don't clear currentMeetingId here - it will be set by recording-started event
   }, []);
 

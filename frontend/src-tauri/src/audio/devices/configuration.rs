@@ -155,10 +155,11 @@ pub async fn get_device_and_config(
                 #[cfg(target_os = "linux")]
                 {
                     // For Linux, we use PulseAudio monitor sources for system audio
+                    let wanted = super::platform::linux::strip_legacy_suffix(&audio_device.name);
                     if let Ok(pulse_host) = cpal::host_from_id(cpal::HostId::Alsa) {
                         for device in pulse_host.input_devices()? {
                             if let Ok(name) = device.name() {
-                                if name == audio_device.name {
+                                if name == wanted {
                                     let default_config = device
                                         .default_input_config()
                                         .map_err(|e| anyhow!("Failed to get default input config: {}", e))?;

@@ -104,7 +104,7 @@ static RECORDING_MANAGER: Mutex<Option<RecordingManager>> = Mutex::new(None);
 static TRANSCRIPTION_TASK: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
 
 // Listener ID for proper cleanup - prevents microphone from staying active after recording stops
-static TRANSCRIPT_LISTENER_ID: Mutex<Option<tauri::EventId>> = Mutex::new(None);
+static TRANSCRIPT_LISTENER_IDS: Mutex<Vec<tauri::EventId>> = Mutex::new(Vec::new());
 
 const TRANSCRIPTION_RUNTIME_START_ERROR_CODE: &str =
     "TRANSCRIPTION_RUNTIME_INITIALIZATION_FAILED";
@@ -124,6 +124,42 @@ pub struct TranscriptionStatus {
     pub chunks_in_queue: usize,
     pub is_processing: bool,
     pub last_activity_ms: u64,
+}
+
+/// Mirror live transcript events into the recording's transcript log: rows
+/// added by `transcript-update`, rows taken back by `transcript-retract` (a
+/// Mic-In line later found to be Speaker-Out bleed). DO NOT register only the
+/// update listener: retracted bleed would then come back in the saved
+/// transcript. The listeners hold the log itself, NOT a RECORDING_MANAGER
+/// lookup: stop_recording takes the manager out before the transcriber drains,
+/// and the last finals and retractions arrive during that drain.
+fn register_transcript_listeners<R: Runtime>(app: &AppHandle<R>, log: super::recording_saver::TranscriptLog) {
+    use tauri::Listener;
+    let update_log = log.clone();
+    let update_id = app.listen("transcript-update", move |event: tauri::Event| {
+        if let Ok(update) = serde_json::from_str::<TranscriptUpdate>(event.payload()) {
+            let segment = crate::audio::recording_saver::TranscriptSegment {
+                id: format!("seg_{}", update.sequence_id),
+                text: update.text.clone(),
+                audio_start_time: update.audio_start_time,
+                audio_end_time: update.audio_end_time,
+                duration: update.duration,
+                display_time: update.timestamp.clone(), // Use wall-clock timestamp for display
+                confidence: update.confidence,
+                sequence_id: update.sequence_id,
+                speaker: update.speaker.clone(),
+            };
+            update_log.add(segment);
+        }
+    });
+    let retract_id = app.listen(super::deepgram::TRANSCRIPT_RETRACT_EVENT, move |event: tauri::Event| {
+        if let Ok(retract) = serde_json::from_str::<super::deepgram::TranscriptRetract>(event.payload()) {
+            log.remove(retract.sequence_id);
+        }
+    });
+    let mut ids = TRANSCRIPT_LISTENER_IDS.lock().unwrap();
+    ids.extend([update_id, retract_id]);
+    info!("✅ Transcript update/retract listeners registered for history persistence");
 }
 
 fn map_recording_start_error<R: Runtime>(
@@ -346,6 +382,7 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
         return Err(validation_error);
     }
     info!("✅ Transcription model validation passed");
+    let send_continuous_transcription = transcription::is_deepgram_transcription_provider(&app).await;
 
     // Notify frontend that startup has begun (surfaces STARTING state)
     app.emit("recording-starting", serde_json::json!({
@@ -402,7 +439,12 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
 
     // Start recording with resolved devices (replaces start_recording_with_defaults_and_auto_save call)
     let transcription_receiver = manager
-        .start_recording(microphone_device, system_device, auto_save)
+        .start_recording(
+            microphone_device,
+            system_device,
+            auto_save,
+            send_continuous_transcription,
+        )
         .await
         .map_err(|error| map_recording_start_error(&app, error))?;
 
@@ -411,6 +453,7 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
     let device_event_receiver = manager.take_device_event_receiver();
     let session = manager.get_state().clone();
 
+    let transcript_log = manager.transcript_log();
     // Store the manager globally to keep it alive
     {
         let mut global_manager = RECORDING_MANAGER.lock().unwrap();
@@ -434,38 +477,9 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
         *global_task = Some(task_handle);
     }
 
-    // CRITICAL: Listen for transcript-update events and save to recording manager
-    // This enables transcript history persistence for page reload sync
-    // Store listener ID for cleanup during stop_recording to ensure microphone is released
-    {
-        use tauri::Listener;
-        let listener_id = app.listen("transcript-update", move |event: tauri::Event| {
-            // Parse the transcript update from the event payload
-            if let Ok(update) = serde_json::from_str::<TranscriptUpdate>(event.payload()) {
-                // Create structured transcript segment
-                let segment = crate::audio::recording_saver::TranscriptSegment {
-                    id: format!("seg_{}", update.sequence_id),
-                    text: update.text.clone(),
-                    audio_start_time: update.audio_start_time,
-                    audio_end_time: update.audio_end_time,
-                    duration: update.duration,
-                    display_time: update.timestamp.clone(), // Use wall-clock timestamp for display
-                    confidence: update.confidence,
-                    sequence_id: update.sequence_id,
-                };
-
-                // Save to recording manager
-                if let Ok(manager_guard) = RECORDING_MANAGER.lock() {
-                    if let Some(manager) = manager_guard.as_ref() {
-                        manager.add_transcript_segment(segment);
-                    }
-                }
-            }
-        });
-        let mut global_listener = TRANSCRIPT_LISTENER_ID.lock().unwrap();
-        *global_listener = Some(listener_id);
-        info!("✅ Transcript-update event listener registered for history persistence");
-    }
+    // Keep the recording manager's transcript (history sync, transcripts.json)
+    // in step with the live events. Listener IDs are removed in stop_recording.
+    register_transcript_listeners(&app, transcript_log);
 
     // Emit success event
     app.emit("recording-started", serde_json::json!({
@@ -536,6 +550,7 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
         return Err(validation_error);
     }
     info!("✅ Transcription model validation passed");
+    let send_continuous_transcription = transcription::is_deepgram_transcription_provider(&app).await;
 
     // Notify frontend that startup has begun (surfaces STARTING state)
     app.emit("recording-starting", serde_json::json!({
@@ -589,7 +604,12 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
 
     // Start recording with specified devices and auto_save setting
     let transcription_receiver = manager
-        .start_recording(mic_device, system_device, auto_save)
+        .start_recording(
+            mic_device,
+            system_device,
+            auto_save,
+            send_continuous_transcription,
+        )
         .await
         .map_err(|error| map_recording_start_error(&app, error))?;
 
@@ -598,6 +618,7 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
     let device_event_receiver = manager.take_device_event_receiver();
     let session = manager.get_state().clone();
 
+    let transcript_log = manager.transcript_log();
     // Store the manager globally to keep it alive
     {
         let mut global_manager = RECORDING_MANAGER.lock().unwrap();
@@ -621,38 +642,9 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
         *global_task = Some(task_handle);
     }
 
-    // CRITICAL: Listen for transcript-update events and save to recording manager
-    // This enables transcript history persistence for page reload sync
-    // Store listener ID for cleanup during stop_recording to ensure microphone is released
-    {
-        use tauri::Listener;
-        let listener_id = app.listen("transcript-update", move |event: tauri::Event| {
-            // Parse the transcript update from the event payload
-            if let Ok(update) = serde_json::from_str::<TranscriptUpdate>(event.payload()) {
-                // Create structured transcript segment
-                let segment = crate::audio::recording_saver::TranscriptSegment {
-                    id: format!("seg_{}", update.sequence_id),
-                    text: update.text.clone(),
-                    audio_start_time: update.audio_start_time,
-                    audio_end_time: update.audio_end_time,
-                    duration: update.duration,
-                    display_time: update.timestamp.clone(), // Use wall-clock timestamp for display
-                    confidence: update.confidence,
-                    sequence_id: update.sequence_id,
-                };
-
-                // Save to recording manager
-                if let Ok(manager_guard) = RECORDING_MANAGER.lock() {
-                    if let Some(manager) = manager_guard.as_ref() {
-                        manager.add_transcript_segment(segment);
-                    }
-                }
-            }
-        });
-        let mut global_listener = TRANSCRIPT_LISTENER_ID.lock().unwrap();
-        *global_listener = Some(listener_id);
-        info!("✅ Transcript-update event listener registered for history persistence");
-    }
+    // Keep the recording manager's transcript (history sync, transcripts.json)
+    // in step with the live events. Listener IDs are removed in stop_recording.
+    register_transcript_listeners(&app, transcript_log);
 
     // Emit success event
     app.emit("recording-started", serde_json::json!({
@@ -734,16 +726,6 @@ pub async fn stop_recording<R: Runtime>(
         }
     }
 
-    // Step 1.5: Clean up transcript listener to release microphone
-    // Unlisten transcript-update event to prevent lingering references
-    {
-        use tauri::Listener;
-        if let Some(listener_id) = TRANSCRIPT_LISTENER_ID.lock().unwrap().take() {
-            app.unlisten(listener_id);
-            info!("✅ Transcript-update listener removed");
-        }
-    }
-
     // Step 2: Signal transcription workers to finish processing ALL queued chunks
     let _ = app.emit(
         "recording-shutdown-progress",
@@ -808,6 +790,18 @@ pub async fn stop_recording<R: Runtime>(
         progress_task.abort();
     } else {
         info!("ℹ️ No transcription task found to wait for");
+    }
+
+    // Remove the transcript listeners only now: DO NOT move this before the
+    // drain above. The last finals (and Mic-In bleed retractions) are emitted
+    // while the transcription task drains, and must reach the saved transcript.
+    // Removing them still prevents lingering references after stop.
+    {
+        use tauri::Listener;
+        for listener_id in std::mem::take(&mut *TRANSCRIPT_LISTENER_IDS.lock().unwrap()) {
+            app.unlisten(listener_id);
+        }
+        info!("✅ Transcript update/retract listeners removed");
     }
 
     // Step 3: Now safely unload Whisper model after ALL chunks are processed

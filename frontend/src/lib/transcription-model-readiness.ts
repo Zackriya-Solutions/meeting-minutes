@@ -21,6 +21,18 @@ const PROVIDER_COMMANDS: Record<string, ProviderCommands> = {
   },
 };
 
+/**
+ * Cloud providers stream audio to an API and need no downloaded model. The
+ * Rust start command still validates them (e.g. that a Deepgram key is
+ * configured) before capture begins.
+ * DO NOT add a provider here unless start_recording accepts it.
+ */
+const CLOUD_PROVIDERS = new Set(['deepgram']);
+
+export function isCloudProvider(provider: string): boolean {
+  return CLOUD_PROVIDERS.has(provider);
+}
+
 export function getProviderCommands(provider: string): ProviderCommands | null {
   return PROVIDER_COMMANDS[provider] ?? null;
 }

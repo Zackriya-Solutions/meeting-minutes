@@ -35,6 +35,10 @@ pub struct Transcript {
     pub audio_start_time: Option<f64>,
     pub audio_end_time: Option<f64>,
     pub duration: Option<f64>,
+    /// Audio source of the segment, per migration 20251110000001
+    /// ("Mic-In" / "Speaker-Out", numbered when diarized: "Speaker-Out 2", see
+    /// deepgram::segment_label); NULL for mixed-audio segments.
+    pub speaker: Option<String>,
 }
 
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
@@ -127,4 +131,16 @@ pub struct TranscriptSetting {
     #[sqlx(rename = "openaiApiKey")]
     #[serde(rename = "openaiApiKey")]
     pub openai_api_key: Option<String>,
+    #[sqlx(rename = "deepgramKeyterm")]
+    #[serde(rename = "deepgramKeyterm")]
+    pub deepgram_keyterm: Option<String>,
+    #[sqlx(rename = "deepgramDiarize")]
+    #[serde(rename = "deepgramDiarize")]
+    pub deepgram_diarize: Option<i64>,
+    #[sqlx(rename = "deepgramMipOptOut")]
+    #[serde(rename = "deepgramMipOptOut")]
+    pub deepgram_mip_opt_out: Option<i64>,
+    #[sqlx(rename = "deepgramLanguage")]
+    #[serde(rename = "deepgramLanguage")]
+    pub deepgram_language: Option<String>,
 }

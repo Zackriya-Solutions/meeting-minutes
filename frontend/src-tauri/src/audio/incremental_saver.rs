@@ -417,7 +417,7 @@ pub async fn has_audio_checkpoints(meeting_folder: String) -> Result<bool, Strin
 mod tests {
     use super::*;
     use tempfile::tempdir;
-    use super::super::recording_state::DeviceType;
+    use super::super::recording_state::{AudioLayout, DeviceType};
 
     #[tokio::test]
     async fn test_checkpoint_creation() {
@@ -440,6 +440,7 @@ mod tests {
                 timestamp: i as f64 * 0.5,  // timestamp in seconds
                 chunk_id: i as u64,
                 device_type: DeviceType::Microphone,
+                layout: AudioLayout::Mono,
             };
             saver.add_chunk(chunk).unwrap();
         }

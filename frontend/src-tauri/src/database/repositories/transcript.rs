@@ -47,8 +47,8 @@ impl TranscriptsRepository {
         for segment in transcripts {
             let transcript_id = format!("transcript-{}", Uuid::new_v4());
             let result = sqlx::query(
-                "INSERT INTO transcripts (id, meeting_id, transcript, timestamp, audio_start_time, audio_end_time, duration)
-                 VALUES (?, ?, ?, ?, ?, ?, ?)"
+                "INSERT INTO transcripts (id, meeting_id, transcript, timestamp, audio_start_time, audio_end_time, duration, speaker)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
             )
             .bind(&transcript_id)
             .bind(&meeting_id)
@@ -57,6 +57,7 @@ impl TranscriptsRepository {
             .bind(segment.audio_start_time)
             .bind(segment.audio_end_time)
             .bind(segment.duration)
+            .bind(&segment.speaker)
             .execute(&mut *transaction)
             .await;
 
@@ -142,5 +143,68 @@ impl TranscriptsRepository {
             }
             None => transcript.chars().take(200).collect(), // Fallback to the start of the transcript
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::database::repositories::meeting::MeetingsRepository;
+    use sqlx::sqlite::SqlitePoolOptions;
+
+    fn segment(text: &str, start: f64, speaker: Option<&str>) -> TranscriptSegment {
+        TranscriptSegment {
+            id: format!("seg-{}", start),
+            text: text.to_string(),
+            timestamp: "2026-10-14T12:00:00Z".to_string(),
+            audio_start_time: Some(start),
+            audio_end_time: Some(start + 1.0),
+            duration: Some(1.0),
+            speaker: speaker.map(str::to_string),
+        }
+    }
+
+    /// Runs the real migrations, so this also fails if the `speaker` column
+    /// the INSERT and `SELECT *` rely on ever disappears from the schema.
+    #[tokio::test]
+    async fn speaker_label_round_trips_through_the_database() {
+        // One connection: every `sqlite::memory:` connection is its own database.
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+
+        let meeting_id = TranscriptsRepository::save_transcript(
+            &pool,
+            "Huddle",
+            &[
+                segment("Can you hear me?", 0.0, Some("Mic-In")),
+                segment("Loud and clear.", 1.5, Some("Speaker-Out")),
+                segment("Mixed audio line.", 3.0, None),
+            ],
+            None,
+        )
+        .await
+        .unwrap();
+
+        let (rows, total) =
+            MeetingsRepository::get_meeting_transcripts_paginated(&pool, &meeting_id, 10, 0)
+                .await
+                .unwrap();
+        assert_eq!(total, 3);
+        let speakers: Vec<Option<&str>> = rows.iter().map(|r| r.speaker.as_deref()).collect();
+        assert_eq!(speakers, vec![Some("Mic-In"), Some("Speaker-Out"), None]);
+    }
+
+    #[test]
+    fn segment_without_speaker_field_deserializes_as_none() {
+        // Older frontends (and mixed-audio providers) send no `speaker` key.
+        let seg: TranscriptSegment = serde_json::from_value(serde_json::json!({
+            "id": "t", "text": "hi", "timestamp": "x"
+        }))
+        .unwrap();
+        assert_eq!(seg.speaker, None);
     }
 }
