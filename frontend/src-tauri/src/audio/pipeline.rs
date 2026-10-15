@@ -30,6 +30,10 @@ struct AudioMixerRingBuffer {
     mic_buffer: VecDeque<f32>,
     system_buffer: VecDeque<f32>,
     window_size_samples: usize,
+    /// Extra samples the leading stream may accumulate while waiting for the
+    /// other one before the other is treated as stalled (e.g. WASAPI loopback
+    /// delivers no packets while nothing is playing) and zero-padded.
+    stall_margin_samples: usize,
     max_buffer_size: usize,
     mic_dropped_samples: u64,
     system_dropped_samples: u64,
@@ -46,6 +50,7 @@ impl AudioMixerRingBuffer {
         // due to sample-by-sample streaming → batching → channel transmission
         // Accounts for: RNNoise buffering + Core Audio jitter + processing delays
         let max_buffer_size = window_size_samples * 8;  // 400ms (was 200ms)
+        let stall_margin_samples = (sample_rate as f32 * 0.3) as usize;  // 300ms
 
         info!("🔊 Ring buffer initialized: window={}ms ({} samples), max={}ms ({} samples)",
               window_ms, window_size_samples,
@@ -55,6 +60,7 @@ impl AudioMixerRingBuffer {
             mic_buffer: VecDeque::with_capacity(max_buffer_size),
             system_buffer: VecDeque::with_capacity(max_buffer_size),
             window_size_samples,
+            stall_margin_samples,
             max_buffer_size,
             mic_dropped_samples: 0,
             system_dropped_samples: 0,
@@ -88,9 +94,34 @@ impl AudioMixerRingBuffer {
         dropped
     }
 
+    /// A window is ready when both streams can fill it, or when one stream is a
+    /// full stall margin ahead (the other has stopped delivering samples).
+    ///
+    /// Extracting as soon as *either* stream had a window meant that whenever one
+    /// stream's latest packet was still in flight, the other one triggered the
+    /// extraction and the late stream was zero-padded mid-signal. Its samples then
+    /// slid into the next window, producing short dropouts in the mix and a
+    /// drifting offset between microphone and system audio.
     fn can_mix(&self) -> bool {
-        self.mic_buffer.len() >= self.window_size_samples ||
-        self.system_buffer.len() >= self.window_size_samples
+        let mic = self.mic_buffer.len();
+        let sys = self.system_buffer.len();
+        let window = self.window_size_samples;
+        let stalled = window + self.stall_margin_samples;
+        (mic >= window && sys >= window) || mic >= stalled || sys >= stalled
+    }
+
+    /// Drain whatever is left at the end of a recording as one final aligned
+    /// window (the shorter stream is zero-padded to the longer one).
+    fn extract_final_window(&mut self) -> Option<(Vec<f32>, Vec<f32>)> {
+        let len = self.mic_buffer.len().max(self.system_buffer.len());
+        if len == 0 {
+            return None;
+        }
+        let mut mic: Vec<f32> = self.mic_buffer.drain(..).collect();
+        let mut sys: Vec<f32> = self.system_buffer.drain(..).collect();
+        mic.resize(len, 0.0);
+        sys.resize(len, 0.0);
+        Some((mic, sys))
     }
 
     fn extract_window(&mut self) -> Option<(Vec<f32>, Vec<f32>)> {
@@ -743,6 +774,8 @@ pub struct AudioPipeline {
     mixer: ProfessionalAudioMixer,
     // Recording sender for pre-mixed audio
     recording_sender_for_mixed: Option<mpsc::UnboundedSender<AudioChunk>>,
+    // Optional recording sender for unmixed interleaved stereo (L = mic, R = system)
+    recording_sender_for_stereo: Option<mpsc::UnboundedSender<AudioChunk>>,
 }
 
 impl AudioPipeline {
@@ -818,6 +851,7 @@ impl AudioPipeline {
             ring_buffer,
             mixer,
             recording_sender_for_mixed: None,  // Will be set by manager
+            recording_sender_for_stereo: None, // Set by manager when separate channels are enabled
         })
     }
 
@@ -904,6 +938,9 @@ impl AudioPipeline {
                                 };
                                 let _ = sender.send(recording_chunk);
                             }
+
+                            // STEP 5: Send the same aligned window unmixed as interleaved stereo
+                            self.send_stereo_window(&mic_window, &sys_window, chunk.timestamp);
                         }
                     }
                 }
@@ -915,10 +952,44 @@ impl AudioPipeline {
             }
         }
 
+        // Samples left in the ring buffer (< one window) would otherwise never reach the
+        // recording files; transcription already flushed its own buffered speech above.
+        if let Some((mic_window, sys_window)) = self.ring_buffer.extract_final_window() {
+            if let Some(ref sender) = self.recording_sender_for_mixed {
+                let _ = sender.send(AudioChunk {
+                    data: self.mixer.mix_window(&mic_window, &sys_window),
+                    sample_rate: self.sample_rate,
+                    timestamp: 0.0,
+                    chunk_id: self.chunk_id_counter,
+                    device_type: DeviceType::Microphone,
+                });
+            }
+            self.send_stereo_window(&mic_window, &sys_window, 0.0);
+        }
+
         self.flush_remaining_audio()?;
         self.emit_log_summary(true);
         info!("VAD-driven audio pipeline ended");
         Ok(())
+    }
+
+    /// Interleave an aligned mic/system window pair (L = mic, R = system) and send
+    /// it to the separate-channels recording, if enabled.
+    fn send_stereo_window(&self, mic_window: &[f32], sys_window: &[f32], timestamp: f64) {
+        if let Some(ref sender) = self.recording_sender_for_stereo {
+            let mut interleaved = Vec::with_capacity(mic_window.len() * 2);
+            for (mic, sys) in mic_window.iter().zip(sys_window.iter()) {
+                interleaved.push(*mic);
+                interleaved.push(*sys);
+            }
+            let _ = sender.send(AudioChunk {
+                data: interleaved,
+                sample_rate: self.sample_rate,
+                timestamp,
+                chunk_id: self.chunk_id_counter,
+                device_type: DeviceType::Microphone,
+            });
+        }
     }
 
     fn flush_remaining_audio(&mut self) -> Result<()> {
@@ -992,6 +1063,7 @@ impl AudioPipelineManager {
         target_chunk_duration_ms: u32,
         sample_rate: u32,
         recording_sender: Option<mpsc::UnboundedSender<AudioChunk>>,
+        stereo_recording_sender: Option<mpsc::UnboundedSender<AudioChunk>>,
         mic_device_name: String,
         mic_device_kind: super::device_detection::InputDeviceKind,
         system_device_name: String,
@@ -1023,6 +1095,7 @@ impl AudioPipelineManager {
         // CRITICAL FIX: Connect recording sender to receive pre-mixed audio
         // This ensures both mic AND system audio are captured in recordings
         pipeline.recording_sender_for_mixed = recording_sender;
+        pipeline.recording_sender_for_stereo = stereo_recording_sender;
 
         let handle = tokio::spawn(async move {
             pipeline.run().await
@@ -1152,5 +1225,52 @@ mod policy_tests {
         // uninterrupted speech. Batch import/retranscription use 2000ms.
         // See #679 and #756.
         assert_eq!(VAD_REDEMPTION_TIME_MS, 500);
+    }
+}
+
+#[cfg(test)]
+mod ring_buffer_tests {
+    use super::*;
+
+    const SR: u32 = 48000;
+
+    fn window(buf: &AudioMixerRingBuffer) -> usize {
+        buf.window_size_samples
+    }
+
+    #[test]
+    fn waits_for_both_streams_before_mixing() {
+        let mut buf = AudioMixerRingBuffer::new(SR);
+        let w = window(&buf);
+        buf.add_samples(DeviceType::Microphone, vec![0.1; w]);
+        // System packet still in flight: must not extract (and zero-pad) yet
+        assert!(!buf.can_mix());
+        buf.add_samples(DeviceType::System, vec![0.2; w]);
+        let (mic, sys) = buf.extract_window().unwrap();
+        assert!(mic.iter().all(|&s| s == 0.1));
+        assert!(sys.iter().all(|&s| s == 0.2));
+    }
+
+    #[test]
+    fn stalled_stream_is_padded_after_margin() {
+        let mut buf = AudioMixerRingBuffer::new(SR);
+        let w = window(&buf);
+        // Loopback delivers nothing while no audio plays: mic alone proceeds after the margin
+        buf.add_samples(DeviceType::Microphone, vec![0.1; w + buf.stall_margin_samples]);
+        assert!(buf.can_mix());
+        let (mic, sys) = buf.extract_window().unwrap();
+        assert_eq!(mic.len(), w);
+        assert!(sys.iter().all(|&s| s == 0.0));
+    }
+
+    #[test]
+    fn final_window_drains_partial_samples_aligned() {
+        let mut buf = AudioMixerRingBuffer::new(SR);
+        buf.add_samples(DeviceType::Microphone, vec![0.1; 100]);
+        buf.add_samples(DeviceType::System, vec![0.2; 40]);
+        let (mic, sys) = buf.extract_final_window().unwrap();
+        assert_eq!((mic.len(), sys.len()), (100, 100));
+        assert!(sys[40..].iter().all(|&s| s == 0.0));
+        assert!(buf.extract_final_window().is_none());
     }
 }

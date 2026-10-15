@@ -26,6 +26,11 @@ pub struct RecordingPreferences {
     /// Recognise voices named in other meetings and remember voices the user names.
     #[serde(default = "default_remember_voices")]
     pub remember_voices: bool,
+    /// Additionally save an unmixed stereo file (`audio_stereo.mp4`) with the
+    /// microphone on the left channel and system audio on the right, so
+    /// downstream tools can tell "me" from "everyone else" (#241).
+    #[serde(default)]
+    pub save_separate_channels: bool,
     #[cfg(target_os = "macos")]
     #[serde(default)]
     pub system_audio_backend: Option<String>,
@@ -49,6 +54,7 @@ impl Default for RecordingPreferences {
             preferred_system_device: None,
             identify_speakers_after_recording: true,
             remember_voices: true,
+            save_separate_channels: false,
             #[cfg(target_os = "macos")]
             system_audio_backend: Some("coreaudio".to_string()),
         }
