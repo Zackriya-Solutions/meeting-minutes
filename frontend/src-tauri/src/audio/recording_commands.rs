@@ -353,16 +353,16 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
     })).map_err(|e| e.to_string())?;
 
     // Load recording preferences to get auto_save AND device preferences
-    let (auto_save, preferred_mic_name, preferred_system_name) =
+    let (auto_save, save_separate_channels, preferred_mic_name, preferred_system_name) =
         match super::recording_preferences::load_recording_preferences(&app).await {
             Ok(prefs) => {
-                info!("📋 Loaded recording preferences: auto_save={}, preferred_mic={:?}, preferred_system={:?}",
-                      prefs.auto_save, prefs.preferred_mic_device, prefs.preferred_system_device);
-                (prefs.auto_save, prefs.preferred_mic_device, prefs.preferred_system_device)
+                info!("📋 Loaded recording preferences: auto_save={}, separate_channels={}, preferred_mic={:?}, preferred_system={:?}",
+                      prefs.auto_save, prefs.save_separate_channels, prefs.preferred_mic_device, prefs.preferred_system_device);
+                (prefs.auto_save, prefs.save_separate_channels, prefs.preferred_mic_device, prefs.preferred_system_device)
             }
             Err(e) => {
                 warn!("Failed to load recording preferences, using defaults: {}", e);
-                (true, None, None)
+                (true, false, None, None)
             }
         };
 
@@ -393,6 +393,7 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
         )
     });
     manager.set_meeting_name(Some(effective_meeting_name));
+    manager.set_save_separate_channels(save_separate_channels);
 
     // Set up error callback
     let app_for_error = app.clone();
@@ -561,15 +562,16 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
     // Create new recording manager
     let mut manager = RecordingManager::new();
 
-    // Load recording preferences to check auto_save setting
-    let auto_save = match super::recording_preferences::load_recording_preferences(&app).await {
+    // Load recording preferences to check auto_save and separate-channels settings
+    let (auto_save, save_separate_channels) = match super::recording_preferences::load_recording_preferences(&app).await {
         Ok(prefs) => {
-            info!("📋 Loaded recording preferences: auto_save={}", prefs.auto_save);
-            prefs.auto_save
+            info!("📋 Loaded recording preferences: auto_save={}, separate_channels={}",
+                  prefs.auto_save, prefs.save_separate_channels);
+            (prefs.auto_save, prefs.save_separate_channels)
         }
         Err(e) => {
             warn!("Failed to load recording preferences, defaulting to auto_save=true: {}", e);
-            true // Default to saving if preferences can't be loaded
+            (true, false) // Default to saving if preferences can't be loaded
         }
     };
 
@@ -582,6 +584,7 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
         )
     });
     manager.set_meeting_name(Some(effective_meeting_name));
+    manager.set_save_separate_channels(save_separate_channels);
 
     // Set up error callback
     let app_for_error = app.clone();

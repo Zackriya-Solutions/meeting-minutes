@@ -18,6 +18,7 @@ export interface RecordingPreferences {
   identify_speakers_after_recording: boolean;
   /** Recognise voices named in one meeting in the others (Settings → Speakers) */
   remember_voices: boolean;
+  save_separate_channels?: boolean;
 }
 
 interface RecordingSettingsProps {
@@ -32,7 +33,8 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
     preferred_mic_device: null,
     preferred_system_device: null,
     identify_speakers_after_recording: true,
-    remember_voices: true
+    remember_voices: true,
+    save_separate_channels: false
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -92,6 +94,16 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
 
     // Track auto-save setting change
     await Analytics.track('auto_save_recording_toggled', {
+      enabled: enabled.toString()
+    });
+  };
+
+  const handleSeparateChannelsToggle = async (enabled: boolean) => {
+    const newPreferences = { ...preferences, save_separate_channels: enabled };
+    setPreferences(newPreferences);
+    await savePreferences(newPreferences);
+
+    await Analytics.track('separate_channels_recording_toggled', {
       enabled: enabled.toString()
     });
   };
@@ -230,6 +242,21 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
               <FolderOpen className="w-4 h-4" />
               Open Folder
             </button>
+          </div>
+
+          <div className="flex items-center justify-between p-4 border rounded-lg">
+            <div className="flex-1">
+              <div className="font-medium">Save Separate Channels</div>
+              <div className="text-sm text-gray-600">
+                Also save an unmixed stereo file (audio_stereo.mp4): microphone on the left channel,
+                system audio on the right. Useful for speaker attribution in external tools.
+              </div>
+            </div>
+            <Switch
+              checked={!!preferences.save_separate_channels}
+              onCheckedChange={handleSeparateChannelsToggle}
+              disabled={saving || isRecording}
+            />
           </div>
 
           <div className="p-4 border rounded-lg bg-blue-50">

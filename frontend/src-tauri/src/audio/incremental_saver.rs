@@ -12,7 +12,7 @@ pub const AUDIO_LAYOUT_FIELD: &str = "audio_layout";
 /// audio.mp4 is a single AAC stream: only the encoder's 1024-sample priming precedes the audio.
 pub const AUDIO_LAYOUT_SINGLE_STREAM: &str = "single_stream";
 
-/// Audio data without device type (we only store mixed audio)
+/// Audio data without device type (mixed mono, or interleaved stereo for the separate-channels file)
 #[derive(Clone)]
 struct AudioData {
     data: Vec<f32>,
@@ -33,6 +33,8 @@ pub struct IncrementalAudioSaver {
     checkpoints_dir: PathBuf,
     meeting_folder: PathBuf,
     sample_rate: u32,
+    channels: u16,
+    output_file_name: String,
 }
 
 impl IncrementalAudioSaver {
@@ -42,7 +44,22 @@ impl IncrementalAudioSaver {
     /// * `meeting_folder` - Path to the meeting folder (contains .checkpoints/)
     /// * `sample_rate` - Sample rate of audio (typically 48000)
     pub fn new(meeting_folder: PathBuf, sample_rate: u32) -> Result<Self> {
-        let checkpoints_dir = meeting_folder.join(".checkpoints");
+        Self::with_layout(meeting_folder, sample_rate, 1, ".checkpoints", "audio.mp4")
+    }
+
+    /// Create a saver with an explicit channel count and file layout.
+    ///
+    /// Used for the optional separate-channels recording: interleaved stereo
+    /// (L = microphone, R = system) written to its own checkpoints directory so
+    /// crash recovery of the mixed `audio.mp4` never picks up stereo chunks.
+    pub fn with_layout(
+        meeting_folder: PathBuf,
+        sample_rate: u32,
+        channels: u16,
+        checkpoints_dir_name: &str,
+        output_file_name: &str,
+    ) -> Result<Self> {
+        let checkpoints_dir = meeting_folder.join(checkpoints_dir_name);
 
         // Verify checkpoints directory exists
         if !checkpoints_dir.exists() {
@@ -51,11 +68,14 @@ impl IncrementalAudioSaver {
 
         Ok(Self {
             checkpoint_buffer: Vec::new(),
-            checkpoint_interval_samples: sample_rate as usize * 30, // 30 seconds
+            // 30 seconds of frames; interleaved buffers hold `channels` samples per frame
+            checkpoint_interval_samples: sample_rate as usize * 30 * channels as usize,
             checkpoint_count: 0,
             checkpoints_dir,
             meeting_folder,
             sample_rate,
+            channels,
+            output_file_name: output_file_name.to_string(),
         })
     }
 
@@ -106,11 +126,11 @@ impl IncrementalAudioSaver {
         encode_lossless_checkpoint(
             bytemuck::cast_slice(&audio_data),
             self.sample_rate,
-            1,  // mono
+            self.channels,
             &checkpoint_path
         )?;
 
-        let duration_seconds = audio_data.len() as f32 / self.sample_rate as f32;
+        let duration_seconds = audio_data.len() as f32 / (self.sample_rate as f32 * self.channels as f32);
         self.checkpoint_count += 1;
 
         info!("Saved checkpoint {}: {:.2}s of audio ({} samples)",
@@ -123,7 +143,7 @@ impl IncrementalAudioSaver {
 
     /// Finalize the recording: save final checkpoint, merge all checkpoints, cleanup
     ///
-    /// Returns the path to the final merged audio.mp4 file
+    /// Returns the path to the final merged audio file (`audio.mp4` by default)
     pub async fn finalize(&mut self) -> Result<PathBuf> {
         info!("Finalizing incremental recording...");
 
@@ -138,8 +158,9 @@ impl IncrementalAudioSaver {
             return Err(anyhow!("No audio checkpoints to merge - recording may have failed"));
         }
 
-        // Encode all checkpoints into one AAC stream
-        let final_audio_path = self.meeting_folder.join("audio.mp4");
+        // Encode all checkpoints into one AAC stream. The mixed saver writes audio.mp4;
+        // the separate-channels saver writes its own output file.
+        let final_audio_path = self.meeting_folder.join(&self.output_file_name);
         let files: Vec<PathBuf> = (0..self.checkpoint_count)
             .map(|i| self.checkpoints_dir.join(format!("audio_chunk_{:03}.{}", i, CHECKPOINT_EXTENSION)))
             .collect();
@@ -454,6 +475,41 @@ mod tests {
 
         // Verify checkpoints directory deleted
         assert!(!meeting_folder.join(".checkpoints").exists());
+    }
+
+    #[tokio::test]
+    async fn test_stereo_checkpoints_use_separate_layout() {
+        let temp_dir = tempdir().unwrap();
+        let meeting_folder = temp_dir.path().join("Stereo_Test");
+        std::fs::create_dir_all(meeting_folder.join(".checkpoints_stereo")).unwrap();
+
+        let mut saver = IncrementalAudioSaver::with_layout(
+            meeting_folder.clone(),
+            48000,
+            2,
+            ".checkpoints_stereo",
+            "audio_stereo.mp4",
+        ).unwrap();
+
+        // 60 seconds of interleaved stereo in 0.5s chunks (2 samples per frame)
+        for i in 0..120 {
+            let chunk = AudioChunk {
+                data: vec![0.25f32; 24000 * 2],
+                sample_rate: 48000,
+                timestamp: i as f64 * 0.5,
+                chunk_id: i as u64,
+                device_type: DeviceType::Microphone,
+            };
+            saver.add_chunk(chunk).unwrap();
+        }
+
+        // Checkpoint interval counts frames, not samples: still one per 30s
+        assert_eq!(saver.checkpoint_count, 2);
+
+        let final_path = saver.finalize().await.unwrap();
+        assert_eq!(final_path, meeting_folder.join("audio_stereo.mp4"));
+        assert!(final_path.exists());
+        assert!(!meeting_folder.join(".checkpoints_stereo").exists());
     }
 
     #[tokio::test]
