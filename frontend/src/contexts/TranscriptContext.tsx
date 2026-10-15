@@ -8,6 +8,7 @@ import { transcriptService } from '@/services/transcriptService';
 import { recordingService } from '@/services/recordingService';
 import { indexedDBService } from '@/services/indexedDBService';
 import { formatTranscriptLine } from '@/lib/transcript-speakers';
+import { withoutRetracted } from '@/lib/transcript-retract';
 
 interface TranscriptContextType {
   transcripts: Transcript[];
@@ -181,6 +182,7 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
   // Main transcript buffering logic with sequence_id ordering
   useEffect(() => {
     let unlistenFn: (() => void) | undefined;
+    let unlistenRetractFn: (() => void) | undefined;
     let transcriptCounter = 0;
     let transcriptBuffer = new Map<number, Transcript>();
     let lastProcessedSequence = 0;
@@ -337,6 +339,15 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
           // Process buffer with minimal delay for immediate UI updates (serial workers = sequential order)
           processingTimer = setTimeout(processBufferedTranscripts, 10);
         });
+        unlistenRetractFn = await transcriptService.onTranscriptRetract(({ sequence_id }) => {
+          // Still buffered or already shown: drop it either way.
+          transcriptBuffer.delete(sequence_id);
+          setTranscripts(prev => withoutRetracted(prev, sequence_id));
+          if (currentMeetingId) {
+            indexedDBService.deleteTranscript(currentMeetingId, sequence_id)
+              .catch(err => console.warn('IndexedDB delete failed:', err));
+          }
+        });
         console.log('✅ MAIN transcript listener setup complete');
       } catch (error) {
         console.error('❌ Failed to setup MAIN transcript listener:', error);
@@ -357,6 +368,7 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
         unlistenFn();
         console.log('🧹 CLEANUP: MAIN transcript listener cleaned up');
       }
+      unlistenRetractFn?.();
     };
   }, [currentMeetingId]); // Add currentMeetingId dependency
 

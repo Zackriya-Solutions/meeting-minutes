@@ -95,6 +95,13 @@ impl RecordingSaver {
 
     /// Add or update a structured transcript segment (upserts based on sequence_id)
     /// Also saves incrementally to disk
+    /// Drop a segment the transcriber took back (Speaker-Out bleed on Mic-In).
+    pub fn remove_transcript_segment(&self, sequence_id: u64) {
+        if let Ok(mut segments) = self.transcript_segments.lock() {
+            segments.retain(|s| s.sequence_id != sequence_id);
+        }
+    }
+
     pub fn add_transcript_segment(&self, segment: TranscriptSegment) {
         if let Ok(mut segments) = self.transcript_segments.lock() {
             // Check if segment with same sequence_id exists (update it)

@@ -524,6 +524,10 @@ impl RecordingManager {
         self.recording_saver.add_transcript_segment(segment);
     }
 
+    pub fn remove_transcript_segment(&self, sequence_id: u64) {
+        self.recording_saver.remove_transcript_segment(sequence_id);
+    }
+
     /// Add a transcript chunk to be saved later (legacy method)
     pub fn add_transcript_chunk(&self, text: String) {
         self.recording_saver.add_transcript_chunk(text);

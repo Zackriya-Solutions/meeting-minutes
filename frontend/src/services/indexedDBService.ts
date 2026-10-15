@@ -233,6 +233,9 @@ class IndexedDBService {
 
       const storedTranscript: StoredTranscript = {
         ...transcript,
+        // Callers pass a TranscriptUpdate, whose id is `sequence_id`; recovery
+        // orders by and deleteTranscript matches on `sequenceId`.
+        sequenceId: transcript.sequenceId ?? transcript.sequence_id,
         meetingId,
         storedAt: Date.now()
       };
@@ -266,6 +269,54 @@ class IndexedDBService {
       }
     } catch (error) {
       console.warn('Failed to save transcript to IndexedDB:', error);
+      // Fail silently - don't interrupt recording
+    }
+  }
+
+  /**
+   * Remove one transcript row (a live line the transcriber retracted).
+   */
+  async deleteTranscript(meetingId: string, sequenceId: number): Promise<void> {
+    try {
+      if (!this.db) await this.init();
+
+      const transaction = this.db!.transaction(['transcripts', 'meetings'], 'readwrite');
+      const transcriptsStore = transaction.objectStore('transcripts');
+      const meetingsStore = transaction.objectStore('meetings');
+
+      const deleted = await new Promise<number>((resolve, reject) => {
+        let count = 0;
+        const request = transcriptsStore.index('meetingId').openCursor(IDBKeyRange.only(meetingId));
+        request.onsuccess = (event) => {
+          const cursor = (event.target as IDBRequest<IDBCursorWithValue>).result;
+          if (!cursor) return resolve(count);
+          if ((cursor.value as StoredTranscript).sequenceId === sequenceId) {
+            cursor.delete();
+            count += 1;
+          }
+          cursor.continue();
+        };
+        request.onerror = () => reject(request.error);
+      });
+
+      if (deleted > 0) {
+        const meeting = await new Promise<MeetingMetadata | null>((resolve, reject) => {
+          const request = meetingsStore.get(meetingId);
+          request.onsuccess = () => resolve(request.result || null);
+          request.onerror = () => reject(request.error);
+        });
+        if (meeting) {
+          meeting.lastUpdated = Date.now();
+          meeting.transcriptCount = Math.max(0, meeting.transcriptCount - deleted);
+          await new Promise<void>((resolve, reject) => {
+            const request = meetingsStore.put(meeting);
+            request.onsuccess = () => resolve();
+            request.onerror = () => reject(request.error);
+          });
+        }
+      }
+    } catch (error) {
+      console.warn('Failed to delete transcript from IndexedDB:', error);
       // Fail silently - don't interrupt recording
     }
   }

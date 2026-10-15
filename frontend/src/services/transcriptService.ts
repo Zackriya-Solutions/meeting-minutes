@@ -8,6 +8,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, UnlistenFn } from '@tauri-apps/api/event';
 import { TranscriptUpdate, Transcript } from '@/types';
+import { TRANSCRIPT_RETRACT_EVENT, type TranscriptRetract } from '@/lib/transcript-retract';
 
 export interface TranscriptionStatus {
   chunks_in_queue: number;
@@ -56,6 +57,16 @@ export class TranscriptService {
    */
   async onTranscriptUpdate(callback: (update: TranscriptUpdate) => void): Promise<UnlistenFn> {
     return listen<TranscriptUpdate>('transcript-update', (event) => {
+      callback(event.payload);
+    });
+  }
+
+  /**
+   * Listen for retractions of rows already delivered by onTranscriptUpdate
+   * (a Mic-In line found to be Speaker-Out bleed).
+   */
+  async onTranscriptRetract(callback: (retract: TranscriptRetract) => void): Promise<UnlistenFn> {
+    return listen<TranscriptRetract>(TRANSCRIPT_RETRACT_EVENT, (event) => {
       callback(event.payload);
     });
   }
