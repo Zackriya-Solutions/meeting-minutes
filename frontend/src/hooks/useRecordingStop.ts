@@ -6,6 +6,7 @@ import { useTranscripts } from '@/contexts/TranscriptContext';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
 import { useRecordingState, RecordingStatus } from '@/contexts/RecordingStateContext';
 import { storageService } from '@/services/storageService';
+import { loadBetaFeatures } from '@/types/betaFeatures';
 import { transcriptService } from '@/services/transcriptService';
 import Analytics from '@/lib/analytics';
 import {
@@ -92,11 +93,17 @@ export function useRecordingStop(
             const { folder_path, meeting_name } = event.payload;
 
             // Store folder_path and meeting_name for later use in handleRecordingStop
+            // Always overwrite: a stop without a folder must not reuse the previous recording's
+            // folder (speaker identification would run on the wrong audio).
             if (folder_path) {
               sessionStorage.setItem('last_recording_folder_path', folder_path);
+            } else {
+              sessionStorage.removeItem('last_recording_folder_path');
             }
             if (meeting_name) {
               sessionStorage.setItem('last_recording_meeting_name', meeting_name);
+            } else {
+              sessionStorage.removeItem('last_recording_meeting_name');
             }
           })();
 
@@ -256,7 +263,8 @@ export function useRecordingStop(
           const responseData = await storageService.saveMeeting(
             savedMeetingName || meetingTitle || 'New Meeting',  // PREFER savedMeetingName (backend source)
             freshTranscripts,
-            folderPath
+            folderPath,
+            loadBetaFeatures().speakerIdentification
           );
 
           const meetingId = responseData.meeting_id;

@@ -49,9 +49,9 @@ pub fn create_meeting_folder(
     if create_checkpoints_dir {
         let checkpoints_dir = meeting_folder.join(".checkpoints");
         std::fs::create_dir_all(&checkpoints_dir)?;
-        log::info!("Created meeting folder with checkpoints: {}", meeting_folder.display());
+        log::info!("Created meeting folder with checkpoints");
     } else {
-        log::info!("Created meeting folder without checkpoints: {}", meeting_folder.display());
+        log::info!("Created meeting folder without checkpoints");
     }
 
     Ok(meeting_folder)

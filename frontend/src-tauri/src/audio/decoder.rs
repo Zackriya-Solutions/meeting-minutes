@@ -10,11 +10,14 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 
 use symphonia::core::audio::SampleBuffer;
-use symphonia::core::codecs::{DecoderOptions, CODEC_TYPE_NULL};
+use symphonia::core::codecs::{DecoderOptions, CODEC_TYPE_AAC, CODEC_TYPE_NULL};
 use symphonia::core::formats::FormatOptions;
 use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
 use symphonia::core::probe::Hint;
+use symphonia::core::codecs::CodecParameters;
+use symphonia::core::formats::{FormatReader, SeekMode, SeekTo};
+use symphonia::core::units::{Time, TimeBase};
 
 use super::audio_processing::{audio_to_mono, resample, resample_audio};
 use super::ffmpeg::find_ffmpeg_path;
@@ -51,6 +54,17 @@ impl DecodedAudio {
 
     /// Convert decoded audio to Whisper format with optional progress callback
     pub fn to_whisper_format_with_progress(&self, progress_callback: Option<ProgressCallback>) -> Vec<f32> {
+        self.clone().into_whisper_format_with_progress(progress_callback)
+    }
+
+    /// Like `to_whisper_format`, but consumes the decoded audio instead of copying its samples,
+    /// which keeps the peak memory of long recordings down.
+    pub fn into_whisper_format(self) -> Vec<f32> {
+        self.into_whisper_format_with_progress(None)
+    }
+
+    /// Consuming variant of `to_whisper_format_with_progress`.
+    pub fn into_whisper_format_with_progress(self, progress_callback: Option<ProgressCallback>) -> Vec<f32> {
         // Step 1: Convert to mono if needed
         let mono_samples = if self.channels > 1 {
             info!(
@@ -58,9 +72,11 @@ impl DecodedAudio {
                 self.channels,
                 self.samples.len()
             );
-            audio_to_mono(&self.samples, self.channels)
+            let mono = audio_to_mono(&self.samples, self.channels);
+            drop(self.samples);
+            mono
         } else {
-            self.samples.clone()
+            self.samples
         };
 
         // Step 1.5: Normalize samples to valid range (-1.0 to 1.0)
@@ -273,9 +289,11 @@ fn needs_ffmpeg_conversion(path: &Path) -> bool {
 ///
 /// Returns a `TempPath` that auto-deletes the temporary WAV file when dropped.
 /// The caller must keep the `TempPath` alive until decoding of the WAV is complete.
+/// `range` (start, seconds) converts only that part of the input.
 fn convert_to_wav_with_ffmpeg(
     input_path: &Path,
     progress_callback: Option<&ProgressCallback>,
+    range: Option<(f64, f64)>,
 ) -> Result<tempfile::TempPath> {
     let ffmpeg_path = find_ffmpeg_path().ok_or_else(|| {
         anyhow!(
@@ -320,9 +338,14 @@ fn convert_to_wav_with_ffmpeg(
         .ok_or_else(|| anyhow!("Invalid temp path (non-UTF8)"))?;
 
     let mut command = Command::new(&ffmpeg_path);
+    command.args(["-i", input_str]);
+    if let Some((start_s, seconds)) = range {
+        // After -i: decoded audio is cut at the exact sample (seeking the input lands on a
+        // container timestamp) and decoding stops at the end of the range.
+        command.args(["-ss", &format!("{start_s:.6}"), "-t", &format!("{seconds:.6}")]);
+    }
     command
         .args([
-            "-i", input_str,
             "-vn",                  // Strip video tracks
             "-acodec", "pcm_s16le", // Output PCM WAV (Symphonia handles natively)
             "-y",                   // Overwrite without prompt
@@ -413,7 +436,7 @@ pub fn decode_audio_file_with_progress(
                     .and_then(|e| e.to_str())
                     .unwrap_or("unknown")
             );
-            let temp_path = convert_to_wav_with_ffmpeg(path, progress_callback.as_ref())?;
+            let temp_path = convert_to_wav_with_ffmpeg(path, progress_callback.as_ref(), None)?;
             let wav_path = temp_path.to_path_buf();
             (Some(temp_path), Cow::Owned(wav_path))
         } else {
@@ -590,9 +613,279 @@ pub fn decode_audio_file_with_progress(
     })
 }
 
+/// The file's demuxer, at the start, with the id and parameters of its first audio track.
+pub(crate) fn open_format(path: &Path) -> Result<(Box<dyn FormatReader>, u32, CodecParameters)> {
+    let file = std::fs::File::open(path).map_err(|e| anyhow!("Failed to open audio file '{}': {}", path.display(), e))?;
+    let mss = MediaSourceStream::new(Box::new(file), Default::default());
+    let mut hint = Hint::new();
+    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+        hint.with_extension(ext);
+    }
+    let probed = symphonia::default::get_probe()
+        .format(&hint, mss, &FormatOptions::default(), &MetadataOptions::default())
+        .map_err(|e| anyhow!("Failed to probe audio format: {}", e))?;
+    let format = probed.format;
+    let track = format
+        .tracks()
+        .iter()
+        .find(|t| t.codec_params.codec != CODEC_TYPE_NULL)
+        .ok_or_else(|| anyhow!("No audio track found in file"))?;
+    let (track_id, params) = (track.id, track.codec_params.clone());
+    Ok((format, track_id, params))
+}
+
+/// Seconds of container timestamp `ts`, or of `ts` frames at `rate` when the track has no time base.
+fn ts_seconds(time_base: Option<TimeBase>, ts: u64, rate: u32) -> f64 {
+    match time_base {
+        Some(tb) => {
+            let t = tb.calc_time(ts);
+            t.seconds as f64 + t.frac
+        }
+        None => ts as f64 / rate.max(1) as f64,
+    }
+}
+
+/// An MP4/M4A file, whose track lengths come from its sample tables.
+fn has_sample_table(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|ext| ["mp4", "m4a"].contains(&ext.to_lowercase().as_str()))
+}
+
+/// Length of the first audio track on the container timeline: the sum of its packet durations.
+/// Read from the MP4 header, else by demuxing (well under a second for a long recording); never
+/// decoded. For a live recording this
+/// is the recording clock (plus the first checkpoint's 21 ms of encoder priming): the joined
+/// checkpoints advance the container by exactly 30 s each, while decoding yields 1792 more frames
+/// per checkpoint.
+pub fn container_duration_s(path: &Path) -> Result<f64> {
+    if needs_ffmpeg_conversion(path) {
+        // Symphonia cannot demux these; their decoded length is the best measure available.
+        return Ok(decode_audio_file(path)?.duration_seconds);
+    }
+    let (mut format, track_id, params) = open_format(path)?;
+    let rate = params.sample_rate.unwrap_or(0);
+    if params.time_base.is_none() && rate == 0 {
+        return Err(anyhow!("Unknown sample rate"));
+    }
+    // An MP4 track's frame count is its sample table's total, the same sum without reading the
+    // packets. Other headers can lie (a streamed WAV declares u32::MAX bytes, MP3 counts are
+    // unchecked), so their packets are walked.
+    if let (Some(n_frames), true) = (params.n_frames, has_sample_table(path)) {
+        return Ok(ts_seconds(params.time_base, n_frames, rate));
+    }
+    let mut duration_ts: u64 = 0;
+    loop {
+        match format.next_packet() {
+            Ok(packet) if packet.track_id() == track_id => duration_ts += packet.dur(),
+            Ok(_) => {}
+            Err(symphonia::core::errors::Error::IoError(ref e)) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
+            Err(e) => {
+                warn!("Error reading packet while measuring {}: {}", path.display(), e);
+                break;
+            }
+        }
+    }
+    Ok(ts_seconds(params.time_base, duration_ts, rate))
+}
+
+/// Frames a full decode of an AAC file yields, counted from its packets without decoding: every
+/// AAC packet decodes to 1024 frames, encoder priming and padding included. `None` for other
+/// codecs.
+pub fn aac_decoded_frames(path: &Path) -> Result<Option<(u32, usize)>> {
+    if needs_ffmpeg_conversion(path) {
+        return Ok(None);
+    }
+    let (mut format, track_id, params) = open_format(path)?;
+    if params.codec != CODEC_TYPE_AAC {
+        return Ok(None);
+    }
+    let rate = params.sample_rate.ok_or_else(|| anyhow!("Unknown sample rate"))?;
+    let mut packets = 0usize;
+    loop {
+        match format.next_packet() {
+            Ok(packet) if packet.track_id() == track_id => packets += 1,
+            Ok(_) => {}
+            Err(symphonia::core::errors::Error::IoError(ref e)) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
+            Err(e) => {
+                warn!("Error reading packet while counting frames of {}: {}", path.display(), e);
+                break;
+            }
+        }
+    }
+    Ok(Some((rate, packets * 1024)))
+}
+
+/// Decoded before the requested start and dropped: after a seek, an AAC packet needs the one
+/// before it to decode cleanly.
+const RANGE_PREROLL_S: f64 = 0.1;
+
+/// Decodes only [start_s, start_s + seconds) of the file's container time (the recording clock
+/// for live recordings). Each packet's audio is placed at its timestamp and limited to its
+/// container duration, so the priming and padding of joined checkpoints, which decode to more
+/// frames than the container gives them, never shift later audio. Past the end the result has
+/// no samples. A file that cannot seek is decoded from its start.
+pub fn decode_audio_range(path: &Path, start_s: f64, seconds: f64) -> Result<DecodedAudio> {
+    let start_s = start_s.max(0.0);
+    let seconds = seconds.max(0.0);
+    if needs_ffmpeg_conversion(path) {
+        // Rare formats symphonia cannot demux: ffmpeg converts only the range to WAV.
+        let wav = convert_to_wav_with_ffmpeg(path, None, Some((start_s, seconds)))?;
+        return decode_audio_range(&wav, 0.0, seconds);
+    }
+
+    let (mut format, track_id, mut params) = open_format(path)?;
+    let seek_to = (start_s - RANGE_PREROLL_S).max(0.0);
+    if seek_to > 0.0 {
+        let seeked = format.seek(SeekMode::Accurate, SeekTo::Time { time: Time::from(seek_to), track_id: Some(track_id) });
+        if let Err(e) = seeked {
+            debug!("Seek to {:.2}s in {} failed ({}); decoding from the start", seek_to, path.display(), e);
+            (format, _, params) = open_format(path)?;
+        }
+    }
+    let mut decoder = symphonia::default::get_codecs()
+        .make(&params, &DecoderOptions::default())
+        .map_err(|e| anyhow!("Failed to create decoder: {}", e))?;
+    let mut rate = params.sample_rate.unwrap_or(16_000);
+    let mut channels = params.channels.map(|c| c.count() as u16).unwrap_or(1);
+    let end_s = start_s + seconds;
+    let mut out: Vec<f32> = Vec::new();
+    let mut sample_buf: Option<SampleBuffer<f32>> = None;
+    // Frames of `out` up to the last one written; gaps before it stay silent.
+    let mut filled = 0usize;
+    loop {
+        let packet = match format.next_packet() {
+            Ok(packet) => packet,
+            Err(symphonia::core::errors::Error::IoError(ref e)) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
+            Err(e) => {
+                warn!("Error reading packet: {}", e);
+                break;
+            }
+        };
+        if packet.track_id() != track_id {
+            continue;
+        }
+        let packet_start = ts_seconds(params.time_base, packet.ts(), rate);
+        if packet_start >= end_s {
+            break;
+        }
+        let decoded = match decoder.decode(&packet) {
+            Ok(decoded) => decoded,
+            Err(e) => {
+                warn!("Error decoding packet: {}", e);
+                continue;
+            }
+        };
+        let spec = *decoded.spec();
+        // The decoder's rate wins over the container's (HE-AAC declares twice its decoded rate).
+        rate = spec.rate;
+        channels = spec.channels.count() as u16;
+        let ch = channels.max(1) as usize;
+        // One buffer for the whole range, replaced only when a packet needs more room.
+        if sample_buf.as_ref().is_some_and(|b| b.capacity() < decoded.capacity() * ch) {
+            sample_buf = None;
+        }
+        let buf = sample_buf.get_or_insert_with(|| SampleBuffer::<f32>::new(decoded.capacity() as u64, spec));
+        buf.copy_interleaved_ref(decoded);
+        let decoded_frames = buf.samples().len() / ch;
+        let wanted = (seconds * rate as f64).round() as usize;
+        if out.len() < wanted * ch {
+            out.resize(wanted * ch, 0.0);
+        }
+        // A packet plays for its container duration: the trimmed packets at the end of each
+        // joined checkpoint decode to a full AAC frame but last only a few samples.
+        let keep = if packet.dur() > 0 {
+            ((ts_seconds(params.time_base, packet.dur(), rate) * rate as f64).round() as usize).min(decoded_frames)
+        } else {
+            decoded_frames
+        };
+        let first = ((packet_start - start_s) * rate as f64).round() as i64;
+        for j in 0..keep {
+            let at = first + j as i64;
+            if at < 0 {
+                continue;
+            }
+            let at = at as usize;
+            if at >= wanted {
+                break;
+            }
+            out[at * ch..(at + 1) * ch].copy_from_slice(&buf.samples()[j * ch..(j + 1) * ch]);
+            filled = filled.max(at + 1);
+        }
+        if filled >= wanted {
+            break;
+        }
+    }
+    out.truncate(filled * channels.max(1) as usize);
+    Ok(DecodedAudio {
+        samples: out,
+        sample_rate: rate,
+        channels,
+        duration_seconds: filled as f64 / rate.max(1) as f64,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn range_decode_matches_full_decode() {
+        use super::test_audio::{silence_then_tone, write_wav};
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("stereo.wav");
+        let stereo: Vec<f32> = silence_then_tone(48_000, 0.5, 3.0).into_iter().flat_map(|s| [s, -s]).collect();
+        write_wav(&path, 48_000, 2, &stereo);
+        let full = decode_audio_file(&path).unwrap();
+        let range = decode_audio_range(&path, 1.0, 0.5).unwrap();
+        assert_eq!((range.sample_rate, range.channels), (48_000, 2));
+        assert_eq!(range.samples, full.samples[48_000 * 2..72_000 * 2].to_vec());
+        assert!((range.duration_seconds - 0.5).abs() < 1e-9);
+        assert!(decode_audio_range(&path, 5.0, 1.0).unwrap().samples.is_empty());
+    }
+
+    #[test]
+    fn range_decode_of_an_ffmpeg_only_format_matches_full_decode() {
+        use super::test_audio::{silence_then_tone, write_wav};
+        let dir = tempfile::tempdir().unwrap();
+        let wav = dir.path().join("speech.wav");
+        write_wav(&wav, 48_000, 1, &silence_then_tone(48_000, 0.5, 3.0));
+        let mkv = dir.path().join("speech.mkv");
+        let ffmpeg = crate::audio::ffmpeg::find_ffmpeg_path().expect("ffmpeg is needed for this test");
+        let status = std::process::Command::new(ffmpeg)
+            .args(["-hide_banner", "-loglevel", "error", "-y", "-i"])
+            .arg(&wav)
+            .args(["-c:a", "pcm_s16le"])
+            .arg(&mkv)
+            .status()
+            .expect("run ffmpeg");
+        assert!(status.success());
+        let full = decode_audio_file(&mkv).unwrap();
+        let range = decode_audio_range(&mkv, 1.0, 0.5).unwrap();
+        assert_eq!((range.sample_rate, range.channels), (48_000, 1));
+        assert_eq!(range.samples, full.samples[48_000..72_000].to_vec());
+        assert!(decode_audio_range(&mkv, 5.0, 1.0).unwrap().samples.is_empty());
+    }
+
+    #[test]
+    fn range_decode_follows_container_time_in_a_live_recording() {
+        use super::test_audio::{joined_checkpoints, onset_s};
+        let dir = tempfile::tempdir().unwrap();
+        let tone = |t: f64| (30.5..31.0).contains(&t) || (120.5..121.0).contains(&t);
+        let path = joined_checkpoints(dir.path(), 5, tone);
+        // Across the first boundary and inside the fifth checkpoint, after four boundaries: the
+        // tone is where the clock puts it, 21 ms of first-checkpoint priming later. Decoded-frame
+        // positions would be 37 ms later per boundary crossed inside the range.
+        for (start, seconds, tone_at) in [(29.0, 2.0, 1.5), (120.0, 1.0, 0.5)] {
+            let range = decode_audio_range(&path, start, seconds).unwrap();
+            assert_eq!(range.samples.len(), (seconds * 48_000.0) as usize, "length of the range from {start} s");
+            let onset = onset_s(&range.samples, 48_000).expect("the tone is in the range");
+            assert!((tone_at..tone_at + 0.04).contains(&onset), "tone at {onset} s into the range from {start} s");
+        }
+        // The last checkpoint ends at 150 s of clock, 150.021 s of container time.
+        let tail = decode_audio_range(&path, 149.0, 2.0).unwrap();
+        assert_eq!(tail.samples.len(), 49_024, "the range stops at the container end");
+    }
 
     #[test]
     fn test_decode_he_aac_uses_decoded_rate_not_container_rate() {
@@ -865,5 +1158,134 @@ mod tests {
         assert!(!needs_ffmpeg_conversion(Path::new("audio.m4a")));
         // No extension
         assert!(!needs_ffmpeg_conversion(Path::new("noext")));
+    }
+
+    #[test]
+    fn test_into_whisper_format_matches_to_whisper_format() {
+        let mono = DecodedAudio {
+            samples: (0..48_000).map(|i| (i as f32 * 0.01).sin() * 0.5).collect(),
+            sample_rate: 48_000,
+            channels: 1,
+            duration_seconds: 1.0,
+        };
+        assert_eq!(mono.to_whisper_format(), mono.clone().into_whisper_format());
+        let stereo = DecodedAudio {
+            samples: (0..96_000).map(|i| if i % 2 == 0 { 0.25 } else { -0.5 }).collect(),
+            sample_rate: 48_000,
+            channels: 2,
+            duration_seconds: 1.0,
+        };
+        assert_eq!(stereo.to_whisper_format(), stereo.clone().into_whisper_format());
+    }
+
+    #[test]
+    fn container_duration_is_the_recording_clock() {
+        use super::test_audio::{joined_checkpoints, silence_then_tone, write_wav};
+        let dir = tempfile::tempdir().unwrap();
+
+        let wav = dir.path().join("speech.wav");
+        write_wav(&wav, 16_000, 1, &silence_then_tone(16_000, 0.5, 1.5));
+        assert_eq!(container_duration_s(&wav).unwrap(), 1.5);
+
+        // Three checkpoints joined as a live recording: the container advances exactly 30 s per
+        // checkpoint; only the first checkpoint's encoder priming (1024 frames) is added.
+        let live = joined_checkpoints(dir.path(), 3, |_| false);
+        let duration = container_duration_s(&live).unwrap();
+        assert!((duration - (90.0 + 1024.0 / 48_000.0)).abs() < 1e-6, "container duration {duration}");
+        // Counting decoded frames instead gains priming and padding at every checkpoint. That
+        // drift is the diarization time map's concern, not the player's.
+        let decoded = decode_audio_file(&live).unwrap();
+        let decoded_s = decoded.samples.len() as f64 / decoded.channels.max(1) as f64 / decoded.sample_rate as f64;
+        assert!(decoded_s - duration > 0.07, "decoded {decoded_s} s vs container {duration} s");
+    }
+
+    #[test]
+    fn aac_frames_are_counted_without_decoding() {
+        use super::test_audio::{joined_checkpoints, write_wav};
+        let dir = tempfile::tempdir().unwrap();
+        let live = joined_checkpoints(dir.path(), 3, |_| false);
+        let decoded = decode_audio_file(&live).unwrap();
+        let frames = decoded.samples.len() / decoded.channels.max(1) as usize;
+        assert_eq!(aac_decoded_frames(&live).unwrap(), Some((48_000, frames)));
+
+        let wav = dir.path().join("speech.wav");
+        write_wav(&wav, 16_000, 1, &[0.0; 1600]);
+        assert_eq!(aac_decoded_frames(&wav).unwrap(), None);
+    }
+}
+
+/// Audio files for tests.
+#[cfg(test)]
+pub(crate) mod test_audio {
+    use std::path::{Path, PathBuf};
+
+    /// 16-bit PCM WAV of interleaved `samples`.
+    pub(crate) fn write_wav(path: &Path, rate: u32, channels: u16, samples: &[f32]) {
+        std::fs::write(path, crate::audio::encode::pcm16_wav(rate, channels, samples)).unwrap();
+    }
+
+    /// Mono: silence for `silent_s`, then a 440 Hz tone at half scale until `total_s`.
+    pub(crate) fn silence_then_tone(rate: u32, silent_s: f64, total_s: f64) -> Vec<f32> {
+        let onset = (silent_s * rate as f64) as usize;
+        (0..(total_s * rate as f64) as usize)
+            .map(|i| if i < onset { 0.0 } else { 0.5 * (2.0 * std::f32::consts::PI * 440.0 * i as f32 / rate as f32).sin() })
+            .collect()
+    }
+
+    /// AAC in MP4 encoded from `wav` with ffmpeg.
+    pub(crate) fn aac_mp4_from_wav(wav: &Path) -> PathBuf {
+        let ffmpeg = crate::audio::ffmpeg::find_ffmpeg_path().expect("ffmpeg is needed for this test");
+        let out = wav.with_extension("mp4");
+        let status = std::process::Command::new(ffmpeg)
+            .args(["-hide_banner", "-loglevel", "error", "-y", "-i"])
+            .arg(wav)
+            .args(["-c:a", "aac", "-b:a", "128k"])
+            .arg(&out)
+            .status()
+            .expect("run ffmpeg");
+        assert!(status.success(), "ffmpeg could not encode {}", wav.display());
+        out
+    }
+
+    /// `dir/audio.mp4` built as a live recording is: 30 s checkpoints of 48 kHz mono encoded by
+    /// `encode_single_audio`, joined with the ffmpeg concat demuxer and `-c copy`. The signal is
+    /// a 440 Hz tone at half scale wherever `tone_at(recording clock seconds)` holds, else silence.
+    pub(crate) fn joined_checkpoints(dir: &Path, checkpoints: usize, tone_at: impl Fn(f64) -> bool) -> PathBuf {
+        const RATE: usize = 48_000;
+        const CHECKPOINT: usize = 30 * RATE;
+        let mut list = String::new();
+        for k in 0..checkpoints {
+            let samples: Vec<f32> = (k * CHECKPOINT..(k + 1) * CHECKPOINT)
+                .map(|n| {
+                    let t = n as f64 / RATE as f64;
+                    if tone_at(t) { 0.5 * (2.0 * std::f64::consts::PI * 440.0 * t).sin() as f32 } else { 0.0 }
+                })
+                .collect();
+            let chunk = dir.join(format!("audio_chunk_{:03}.mp4", k));
+            crate::audio::encode::encode_single_audio(bytemuck::cast_slice(&samples), RATE as u32, 1, &chunk)
+                .expect("encode a checkpoint");
+            list.push_str(&format!("file '{}'\n", chunk.display()));
+        }
+        let list_file = dir.join("concat_list.txt");
+        std::fs::write(&list_file, list).unwrap();
+        let out = dir.join("audio.mp4");
+        let ffmpeg = crate::audio::ffmpeg::find_ffmpeg_path().expect("ffmpeg is needed for this test");
+        let status = std::process::Command::new(ffmpeg)
+            .args(["-hide_banner", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i"])
+            .arg(&list_file)
+            .args(["-c", "copy", "-y"])
+            .arg(&out)
+            .status()
+            .expect("run ffmpeg");
+        assert!(status.success(), "ffmpeg could not join the checkpoints");
+        out
+    }
+
+    /// Seconds into mono `samples` of the first 2 ms window whose RMS exceeds 0.1.
+    pub(crate) fn onset_s(samples: &[f32], rate: u32) -> Option<f64> {
+        let window = (rate as usize / 500).max(1);
+        (0..samples.len().saturating_sub(window))
+            .find(|&i| (samples[i..i + window].iter().map(|x| x * x).sum::<f32>() / window as f32).sqrt() > 0.1)
+            .map(|i| i as f64 / rate as f64)
     }
 }

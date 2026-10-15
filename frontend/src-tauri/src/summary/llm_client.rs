@@ -4,7 +4,7 @@ use std::future::Future;
 use std::path::PathBuf;
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
-use tracing::{info, warn};
+use log::{info, warn};
 
 const REQUEST_TIMEOUT_DURATION: Duration = Duration::from_secs(300);
 
@@ -441,6 +441,7 @@ pub(crate) async fn generate_summary(
             .await?
             .unwrap_or_else(|error| format!("Failed to read LLM error response body: {error}"));
         if provider != &LLMProvider::Ollama || !ollama_rejects_reasoning_effort(status, &error_body) {
+            warn!("{}", llm_http_failure_log_message(provider, status, error_body.len()));
             return Err(format!(
                 "LLM API request failed with status {}: {}",
                 status, error_body
@@ -478,6 +479,7 @@ pub(crate) async fn generate_summary(
         let error_body = await_or_cancel(response.text(), cancellation_token)
             .await?
             .unwrap_or_else(|error| format!("Failed to read LLM error response body: {error}"));
+        warn!("{}", llm_http_failure_log_message(provider, status, error_body.len()));
         return Err(format!(
             "LLM API request failed with status {}: {}",
             status, error_body
@@ -510,6 +512,19 @@ pub(crate) async fn generate_summary(
         info!("🐞 LLM Response received from {}", provider_name(provider));
         chat_response.completion()
     }
+}
+
+fn llm_http_failure_log_message(
+    provider: &LLMProvider,
+    status: reqwest::StatusCode,
+    response_bytes: usize,
+) -> String {
+    format!(
+        "LLM API request failed; provider={}, status={}, response_bytes={}",
+        provider_name(provider),
+        status,
+        response_bytes
+    )
 }
 
 #[cfg(test)]
@@ -634,6 +649,57 @@ mod tests {
             reqwest::StatusCode::INTERNAL_SERVER_ERROR,
             r#"{"error":"think value \"none\" is not supported"}"#,
         ));
+    }
+
+    #[tokio::test]
+    async fn custom_provider_failure_keeps_response_body_out_of_log_message() {
+        let response_body = b"REMOTE_BODY_SECRET";
+        let safe_message = llm_http_failure_log_message(
+            &LLMProvider::CustomOpenAI,
+            reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+            response_body.len(),
+        );
+        assert_eq!(
+            safe_message,
+            "LLM API request failed; provider=Custom OpenAI, status=500 Internal Server Error, response_bytes=18"
+        );
+        assert!(!safe_message.contains("REMOTE_BODY_SECRET"));
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let _request = read_http_request(&mut stream).await;
+            let headers = format!(
+                "HTTP/1.1 500 Internal Server Error\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                response_body.len()
+            );
+            stream.write_all(headers.as_bytes()).await.unwrap();
+            stream.write_all(response_body).await.unwrap();
+            stream.flush().await.unwrap();
+        });
+
+        let endpoint = format!("http://{address}");
+        let error = generate_summary(
+            &Client::new(),
+            &LLMProvider::CustomOpenAI,
+            "model",
+            "",
+            "system",
+            "user",
+            None,
+            Some(&endpoint),
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .await
+        .expect_err("custom provider failure should preserve its response body");
+        server.await.unwrap();
+
+        assert!(error.contains("REMOTE_BODY_SECRET"));
     }
 
     #[tokio::test]
@@ -924,5 +990,3 @@ fn provider_name(provider: &LLMProvider) -> &str {
         LLMProvider::CustomOpenAI => "Custom OpenAI",
     }
 }
-
-

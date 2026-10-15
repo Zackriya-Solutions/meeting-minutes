@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use silero_rs::{VadConfig, VadSession, VadTransition};
 use log::{debug, info, warn};
 use std::collections::VecDeque;
@@ -28,8 +28,8 @@ pub struct ContinuousVadProcessor {
     in_speech: bool,
     processed_samples: usize,
     speech_start_sample: usize,
-    // State tracking for smart logging
     last_logged_state: bool,
+    large_speech_buffer_warned: bool,
 }
 
 impl ContinuousVadProcessor {
@@ -82,8 +82,8 @@ impl ContinuousVadProcessor {
             in_speech: false,
             processed_samples: 0,
             speech_start_sample: 0,
-            // Initialize state tracking
             last_logged_state: false,
+            large_speech_buffer_warned: false,
         })
     }
 
@@ -157,9 +157,6 @@ impl ContinuousVadProcessor {
                 resampled.push(filtered_samples[source_index]);
             }
         }
-
-        debug!("Resampled from {} samples ({}Hz) to {} samples (16kHz) with anti-aliasing",
-               samples.len(), self.sample_rate, resampled.len());
 
         Ok(resampled)
     }
@@ -238,21 +235,14 @@ impl ContinuousVadProcessor {
     }
 
     fn process_chunk(&mut self, chunk: &[f32]) -> Result<()> {
-        // Track accumulated speech buffer size to detect memory issues
         let current_speech_size = self.current_speech.len();
-        if current_speech_size > 1_000_000 {
-            // More than ~62 seconds of accumulated speech at 16kHz
-            warn!("VAD: Accumulated speech buffer is large: {} samples ({:.1}s) - possible memory issue",
-                  current_speech_size, current_speech_size as f64 / 16000.0);
+        if current_speech_size > 1_000_000 && !self.large_speech_buffer_warned {
+            warn!("VAD speech buffer exceeded 1,000,000 samples");
+            self.large_speech_buffer_warned = true;
         }
 
-        let transitions = self.session.process(chunk)
-            .map_err(|e| anyhow!("VAD processing failed: {}", e))?;
+        let transitions = self.session.process(chunk).context("VAD processing failed")?;
 
-        // Log transitions for debugging
-        if !transitions.is_empty() {
-            debug!("VAD transitions at sample {}: {} transitions", self.processed_samples, transitions.len());
-        }
 
         // Handle VAD transitions
         for transition in transitions {
@@ -299,13 +289,12 @@ impl ContinuousVadProcessor {
                             confidence: 0.9, // VAD confidence
                         };
 
-                        info!("VAD: Completed speech segment: {:.1}ms duration, {} samples",
-                              end_timestamp_ms - start_timestamp_ms, segment.samples.len());
-
                         self.speech_segments.push_back(segment);
+
                     }
 
                     self.current_speech.clear();
+                    self.large_speech_buffer_warned = false;
                 }
             }
         }

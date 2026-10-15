@@ -32,6 +32,7 @@ const invoke = mock(async (command: string, args?: Record<string, unknown>): Pro
   if (command === 'get_ollama_models') return [{ name: 'test' }];
   if (command === 'api_process_transcript') return startProcess();
   if (command === 'api_cancel_summary') return { cancelled: true };
+  if (command === 'api_list_meeting_speakers') return [];
   throw new Error(`Unexpected command: ${command}`);
 });
 mock.module('@tauri-apps/api/core', () => ({ invoke }));

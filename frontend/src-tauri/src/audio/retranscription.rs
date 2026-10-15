@@ -2,9 +2,10 @@
 
 use crate::audio::decoder::decode_audio_file;
 use crate::audio::vad::get_speech_chunks_with_progress;
-use super::common::{create_transcript_segments, split_segment_at_silence, write_transcripts_json};
+use super::common::{create_transcript_segments, split_segment_at_silence};
 use super::constants::AUDIO_EXTENSIONS;
 use crate::config::{DEFAULT_WHISPER_MODEL, DEFAULT_PARAKEET_MODEL};
+use crate::database::repositories::transcript::TranscriptsRepository;
 use crate::parakeet_engine::ParakeetEngine;
 use crate::state::AppState;
 use crate::whisper_engine::WhisperEngine;
@@ -68,6 +69,12 @@ pub struct RetranscriptionResult {
     pub segments_count: usize,
     pub duration_seconds: f64,
     pub language: Option<String>,
+    /// Number of speakers identified, when identification ran and found speakers.
+    #[serde(default)]
+    pub speaker_count: Option<usize>,
+    /// Why speakers were not identified although requested.
+    #[serde(default)]
+    pub speaker_warning: Option<String>,
 }
 
 /// Error during retranscription
@@ -87,26 +94,32 @@ pub fn cancel_retranscription() {
     RETRANSCRIPTION_CANCELLED.store(true, Ordering::SeqCst);
 }
 
-/// Start retranscription of a meeting's audio
-pub async fn start_retranscription<R: Runtime>(
+/// Start retranscription of a meeting's audio. The caller holds the in-progress guard.
+async fn start_retranscription<R: Runtime>(
     app: AppHandle<R>,
     meeting_id: String,
     meeting_folder_path: String,
     language: Option<String>,
     model: Option<String>,
     provider: Option<String>,
+    speakers: super::common::SpeakerOptions,
+    _guard: RetranscriptionGuard,
 ) -> Result<RetranscriptionResult> {
-    // Acquire guard - ensures flag is cleared even on panic/early return
-    let _guard = RetranscriptionGuard::acquire().map_err(|e| anyhow!(e))?;
-
     // Reset cancellation flag
     RETRANSCRIPTION_CANCELLED.store(false, Ordering::SeqCst);
 
+    // One batch job at a time uses the shared transcription engine (load to unload).
+    if super::common::batch_engine_busy() {
+        emit_progress(&app, &meeting_id, "waiting", 0, "Waiting for another transcription job to finish...");
+    }
+    let batch_guard = super::common::acquire_batch_engine_lock().await;
+
     let use_parakeet = provider.as_deref() == Some("parakeet");
-    let result = run_retranscription(app.clone(), meeting_id.clone(), meeting_folder_path, language, model, provider).await;
+    let result = run_retranscription(app.clone(), meeting_id.clone(), meeting_folder_path, language, model, provider, speakers).await;
 
     // Unload the engine after the batch job (success, failure, or cancellation)
     super::common::unload_engine_after_batch(use_parakeet).await;
+    drop(batch_guard);
 
     // Guard will automatically clear flag on drop
     // No need for manual: RETRANSCRIPTION_IN_PROGRESS.store(false, Ordering::SeqCst);
@@ -119,7 +132,9 @@ pub async fn start_retranscription<R: Runtime>(
                     "meeting_id": res.meeting_id,
                     "segments_count": res.segments_count,
                     "duration_seconds": res.duration_seconds,
-                    "language": res.language
+                    "language": res.language,
+                    "speaker_count": res.speaker_count,
+                    "speaker_warning": res.speaker_warning
                 }),
             );
         }
@@ -139,7 +154,7 @@ pub async fn start_retranscription<R: Runtime>(
 
 /// Find audio file in meeting folder
 /// Tries common names first, then scans for any file with an audio extension
-fn find_audio_file(folder: &Path) -> Result<PathBuf> {
+pub(crate) fn find_audio_file(folder: &Path) -> Result<PathBuf> {
     let candidates = [
         "audio.mp4", "audio.m4a", "audio.wav", "audio.mp3",
         "audio.flac", "audio.ogg", "recording.mp4",
@@ -177,6 +192,7 @@ async fn run_retranscription<R: Runtime>(
     language: Option<String>,
     model: Option<String>,
     provider: Option<String>,
+    speakers: super::common::SpeakerOptions,
 ) -> Result<RetranscriptionResult> {
     let folder_path = PathBuf::from(&meeting_folder_path);
     let audio_path = find_audio_file(&folder_path)?;
@@ -220,7 +236,7 @@ async fn run_retranscription<R: Runtime>(
 
     // Convert to 16kHz mono format (CPU-intensive, run in blocking task)
     let audio_samples = tokio::task::spawn_blocking(move || {
-        decoded.to_whisper_format()
+        decoded.into_whisper_format()
     })
     .await
     .map_err(|e| anyhow!("Resample task panicked: {}", e))?;
@@ -237,6 +253,8 @@ async fn run_retranscription<R: Runtime>(
     // IMPORTANT: Run VAD in a blocking task to avoid blocking the async runtime
     // For large files (35+ minutes), VAD processing can take several minutes
     let app_for_vad = app.clone();
+    let audio_samples = Arc::new(audio_samples);
+    let samples_for_speakers = audio_samples.clone();
     let meeting_id_for_vad = meeting_id.clone();
 
     let speech_segments = tokio::task::spawn_blocking(move || {
@@ -297,6 +315,24 @@ async fn run_retranscription<R: Runtime>(
         return Err(anyhow!("No speech detected in audio file"));
     }
 
+    let (diarization, speaker_warning): (Option<crate::diarization::diarizer::Diarization>, Option<String>) = if speakers.identify {
+        let (app_p, id_p) = (app.clone(), meeting_id.clone());
+        let report = move |message: &str| emit_progress(&app_p, &id_p, "speakers", 25, message);
+        crate::diarization::jobs::diarize_for_batch(
+            &app,
+            samples_for_speakers.clone(),
+            speakers.num_speakers,
+            report,
+            || RETRANSCRIPTION_CANCELLED.load(Ordering::SeqCst),
+        )
+        .await
+        .map_err(|_| anyhow!("Retranscription cancelled"))?
+    } else {
+        (None, None)
+    };
+    // The full-length 16 kHz buffer is no longer needed; VAD segments carry their own samples.
+    drop(samples_for_speakers);
+
     emit_progress(&app, &meeting_id, "transcribing", 25, "Loading transcription engine...");
 
     // Initialize the appropriate engine once (not per-segment)
@@ -331,6 +367,10 @@ async fn run_retranscription<R: Runtime>(
         } else {
             processable_segments.push(segment.clone());
         }
+    }
+
+    if let Some(d) = &diarization {
+        processable_segments = crate::diarization::assign::split_segments_at_turns(processable_segments, &d.turns, 16000);
     }
 
     let processable_count = processable_segments.len();
@@ -420,45 +460,19 @@ async fn run_retranscription<R: Runtime>(
     emit_progress(&app, &meeting_id, "saving", 80, "Saving transcripts...");
 
     // Create transcript segments with proper timestamps from VAD
-    let segments = create_transcript_segments(&all_transcripts);
+    let mut segments = create_transcript_segments(&all_transcripts);
+    if let Some(d) = &diarization {
+        crate::diarization::assign::label_segments(&mut segments, &d.turns);
+    }
 
     // Save to database
     let app_state = app
         .try_state::<AppState>()
         .ok_or_else(|| anyhow!("App state not available"))?;
 
-    // Wrap delete+insert+update in a transaction to prevent data loss
     let pool = app_state.db_manager.pool();
-    let mut conn = pool.acquire().await.map_err(|e| anyhow!("DB error: {}", e))?;
-    let mut tx = sqlx::Connection::begin(&mut *conn)
-        .await
-        .map_err(|e| anyhow!("Failed to start transaction: {}", e))?;
-
-    sqlx::query("DELETE FROM transcripts WHERE meeting_id = ?")
-        .bind(&meeting_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(|e| anyhow!("Failed to delete existing transcripts: {}", e))?;
-
-    for segment in &segments {
-        sqlx::query(
-            "INSERT INTO transcripts (id, meeting_id, transcript, timestamp, audio_start_time, audio_end_time, duration)
-             VALUES (?, ?, ?, ?, ?, ?, ?)"
-        )
-        .bind(&segment.id)
-        .bind(&meeting_id)
-        .bind(&segment.text)
-        .bind(&segment.timestamp)
-        .bind(segment.audio_start_time)
-        .bind(segment.audio_end_time)
-        .bind(segment.duration)
-        .execute(&mut *tx)
-        .await
-        .map_err(|e| anyhow!("Failed to insert transcript: {}", e))?;
-    }
-
-    tx.commit().await
-        .map_err(|e| anyhow!("Failed to commit transaction: {}", e))?;
+    let remember_voices = super::recording_preferences::remember_voices(&app).await;
+    save_retranscribed_rows(pool, &meeting_id, &segments, diarization.as_ref(), remember_voices).await?;
 
     info!(
         "Updated {} transcripts for meeting {} in transaction",
@@ -469,9 +483,7 @@ async fn run_retranscription<R: Runtime>(
     // Write updated transcripts.json and metadata.json to the meeting folder
     emit_progress(&app, &meeting_id, "saving", 90, "Writing transcript files...");
 
-    if let Err(e) = write_transcripts_json(&folder_path, &segments) {
-        warn!("Failed to write transcripts.json: {}", e);
-    }
+    crate::diarization::jobs::rewrite_transcripts_json(pool, &meeting_id, Some(&folder_path)).await;
 
     // Find audio filename for metadata
     let audio_filename = audio_path
@@ -496,7 +508,67 @@ async fn run_retranscription<R: Runtime>(
         segments_count: segments.len(),
         duration_seconds,
         language,
+        speaker_count: diarization.as_ref().map(|d| d.speakers.len()),
+        speaker_warning,
     })
+}
+
+/// Replace the meeting's transcript rows in one transaction. With `diarization`, the meeting's
+/// speakers are replaced too (names carried over by voice, then matched against people named in
+/// other meetings when `remember_voices` is on); without it the previous speakers, with their
+/// names and voice centroids, are kept for a later identification.
+pub(crate) async fn save_retranscribed_rows(
+    pool: &sqlx::SqlitePool,
+    meeting_id: &str,
+    segments: &[crate::api::TranscriptSegment],
+    diarization: Option<&crate::diarization::diarizer::Diarization>,
+    remember_voices: bool,
+) -> Result<()> {
+    let mut conn = pool.acquire().await.map_err(|e| anyhow!("DB error: {}", e))?;
+    let mut tx = sqlx::Connection::begin(&mut *conn)
+        .await
+        .map_err(|e| anyhow!("Failed to start transaction: {}", e))?;
+
+    sqlx::query("DELETE FROM transcripts WHERE meeting_id = ?")
+        .bind(meeting_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| anyhow!("Failed to delete existing transcripts: {}", e))?;
+
+    for segment in segments {
+        TranscriptsRepository::insert_row(&mut tx, &segment.id, meeting_id, segment)
+            .await
+            .map_err(|e| anyhow!("Failed to insert transcript: {}", e))?;
+    }
+
+    if let Some(d) = diarization {
+        let speakers = crate::diarization::jobs::speaker_write_names(&mut tx, meeting_id, d, remember_voices).await?;
+        crate::database::repositories::speaker::SpeakersRepository::replace_for_meeting(
+            &mut tx,
+            meeting_id,
+            &crate::database::repositories::speaker::SpeakerWrite { speakers, ..Default::default() },
+        )
+        .await
+        .map_err(|e| anyhow!("Failed to save speakers: {}", e))?;
+    }
+
+    tx.commit()
+        .await
+        .map_err(|e| anyhow!("Failed to commit transaction: {}", e))?;
+    Ok(())
+}
+
+/// Load the local engine for the provider configured in transcript settings (Parakeet or Whisper).
+/// Call it while holding the batch engine lock.
+pub(crate) async fn load_configured_engine<R: Runtime>(
+    app: &AppHandle<R>,
+    provider: Option<&str>,
+) -> Result<super::common::BatchEngine> {
+    if provider == Some("parakeet") {
+        Ok(super::common::BatchEngine::Parakeet(get_or_init_parakeet(app, None).await?))
+    } else {
+        Ok(super::common::BatchEngine::Whisper(get_or_init_whisper(app, None).await?))
+    }
 }
 
 /// Emit progress event
@@ -785,12 +857,15 @@ pub async fn start_retranscription_command<R: Runtime>(
     language: Option<String>,
     model: Option<String>,
     provider: Option<String>,
+    identify_speakers: Option<bool>,
+    num_speakers: Option<u32>,
 ) -> Result<RetranscriptionStarted, String> {
-
-    // Check if retranscription is already in progress (guard will be acquired in start_retranscription)
-    if RETRANSCRIPTION_IN_PROGRESS.load(Ordering::SeqCst) {
-        return Err("Retranscription already in progress".to_string());
-    }
+    // Take the in-progress guard first and before spawning, so two quick requests cannot both
+    // start and a rejected request never touches the running one's meeting claim.
+    let guard = RetranscriptionGuard::acquire()?;
+    // Refuse while speaker identification is queued or running for this meeting, and keep new
+    // identification jobs off it until retranscription ends.
+    let claim = crate::diarization::jobs::claim_for_retranscription(&meeting_id)?;
 
     // Clone values for the spawned task
     let meeting_id_clone = meeting_id.clone();
@@ -804,8 +879,11 @@ pub async fn start_retranscription_command<R: Runtime>(
             language,
             model,
             provider,
+            super::common::SpeakerOptions::from_command(identify_speakers, num_speakers),
+            guard,
         )
         .await;
+        drop(claim);
 
         // Errors are already emitted as events in start_retranscription
         // so we just log here for debugging
@@ -1050,5 +1128,72 @@ mod tests {
         assert_eq!(metadata["summary_language"], "fr");
         assert_eq!(metadata["custom_field"], "preserve me");
         assert!(metadata.get("detected_summary_language").is_none());
+    }
+
+    async fn meeting_with_named_speaker() -> sqlx::SqlitePool {
+        use crate::database::repositories::speaker::{NewSpeaker, SpeakerWrite, SpeakersRepository};
+        use crate::database::test_support::{migrated_pool, seed_meeting, SeedRow};
+        let pool = migrated_pool().await;
+        seed_meeting(&pool, "m1", &[SeedRow { id: "t1", start: Some(0.0), end: Some(1.0), speaker: Some("spk_0"), text: "old" }]).await;
+        let mut conn = pool.acquire().await.unwrap();
+        SpeakersRepository::replace_for_meeting(
+            &mut conn,
+            "m1",
+            &SpeakerWrite {
+                speakers: vec![NewSpeaker { key: "spk_0".into(), display_name: Some("Noah".into()), embedding: vec![1.0, 0.0], speech_seconds: 1.0, ..Default::default() }],
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        drop(conn);
+        pool
+    }
+
+    #[tokio::test]
+    async fn retranscription_without_speakers_keeps_previous_speakers() {
+        let pool = meeting_with_named_speaker().await;
+        let segments = create_transcript_segments(&[("new".to_string(), 0.0, 1000.0)]);
+        save_retranscribed_rows(&pool, "m1", &segments, None, true).await.unwrap();
+        let speakers = crate::database::repositories::speaker::SpeakersRepository::list(&pool, "m1").await.unwrap();
+        assert_eq!(speakers.len(), 1);
+        assert_eq!(speakers[0].display_name.as_deref(), Some("Noah"));
+        let texts: Vec<String> = sqlx::query_scalar("SELECT transcript FROM transcripts WHERE meeting_id = 'm1'")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+        assert_eq!(texts, vec!["new".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn retranscription_with_speakers_carries_names_over() {
+        let pool = meeting_with_named_speaker().await;
+        let mut segments = create_transcript_segments(&[("new".to_string(), 0.0, 1000.0)]);
+        segments[0].speaker = Some("spk_0".into());
+        let d = crate::diarization::diarizer::Diarization {
+            turns: vec![],
+            overlap: vec![],
+            speakers: vec![crate::diarization::diarizer::SpeakerCentroid { key: "spk_0".into(), embedding: vec![0.9, 0.1], speech_seconds: 1.0 }],
+        };
+        save_retranscribed_rows(&pool, "m1", &segments, Some(&d), true).await.unwrap();
+        let speakers = crate::database::repositories::speaker::SpeakersRepository::list(&pool, "m1").await.unwrap();
+        assert_eq!(speakers.len(), 1);
+        assert_eq!(speakers[0].display_name.as_deref(), Some("Noah"));
+        assert_eq!(speakers[0].row_count, 1);
+    }
+
+    #[test]
+    fn retranscription_result_serializes_speaker_fields() {
+        let r = RetranscriptionResult {
+            meeting_id: "m".into(),
+            segments_count: 1,
+            duration_seconds: 1.0,
+            language: None,
+            speaker_count: None,
+            speaker_warning: Some("Speaker identification failed: offline".into()),
+        };
+        let v = serde_json::to_value(&r).unwrap();
+        assert_eq!(v["speaker_warning"], "Speaker identification failed: offline");
+        assert!(v.get("speaker_count").is_some());
     }
 }

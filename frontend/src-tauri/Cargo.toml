@@ -84,8 +84,7 @@ chrono = { version = "0.4.31", features = ["serde"] }
 
 # Log
 log = "0.4"
-env_logger = "0.11"
-tracing = "0.1.40"
+tauri-plugin-log = { version = "2.6.0", features = ["colored"] }
 which = "6.0.1"
 
 # Bytes
@@ -101,6 +100,7 @@ nnnoiseless = "0.5"
 # NOTE: whisper-rs is declared in platform-specific sections below (macOS/Windows/Linux)
 # to ensure correct GPU features are enabled per platform
 futures-util = "0.3"
+sha2 = "0.10"         # model download verification (also a build-dependency for build.rs)
 silero_rs = { git = "https://github.com/emotechlab/silero-rs", rev = "26a6460", package = "silero" }
 
 # Parakeet (ONNX-based fast transcription) dependencies
@@ -165,7 +165,6 @@ tauri-plugin-single-instance = "=2.3.7"
 tauri = { version = "2.6.2", features = ["protocol-asset", "macos-private-api", "tray-icon"] }
 once_cell = "1.17.1"
 objc = "0.2.7"
-tauri-plugin-log = { version = "2.6.0", features = ["colored"] }
 anyhow = "1.0"
 time = { version = "0.3", features = ["formatting"] }
 reqwest = { version = "0.11", features = ["multipart", "json"] }
@@ -207,7 +206,6 @@ criterion = { version = "0.5.1", features = ["async_tokio"] }
 memory-stats = "1.0"
 strsim = "0.10.0"
 futures = "0.3.31"
-tracing-subscriber = "0.3.16"
 
 [patch.crates-io]
 cpal = { git = "https://github.com/RustAudio/cpal", rev = "51c3b43" }

@@ -45,29 +45,17 @@ macro_rules! perf_debug {
 
 **Impact:** Zero logging overhead in production builds
 
-### 3. Async Logging Infrastructure ✅
-**Files Created:** `audio/async_logger.rs`
+### 3. Periodic Diagnostics ✅
+**Files Modified:** `audio/pipeline.rs`, `audio/transcription/worker.rs`
 
 **Features:**
-- Non-blocking log message buffering (1000 message capacity)
-- Background task processes logs asynchronously
-- Automatic batching and timeout-based flushing (100ms)
-- Drop messages if channel full to avoid blocking audio threads
+- Emits 60-second aggregate summaries and final snapshots at shutdown
+- Records failure counters, segment-duration statistics, and dropped-sample totals
+- Resets aggregate state after each emitted summary
 
-**Impact:** Eliminates I/O blocking by moving logging to background thread
+**Impact:** Preserves bounded operational diagnostics without retaining per-chunk results
 
-### 4. Smart Batching for Frequent Operations ✅
-**Files Created:** `audio/batch_processor.rs`
-
-**Features:**
-- Batches audio metrics instead of logging individual chunks
-- Processes every 50 chunks or 5-second timeout
-- Generates summaries: total chunks, samples, duration, average levels
-- Reduces logging frequency by 98%
-
-**Impact:** Replaces frequent individual logs with periodic summaries
-
-### 5. Recording Manager Optimization ✅
+### 4. Recording Manager Optimization ✅
 **Files Modified:** `audio/recording_manager.rs`
 
 **Changes:**
@@ -77,15 +65,8 @@ macro_rules! perf_debug {
 
 **Impact:** Reduces recording operation logging spam
 
-### 6. println! Statement Elimination ✅
-**Files Modified:** `analytics/analytics.rs`, `audio/hardware_detector.rs`
-
-**Changes:**
-- Replaced `eprintln!` with `log::warn!` in analytics
-- Converted test `println!` to `log::debug!`
-- Preserved build.rs cargo directives (not actual logging)
-
-**Impact:** Consistent structured logging, no uncontrolled output
+### 5. Raw Output Follow-up
+`analytics/analytics.rs` still uses `eprintln!` for analytics failures. These calls are not covered by the bounded local logger and require a separate safety review.
 
 ## Performance Gains Achieved
 

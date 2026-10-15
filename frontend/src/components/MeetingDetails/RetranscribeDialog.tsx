@@ -20,9 +20,11 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen, UnlistenFn } from '@tauri-apps/api/event';
 import { toast } from 'sonner';
 import { useConfig } from '@/contexts/ConfigContext';
+import { IdentifySpeakersOption, useSpeakerOptions } from '@/components/Speakers/IdentifySpeakersOption';
 import { LANGUAGES } from '@/constants/languages';
 import { useTranscriptionModels, ModelOption } from '@/hooks/useTranscriptionModels';
 import Analytics from '@/lib/analytics';
+import { formatSpeakerCount } from '@/lib/speakers';
 
 interface RetranscribeDialogProps {
   open: boolean;
@@ -44,6 +46,8 @@ interface RetranscriptionResult {
   segments_count: number;
   duration_seconds: number;
   language: string | null;
+  speaker_count?: number | null;
+  speaker_warning?: string | null;
 }
 
 interface RetranscriptionError {
@@ -63,6 +67,7 @@ export function RetranscribeDialog({
   const [progress, setProgress] = useState<RetranscriptionProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selectedLang, setSelectedLang] = useState(selectedLanguage || 'auto');
+  const speakerOptions = useSpeakerOptions();
 
   // Use centralized model fetching hook
   const {
@@ -153,9 +158,13 @@ export function RetranscribeDialog({
             });
 
             setIsProcessing(false);
-            toast.success(
-              `Retranscription complete! ${event.payload.segments_count} segments created.`
-            );
+            const { segments_count, speaker_count, speaker_warning } = event.payload;
+            if (speaker_warning) {
+              toast.warning('Transcript updated without speaker labels', { description: speaker_warning });
+            } else {
+              const speakersNote = speaker_count ? `, ${formatSpeakerCount(speaker_count)} identified` : '';
+              toast.success(`Retranscription complete! ${segments_count} segments created${speakersNote}.`);
+            }
             onCompleteRef.current?.();
             onOpenChangeRef.current(false);
           }
@@ -220,6 +229,8 @@ export function RetranscribeDialog({
         language: languageToSend,
         model: selectedModelDetails?.name || null,
         provider: selectedModelDetails?.provider || null,
+        identifySpeakers: speakerOptions.request.identify,
+        numSpeakers: speakerOptions.request.numSpeakers,
       });
     } catch (err: any) {
       setIsProcessing(false);
@@ -359,6 +370,8 @@ export function RetranscribeDialog({
               </p>
             </div>
           )}
+
+          {!isProcessing && !error && <IdentifySpeakersOption options={speakerOptions} />}
 
           {isProcessing && progress && (
             <div className="space-y-2">

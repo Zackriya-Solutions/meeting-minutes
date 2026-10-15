@@ -32,6 +32,7 @@ import {
 } from '../ui/select';
 import { toast } from 'sonner';
 import { useConfig } from '@/contexts/ConfigContext';
+import { IdentifySpeakersOption, useSpeakerOptions } from '@/components/Speakers/IdentifySpeakersOption';
 import { useImportAudio, ImportResult } from '@/hooks/useImportAudio';
 import { useRouter } from 'next/navigation';
 import { useSidebar } from '../Sidebar/SidebarProvider';
@@ -76,6 +77,7 @@ export function ImportAudioDialog({
 
   const [title, setTitle] = useState('');
   const [selectedLang, setSelectedLang] = useState(selectedLanguage || 'auto');
+  const speakerOptions = useSpeakerOptions();
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [titleModifiedByUser, setTitleModifiedByUser] = useState(false);
 
@@ -192,7 +194,8 @@ export function ImportAudioDialog({
       title || fileInfo.filename,
       isParakeetModel ? null : selectedLang === 'auto' ? null : selectedLang,
       selectedModel?.name || null,
-      selectedModel?.provider || null
+      selectedModel?.provider || null,
+      speakerOptions.request
     );
   };
 
@@ -406,6 +409,7 @@ export function ImportAudioDialog({
                   )}
                 </div>
               )}
+              {fileInfo && <IdentifySpeakersOption options={speakerOptions} />}
             </>
           )}
 

@@ -124,7 +124,7 @@ const PARAKEET_MODEL_SPECS: &[ModelSpec] = &[
         quantization: QuantizationType::Int8,
         speed: "Ultra Fast (v3)",
         description: "Real time on M4 Max, latest version with int8 quantization",
-        source_base_url: "https://meetily.towardsgeneralintelligence.com/models/parakeet-tdt-0.6b-v3-onnx",
+        source_base_url: "https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx/resolve/8f23f0c03c8761650bdb5b40aaf3e40d2c15f1ce",
         artifacts: PARAKEET_V3_ARTIFACTS,
     },
     ModelSpec {
@@ -297,7 +297,7 @@ impl ParakeetEngine {
             }
         };
 
-        log::info!("ParakeetEngine using models directory: {}", models_dir.display());
+        log::debug!("ParakeetEngine using models directory: {}", models_dir.display());
 
         // Create directory if it doesn't exist
         if !models_dir.exists() {
@@ -546,19 +546,11 @@ impl ParakeetEngine {
             .as_mut()
             .ok_or_else(|| anyhow!("No Parakeet model loaded. Please load a model first."))?;
 
-        let duration_seconds = audio_data.len() as f64 / 16000.0; // Assuming 16kHz
-        log::debug!(
-            "Parakeet transcribing {} samples ({:.1}s duration)",
-            audio_data.len(),
-            duration_seconds
-        );
 
-        // Transcribe using Parakeet model
         let result = model
             .transcribe_samples(audio_data)
             .map_err(|e| anyhow!("Parakeet transcription failed: {}", e))?;
 
-        log::debug!("Parakeet transcription result: '{}'", result.text);
 
         Ok(result.text)
     }
@@ -863,6 +855,7 @@ impl ParakeetEngine {
             .map_err(|error| anyhow!("Failed to create model directory: {}", error))?;
 
         let client = reqwest::Client::builder()
+            .user_agent(concat!("Meetily/", env!("CARGO_PKG_VERSION")))
             .tcp_nodelay(true)
             .pool_max_idle_per_host(1)
             .timeout(Duration::from_secs(3600))
@@ -1306,6 +1299,13 @@ mod tests {
             for expected in expected_responses {
                 let (mut socket, _) = listener.accept().await.expect("accept test request");
                 let request = read_request(&mut socket).await;
+                assert!(
+                    request.to_ascii_lowercase().contains(&format!(
+                        "user-agent: meetily/{}",
+                        env!("CARGO_PKG_VERSION")
+                    )),
+                    "download request is missing the Meetily user agent: {request}"
+                );
                 assert!(
                     request.starts_with(&format!("GET /{} HTTP/", expected.filename)),
                     "unexpected request path: {request}"

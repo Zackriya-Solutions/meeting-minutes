@@ -73,10 +73,20 @@ export class RecordingService {
   }
 
   /**
+   * Forget the previous recording's folder and name, so a new recording can never be saved
+   * with them (the recording-stopped event sets them again).
+   */
+  private clearLastRecordingSession(): void {
+    sessionStorage.removeItem('last_recording_folder_path');
+    sessionStorage.removeItem('last_recording_meeting_name');
+  }
+
+  /**
    * Start recording (no device configuration)
    * @returns Promise<void>
    */
   async startRecording(): Promise<void> {
+    this.clearLastRecordingSession();
     return withStartTimeout(invoke('start_recording'));
   }
 
@@ -92,6 +102,7 @@ export class RecordingService {
     systemDeviceName: string | null,
     meetingName: string
   ): Promise<void> {
+    this.clearLastRecordingSession();
     return withStartTimeout(invoke('start_recording_with_devices_and_meeting', {
       micDeviceName,
       systemDeviceName,

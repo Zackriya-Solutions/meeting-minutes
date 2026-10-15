@@ -81,7 +81,10 @@ pub async fn show_notification(
     notification: Notification,
     manager_state: State<'_, NotificationManagerState<Wry>>
 ) -> Result<(), String> {
-    log_info!("Showing custom notification: {}", notification.title);
+    log_info!(
+        "Notification requested; type={}, outcome=attempting",
+        notification.notification_type.log_label()
+    );
 
     let manager_lock = manager_state.read().await;
     if let Some(manager) = manager_lock.as_ref() {
@@ -288,16 +291,16 @@ pub async fn show_recording_started_notification<R: Runtime>(
     manager_state: &NotificationManagerState<R>,
     meeting_name: Option<String>,
 ) -> Result<()> {
-    log_info!("Attempting to show recording started notification for meeting: {:?}", meeting_name);
+    log_info!("Notification attempt; type=recording_started");
 
     // Check if manager is initialized
     let manager_lock = manager_state.read().await;
     if let Some(manager) = manager_lock.as_ref() {
-        log_info!("Notification manager found, showing recording started notification");
+        log_info!("Notification manager; type=recording_started, outcome=available");
         manager.show_recording_started(meeting_name).await
     } else {
         drop(manager_lock);
-        log_info!("Notification manager not initialized, initializing now...");
+        log_info!("Notification manager unavailable; type=recording_started, outcome=initializing");
 
         // Try to initialize the manager first
         match initialize_notification_manager(app_handle.clone()).await {
@@ -307,19 +310,19 @@ pub async fn show_recording_started_notification<R: Runtime>(
                 *state_lock = Some(manager);
                 drop(state_lock);
 
-                log_info!("Notification manager initialized, showing notification...");
+                log_info!("Notification manager; type=recording_started, outcome=initialized");
 
                 // Now use the initialized manager
                 let manager_lock = manager_state.read().await;
                 if let Some(manager) = manager_lock.as_ref() {
                     manager.show_recording_started(meeting_name).await
                 } else {
-                    log_error!("Manager still not available after initialization");
+                    log_error!("Notification unavailable; type=recording_started");
                     Ok(())
                 }
             }
-            Err(e) => {
-                log_error!("Failed to initialize notification manager: {}", e);
+            Err(_) => {
+                log_error!("Notification initialization failed; type=recording_started");
 
                 // Check settings before showing fallback notification
                 use crate::notifications::settings::ConsentManager;
@@ -327,7 +330,7 @@ pub async fn show_recording_started_notification<R: Runtime>(
                 let settings = consent_manager.load_settings().await.unwrap_or_default();
 
                 if !settings.notification_preferences.show_recording_started {
-                    log_info!("Recording started notification is disabled in settings, skipping fallback");
+                    log_info!("Notification skipped; type=recording_started, enabled=false");
                     return Ok(());
                 }
 
@@ -338,7 +341,7 @@ pub async fn show_recording_started_notification<R: Runtime>(
                     None => "Recording has started. Please inform others in the meeting that you are recording.".to_string(),
                 };
 
-                log_info!("Using direct Tauri notification fallback: {} - {}", title, body);
+                log_info!("Notification fallback; type=recording_started, outcome=attempting");
 
                 match app_handle.notification().builder()
                     .title(title)
@@ -346,12 +349,12 @@ pub async fn show_recording_started_notification<R: Runtime>(
                     .show()
                 {
                     Ok(_) => {
-                        log_info!("Successfully showed fallback notification: {}", title);
+                        log_info!("Notification fallback; type=recording_started, outcome=shown");
                         Ok(())
                     }
-                    Err(e) => {
-                        log_error!("Failed to show fallback notification: {}", e);
-                        Err(anyhow::anyhow!("Failed to show notification: {}", e))
+                    Err(_e) => {
+                        log_error!("Notification fallback; type=recording_started, outcome=failed");
+                        Err(anyhow::anyhow!("Failed to show notification: {}", _e))
                     }
                 }
             }
@@ -369,7 +372,7 @@ pub async fn show_recording_stopped_notification<R: Runtime>(
         manager.show_recording_stopped().await
     } else {
         drop(manager_lock);
-        log_info!("Notification manager not initialized for stop notification, using fallback...");
+        log_info!("Notification fallback; type=recording_stopped, outcome=manager_unavailable");
 
         // Check settings before showing fallback notification
         use crate::notifications::settings::ConsentManager;
@@ -377,7 +380,7 @@ pub async fn show_recording_stopped_notification<R: Runtime>(
         let settings = consent_manager.load_settings().await.unwrap_or_default();
 
         if !settings.notification_preferences.show_recording_stopped {
-            log_info!("Recording stopped notification is disabled in settings, skipping fallback");
+            log_info!("Notification skipped; type=recording_stopped, enabled=false");
             return Ok(());
         }
 
@@ -385,7 +388,7 @@ pub async fn show_recording_stopped_notification<R: Runtime>(
         let title = "Meetily";
         let body = "Recording has stopped";
 
-        log_info!("Using direct Tauri notification fallback: {} - {}", title, body);
+        log_info!("Notification fallback; type=recording_stopped, outcome=attempting");
 
         match app_handle.notification().builder()
             .title(title)
@@ -393,11 +396,11 @@ pub async fn show_recording_stopped_notification<R: Runtime>(
             .show()
         {
             Ok(_) => {
-                log_info!("Successfully showed fallback notification: {}", title);
+                log_info!("Notification fallback; type=recording_stopped, outcome=shown");
                 Ok(())
             }
             Err(e) => {
-                log_error!("Failed to show fallback notification: {}", e);
+                log_error!("Notification fallback; type=recording_stopped, outcome=failed");
                 Err(anyhow::anyhow!("Failed to show notification: {}", e))
             }
         }
@@ -412,7 +415,7 @@ pub async fn show_recording_paused_notification(
     if let Some(manager) = manager_lock.as_ref() {
         manager.show_recording_paused().await
     } else {
-        log_error!("Cannot show recording paused notification: manager not initialized");
+        log_error!("Notification unavailable; type=recording_paused");
         Ok(())
     }
 }
@@ -425,7 +428,7 @@ pub async fn show_recording_resumed_notification(
     if let Some(manager) = manager_lock.as_ref() {
         manager.show_recording_resumed().await
     } else {
-        log_error!("Cannot show recording resumed notification: manager not initialized");
+        log_error!("Notification unavailable; type=recording_resumed");
         Ok(())
     }
 }
@@ -439,7 +442,7 @@ pub async fn show_transcription_complete_notification(
     if let Some(manager) = manager_lock.as_ref() {
         manager.show_transcription_complete(file_path).await
     } else {
-        log_error!("Cannot show transcription complete notification: manager not initialized");
+        log_error!("Notification unavailable; type=transcription_complete");
         Ok(())
     }
 }
@@ -453,7 +456,7 @@ pub async fn show_system_error_notification(
     if let Some(manager) = manager_lock.as_ref() {
         manager.show_system_error(error).await
     } else {
-        log_error!("Cannot show system error notification: manager not initialized");
+        log_error!("Notification unavailable; type=system_error");
         Ok(())
     }
 }

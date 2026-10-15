@@ -86,12 +86,17 @@ impl<R: Runtime> NotificationManager<R> {
 
         // Check if we should show notifications
         if !self.should_show_notification(&notification).await {
-            log_info!("Skipping notification due to settings: {}", notification.title);
+            log_info!(
+                "Notification skipped; type={}, enabled=false",
+                notification.notification_type.log_label()
+            );
             return Ok(());
         }
 
-        // Log the notification attempt
-        log_info!("Showing notification: {} - {}", notification.title, notification.body);
+        log_info!(
+            "Notification showing; type={}, enabled=true",
+            notification.notification_type.log_label()
+        );
 
         // Show the notification
         self.system_handler.show_notification(notification).await
@@ -100,14 +105,17 @@ impl<R: Runtime> NotificationManager<R> {
     /// Show a recording started notification
     pub async fn show_recording_started(&self, meeting_name: Option<String>) -> Result<()> {
         let settings = self.settings.read().await;
-        log_info!("🔔 Checking notification settings - show_recording_started: {}", settings.notification_preferences.show_recording_started);
+        log_info!(
+            "Notification settings; type=recording_started, enabled={}",
+            settings.notification_preferences.show_recording_started
+        );
 
         if !settings.notification_preferences.show_recording_started {
-            log_info!("🚫 Recording started notification is disabled, skipping");
+            log_info!("Notification skipped; type=recording_started, enabled=false");
             return Ok(());
         }
 
-        log_info!("✅ Recording started notification is enabled, showing notification");
+        log_info!("Notification showing; type=recording_started, enabled=true");
         let notification = Notification::recording_started(meeting_name);
         self.show_notification(notification).await
     }

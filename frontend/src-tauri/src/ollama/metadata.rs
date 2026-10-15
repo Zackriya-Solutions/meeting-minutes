@@ -76,18 +76,16 @@ impl ModelMetadataCache {
             if let Some(entry) = cache.get(&cache_key) {
                 // Check if entry is still valid (within TTL)
                 if entry.fetched_at.elapsed() < self.ttl {
-                    tracing::debug!(
-                        "Cache hit for model {}: context_size={}",
-                        model_name,
-                        entry.metadata.context_size
-                    );
+                    log::debug!("Cache hit for model {}: context_size={}",
+                    model_name,
+                    entry.metadata.context_size);
                     return Ok(entry.metadata.clone());
                 }
             }
         }
 
         // Cache miss or expired - fetch from API
-        tracing::info!("Fetching metadata for model: {}", model_name);
+        log::info!("Fetching metadata for model: {}", model_name);
         let metadata = fetch_model_info(model_name, endpoint).await?;
 
         // Store in cache
@@ -110,7 +108,7 @@ impl ModelMetadataCache {
     pub async fn clear(&self) {
         let mut cache = self.cache.write().await;
         cache.clear();
-        tracing::info!("Model metadata cache cleared");
+        log::info!("Model metadata cache cleared");
     }
 }
 
@@ -197,11 +195,9 @@ async fn fetch_model_info(
             .iter()
             .find(|(fam, _)| family.to_lowercase().contains(fam))
         {
-            tracing::info!(
-                "No num_ctx in modelfile for {}, using family-based default: {} tokens",
-                model_name,
-                size
-            );
+            log::info!("No num_ctx in modelfile for {}, using family-based default: {} tokens",
+            model_name,
+            size);
             context_size = *size;
         }
     }
@@ -238,7 +234,7 @@ fn extract_context_from_model_info(
     for key in possible_keys {
         if let Some(value) = model_info.get(&key) {
             if let Some(ctx) = value.as_u64() {
-                tracing::info!("Found context size in model_info[{}]: {} tokens", key, ctx);
+                log::info!("Found context size in model_info[{}]: {} tokens", key, ctx);
                 return ctx as usize;
             }
         }
@@ -264,10 +260,8 @@ fn parse_num_ctx_from_modelfile(modelfile: &str) -> usize {
         .and_then(|caps| caps.get(1))
         .and_then(|m| m.as_str().parse::<usize>().ok())
         .unwrap_or_else(|| {
-            tracing::debug!(
-                "num_ctx not found in modelfile, using default {}",
-                ULTIMATE_FALLBACK
-            );
+            log::debug!("num_ctx not found in modelfile, using default {}",
+            ULTIMATE_FALLBACK);
             ULTIMATE_FALLBACK
         })
 }
@@ -297,11 +291,9 @@ fn get_fallback_metadata(model_name: &str) -> ModelMetadata {
         .unwrap_or("unknown")
         .to_string();
 
-    tracing::warn!(
-        "Using fallback metadata for {}: context_size={}",
-        model_name,
-        context_size
-    );
+    log::warn!("Using fallback metadata for {}: context_size={}",
+    model_name,
+    context_size);
 
     ModelMetadata {
         name: model_name.to_string(),

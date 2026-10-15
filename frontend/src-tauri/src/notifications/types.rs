@@ -25,6 +25,22 @@ pub enum NotificationType {
     Test, // For testing notifications
 }
 
+impl NotificationType {
+    pub fn log_label(&self) -> &'static str {
+        match self {
+            Self::RecordingStarted => "recording_started",
+            Self::RecordingStopped => "recording_stopped",
+            Self::RecordingPaused => "recording_paused",
+            Self::RecordingResumed => "recording_resumed",
+            Self::TranscriptionComplete => "transcription_complete",
+            Self::MeetingReminder(_) => "meeting_reminder",
+            Self::SystemError(_) => "system_error",
+            Self::Test => "test",
+        }
+    }
+}
+
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum NotificationPriority {
     Low,
@@ -195,5 +211,18 @@ impl Notification {
         )
         .with_priority(NotificationPriority::Normal)
         .with_timeout(NotificationTimeout::Seconds(5))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::NotificationType;
+
+    #[test]
+    fn system_error_log_label_omits_payload() {
+        assert_eq!(
+            NotificationType::SystemError("SYSTEM_ERROR_SECRET".into()).log_label(),
+            "system_error"
+        );
     }
 }

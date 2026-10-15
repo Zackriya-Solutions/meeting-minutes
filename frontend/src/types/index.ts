@@ -16,6 +16,7 @@ export interface Transcript {
   audio_start_time?: number; // Seconds from recording start (e.g., 125.3)
   audio_end_time?: number;   // Seconds from recording start (e.g., 128.6)
   duration?: number;          // Segment duration in seconds (e.g., 3.3)
+  speaker?: string | null;
 }
 
 export interface TranscriptUpdate {
@@ -141,4 +142,92 @@ export interface TranscriptSegmentData {
   endTime?: number; // audio_end_time in seconds
   text: string;
   confidence?: number;
+  speaker?: string | null;
+}
+
+export type NameSource = 'user' | 'voice' | 'conversation';
+export type SuggestionSource = 'voice' | 'conversation';
+
+export interface MeetingSpeaker {
+  speaker_key: string;
+  display_name: string | null;
+  speech_seconds: number;
+  /** Transcript rows currently labelled with this speaker */
+  row_count: number;
+  /** Seconds covered by those rows */
+  row_seconds: number;
+  /** The person this speaker is linked to */
+  person_id: string | null;
+  /** Who set display_name: typed or confirmed by the user, matched by voice, or found in the
+   *  conversation. Null for names set before people existed (treated as typed). */
+  name_source: NameSource | null;
+  suggested_person_id: string | null;
+  suggested_name: string | null;
+  suggestion_source: SuggestionSource | null;
+  /** Why the name is suggested, e.g. "voice match 0.68" or "addressed as Noah at 01:12" */
+  suggestion_reason: string | null;
+  /** Up to 8 s from the start of the speaker's longest single-speaker row; null without one */
+  sample_start_s: number | null;
+  sample_end_s: number | null;
+}
+
+export interface SpeakerJobStatus {
+  meeting_id: string;
+  /** Which job: identifying speakers, or finding names in the conversation */
+  kind: 'identify' | 'naming';
+  state: 'queued' | 'running';
+  /** 'audio' | 'waiting' | 'download' | 'segmentation' | 'embeddings' | 'clustering' | 'splitting' | 'saving' | 'naming' | 'done'; null while queued */
+  stage: string | null;
+  percent: number;
+  message: string;
+}
+
+/** A person whose voice is remembered across meetings (Settings → Speakers). */
+export interface Person {
+  id: string;
+  name: string;
+  meeting_count: number;
+  /** Creation time of the newest meeting the person is linked in */
+  last_seen: string | null;
+}
+
+/** A speaker of another meeting that was named by voice after a name was typed or confirmed. */
+export interface PropagatedLink {
+  meeting_id: string;
+  speaker_key: string;
+  person_id: string;
+}
+
+export interface NameOutcome {
+  propagated: PropagatedLink[];
+}
+
+/** Payload of `diarization-complete`, for both job kinds. */
+export interface SpeakerJobComplete {
+  meeting_id: string;
+  kind: 'identify' | 'naming';
+  speaker_count: number;
+  automatic: boolean;
+  warning?: string | null;
+  /** Naming: speakers given an auto name */
+  named: number;
+  /** Naming: speakers given a suggestion */
+  suggested: number;
+}
+
+export interface DiarizationModelsStatus {
+  installed: boolean;
+  total_bytes: number;
+  downloaded_bytes: number;
+  directory: string;
+}
+
+/** How to play a meeting's recording (`api_prepare_meeting_playback`). */
+export interface PlaybackSource {
+  /** The audio file; played over the asset protocol. */
+  path: string;
+  /** Length in seconds of container time, which is the recording clock. */
+  duration_s: number;
+  /** (clock_s, file_s) points; the identity for every recording today. */
+  time_table: [number, number][];
 }

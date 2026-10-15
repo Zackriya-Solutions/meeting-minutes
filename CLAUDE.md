@@ -343,7 +343,7 @@ $env:RUST_LOG="debug"; ./clean_run_windows.bat
 
 ### Audio Processing
 - Use `perf_debug!()` / `perf_trace!()` for hot-path logging (zero cost in release)
-- Batch audio metrics using `AudioMetricsBatcher` (pipeline.rs)
+- Use 60-second aggregated pipeline and worker summaries; avoid per-chunk logs
 - Pre-allocate buffers with `AudioBufferPool` (buffer_pool.rs)
 - VAD filtering reduces Whisper load by ~70% (only processes speech)
 
