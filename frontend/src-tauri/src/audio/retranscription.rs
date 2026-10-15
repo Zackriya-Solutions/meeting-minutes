@@ -103,6 +103,7 @@ async fn start_retranscription<R: Runtime>(
     model: Option<String>,
     provider: Option<String>,
     speakers: super::common::SpeakerOptions,
+    cleanup: bool,
     _guard: RetranscriptionGuard,
 ) -> Result<RetranscriptionResult> {
     // Reset cancellation flag
@@ -124,6 +125,19 @@ async fn start_retranscription<R: Runtime>(
     // Guard will automatically clear flag on drop
     // No need for manual: RETRANSCRIPTION_IN_PROGRESS.store(false, Ordering::SeqCst);
 
+    let cleanup_error = if cleanup && result.is_ok() {
+        emit_progress(&app, &meeting_id, "cleanup", 95, "Cleaning up the transcript...");
+        match crate::summary::cleanup::cleanup_meeting(&app, &meeting_id, Some(true)).await {
+            Ok(_) => None,
+            Err(error) => {
+                warn!("Transcript cleanup after retranscription failed: {}", error);
+                Some(error)
+            }
+        }
+    } else {
+        None
+    };
+
     match &result {
         Ok(res) => {
             let _ = app.emit(
@@ -134,7 +148,8 @@ async fn start_retranscription<R: Runtime>(
                     "duration_seconds": res.duration_seconds,
                     "language": res.language,
                     "speaker_count": res.speaker_count,
-                    "speaker_warning": res.speaker_warning
+                    "speaker_warning": res.speaker_warning,
+                    "cleanup_error": cleanup_error
                 }),
             );
         }
@@ -859,6 +874,7 @@ pub async fn start_retranscription_command<R: Runtime>(
     provider: Option<String>,
     identify_speakers: Option<bool>,
     num_speakers: Option<u32>,
+    cleanup: Option<bool>,
 ) -> Result<RetranscriptionStarted, String> {
     // Take the in-progress guard first and before spawning, so two quick requests cannot both
     // start and a rejected request never touches the running one's meeting claim.
@@ -880,6 +896,7 @@ pub async fn start_retranscription_command<R: Runtime>(
             model,
             provider,
             super::common::SpeakerOptions::from_command(identify_speakers, num_speakers),
+            cleanup.unwrap_or(false),
             guard,
         )
         .await;

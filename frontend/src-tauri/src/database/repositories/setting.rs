@@ -345,4 +345,53 @@ impl SettingsRepository {
 
         Ok(())
     }
+
+    /// Cleanup settings. Missing row or columns yield the off default.
+    pub async fn get_cleanup_config(
+        pool: &SqlitePool,
+    ) -> std::result::Result<crate::summary::cleanup::CleanupConfig, sqlx::Error> {
+        let row = sqlx::query_as::<_, crate::summary::cleanup::CleanupConfigRow>(
+            r#"
+            SELECT cleanupEnabled, cleanupProvider, cleanupModel, cleanupOllamaEndpoint, cleanupPrompt
+            FROM settings
+            WHERE id = '1'
+            LIMIT 1
+            "#,
+        )
+        .fetch_optional(pool)
+        .await?;
+
+        Ok(row.map(crate::summary::cleanup::CleanupConfig::from).unwrap_or_default())
+    }
+
+    /// Writes cleanup columns only. An existing summary provider and model are left as they are.
+    pub async fn save_cleanup_config(
+        pool: &SqlitePool,
+        config: &crate::summary::cleanup::CleanupConfig,
+    ) -> std::result::Result<(), sqlx::Error> {
+        sqlx::query(
+            r#"
+            INSERT INTO settings (
+                id, provider, model, whisperModel,
+                cleanupEnabled, cleanupProvider, cleanupModel, cleanupOllamaEndpoint, cleanupPrompt
+            )
+            VALUES ('1', 'builtin-ai', 'qwen3.5:2b', 'large-v3', $1, $2, $3, $4, $5)
+            ON CONFLICT(id) DO UPDATE SET
+                cleanupEnabled = excluded.cleanupEnabled,
+                cleanupProvider = excluded.cleanupProvider,
+                cleanupModel = excluded.cleanupModel,
+                cleanupOllamaEndpoint = excluded.cleanupOllamaEndpoint,
+                cleanupPrompt = excluded.cleanupPrompt
+            "#,
+        )
+        .bind(config.enabled)
+        .bind(&config.provider)
+        .bind(&config.model)
+        .bind(&config.ollama_endpoint)
+        .bind(&config.prompt)
+        .execute(pool)
+        .await?;
+
+        Ok(())
+    }
 }

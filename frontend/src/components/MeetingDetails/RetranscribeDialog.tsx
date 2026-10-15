@@ -9,6 +9,7 @@ import {
   DialogTitle,
 } from '../ui/dialog';
 import { Button } from '../ui/button';
+import { Switch } from '../ui/switch';
 import {
   Select,
   SelectContent,
@@ -48,6 +49,7 @@ interface RetranscriptionResult {
   language: string | null;
   speaker_count?: number | null;
   speaker_warning?: string | null;
+  cleanup_error?: string | null;
 }
 
 interface RetranscriptionError {
@@ -67,6 +69,7 @@ export function RetranscribeDialog({
   const [progress, setProgress] = useState<RetranscriptionProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selectedLang, setSelectedLang] = useState(selectedLanguage || 'auto');
+  const [cleanupEnabled, setCleanupEnabled] = useState(false);
   const speakerOptions = useSpeakerOptions();
 
   // Use centralized model fetching hook
@@ -117,6 +120,9 @@ export function RetranscribeDialog({
       setProgress(null);
       setError(null);
       setSelectedLang(selectedLanguage || 'auto');
+      invoke<{ enabled: boolean }>('api_get_cleanup_config')
+        .then(saved => setCleanupEnabled(Boolean(saved.enabled)))
+        .catch(error => console.error('Failed to load transcript cleanup setting:', error));
 
       // Fetch available models using centralized hook
       fetchModels();
@@ -158,12 +164,15 @@ export function RetranscribeDialog({
             });
 
             setIsProcessing(false);
-            const { segments_count, speaker_count, speaker_warning } = event.payload;
+            const { segments_count, speaker_count, speaker_warning, cleanup_error } = event.payload;
             if (speaker_warning) {
               toast.warning('Transcript updated without speaker labels', { description: speaker_warning });
             } else {
               const speakersNote = speaker_count ? `, ${formatSpeakerCount(speaker_count)} identified` : '';
               toast.success(`Retranscription complete! ${segments_count} segments created${speakersNote}.`);
+            }
+            if (cleanup_error) {
+              toast.error('Transcript cleanup failed', { description: cleanup_error });
             }
             onCompleteRef.current?.();
             onOpenChangeRef.current(false);
@@ -231,6 +240,7 @@ export function RetranscribeDialog({
         provider: selectedModelDetails?.provider || null,
         identifySpeakers: speakerOptions.request.identify,
         numSpeakers: speakerOptions.request.numSpeakers,
+        cleanup: cleanupEnabled,
       });
     } catch (err: any) {
       setIsProcessing(false);
@@ -372,6 +382,20 @@ export function RetranscribeDialog({
           )}
 
           {!isProcessing && !error && <IdentifySpeakersOption options={speakerOptions} />}
+
+          {!isProcessing && !error && (
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <div className="text-sm font-medium">Clean up transcript</div>
+                <div className="text-xs text-gray-500">Correct names and terms after this retranscription</div>
+              </div>
+              <Switch
+                checked={cleanupEnabled}
+                onCheckedChange={setCleanupEnabled}
+                aria-label="Clean up transcript after retranscription"
+              />
+            </div>
+          )}
 
           {isProcessing && progress && (
             <div className="space-y-2">

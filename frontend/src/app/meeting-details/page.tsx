@@ -6,6 +6,7 @@ import PageContent from "./page-content";
 import { useRouter, useSearchParams } from "next/navigation";
 import Analytics from "@/lib/analytics";
 import { invoke } from "@tauri-apps/api/core";
+import { toast } from "sonner";
 import { LoaderIcon } from "lucide-react";
 import { useConfig } from "@/contexts/ConfigContext";
 import { usePaginatedTranscripts } from "@/hooks/usePaginatedTranscripts";
@@ -75,6 +76,22 @@ function MeetingDetailsContent() {
       return;
     }
 
+    // Claim the check before cleanup reloads transcripts, so that reload cannot start a second pass.
+    setHasCheckedAutoGen(true);
+
+    if (meetingId) {
+      try {
+        const cleanup = await invoke<{ enabled: boolean }>('api_get_cleanup_config');
+        if (cleanup.enabled) {
+          await invoke('api_cleanup_meeting_transcript', { meetingId });
+          await refetch();
+        }
+      } catch (error) {
+        console.error('Transcript cleanup failed:', error);
+        toast.error('Transcript cleanup failed', { description: String(error) });
+      }
+    }
+
     // Respect user's auto-summary toggle preference
     if (!isAutoSummary) {
       console.log('Auto-summary is disabled in settings');
@@ -117,7 +134,7 @@ function MeetingDetailsContent() {
     }
 
     setHasCheckedAutoGen(true);
-  }, [hasCheckedAutoGen, checkForGemmaModel, source, isAutoSummary]);
+  }, [hasCheckedAutoGen, checkForGemmaModel, source, isAutoSummary, meetingId, refetch]);
 
   // Sync meeting metadata from pagination hook to meeting details state
   useEffect(() => {

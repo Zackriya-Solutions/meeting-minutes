@@ -900,6 +900,9 @@ pub fn run() {
             summary::context_commands::api_save_meeting_summary_context,
             summary::context_commands::api_get_global_summary_context,
             summary::context_commands::api_save_global_summary_context,
+            summary::cleanup::api_get_cleanup_config,
+            summary::cleanup::api_save_cleanup_config,
+            summary::cleanup::api_cleanup_meeting_transcript,
             // Built-in AI commands
             summary::summary_engine::commands::builtin_ai_list_models,
             summary::summary_engine::commands::builtin_ai_get_model_info,
