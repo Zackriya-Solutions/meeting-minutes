@@ -36,7 +36,8 @@ pub struct Transcript {
     pub audio_end_time: Option<f64>,
     pub duration: Option<f64>,
     /// Audio source of the segment, per migration 20251110000001
-    /// ("Mic-In" / "Speaker-Out"); NULL for mixed-audio segments.
+    /// ("Mic-In" / "Speaker-Out", numbered when diarized: "Speaker-Out 2", see
+    /// deepgram::segment_label); NULL for mixed-audio segments.
     pub speaker: Option<String>,
 }
 

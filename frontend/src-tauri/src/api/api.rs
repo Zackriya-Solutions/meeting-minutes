@@ -137,7 +137,8 @@ pub struct MeetingTranscript {
     pub audio_end_time: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub duration: Option<f64>,
-    /// Audio source ("Mic-In" / "Speaker-Out"); None for a mixed-audio segment.
+    /// Speaker label from deepgram::segment_label ("Mic-In", "Speaker-Out", or
+    /// numbered when diarized: "Speaker-Out 2"); None for a mixed-audio segment.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub speaker: Option<String>,
 }
@@ -191,7 +192,8 @@ pub struct TranscriptSegment {
     pub audio_end_time: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub duration: Option<f64>,
-    /// Audio source ("Mic-In" / "Speaker-Out"); None for a mixed-audio segment.
+    /// Speaker label from deepgram::segment_label ("Mic-In", "Speaker-Out", or
+    /// numbered when diarized: "Speaker-Out 2"); None for a mixed-audio segment.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub speaker: Option<String>,
 }
@@ -727,14 +729,18 @@ pub async fn api_get_deepgram_options<R: Runtime>(
 ) -> Result<serde_json::Value, String> {
     let pool = state.db_manager.pool();
     match SettingsRepository::get_deepgram_options(pool).await {
-        Ok(opts) => Ok(serde_json::json!({
-            "keyterm": opts.keyterm.unwrap_or_default(),
-            "diarize": opts.diarize.map(|d| d != 0).unwrap_or(false),
-            // Privacy-first default: opt OUT of Deepgram's model-improvement program when unset.
-            "mipOptOut": opts.mip_opt_out.map(|m| m != 0).unwrap_or(true),
-            // Deepgram-specific language; empty string means "use nova-3 default (multi)".
-            "language": opts.language.unwrap_or_default(),
-        })),
+        Ok(opts) => {
+            // Unset columns fall back to the one set of defaults the
+            // transcriber itself uses (diarize off, MIP opt-out on).
+            let defaults = crate::audio::deepgram::DeepgramOptions::default();
+            Ok(serde_json::json!({
+                "keyterm": opts.keyterm.unwrap_or_default(),
+                "diarize": opts.diarize.map(|d| d != 0).unwrap_or(defaults.diarize),
+                "mipOptOut": opts.mip_opt_out.map(|m| m != 0).unwrap_or(defaults.mip_opt_out),
+                // Deepgram-specific language; empty string means "use nova-3 default (multi)".
+                "language": opts.language.unwrap_or_default(),
+            }))
+        }
         Err(e) => {
             log_error!("Failed to get Deepgram options: {}", e);
             Err(e.to_string())

@@ -137,6 +137,9 @@ pub struct Utterance {
     pub end: f64,
     #[serde(default)]
     pub transcript: String,
+    /// Diarization speaker id (0-based), present only when diarization is on.
+    #[serde(default)]
+    pub speaker: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -173,6 +176,25 @@ pub struct DeepgramTranscript {
     pub utterances: Vec<Utterance>,
     pub words: Vec<DeepgramWord>,
     pub duration_seconds: Option<f64>,
+}
+
+impl From<PrerecordedResponse> for DeepgramTranscript {
+    fn from(payload: PrerecordedResponse) -> Self {
+        let (text, words) = payload
+            .results
+            .channels
+            .into_iter()
+            .next()
+            .and_then(|channel| channel.alternatives.into_iter().next())
+            .map(|alt| (alt.transcript, alt.words))
+            .unwrap_or_default();
+        DeepgramTranscript {
+            text,
+            utterances: payload.results.utterances,
+            words,
+            duration_seconds: payload.metadata.and_then(|m| m.duration),
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -235,18 +257,30 @@ struct FinalSeg {
     start_ms: f64,
     end_ms: f64,
     confidence: f32,
-    /// Deepgram's 0-based diarization speaker id; None unless diarization is on.
-    diarized_speaker: Option<i64>,
+    /// Diarized speaker runs within this final; empty unless diarization is on.
+    /// The final stays whole until emit so bleed suppression compares complete
+    /// Mic-In and Speaker-Out text (split pieces fall below its overlap rules).
+    turns: Vec<SpeakerTurn>,
+}
+
+/// One run of same-speaker words in a diarized final.
+#[derive(Debug, Clone, PartialEq)]
+struct SpeakerTurn {
+    text: String,
+    start_ms: f64,
+    end_ms: f64,
+    confidence: f32,
+    /// Deepgram's 0-based diarization speaker id.
+    speaker: i64,
 }
 
 /// A final nova `Results` message: which channel it covers, how far that
-/// channel is now finalized (stream ms), and its segments. Empty finals still
-/// matter: they advance the channel's watermark. More than one segment only
-/// when diarization split the final between speakers.
+/// channel is now finalized (stream ms), and its segment if it had words.
+/// Empty finals still matter: they advance the channel's watermark.
 struct NovaFinal {
     channel_index: Option<(usize, usize)>,
     finalized_through_ms: f64,
-    segs: Vec<FinalSeg>,
+    seg: Option<FinalSeg>,
 }
 
 /// Reduce a nova message to a final (None for interim and non-Results).
@@ -257,55 +291,61 @@ fn nova_final(m: RealtimeMessage) -> Option<NovaFinal> {
     let channel_index = parse_channel_index(&m.channel_index);
     let start_ms = m.start * 1000.0;
     let end_ms = (m.start + m.duration) * 1000.0;
-    let segs = m
+    let seg = m
         .channel
         .and_then(|c| c.alternatives.into_iter().next())
-        .map(|alternative| {
+        .and_then(|alternative| {
             let transcript = alternative.transcript.trim();
             if transcript.is_empty() {
-                return Vec::new();
-            }
-            if alternative.words.iter().any(|w| w.speaker.is_some()) {
-                return split_by_diarized_speaker(&alternative.words);
+                return None;
             }
             let confidence = alternative.confidence.unwrap_or_else(|| {
                 average_confidence(alternative.words.iter().filter_map(|w| w.confidence))
             });
-            vec![FinalSeg {
+            Some(FinalSeg {
                 transcript: transcript.to_string(),
                 start_ms,
                 end_ms,
                 confidence,
-                diarized_speaker: None,
-            }]
-        })
-        .unwrap_or_default();
-    Some(NovaFinal { channel_index, finalized_through_ms: end_ms, segs })
+                turns: diarized_turns(&alternative.words),
+            })
+        });
+    Some(NovaFinal { channel_index, finalized_through_ms: end_ms, seg })
 }
 
-/// One segment per run of same-speaker words in a diarized final. Word times
-/// are stream-relative seconds, like the final's own `start`.
-fn split_by_diarized_speaker(words: &[DeepgramWord]) -> Vec<FinalSeg> {
-    let mut segs: Vec<FinalSeg> = Vec::new();
+/// A word's display text: the punctuated form unless it is missing or empty.
+fn word_display(w: &DeepgramWord) -> &str {
+    w.punctuated_word.as_deref().filter(|p| !p.is_empty()).unwrap_or(&w.word)
+}
+
+/// Runs of same-speaker words, in stream ms. Empty when no word carries a
+/// speaker id (diarization off). A word missing its id stays with the current
+/// run rather than splitting a line into an unnumbered fragment.
+fn diarized_turns(words: &[DeepgramWord]) -> Vec<SpeakerTurn> {
+    let mut turns: Vec<SpeakerTurn> = Vec::new();
     let mut confidences: Vec<Vec<f32>> = Vec::new();
+    let Some(mut speaker) = words.iter().find_map(|w| w.speaker) else {
+        return turns;
+    };
     for w in words {
-        let display = w.punctuated_word.as_deref().unwrap_or(&w.word);
+        let display = word_display(w);
         if display.is_empty() {
             continue;
         }
-        match segs.last_mut() {
-            Some(last) if last.diarized_speaker == w.speaker => {
-                last.transcript.push(' ');
-                last.transcript.push_str(display);
+        speaker = w.speaker.unwrap_or(speaker);
+        match turns.last_mut() {
+            Some(last) if last.speaker == speaker => {
+                last.text.push(' ');
+                last.text.push_str(display);
                 last.end_ms = (w.end * 1000.0).max(last.end_ms);
             }
             _ => {
-                segs.push(FinalSeg {
-                    transcript: display.to_string(),
+                turns.push(SpeakerTurn {
+                    text: display.to_string(),
                     start_ms: w.start * 1000.0,
                     end_ms: (w.end * 1000.0).max(w.start * 1000.0),
                     confidence: 0.0,
-                    diarized_speaker: w.speaker,
+                    speaker,
                 });
                 confidences.push(Vec::new());
             }
@@ -314,17 +354,17 @@ fn split_by_diarized_speaker(words: &[DeepgramWord]) -> Vec<FinalSeg> {
             list.push(c);
         }
     }
-    for (seg, list) in segs.iter_mut().zip(confidences) {
-        seg.confidence = average_confidence(list.into_iter());
+    for (turn, list) in turns.iter_mut().zip(confidences) {
+        turn.confidence = average_confidence(list.into_iter());
     }
-    segs
+    turns
 }
 
-/// Reduce a nova `Results` message to its first finalized segment (None for
-/// interim/other). Test shorthand: the realtime reader uses `nova_final`.
+/// Reduce a nova `Results` message to a finalized segment (None for interim/other).
+/// Test shorthand: the realtime reader uses `nova_final` for the progress too.
 #[cfg(test)]
 fn nova_result_to_final(m: RealtimeMessage) -> Option<FinalSeg> {
-    nova_final(m)?.segs.into_iter().next()
+    nova_final(m)?.seg
 }
 
 /// Reduce a Flux `TurnInfo` to a finalized segment (only on `EndOfTurn`).
@@ -342,7 +382,7 @@ fn flux_turn_to_final(m: &FluxTurnInfo) -> Option<FinalSeg> {
         end_ms: m.audio_window_end * 1000.0,
         confidence: average_confidence(m.words.iter().filter_map(|w| w.confidence)),
         // Flux has no diarization.
-        diarized_speaker: None,
+        turns: Vec::new(),
     })
 }
 
@@ -423,21 +463,7 @@ impl DeepgramClient {
             .await
             .context("Failed to parse Deepgram prerecorded response")?;
 
-        let (text, words) = payload
-            .results
-            .channels
-            .into_iter()
-            .next()
-            .and_then(|channel| channel.alternatives.into_iter().next())
-            .map(|alt| (alt.transcript, alt.words))
-            .unwrap_or_default();
-
-        Ok(DeepgramTranscript {
-            text,
-            utterances: payload.results.utterances,
-            words,
-            duration_seconds: payload.metadata.and_then(|m| m.duration),
-        })
+        Ok(DeepgramTranscript::from(payload))
     }
 
     /// Query parameters for the prerecorded endpoint. `smart_format` and
@@ -564,14 +590,13 @@ pub fn transcript_to_segments(
     fallback_duration_seconds: f64,
 ) -> Vec<TranscriptSegment> {
     if !transcript.utterances.is_empty() {
-        let tuples = utterances_to_tuples(&transcript.utterances);
-        let segments = super::common::create_transcript_segments(&tuples);
+        let segments = labeled_segments(utterances_to_tuples(&transcript.utterances));
         if !segments.is_empty() {
             return segments;
         }
     }
 
-    let mut segments = super::common::create_transcript_segments(&words_to_tuples(&transcript.words));
+    let mut segments = labeled_segments(words_to_tuples(&transcript.words));
     if segments.is_empty() && !transcript.text.trim().is_empty() {
         // Prefer Deepgram's own reported duration; fall back to the caller's.
         let total_duration = transcript.duration_seconds.unwrap_or(fallback_duration_seconds);
@@ -589,7 +614,27 @@ pub fn transcript_to_segments(
     segments
 }
 
-fn utterances_to_tuples(utterances: &[Utterance]) -> Vec<(String, f64, f64)> {
+/// (text, start_ms, end_ms, diarized speaker id) for one prerecorded segment.
+type SpeakerTuple = (String, f64, f64, Option<i64>);
+
+/// Segments for prerecorded output. The recording file is one mixed signal,
+/// so there is no Mic-In / Speaker-Out channel; a diarized speaker is still
+/// kept, as "Speaker N" (the same `segment_label` realtime uses).
+fn labeled_segments(tuples: Vec<SpeakerTuple>) -> Vec<TranscriptSegment> {
+    let (plain, speakers): (Vec<(String, f64, f64)>, Vec<Option<i64>>) =
+        tuples.into_iter().map(|(t, s, e, spk)| ((t, s, e), spk)).unzip();
+    // create_transcript_segments maps its input 1:1, so the zip lines up.
+    super::common::create_transcript_segments(&plain)
+        .into_iter()
+        .zip(speakers)
+        .map(|(mut seg, spk)| {
+            seg.speaker = segment_label(None, spk);
+            seg
+        })
+        .collect()
+}
+
+fn utterances_to_tuples(utterances: &[Utterance]) -> Vec<SpeakerTuple> {
     let mut tuples = Vec::new();
     for utterance in utterances {
         push_tuple(
@@ -597,6 +642,7 @@ fn utterances_to_tuples(utterances: &[Utterance]) -> Vec<(String, f64, f64)> {
             utterance.transcript.clone(),
             utterance.start * 1000.0,
             utterance.end * 1000.0,
+            utterance.speaker,
         );
     }
     tuples
@@ -604,7 +650,7 @@ fn utterances_to_tuples(utterances: &[Utterance]) -> Vec<(String, f64, f64)> {
 
 /// Group word-level output into segments on speaker change, long pause, or a
 /// long sentence-terminated run, so transcript rows stay a readable size.
-fn words_to_tuples(words: &[DeepgramWord]) -> Vec<(String, f64, f64)> {
+fn words_to_tuples(words: &[DeepgramWord]) -> Vec<SpeakerTuple> {
     let mut segments = Vec::new();
     let mut current_text = String::new();
     let mut current_start_ms = 0.0;
@@ -612,7 +658,7 @@ fn words_to_tuples(words: &[DeepgramWord]) -> Vec<(String, f64, f64)> {
     let mut current_speaker: Option<i64> = None;
 
     for word in words {
-        let display = word.punctuated_word.as_deref().unwrap_or(&word.word);
+        let display = word_display(word);
         if display.is_empty() {
             continue;
         }
@@ -630,6 +676,7 @@ fn words_to_tuples(words: &[DeepgramWord]) -> Vec<(String, f64, f64)> {
                 std::mem::take(&mut current_text),
                 current_start_ms,
                 current_end_ms,
+                current_speaker,
             );
             current_speaker = None;
         }
@@ -645,7 +692,7 @@ fn words_to_tuples(words: &[DeepgramWord]) -> Vec<(String, f64, f64)> {
         current_end_ms = word_end_ms;
     }
 
-    push_tuple(&mut segments, current_text, current_start_ms, current_end_ms);
+    push_tuple(&mut segments, current_text, current_start_ms, current_end_ms, current_speaker);
     segments
 }
 
@@ -834,8 +881,9 @@ struct LabeledSegment {
     end_ms: f64,
     confidence: f32,
     speaker: Option<&'static str>,
-    /// Deepgram diarization id within this channel, when diarization is on.
-    diarized_speaker: Option<i64>,
+    /// Diarized runs (recording-relative ms); empty unless diarization is on.
+    /// Bleed suppression ignores these and compares the whole segment.
+    turns: Vec<SpeakerTurn>,
 }
 
 fn word_tokens(text: &str) -> std::collections::HashSet<String> {
@@ -1181,7 +1229,7 @@ where
 
                 // Reduce per protocol to (global channel, finalized-through ms,
                 // optional final). Both report `type:"Error"` on failure.
-                let (channel, finalized_through_ms, final_segs) = if flux {
+                let (channel, finalized_through_ms, final_seg) = if flux {
                     let m = match serde_json::from_str::<FluxTurnInfo>(&text) {
                         Ok(m) => m,
                         Err(e) => {
@@ -1198,7 +1246,7 @@ where
                         continue;
                     }
                     let through = flux_progress.observe(&m);
-                    (resolve_channel(lane, None), through, flux_turn_to_final(&m).into_iter().collect::<Vec<_>>())
+                    (resolve_channel(lane, None), through, flux_turn_to_final(&m))
                 } else {
                     let m = match serde_json::from_str::<RealtimeMessage>(&text) {
                         Ok(m) => m,
@@ -1220,20 +1268,31 @@ where
                             lane.channels, fin.channel_index
                         );
                     }
-                    (channel, fin.finalized_through_ms, fin.segs)
+                    (channel, fin.finalized_through_ms, fin.seg)
                 };
 
                 let entries = reader_time_map.lock().await.clone();
-                for seg in final_segs {
-                    let start_ms = map_stream_ms_to_original(&entries, seg.start_ms);
-                    let end_ms = map_stream_ms_to_original(&entries, seg.end_ms).max(start_ms);
+                if let Some(seg) = final_seg {
+                    let to_original = |stream_start: f64, stream_end: f64| {
+                        let start = map_stream_ms_to_original(&entries, stream_start);
+                        (start, map_stream_ms_to_original(&entries, stream_end).max(start))
+                    };
+                    let (start_ms, end_ms) = to_original(seg.start_ms, seg.end_ms);
+                    let turns = seg
+                        .turns
+                        .into_iter()
+                        .map(|t| {
+                            let (start_ms, end_ms) = to_original(t.start_ms, t.end_ms);
+                            SpeakerTurn { start_ms, end_ms, ..t }
+                        })
+                        .collect();
                     let _ = reader_events.send(LaneEvent::Final(LabeledSegment {
                         text: seg.transcript,
                         start_ms,
                         end_ms,
                         confidence: seg.confidence,
                         speaker: channel.and_then(|c| channel_label(layout, c)),
-                        diarized_speaker: seg.diarized_speaker,
+                        turns,
                     }));
                 }
                 if layout == AudioLayout::MicSystemStereo && channel == Some(SPEAKER_OUT_CHANNEL) {
@@ -1400,15 +1459,45 @@ where
 
 fn emit_labeled_segment<R: Runtime>(app: &AppHandle<R>, seg: LabeledSegment) {
     emit_speech_detected(app);
-    emit_transcript_update(
-        app,
-        seg.text,
-        seg.start_ms,
-        seg.end_ms,
-        seg.confidence,
-        false,
-        segment_label(seg.speaker, seg.diarized_speaker),
-    );
+    for line in transcript_lines(seg) {
+        emit_transcript_update(app, line.text, line.start_ms, line.end_ms, line.confidence, false, line.speaker);
+    }
+}
+
+/// One stored transcript row.
+#[derive(Debug, PartialEq)]
+struct TranscriptLine {
+    text: String,
+    start_ms: f64,
+    end_ms: f64,
+    confidence: f32,
+    speaker: Option<String>,
+}
+
+/// Rows for one finalized segment: one per diarized speaker run when the
+/// final holds several voices, otherwise the whole segment (numbered when
+/// diarization identified its single speaker).
+fn transcript_lines(seg: LabeledSegment) -> Vec<TranscriptLine> {
+    if seg.turns.len() > 1 {
+        return seg
+            .turns
+            .into_iter()
+            .map(|t| TranscriptLine {
+                text: t.text,
+                start_ms: t.start_ms,
+                end_ms: t.end_ms,
+                confidence: t.confidence,
+                speaker: segment_label(seg.speaker, Some(t.speaker)),
+            })
+            .collect();
+    }
+    vec![TranscriptLine {
+        speaker: segment_label(seg.speaker, seg.turns.first().map(|t| t.speaker)),
+        text: seg.text,
+        start_ms: seg.start_ms,
+        end_ms: seg.end_ms,
+        confidence: seg.confidence,
+    }]
 }
 
 /// The stored/displayed speaker for a segment. The channel label says which
@@ -1669,12 +1758,12 @@ where
     }
 }
 
-fn push_tuple(segments: &mut Vec<(String, f64, f64)>, text: String, start_ms: f64, end_ms: f64) {
+fn push_tuple(segments: &mut Vec<SpeakerTuple>, text: String, start_ms: f64, end_ms: f64, speaker: Option<i64>) {
     let trimmed = text.trim();
     if trimmed.is_empty() {
         return;
     }
-    segments.push((trimmed.to_string(), start_ms, end_ms.max(start_ms)));
+    segments.push((trimmed.to_string(), start_ms, end_ms.max(start_ms), speaker));
 }
 
 fn average_confidence(values: impl Iterator<Item = f32>) -> f32 {
@@ -1749,11 +1838,13 @@ mod tests {
                     start: 0.0,
                     end: 1.5,
                     transcript: "Hello there.".to_string(),
+                    speaker: None,
                 },
                 Utterance {
                     start: 2.0,
                     end: 3.0,
                     transcript: "General Kenobi.".to_string(),
+                    speaker: None,
                 },
             ],
             words: vec![],
@@ -1765,6 +1856,24 @@ mod tests {
         assert_eq!(segments[1].text, "General Kenobi.");
         assert_eq!(segments[0].audio_start_time, Some(0.0));
         assert_eq!(segments[1].audio_start_time, Some(2.0));
+        assert_eq!(segments[0].speaker, None);
+    }
+
+    #[test]
+    fn diarized_prerecorded_utterances_keep_numbered_speakers() {
+        let json = r#"{ "metadata": { "duration": 3.0 }, "results": {
+            "channels": [ { "alternatives": [ { "transcript": "Hello there. General Kenobi.", "words": [] } ] } ],
+            "utterances": [
+                { "start": 0.0, "end": 1.5, "transcript": "Hello there.", "speaker": 0 },
+                { "start": 1.6, "end": 1.7, "transcript": "  ", "speaker": 2 },
+                { "start": 2.0, "end": 3.0, "transcript": "General Kenobi.", "speaker": 1 }
+            ] } }"#;
+        let transcript = DeepgramTranscript::from(serde_json::from_str::<PrerecordedResponse>(json).unwrap());
+        let segments = transcript_to_segments(&transcript, 3.0);
+        let labels: Vec<(&str, Option<&str>)> =
+            segments.iter().map(|s| (s.text.as_str(), s.speaker.as_deref())).collect();
+        // The blank utterance is dropped without shifting later labels.
+        assert_eq!(labels, vec![("Hello there.", Some("Speaker 1")), ("General Kenobi.", Some("Speaker 2"))]);
     }
 
     #[test]
@@ -1777,7 +1886,9 @@ mod tests {
         let tuples = words_to_tuples(&words);
         assert_eq!(tuples.len(), 2);
         assert_eq!(tuples[0].0, "Hello world.");
+        assert_eq!(tuples[0].3, Some(0));
         assert_eq!(tuples[1].0, "Reply");
+        assert_eq!(tuples[1].3, Some(1));
     }
 
     #[test]
@@ -1962,13 +2073,8 @@ mod tests {
             }
         }"#;
         let payload: PrerecordedResponse = serde_json::from_str(json).unwrap();
-        assert_eq!(payload.metadata.and_then(|m| m.duration), Some(3.5));
-        let transcript = DeepgramTranscript {
-            text: payload.results.channels[0].alternatives[0].transcript.clone(),
-            utterances: payload.results.utterances,
-            words: payload.results.channels[0].alternatives[0].words.clone(),
-            duration_seconds: Some(3.5),
-        };
+        let transcript = DeepgramTranscript::from(payload);
+        assert_eq!(transcript.duration_seconds, Some(3.5));
         let segments = transcript_to_segments(&transcript, 3.5);
         assert_eq!(segments.len(), 2);
         assert_eq!(segments[0].text, "Hello there.");
@@ -2183,6 +2289,21 @@ mod tests {
         );
     }
 
+    /// The frontend skips its local-model check for these providers, so each
+    /// must be one the Rust start path validates itself. Reads the TS source,
+    /// so adding a provider there without wiring it here fails.
+    #[test]
+    fn ts_cloud_providers_are_ones_recording_validates() {
+        let ts = include_str!("../../../src/lib/transcription-model-readiness.ts");
+        let line = ts
+            .lines()
+            .find(|l| l.contains("const CLOUD_PROVIDERS = new Set(["))
+            .expect("CLOUD_PROVIDERS declaration not found in transcription-model-readiness.ts");
+        let inner = line.split_once("([").unwrap().1.split_once("])").unwrap().0;
+        let providers: Vec<&str> = inner.split(',').map(|p| p.trim().trim_matches('\'')).collect();
+        assert_eq!(providers, vec![PROVIDER]);
+    }
+
     #[test]
     fn stereo_realtime_url_requests_multichannel() {
         let url = build_realtime_url(LISTEN_WS_URL, &DeepgramOptions::default(), None, 2);
@@ -2214,15 +2335,15 @@ mod tests {
         let fin = nova_final(serde_json::from_str(json).unwrap()).unwrap();
         assert_eq!(fin.channel_index, Some((1, 2)));
         assert_eq!(fin.finalized_through_ms, 3000.0);
-        assert_eq!(fin.segs[0].transcript, "Life moves pretty fast.");
+        assert_eq!(fin.seg.unwrap().transcript, "Life moves pretty fast.");
     }
 
     #[test]
-    fn diarized_final_splits_into_one_segment_per_speaker_run() {
+    fn diarized_final_stays_whole_and_carries_speaker_turns() {
         let json = r#"{
             "type": "Results", "channel_index": [1, 2], "start": 2.0, "duration": 2.0,
             "is_final": true,
-            "channel": { "alternatives": [ { "transcript": "Hi there. Hello.", "words": [
+            "channel": { "alternatives": [ { "transcript": "Hi there. Hello.", "confidence": 0.95, "words": [
                 { "word": "hi", "punctuated_word": "Hi", "start": 2.0, "end": 2.3, "confidence": 0.8, "speaker": 0 },
                 { "word": "there", "punctuated_word": "there.", "start": 2.3, "end": 2.7, "confidence": 1.0, "speaker": 0 },
                 { "word": "hello", "punctuated_word": "Hello.", "start": 3.1, "end": 3.6, "confidence": 0.9, "speaker": 1 }
@@ -2230,28 +2351,101 @@ mod tests {
         }"#;
         let fin = nova_final(serde_json::from_str(json).unwrap()).unwrap();
         assert_eq!(fin.finalized_through_ms, 4000.0);
-        assert_eq!(fin.segs.len(), 2);
-        assert_eq!(fin.segs[0].transcript, "Hi there.");
-        assert_eq!(fin.segs[0].diarized_speaker, Some(0));
-        assert_eq!((fin.segs[0].start_ms, fin.segs[0].end_ms), (2000.0, 2700.0));
-        assert!((fin.segs[0].confidence - 0.9).abs() < 1e-6);
-        assert_eq!(fin.segs[1].transcript, "Hello.");
-        assert_eq!(fin.segs[1].diarized_speaker, Some(1));
-        assert_eq!((fin.segs[1].start_ms, fin.segs[1].end_ms), (3100.0, 3600.0));
+        let seg = fin.seg.unwrap();
+        // Whole final kept for bleed suppression.
+        assert_eq!(seg.transcript, "Hi there. Hello.");
+        assert_eq!((seg.start_ms, seg.end_ms), (2000.0, 4000.0));
+        assert_eq!(seg.turns.len(), 2);
+        assert_eq!(seg.turns[0].text, "Hi there.");
+        assert_eq!(seg.turns[0].speaker, 0);
+        assert_eq!((seg.turns[0].start_ms, seg.turns[0].end_ms), (2000.0, 2700.0));
+        assert!((seg.turns[0].confidence - 0.9).abs() < 1e-6);
+        assert_eq!(seg.turns[1].text, "Hello.");
+        assert_eq!(seg.turns[1].speaker, 1);
+        assert_eq!((seg.turns[1].start_ms, seg.turns[1].end_ms), (3100.0, 3600.0));
     }
 
     #[test]
-    fn undiarized_final_is_one_segment_without_speaker() {
+    fn undiarized_final_has_no_turns() {
         let json = r#"{ "type": "Results", "channel_index": [0, 2], "start": 0.0, "duration": 1.0,
             "is_final": true, "channel": { "alternatives": [ { "transcript": "Just me.", "words": [
                 { "word": "just", "punctuated_word": "Just", "start": 0.1, "end": 0.3 },
                 { "word": "me", "punctuated_word": "me.", "start": 0.3, "end": 0.5 }
             ] } ] } }"#;
-        let fin = nova_final(serde_json::from_str(json).unwrap()).unwrap();
-        assert_eq!(fin.segs.len(), 1);
-        assert_eq!(fin.segs[0].transcript, "Just me.");
-        assert_eq!(fin.segs[0].diarized_speaker, None);
-        assert_eq!((fin.segs[0].start_ms, fin.segs[0].end_ms), (0.0, 1000.0));
+        let seg = nova_result_to_final(serde_json::from_str(json).unwrap()).unwrap();
+        assert_eq!(seg.transcript, "Just me.");
+        assert!(seg.turns.is_empty());
+        assert_eq!((seg.start_ms, seg.end_ms), (0.0, 1000.0));
+    }
+
+    #[test]
+    fn word_missing_speaker_id_stays_in_current_turn() {
+        let words = vec![
+            word("one", 0.0, 0.2, Some(1)),
+            word("two", 0.2, 0.4, None),
+            word("three", 0.4, 0.6, Some(1)),
+            word("four", 0.6, 0.8, Some(0)),
+        ];
+        let turns = diarized_turns(&words);
+        let summary: Vec<(&str, i64)> = turns.iter().map(|t| (t.text.as_str(), t.speaker)).collect();
+        assert_eq!(summary, vec![("one two three", 1), ("four", 0)]);
+    }
+
+    #[test]
+    fn empty_punctuated_word_falls_back_to_raw_word() {
+        let mut w = word("okay", 0.0, 0.2, Some(0));
+        w.punctuated_word = Some(String::new());
+        assert_eq!(word_display(&w), "okay");
+        assert_eq!(diarized_turns(&[w])[0].text, "okay");
+    }
+
+    fn turn(text: &str, start_ms: f64, end_ms: f64, speaker: i64) -> SpeakerTurn {
+        SpeakerTurn { text: text.to_string(), start_ms, end_ms, confidence: 0.8, speaker }
+    }
+
+    #[test]
+    fn transcript_lines_split_multi_voice_finals_only() {
+        let mut multi = seg("Hi there. Hello.", 2000.0, 4000.0, Some(SPEAKER_OUT_LABEL));
+        multi.turns = vec![turn("Hi there.", 2000.0, 2700.0, 0), turn("Hello.", 3100.0, 3600.0, 1)];
+        let lines = transcript_lines(multi);
+        let summary: Vec<(&str, Option<&str>, f64)> =
+            lines.iter().map(|l| (l.text.as_str(), l.speaker.as_deref(), l.start_ms)).collect();
+        assert_eq!(
+            summary,
+            vec![("Hi there.", Some("Speaker-Out 1"), 2000.0), ("Hello.", Some("Speaker-Out 2"), 3100.0)]
+        );
+
+        // One voice: the whole final, window and confidence, numbered.
+        let mut single = seg("Just me.", 0.0, 1000.0, Some(MIC_IN_LABEL));
+        single.turns = vec![turn("Just me.", 100.0, 500.0, 0)];
+        let lines = transcript_lines(single);
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].speaker.as_deref(), Some("Mic-In 1"));
+        assert_eq!((lines[0].start_ms, lines[0].end_ms, lines[0].confidence), (0.0, 1000.0, 0.9));
+
+        // Diarization off: unchanged label.
+        let lines = transcript_lines(seg("Plain.", 0.0, 500.0, Some(SPEAKER_OUT_LABEL)));
+        assert_eq!(lines[0].speaker.as_deref(), Some("Speaker-Out"));
+    }
+
+    /// Review finding: splitting before suppression let a mic copy of a
+    /// two-voice Speaker-Out final through, since each 3-word piece fell under
+    /// the overlap and containment thresholds. Suppression sees whole finals.
+    #[test]
+    fn bleed_of_a_two_voice_final_is_still_dropped() {
+        let mut s = BleedSuppressor::default();
+        let mut far = seg("Alpha beta gamma. Delta epsilon zeta.", 1000.0, 4000.0, Some(SPEAKER_OUT_LABEL));
+        far.turns = vec![
+            turn("Alpha beta gamma.", 1000.0, 2400.0, 0),
+            turn("Delta epsilon zeta.", 2600.0, 4000.0, 1),
+        ];
+        let out = s.push(far.clone(), 0.0);
+        assert_eq!(out, vec![far]);
+        let mic = seg("Alpha beta gamma. Delta epsilon zeta.", 1050.0, 4000.0, Some(MIC_IN_LABEL));
+        // Dropped, not merely held: nothing comes out later either.
+        assert!(s.push(mic, 100.0).is_empty());
+        assert!(s.drain_ready(20_000.0).is_empty());
+        assert!(s.flush().is_empty());
     }
 
     #[test]
@@ -2276,7 +2470,7 @@ mod tests {
         let json = r#"{ "type": "Results", "channel_index": [1, 2], "start": 4.0, "duration": 2.0,
             "is_final": true, "channel": { "alternatives": [ { "transcript": "", "words": [] } ] } }"#;
         let fin = nova_final(serde_json::from_str(json).unwrap()).unwrap();
-        assert!(fin.segs.is_empty());
+        assert!(fin.seg.is_none());
         assert_eq!(fin.finalized_through_ms, 6000.0);
     }
 
@@ -2409,7 +2603,7 @@ mod tests {
     // ------------------------------------------------------------------
 
     fn seg(text: &str, start_ms: f64, end_ms: f64, speaker: Option<&'static str>) -> LabeledSegment {
-        LabeledSegment { text: text.to_string(), start_ms, end_ms, confidence: 0.9, speaker, diarized_speaker: None }
+        LabeledSegment { text: text.to_string(), start_ms, end_ms, confidence: 0.9, speaker, turns: Vec::new() }
     }
 
     #[test]

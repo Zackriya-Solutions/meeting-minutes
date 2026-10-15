@@ -42,8 +42,8 @@ pub struct TranscriptUpdate {
     pub audio_start_time: f64, // Seconds from recording start (e.g., 125.3)
     pub audio_end_time: f64,   // Seconds from recording start (e.g., 128.6)
     pub duration: f64,          // Segment duration in seconds (e.g., 3.3)
-    /// Audio source of the segment ("Mic-In" / "Speaker-Out", see
-    /// deepgram::channel_label). None when the audio was a single mixed stream.
+    /// Speaker label (see deepgram::segment_label): "Mic-In" / "Speaker-Out",
+    /// numbered when diarized ("Speaker-Out 2"). None for a single mixed stream.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub speaker: Option<String>,
 }

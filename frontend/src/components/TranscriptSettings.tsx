@@ -31,8 +31,12 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
     const [isLockButtonVibrating, setIsLockButtonVibrating] = useState<boolean>(false);
     const [uiProvider, setUiProvider] = useState<TranscriptModelProps['provider']>(transcriptModelConfig.provider);
     const [deepgramKeyterm, setDeepgramKeyterm] = useState<string>('');
+    // Placeholders until api_get_deepgram_options answers; the backend owns the defaults.
     const [deepgramDiarize, setDeepgramDiarize] = useState<boolean>(false);
     const [deepgramMipOptOut, setDeepgramMipOptOut] = useState<boolean>(true);
+    // Saves write every knob at once, so saving before the stored values load
+    // would overwrite them with the placeholders above.
+    const [deepgramOptionsLoaded, setDeepgramOptionsLoaded] = useState<boolean>(false);
     // Deepgram-specific language, kept separate from the global (Whisper/Parakeet) pref.
     const [deepgramLanguage, setDeepgramLanguage] = useState<string>('');
 
@@ -48,9 +52,10 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
             try {
                 const opts = await invoke('api_get_deepgram_options') as { keyterm: string; diarize: boolean; mipOptOut: boolean; language: string };
                 setDeepgramKeyterm(opts.keyterm || '');
-                setDeepgramDiarize(opts.diarize ?? false);
-                setDeepgramMipOptOut(opts.mipOptOut ?? true);
+                setDeepgramDiarize(opts.diarize);
+                setDeepgramMipOptOut(opts.mipOptOut);
                 setDeepgramLanguage(opts.language || '');
+                setDeepgramOptionsLoaded(true);
             } catch (err) {
                 console.error('Failed to load Deepgram options:', err);
             }
@@ -101,6 +106,10 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
     };
 
     const saveDeepgramOptions = async (keyterm: string, diarize: boolean, mipOptOut: boolean, language: string) => {
+        if (!deepgramOptionsLoaded) {
+            console.error('Deepgram options not loaded yet; not saving over the stored values');
+            return;
+        }
         try {
             await invoke('api_save_deepgram_options', { keyterm: keyterm || null, diarize, mipOptOut, language: language || null });
         } catch (error) {

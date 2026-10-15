@@ -22,7 +22,8 @@ pub struct TranscriptSegment {
     pub display_time: String,   // Formatted time for display like "[02:15]"
     pub confidence: f32,
     pub sequence_id: u64,
-    /// Audio source ("Mic-In" / "Speaker-Out"); None for a mixed-audio segment.
+    /// Speaker label from deepgram::segment_label ("Mic-In", "Speaker-Out", or
+    /// numbered when diarized: "Speaker-Out 2"); None for a mixed-audio segment.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub speaker: Option<String>,
 }

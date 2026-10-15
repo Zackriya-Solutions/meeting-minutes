@@ -3,7 +3,8 @@ use crate::summary::CustomOpenAIConfig;
 use sqlx::SqlitePool;
 
 /// Deepgram provider knobs read from the dedicated `transcript_settings` columns.
-/// `diarize`/`mip_opt_out` are stored as 1/0 integers (None = column never set).
+/// `diarize`/`mip_opt_out` are stored as 1/0 integers (None = column never set;
+/// unset falls back to `DeepgramOptions::default()`: diarize off, MIP opt-out on).
 #[derive(Debug, Default, Clone)]
 pub struct DeepgramOptionsRow {
     pub keyterm: Option<String>,

@@ -21,4 +21,12 @@ describe('transcript speaker labels', () => {
     expect(new Set([mic, speaker, unknown]).size).toBe(3);
     expect(unknown).toBe('text-gray-500');
   });
+
+  test('numbered diarized labels keep their channel colour', () => {
+    expect(speakerLabelClass('Speaker-Out 2')).toBe(speakerLabelClass(SPEAKER_OUT_LABEL));
+    expect(speakerLabelClass('Mic-In 1')).toBe(speakerLabelClass(MIC_IN_LABEL));
+    // A diarized mono stream has no channel.
+    expect(speakerLabelClass('Speaker 1')).toBe('text-gray-500');
+    expect(formatTranscriptLine('Hello.', 'Speaker-Out 2')).toBe('Speaker-Out 2: Hello.');
+  });
 });

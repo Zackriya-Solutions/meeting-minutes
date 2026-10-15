@@ -135,7 +135,7 @@ pub async fn validate_transcription_model_ready<R: Runtime>(app: &AppHandle<R>) 
                 }
             }
         }
-        "deepgram" => {
+        crate::audio::deepgram::PROVIDER => {
             info!("🔍 Validating Deepgram API key...");
             match crate::audio::deepgram::validate_configured_api_key(app).await {
                 Ok(()) => {
@@ -225,7 +225,7 @@ pub async fn get_or_init_transcription_engine<R: Runtime>(
                 }
             }
         }
-        "deepgram" => {
+        crate::audio::deepgram::PROVIDER => {
             Err("Deepgram realtime transcription is handled by the Deepgram streaming worker".to_string())
         }
         "localWhisper" | _ => {
