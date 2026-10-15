@@ -882,6 +882,10 @@ pub fn run() {
             summary::template_commands::api_list_templates,
             summary::template_commands::api_get_template_details,
             summary::template_commands::api_validate_template,
+            // Terminology commands
+            summary::terminology::api_get_terminology,
+            summary::terminology::api_save_terminology,
+            summary::terminology::api_add_terminology_entry,
             // Summary context commands
             summary::context_commands::api_get_meeting_summary_context,
             summary::context_commands::api_save_meeting_summary_context,
