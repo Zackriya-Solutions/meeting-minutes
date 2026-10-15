@@ -192,6 +192,7 @@ export function TranscriptPanel({
           onIdentifySpeakers={tools?.onStartIdentify}
           hasSpeakers={(tools?.speakers.length ?? 0) > 0}
           speakerJobActive={!!speakerJob}
+          isRecording={isRecording}
         />
       </div>
 
