@@ -886,6 +886,11 @@ pub fn run() {
             summary::terminology::api_get_terminology,
             summary::terminology::api_save_terminology,
             summary::terminology::api_add_terminology_entry,
+            // Summary context commands
+            summary::context_commands::api_get_meeting_summary_context,
+            summary::context_commands::api_save_meeting_summary_context,
+            summary::context_commands::api_get_global_summary_context,
+            summary::context_commands::api_save_global_summary_context,
             // Built-in AI commands
             summary::summary_engine::commands::builtin_ai_list_models,
             summary::summary_engine::commands::builtin_ai_get_model_info,
