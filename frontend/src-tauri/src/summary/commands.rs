@@ -112,6 +112,14 @@ pub async fn api_save_meeting_summary<R: Runtime>(
 
     match SummaryProcessesRepository::update_meeting_summary(pool, &meeting_id, &summary).await {
         Ok(true) => {
+            if let Some(markdown) = summary.get("markdown").and_then(|value| value.as_str()) {
+                SummaryService::write_saved_summary_markdown(pool, &meeting_id, markdown).await;
+            } else {
+                log_warn!(
+                    "Saved summary for meeting_id {} has no markdown field; skipped summary.md",
+                    meeting_id
+                );
+            }
             log_info!("Summary saved successfully for meeting_id: {}", meeting_id);
             Ok(serde_json::json!({
                 "message": "Meeting summary saved successfully"
