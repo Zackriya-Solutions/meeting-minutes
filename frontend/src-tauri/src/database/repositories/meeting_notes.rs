@@ -1,8 +1,14 @@
 use crate::api::{SearchMatchSource, TranscriptSearchResult};
+use crate::database::repositories::meeting::MeetingsRepository;
 use crate::database::repositories::search_snippet::match_context;
+use anyhow::{Context, Result};
 use chrono::Utc;
+use log::{info, warn};
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
+use std::path::Path;
+
+const NOTES_MARKDOWN_FILE: &str = "notes.md";
 
 /// A meeting's user-written note.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -17,6 +23,48 @@ pub struct MeetingNotesRepository;
 /// True when `json` is a JSON array whose items are all objects.
 pub fn is_block_array(json: &str) -> bool {
     serde_json::from_str::<Vec<serde_json::Map<String, serde_json::Value>>>(json).is_ok()
+}
+
+/// Writes the saved note beside the recording. Replaces any existing file.
+pub(crate) fn write_notes_markdown(folder: &Path, markdown: &str) -> Result<()> {
+    let notes_path = folder.join(NOTES_MARKDOWN_FILE);
+    let temp_path = folder.join(format!(".notes.md.{}.tmp", uuid::Uuid::new_v4()));
+    let mut contents = markdown.to_string();
+    if !contents.ends_with('\n') {
+        contents.push('\n');
+    }
+
+    std::fs::write(&temp_path, contents)
+        .with_context(|| format!("Failed to write {}", temp_path.display()))?;
+    std::fs::rename(&temp_path, &notes_path).with_context(|| {
+        format!(
+            "Failed to replace {} with {}",
+            notes_path.display(),
+            temp_path.display()
+        )
+    })?;
+
+    Ok(())
+}
+
+/// Removes notes.md when the saved note is blank. A missing file is already clear.
+fn remove_notes_markdown(folder: &Path) -> Result<()> {
+    let notes_path = folder.join(NOTES_MARKDOWN_FILE);
+    match std::fs::remove_file(&notes_path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => {
+            Err(error).with_context(|| format!("Failed to remove {}", notes_path.display()))
+        }
+    }
+}
+
+fn sync_notes_markdown(folder: &Path, markdown: &str) -> Result<()> {
+    if markdown.trim().is_empty() {
+        remove_notes_markdown(folder)
+    } else {
+        write_notes_markdown(folder, markdown)
+    }
 }
 
 impl MeetingNotesRepository {
@@ -73,6 +121,35 @@ impl MeetingNotesRepository {
         .execute(pool)
         .await?;
         Ok(result.rows_affected() > 0)
+    }
+
+    /// Writes notes.md into the recording folder. A missing folder or a file error
+    /// is logged and does not change the database save that already succeeded.
+    /// Blank markdown removes the file, matching the deleted database row.
+    pub async fn write_saved_notes_markdown(pool: &SqlitePool, meeting_id: &str, markdown: &str) {
+        let meeting = match MeetingsRepository::get_meeting_metadata(pool, meeting_id).await {
+            Ok(Some(meeting)) => meeting,
+            Ok(None) => {
+                warn!("Meeting not found while writing notes.md: {}", meeting_id);
+                return;
+            }
+            Err(e) => {
+                warn!(
+                    "Failed to read meeting folder for notes.md (meeting_id={}): {}",
+                    meeting_id, e
+                );
+                return;
+            }
+        };
+
+        let Some(folder_path) = meeting.folder_path.filter(|path| !path.trim().is_empty()) else {
+            info!("No recording folder for meeting {}; skipped notes.md", meeting_id);
+            return;
+        };
+
+        if let Err(e) = sync_notes_markdown(Path::new(&folder_path), markdown) {
+            warn!("Failed to update notes.md for meeting_id={}: {}", meeting_id, e);
+        }
     }
 
     /// Finds notes containing `query`, ignoring case.
@@ -264,5 +341,41 @@ mod tests {
             .await
             .unwrap();
         assert!(MeetingNotesRepository::search(&pool, "   ").await.unwrap().is_empty());
+    }
+
+    #[test]
+    fn notes_markdown_is_written_with_trailing_newline() {
+        let dir = tempfile::tempdir().unwrap();
+        write_notes_markdown(dir.path(), "Ship Friday").unwrap();
+
+        let raw = std::fs::read_to_string(dir.path().join("notes.md")).unwrap();
+        assert_eq!(raw, "Ship Friday\n");
+        assert!(dir.path().read_dir().unwrap().all(|entry| {
+            !entry.unwrap().file_name().to_string_lossy().ends_with(".tmp")
+        }));
+    }
+
+    #[test]
+    fn a_later_save_replaces_notes_markdown() {
+        let dir = tempfile::tempdir().unwrap();
+        write_notes_markdown(dir.path(), "first").unwrap();
+        write_notes_markdown(dir.path(), "second").unwrap();
+
+        let raw = std::fs::read_to_string(dir.path().join("notes.md")).unwrap();
+        assert_eq!(raw, "second\n");
+        assert!(dir.path().read_dir().unwrap().all(|entry| {
+            !entry.unwrap().file_name().to_string_lossy().ends_with(".tmp")
+        }));
+    }
+
+    #[test]
+    fn blank_markdown_removes_notes_markdown() {
+        let dir = tempfile::tempdir().unwrap();
+        write_notes_markdown(dir.path(), "Ship Friday").unwrap();
+        sync_notes_markdown(dir.path(), "  \n ").unwrap();
+        assert!(!dir.path().join("notes.md").exists());
+
+        sync_notes_markdown(dir.path(), "   ").unwrap();
+        assert!(!dir.path().join("notes.md").exists());
     }
 }
