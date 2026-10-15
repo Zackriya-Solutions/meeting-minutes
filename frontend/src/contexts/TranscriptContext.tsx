@@ -8,7 +8,7 @@ import { transcriptService } from '@/services/transcriptService';
 import { recordingService } from '@/services/recordingService';
 import { indexedDBService } from '@/services/indexedDBService';
 import { formatTranscriptLine } from '@/lib/transcript-speakers';
-import { withoutRetracted } from '@/lib/transcript-retract';
+import { mergeHistory, withoutRetracted } from '@/lib/transcript-retract';
 
 interface TranscriptContextType {
   transcripts: Transcript[];
@@ -36,6 +36,8 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
 
   // Refs for transcript management
   const transcriptsRef = useRef<Transcript[]>(transcripts);
+  // Sequence ids retracted this session, so a reload sync cannot bring one back.
+  const retractedIdsRef = useRef<Set<number>>(new Set());
   const isUserAtBottomRef = useRef<boolean>(true);
   const transcriptContainerRef = useRef<HTMLDivElement>(null);
   const finalFlushRef = useRef<(() => void) | null>(null);
@@ -341,6 +343,7 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
         });
         unlistenRetractFn = await transcriptService.onTranscriptRetract(({ sequence_id }) => {
           // Still buffered or already shown: drop it either way.
+          retractedIdsRef.current.add(sequence_id);
           transcriptBuffer.delete(sequence_id);
           setTranscripts(prev => withoutRetracted(prev, sequence_id));
           if (currentMeetingId) {
@@ -400,7 +403,7 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
             speaker: segment.speaker,
           }));
 
-          setTranscripts(formattedTranscripts);
+          setTranscripts(prev => mergeHistory(formattedTranscripts, prev, retractedIdsRef.current));
           console.log('[Reload Sync] ✅ Transcript history synced successfully');
 
           // Fetch meeting name from backend
@@ -499,6 +502,7 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
   // Clear transcripts (used when starting new recording)
   const clearTranscripts = useCallback(() => {
     setTranscripts([]);
+    retractedIdsRef.current.clear();
     // Don't clear currentMeetingId here - it will be set by recording-started event
   }, []);
 

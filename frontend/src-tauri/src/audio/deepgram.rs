@@ -880,7 +880,9 @@ const BLEED_MIN_CONTAINMENT: f64 = 0.9;
 const BLEED_MIN_CONTAINMENT_TOKENS: usize = 4;
 /// Segments shorter than this ("Okay.", "Yeah, sure.") match genuine replies
 /// too easily, so they also have to coincide in time: acoustic bleed is
-/// near-instant, a reply comes after the far side.
+/// near-instant, a reply comes after the far side. With word timings each
+/// word must start within BLEED_SHORT_MAX_START_DELTA_MS of the same far-side
+/// word (`is_bleed_of`); without, the segments must (`is_bleed`).
 const BLEED_SHORT_TOKENS: usize = 3;
 const BLEED_SHORT_MAX_START_DELTA_MS: f64 = 300.0;
 const BLEED_SHORT_MIN_OVERLAP: f64 = 0.5;
@@ -926,20 +928,6 @@ fn is_bleed(mic: &LabeledSegment, speaker: &LabeledSegment) -> bool {
     if a.is_empty() || b.is_empty() {
         return false;
     }
-    if a.len() < BLEED_SHORT_TOKENS && !speaker.words.is_empty() {
-        // A short mic line ("Sounds great.") inside a long far-side segment:
-        // segment-level overlap cannot tell echo from a genuine reply, word
-        // timing can. Echo is the far side's own words at that same moment.
-        let from = mic.start_ms - BLEED_SHORT_MAX_START_DELTA_MS;
-        let to = mic.end_ms + BLEED_SHORT_MAX_START_DELTA_MS;
-        let concurrent: std::collections::HashSet<&str> = speaker
-            .words
-            .iter()
-            .filter(|w| w.start_ms <= to && w.end_ms >= from)
-            .map(|w| w.token.as_str())
-            .collect();
-        return a.iter().all(|t| concurrent.contains(t.as_str()));
-    }
     let shared = a.intersection(&b).count() as f64;
     let jaccard = shared / a.union(&b).count() as f64;
     let smaller = a.len().min(b.len());
@@ -958,6 +946,62 @@ fn is_bleed(mic: &LabeledSegment, speaker: &LabeledSegment) -> bool {
     true
 }
 
+/// How far around a mic line to gather the far side's words: the channels
+/// segment speech differently, so one mic line can span several Speaker-Out
+/// finals and start or end slightly off theirs.
+const BLEED_WORD_WINDOW_MS: f64 = 1500.0;
+/// Share of the mic line's words that must appear, in order, among the far
+/// side's words in that window.
+const BLEED_MIN_WORD_MATCH: f64 = 0.8;
+
+/// Length of the longest common subsequence of two token lists.
+fn lcs_len(a: &[&str], b: &[&str]) -> usize {
+    let mut prev = vec![0usize; b.len() + 1];
+    for x in a {
+        let mut cur = vec![0usize; b.len() + 1];
+        for (j, y) in b.iter().enumerate() {
+            cur[j + 1] = if x == y { prev[j] + 1 } else { prev[j + 1].max(cur[j]) };
+        }
+        prev = cur;
+    }
+    prev[b.len()]
+}
+
+/// True when `mic` repeats what the far side said at the same moment, judged
+/// against all of `speakers` together, using Deepgram's word timings (the
+/// span of the words, NOT the final's window, which includes silence):
+/// - a line of BLEED_SHORT_TOKENS or more is echo when most of its words
+///   appear, in order, among the far side's words around it, however each
+///   channel split the speech into finals;
+/// - a shorter line ("Sounds great.") is echo only when each of its words
+///   matches the same far-side word starting within
+///   BLEED_SHORT_MAX_START_DELTA_MS, so a genuine "Yeah." over a far-side
+///   monologue that says "yeah" elsewhere is kept.
+/// Without word timings, falls back to comparing whole segments (`is_bleed`).
+fn is_bleed_of(mic: &LabeledSegment, speakers: &[&LabeledSegment]) -> bool {
+    let (Some(first), Some(last)) = (mic.words.first(), mic.words.last()) else {
+        return speakers.iter().any(|s| is_bleed(mic, s));
+    };
+    if speakers.iter().all(|s| s.words.is_empty()) {
+        return speakers.iter().any(|s| is_bleed(mic, s));
+    }
+    let far_words = speakers.iter().flat_map(|s| s.words.iter());
+    if mic.words.len() < BLEED_SHORT_TOKENS {
+        let far: Vec<&TimedWord> = far_words.collect();
+        return mic.words.iter().all(|m| {
+            far.iter().any(|f| {
+                f.token == m.token && (f.start_ms - m.start_ms).abs() <= BLEED_SHORT_MAX_START_DELTA_MS
+            })
+        });
+    }
+    let (from, to) = (first.start_ms - BLEED_WORD_WINDOW_MS, last.end_ms + BLEED_WORD_WINDOW_MS);
+    let mut far: Vec<&TimedWord> = far_words.filter(|w| w.start_ms <= to && w.end_ms >= from).collect();
+    far.sort_by(|a, b| a.start_ms.total_cmp(&b.start_ms));
+    let mic_tokens: Vec<&str> = mic.words.iter().map(|w| w.token.as_str()).collect();
+    let far_tokens: Vec<&str> = far.iter().map(|w| w.token.as_str()).collect();
+    lcs_len(&mic_tokens, &far_tokens) as f64 / mic_tokens.len() as f64 >= BLEED_MIN_WORD_MATCH
+}
+
 /// What the realtime session tells the transcript: show a line, or take back
 /// a line it showed.
 #[derive(Debug, Clone, PartialEq)]
@@ -965,6 +1009,29 @@ enum RealtimeOutput {
     Show { key: u64, seg: LabeledSegment },
     /// A shown Mic-In line turned out to be Speaker-Out bleed.
     Retract { key: u64 },
+}
+
+/// The transcript rows (sequence ids) behind each shown Mic-In line, kept as
+/// long as the suppressor may still retract that line. One line can be
+/// several rows when diarization split it.
+#[derive(Default)]
+struct RetractionLedger {
+    rows: Vec<(f64, u64, Vec<u64>)>,
+}
+
+impl RetractionLedger {
+    fn record(&mut self, now_ms: f64, key: u64, sequence_ids: Vec<u64>) {
+        self.rows.retain(|(at, _, _)| now_ms - at <= BLEED_MEMORY_MS);
+        self.rows.push((now_ms, key, sequence_ids));
+    }
+
+    /// The rows to remove for a retracted line (empty if unknown or expired).
+    fn take(&mut self, key: u64) -> Vec<u64> {
+        match self.rows.iter().position(|(_, k, _)| *k == key) {
+            Some(i) => self.rows.remove(i).2,
+            None => Vec::new(),
+        }
+    }
 }
 
 /// Removes Mic-In segments that duplicate a Speaker-Out segment without
@@ -990,22 +1057,25 @@ impl BleedSuppressor {
         self.next_key += 1;
         match seg.speaker {
             Some(MIC_IN_LABEL) => {
-                if self.recent_speaker.iter().any(|(_, s)| is_bleed(&seg, s)) {
+                let far: Vec<&LabeledSegment> = self.recent_speaker.iter().map(|(_, s)| s).collect();
+                if is_bleed_of(&seg, &far) {
                     return Vec::new();
                 }
                 self.shown_mic.push((now_ms, key, seg.clone()));
                 vec![RealtimeOutput::Show { key, seg }]
             }
             Some(SPEAKER_OUT_LABEL) => {
-                let mut out = vec![RealtimeOutput::Show { key, seg: seg.clone() }];
+                let out_seg = seg.clone();
+                self.recent_speaker.push((now_ms, seg));
+                let far: Vec<&LabeledSegment> = self.recent_speaker.iter().map(|(_, s)| s).collect();
+                let mut out = vec![RealtimeOutput::Show { key, seg: out_seg }];
                 self.shown_mic.retain(|(_, mic_key, mic)| {
-                    let bleed = is_bleed(mic, &seg);
+                    let bleed = is_bleed_of(mic, &far);
                     if bleed {
                         out.push(RealtimeOutput::Retract { key: *mic_key });
                     }
                     !bleed
                 });
-                self.recent_speaker.push((now_ms, seg));
                 out
             }
             _ => vec![RealtimeOutput::Show { key, seg }],
@@ -1048,9 +1118,9 @@ pub async fn run_realtime_transcription<R: Runtime>(
     let language = crate::get_language_preference_internal();
 
     let emitter_app = app.clone();
-    // Transcript sequence ids of each shown Mic-In line, so a retraction can
-    // name the rows it removes. Only Mic-In lines are ever retracted.
-    let mut shown_mic: std::collections::HashMap<u64, Vec<u64>> = std::collections::HashMap::new();
+    // Only Mic-In lines are ever retracted, so only they are recorded.
+    let mut ledger = RetractionLedger::default();
+    let clock = std::time::Instant::now();
     run_realtime_core(
         RealtimeEndpoints::deepgram(),
         api_key,
@@ -1062,11 +1132,11 @@ pub async fn run_realtime_transcription<R: Runtime>(
                 let retractable = seg.speaker == Some(MIC_IN_LABEL);
                 let sequence_ids = emit_labeled_segment(&emitter_app, seg);
                 if retractable {
-                    shown_mic.insert(key, sequence_ids);
+                    ledger.record(clock.elapsed().as_secs_f64() * 1000.0, key, sequence_ids);
                 }
             }
             RealtimeOutput::Retract { key } => {
-                for sequence_id in shown_mic.remove(&key).unwrap_or_default() {
+                for sequence_id in ledger.take(key) {
                     emit_transcript_retract(&emitter_app, sequence_id);
                 }
             }
@@ -1435,8 +1505,8 @@ where
     }
 
     // Every reader has ended, so the event channel is closed: the emitter
-    // releases what the suppressor still holds and exits. Await it so no
-    // emit can happen after we return.
+    // finishes the finals already queued and exits. Await it so no emit can
+    // happen after we return.
     let _ = emitter_handle.await;
 
     match first_error {
@@ -2758,26 +2828,100 @@ mod tests {
             .collect()
     }
 
+    /// A mic segment with Deepgram-style word timings over its own text.
+    fn timed_seg(text: &str, start_ms: f64, end_ms: f64, speaker: &'static str) -> LabeledSegment {
+        let mut seg = seg(text, start_ms, end_ms, Some(speaker));
+        seg.words = timed(text, start_ms, end_ms);
+        seg
+    }
+
     /// Measured live (2026-10-15): the mic's echo of "Sounds great." stayed
     /// on screen because the far side's segment ran on for another sentence.
     #[test]
     fn short_echo_at_the_start_of_a_long_far_side_segment_is_bleed() {
-        let text = "Sounds great. Before we start, I have a question about the pricing changes";
-        let mut spk = seg(text, 6_600.0, 11_000.0, Some(SPEAKER_OUT_LABEL));
-        spk.words = timed(text, 6_600.0, 11_000.0);
-        let mic = seg("Sounds great.", 6_700.0, 7_300.0, Some(MIC_IN_LABEL));
-        assert!(is_bleed(&mic, &spk));
+        let spk = timed_seg(
+            "Sounds great. Before we start, I have a question about the pricing changes",
+            6_600.0,
+            11_000.0,
+            SPEAKER_OUT_LABEL,
+        );
+        let mic = timed_seg("Sounds great.", 6_650.0, 7_250.0, MIC_IN_LABEL);
+        assert!(is_bleed_of(&mic, &[&spk]));
     }
 
-    /// A genuine "Yeah." while the far side is saying other words is kept,
-    /// even if their segment contains "yeah" somewhere else.
+    /// Review finding: a nova final's window includes silence, so a short
+    /// reply must be judged by its words' times, not the window. A genuine
+    /// "Yeah." in a 4s final, during a far-side monologue that says "yeah"
+    /// 2s earlier, is kept.
     #[test]
-    fn short_reply_not_matching_concurrent_far_side_words_is_kept() {
-        let text = "So the plan for the demo is next week, yeah, and then we ship.";
-        let mut spk = seg(text, 1_000.0, 6_000.0, Some(SPEAKER_OUT_LABEL));
-        spk.words = timed(text, 1_000.0, 6_000.0);
-        let mic = seg("Yeah.", 1_500.0, 1_800.0, Some(MIC_IN_LABEL));
-        assert!(!is_bleed(&mic, &spk));
+    fn short_reply_is_judged_by_word_time_not_the_final_window() {
+        let far_text = "Yeah so the plan for the demo is next week and then we ship it";
+        let spk = timed_seg(far_text, 1_000.0, 7_000.0, SPEAKER_OUT_LABEL);
+        let mut mic = seg("Yeah.", 1_000.0, 5_000.0, Some(MIC_IN_LABEL));
+        mic.words = timed("Yeah.", 3_000.0, 3_300.0);
+        assert!(!is_bleed_of(&mic, &[&spk]));
+    }
+
+    /// Measured in the app (2026-10-15): one mic line spanned two Speaker-Out
+    /// finals, so no single far-side segment contained enough of it.
+    #[test]
+    fn echo_split_across_far_side_finals_is_bleed() {
+        let a = timed_seg("For joining. Let's walk through the quarterly road map and the", 7_900.0, 11_500.0, SPEAKER_OUT_LABEL);
+        let b = timed_seg("launch timeline today.", 11_600.0, 13_000.0, SPEAKER_OUT_LABEL);
+        let mic = timed_seg(
+            "Let's walk through the quarterly road map and the launch timeline today.",
+            9_300.0,
+            13_000.0,
+            MIC_IN_LABEL,
+        );
+        assert!(!is_bleed(&mic, &a) && !is_bleed(&mic, &b), "segment-level check alone misses it");
+        assert!(is_bleed_of(&mic, &[&a, &b]));
+    }
+
+    /// Genuine speech sharing common words with the far side is kept.
+    #[test]
+    fn genuine_line_sharing_common_words_is_not_bleed() {
+        let spk = timed_seg("I think we should move the launch to next quarter", 1_000.0, 4_000.0, SPEAKER_OUT_LABEL);
+        let mic = timed_seg("I think the demo went really well today", 2_000.0, 5_000.0, MIC_IN_LABEL);
+        assert!(!is_bleed_of(&mic, &[&spk]));
+    }
+
+    #[test]
+    fn suppressor_retracts_mic_echo_split_across_far_side_finals() {
+        let mut s = BleedSuppressor::default();
+        let mic = timed_seg(
+            "Let's walk through the quarterly road map and the launch timeline today.",
+            9_300.0,
+            13_000.0,
+            MIC_IN_LABEL,
+        );
+        let mut outputs = s.push(mic, 0.0);
+        outputs.extend(s.push(
+            timed_seg("For joining. Let's walk through the quarterly road map and the", 7_900.0, 11_500.0, SPEAKER_OUT_LABEL),
+            500.0,
+        ));
+        outputs.extend(s.push(timed_seg("launch timeline today.", 11_600.0, 13_000.0, SPEAKER_OUT_LABEL), 900.0));
+        assert!(visible(&outputs).iter().all(|l| l.speaker == Some(SPEAKER_OUT_LABEL)), "{:?}", visible(&outputs));
+    }
+
+    #[test]
+    fn ledger_returns_every_row_of_a_retracted_line_once() {
+        let mut ledger = RetractionLedger::default();
+        ledger.record(0.0, 7, vec![10, 11, 12]);
+        ledger.record(0.0, 8, vec![13]);
+        assert_eq!(ledger.take(7), vec![10, 11, 12]);
+        assert!(ledger.take(7).is_empty(), "a line is retracted at most once");
+        assert_eq!(ledger.take(8), vec![13]);
+    }
+
+    /// Literal 30s, not the constant, so a changed memory window shows here.
+    #[test]
+    fn ledger_forgets_lines_past_the_retraction_window() {
+        let mut ledger = RetractionLedger::default();
+        ledger.record(0.0, 1, vec![10]);
+        ledger.record(30_001.0, 2, vec![11]);
+        assert!(ledger.take(1).is_empty());
+        assert_eq!(ledger.take(2), vec![11]);
     }
 
     /// Finding 3 (guard): acoustic bleed of a short word is near-instant.
@@ -2958,7 +3102,7 @@ mod tests {
     /// Finding 2: a mic-only stream uses one mono socket and emits Mic-In lines
     /// immediately.
     #[tokio::test]
-    async fn mic_only_stream_is_mono_and_unheld() {
+    async fn mic_only_stream_is_mono_and_immediate() {
         let mono_result = serde_json::json!({
             "type": "Results", "channel_index": [0, 1], "start": 0.0, "duration": 1.0,
             "is_final": true, "channel": { "alternatives": [ { "transcript": "Just me talking.", "words": [] } ] }
@@ -2976,7 +3120,7 @@ mod tests {
         // The Error that ends the session is 2s away; the line is already out.
         tokio::time::sleep(Duration::from_millis(1000)).await;
         let early = visible(&emitted.lock().unwrap());
-        assert_eq!(early.len(), 1, "mic-only line was held");
+        assert_eq!(early.len(), 1, "mic-only line not emitted promptly");
         assert_eq!(early[0].speaker, Some(MIC_IN_LABEL));
         let _ = session.await.unwrap();
     }
@@ -3010,9 +3154,7 @@ mod tests {
     #[ignore]
     async fn live_bleed_is_removed_and_real_mic_speech_kept() {
         let key = live_inputs_key();
-        let pcm = std::fs::read(std::env::var("MEETILY_BLEED_PCM").unwrap()).unwrap();
-        let samples: Vec<f32> =
-            pcm.chunks_exact(2).map(|b| i16::from_le_bytes([b[0], b[1]]) as f32 / 32768.0).collect();
+        let samples = read_pcm_env("MEETILY_BLEED_PCM");
         let segs = live_run(&key, "nova-3", &samples, AudioLayout::MicSystemStereo).await;
         let mic: String = segs.iter().filter(|s| s.speaker == Some(MIC_IN_LABEL)).map(|s| s.text.to_lowercase()).collect();
         let spk: String = segs.iter().filter(|s| s.speaker == Some(SPEAKER_OUT_LABEL)).map(|s| s.text.to_lowercase()).collect();
@@ -3046,13 +3188,13 @@ mod tests {
     }
 
     fn live_inputs() -> (String, Vec<f32>) {
-        let key = live_inputs_key();
-        let pcm = std::fs::read(std::env::var("MEETILY_STEREO_PCM").unwrap()).unwrap();
-        let samples = pcm
-            .chunks_exact(2)
-            .map(|b| i16::from_le_bytes([b[0], b[1]]) as f32 / 32768.0)
-            .collect();
-        (key, samples)
+        (live_inputs_key(), read_pcm_env("MEETILY_STEREO_PCM"))
+    }
+
+    /// s16le PCM at the path in env var `var`, as f32 samples.
+    fn read_pcm_env(var: &str) -> Vec<f32> {
+        let pcm = std::fs::read(std::env::var(var).unwrap()).unwrap();
+        pcm.chunks_exact(2).map(|b| i16::from_le_bytes([b[0], b[1]]) as f32 / 32768.0).collect()
     }
 
     async fn live_run(key: &str, model: &str, samples: &[f32], layout: AudioLayout) -> Vec<LabeledSegment> {

@@ -16,3 +16,21 @@ export function withoutRetracted<T extends { sequence_id?: number }>(rows: T[], 
     ? rows.filter((row) => row.sequence_id !== sequenceId)
     : rows;
 }
+
+/**
+ * Rows after a reload sync: the backend history plus any live rows that
+ * arrived while it was being fetched, minus rows retracted meanwhile.
+ * Replacing state with the history alone would drop those live rows and
+ * bring back a line retracted during the fetch.
+ */
+export function mergeHistory<T extends { sequence_id?: number; chunk_start_time?: number }>(
+  history: T[],
+  current: T[],
+  retracted: ReadonlySet<number>,
+): T[] {
+  const seen = new Set(history.map((row) => row.sequence_id));
+  // Same order as the live transcript: audio time, then arrival.
+  return [...history, ...current.filter((row) => !seen.has(row.sequence_id))]
+    .filter((row) => row.sequence_id === undefined || !retracted.has(row.sequence_id))
+    .sort((a, b) => ((a.chunk_start_time ?? 0) - (b.chunk_start_time ?? 0)) || ((a.sequence_id ?? 0) - (b.sequence_id ?? 0)));
+}

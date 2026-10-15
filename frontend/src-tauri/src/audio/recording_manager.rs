@@ -524,8 +524,10 @@ impl RecordingManager {
         self.recording_saver.add_transcript_segment(segment);
     }
 
-    pub fn remove_transcript_segment(&self, sequence_id: u64) {
-        self.recording_saver.remove_transcript_segment(sequence_id);
+    /// The live transcript log, for listeners that must outlive this manager's
+    /// slot in RECORDING_MANAGER (it is taken out before stop drains).
+    pub fn transcript_log(&self) -> super::recording_saver::TranscriptLog {
+        self.recording_saver.transcript_log()
     }
 
     /// Add a transcript chunk to be saved later (legacy method)

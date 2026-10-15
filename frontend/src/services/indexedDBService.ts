@@ -32,7 +32,8 @@ export interface StoredTranscript {
 class IndexedDBService {
   private db: IDBDatabase | null = null;
   private readonly DB_NAME = 'MeetilyRecoveryDB';
-  private readonly DB_VERSION = 1;
+  // v2: transcripts index [meetingId, sequenceId] for retracting one row.
+  private readonly DB_VERSION = 2;
   private initPromise: Promise<void> | null = null;
 
   /**
@@ -81,6 +82,12 @@ class IndexedDBService {
             });
             transcriptsStore.createIndex('meetingId', 'meetingId', { unique: false });
             transcriptsStore.createIndex('storedAt', 'storedAt', { unique: false });
+          }
+
+          // v2 (also applied to v1 databases): find a row by meeting + sequence id.
+          const transcriptsStore = (event.target as IDBOpenDBRequest).transaction!.objectStore('transcripts');
+          if (!transcriptsStore.indexNames.contains('meetingSequence')) {
+            transcriptsStore.createIndex('meetingSequence', ['meetingId', 'sequenceId'], { unique: false });
           }
         };
       } catch (error) {
@@ -284,20 +291,15 @@ class IndexedDBService {
       const transcriptsStore = transaction.objectStore('transcripts');
       const meetingsStore = transaction.objectStore('meetings');
 
-      const deleted = await new Promise<number>((resolve, reject) => {
-        let count = 0;
-        const request = transcriptsStore.index('meetingId').openCursor(IDBKeyRange.only(meetingId));
-        request.onsuccess = (event) => {
-          const cursor = (event.target as IDBRequest<IDBCursorWithValue>).result;
-          if (!cursor) return resolve(count);
-          if ((cursor.value as StoredTranscript).sequenceId === sequenceId) {
-            cursor.delete();
-            count += 1;
-          }
-          cursor.continue();
-        };
+      const keys = await new Promise<IDBValidKey[]>((resolve, reject) => {
+        const request = transcriptsStore.index('meetingSequence').getAllKeys(IDBKeyRange.only([meetingId, sequenceId]));
+        request.onsuccess = () => resolve(request.result);
         request.onerror = () => reject(request.error);
       });
+      for (const key of keys) {
+        transcriptsStore.delete(key);
+      }
+      const deleted = keys.length;
 
       if (deleted > 0) {
         const meeting = await new Promise<MeetingMetadata | null>((resolve, reject) => {

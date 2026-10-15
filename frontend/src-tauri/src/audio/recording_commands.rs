@@ -126,12 +126,16 @@ pub struct TranscriptionStatus {
     pub last_activity_ms: u64,
 }
 
-/// Mirror live transcript events into the recording manager: rows added by
-/// `transcript-update`, rows taken back by `transcript-retract` (a Mic-In line
-/// later found to be Speaker-Out bleed). DO NOT register only the update
-/// listener: retracted bleed would then come back in the saved transcript.
-fn register_transcript_listeners<R: Runtime>(app: &AppHandle<R>) {
+/// Mirror live transcript events into the recording's transcript log: rows
+/// added by `transcript-update`, rows taken back by `transcript-retract` (a
+/// Mic-In line later found to be Speaker-Out bleed). DO NOT register only the
+/// update listener: retracted bleed would then come back in the saved
+/// transcript. The listeners hold the log itself, NOT a RECORDING_MANAGER
+/// lookup: stop_recording takes the manager out before the transcriber drains,
+/// and the last finals and retractions arrive during that drain.
+fn register_transcript_listeners<R: Runtime>(app: &AppHandle<R>, log: super::recording_saver::TranscriptLog) {
     use tauri::Listener;
+    let update_log = log.clone();
     let update_id = app.listen("transcript-update", move |event: tauri::Event| {
         if let Ok(update) = serde_json::from_str::<TranscriptUpdate>(event.payload()) {
             let segment = crate::audio::recording_saver::TranscriptSegment {
@@ -145,20 +149,12 @@ fn register_transcript_listeners<R: Runtime>(app: &AppHandle<R>) {
                 sequence_id: update.sequence_id,
                 speaker: update.speaker.clone(),
             };
-            if let Ok(manager_guard) = RECORDING_MANAGER.lock() {
-                if let Some(manager) = manager_guard.as_ref() {
-                    manager.add_transcript_segment(segment);
-                }
-            }
+            update_log.add(segment);
         }
     });
     let retract_id = app.listen(super::deepgram::TRANSCRIPT_RETRACT_EVENT, move |event: tauri::Event| {
         if let Ok(retract) = serde_json::from_str::<super::deepgram::TranscriptRetract>(event.payload()) {
-            if let Ok(manager_guard) = RECORDING_MANAGER.lock() {
-                if let Some(manager) = manager_guard.as_ref() {
-                    manager.remove_transcript_segment(retract.sequence_id);
-                }
-            }
+            log.remove(retract.sequence_id);
         }
     });
     let mut ids = TRANSCRIPT_LISTENER_IDS.lock().unwrap();
@@ -457,6 +453,7 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
     let device_event_receiver = manager.take_device_event_receiver();
     let session = manager.get_state().clone();
 
+    let transcript_log = manager.transcript_log();
     // Store the manager globally to keep it alive
     {
         let mut global_manager = RECORDING_MANAGER.lock().unwrap();
@@ -482,7 +479,7 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
 
     // Keep the recording manager's transcript (history sync, transcripts.json)
     // in step with the live events. Listener IDs are removed in stop_recording.
-    register_transcript_listeners(&app);
+    register_transcript_listeners(&app, transcript_log);
 
     // Emit success event
     app.emit("recording-started", serde_json::json!({
@@ -621,6 +618,7 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
     let device_event_receiver = manager.take_device_event_receiver();
     let session = manager.get_state().clone();
 
+    let transcript_log = manager.transcript_log();
     // Store the manager globally to keep it alive
     {
         let mut global_manager = RECORDING_MANAGER.lock().unwrap();
@@ -646,7 +644,7 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
 
     // Keep the recording manager's transcript (history sync, transcripts.json)
     // in step with the live events. Listener IDs are removed in stop_recording.
-    register_transcript_listeners(&app);
+    register_transcript_listeners(&app, transcript_log);
 
     // Emit success event
     app.emit("recording-started", serde_json::json!({
