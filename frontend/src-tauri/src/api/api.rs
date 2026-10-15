@@ -483,7 +483,15 @@ pub async fn api_save_meeting_notes(
     )
     .await
     {
-        Ok(true) => Ok(()),
+        Ok(true) => {
+            MeetingNotesRepository::write_saved_notes_markdown(
+                state.db_manager.pool(),
+                &meeting_id,
+                &markdown,
+            )
+            .await;
+            Ok(())
+        }
         Ok(false) => Err("Meeting not found".into()),
         Err(e) => {
             log_error!("Failed to save meeting notes for {}: {}", meeting_id, e);
