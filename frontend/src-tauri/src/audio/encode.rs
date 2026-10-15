@@ -21,6 +21,40 @@ pub fn encode_single_audio(
     channels: u16,
     output_path: &PathBuf,
 ) -> anyhow::Result<()> {
+    encode_with_ffmpeg(
+        data,
+        sample_rate,
+        channels,
+        &[
+            "-c:a", "aac",
+            "-b:a", "192k",          // Increased from 64k for better audio quality (especially for speech)
+            "-profile:a", "aac_low", // Use AAC-LC profile for better compatibility
+            "-movflags", "+faststart", // Optimize for web streaming
+            "-f", "mp4",
+        ],
+        output_path,
+    )
+}
+
+/// Encode a recording checkpoint losslessly (16-bit FLAC), so the finished recording can be
+/// encoded to AAC once and stay sample-aligned with transcript times.
+pub fn encode_lossless_checkpoint(
+    data: &[u8],
+    sample_rate: u32,
+    channels: u16,
+    output_path: &PathBuf,
+) -> anyhow::Result<()> {
+    encode_with_ffmpeg(data, sample_rate, channels, &["-c:a", "flac", "-sample_fmt", "s16", "-f", "flac"], output_path)
+}
+
+/// Pipe interleaved f32 samples into ffmpeg and encode them with `codec_args`.
+fn encode_with_ffmpeg(
+    data: &[u8],
+    sample_rate: u32,
+    channels: u16,
+    codec_args: &[&str],
+    output_path: &PathBuf,
+) -> anyhow::Result<()> {
     debug!("Starting FFmpeg process for {} bytes of audio data", data.len());
 
     if data.is_empty() {
@@ -35,27 +69,9 @@ pub fn encode_single_audio(
 
     let mut command = Command::new(ffmpeg_path);
     command
-        .args([
-            "-f",
-            "f32le",
-            "-ar",
-            &sample_rate.to_string(),
-            "-ac",
-            &channels.to_string(),
-            "-i",
-            "pipe:0",
-            "-c:a",
-            "aac",
-            "-b:a",
-            "192k", // Increased from 64k for better audio quality (especially for speech)
-            "-profile:a",
-            "aac_low", // Use AAC-LC profile for better compatibility
-            "-movflags",
-            "+faststart", // Optimize for web streaming
-            "-f",
-            "mp4",
-            output_path.to_str().unwrap(),
-        ])
+        .args(["-f", "f32le", "-ar", &sample_rate.to_string(), "-ac", &channels.to_string(), "-i", "pipe:0"])
+        .args(codec_args)
+        .arg(output_path)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
