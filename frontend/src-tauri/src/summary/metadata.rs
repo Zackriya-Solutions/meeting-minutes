@@ -10,6 +10,7 @@ const SUMMARY_LANGUAGE_FIELD: &str = "summary_language";
 const DETECTED_SUMMARY_LANGUAGE_FIELD: &str = "detected_summary_language";
 const METADATA_FILE: &str = "metadata.json";
 const METADATA_TEMP_FILE_PREFIX: &str = ".metadata.json.";
+const SUMMARY_MARKDOWN_FILE: &str = "summary.md";
 static METADATA_WRITE_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
 pub(crate) fn read_summary_language_from_metadata(folder: &Path) -> Result<Option<String>> {
@@ -34,6 +35,28 @@ pub(crate) fn write_detected_summary_language_to_metadata(
     summary_language: Option<&str>,
 ) -> Result<()> {
     write_language_field_to_metadata(folder, DETECTED_SUMMARY_LANGUAGE_FIELD, summary_language)
+}
+
+/// Writes the visible summary markdown beside the recording. Replaces any existing file.
+pub(crate) fn write_summary_markdown(folder: &Path, markdown: &str) -> Result<()> {
+    let summary_path = folder.join(SUMMARY_MARKDOWN_FILE);
+    let temp_path = folder.join(format!(".summary.md.{}.tmp", uuid::Uuid::new_v4()));
+    let mut contents = markdown.to_string();
+    if !contents.ends_with('\n') {
+        contents.push('\n');
+    }
+
+    std::fs::write(&temp_path, contents)
+        .with_context(|| format!("Failed to write {}", temp_path.display()))?;
+    std::fs::rename(&temp_path, &summary_path).with_context(|| {
+        format!(
+            "Failed to replace {} with {}",
+            summary_path.display(),
+            temp_path.display()
+        )
+    })?;
+
+    Ok(())
 }
 
 fn read_language_field_from_metadata(folder: &Path, field: &str) -> Result<Option<String>> {
@@ -155,6 +178,22 @@ mod tests {
         .unwrap();
 
         assert_eq!(read_summary_language_from_metadata(dir.path()).unwrap(), None);
+    }
+
+    #[test]
+    fn summary_markdown_is_written_with_trailing_newline() {
+        let dir = tempfile::tempdir().unwrap();
+        write_summary_markdown(dir.path(), "# Notes\n\nDecided to ship.").unwrap();
+
+        let raw = std::fs::read_to_string(dir.path().join("summary.md")).unwrap();
+        assert_eq!(raw, "# Notes\n\nDecided to ship.\n");
+        assert!(std::fs::read_dir(dir.path()).unwrap().all(|entry| {
+            !entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .ends_with(".tmp")
+        }));
     }
 
     #[test]

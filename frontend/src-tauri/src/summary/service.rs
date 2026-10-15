@@ -3,7 +3,9 @@ use crate::database::repositories::{
 };
 use crate::summary::llm_client::LLMProvider;
 use crate::summary::language_detection::detect_summary_language;
-use crate::summary::metadata::read_detected_summary_language_from_metadata;
+use crate::summary::metadata::{
+    read_detected_summary_language_from_metadata, write_summary_markdown,
+};
 use crate::summary::processor::{
     clean_llm_markdown_detailed, extract_meeting_name_from_markdown, generate_meeting_summary,
     language_name_from_code, require_visible_markdown,
@@ -421,6 +423,44 @@ impl SummaryService {
         }
     }
 
+    /// Writes summary.md into the recording folder. A missing folder or a file error
+    /// is logged and does not change the database save that already succeeded.
+    pub(crate) async fn write_saved_summary_markdown(
+        pool: &SqlitePool,
+        meeting_id: &str,
+        markdown: &str,
+    ) {
+        let meeting = match MeetingsRepository::get_meeting_metadata(pool, meeting_id).await {
+            Ok(Some(meeting)) => meeting,
+            Ok(None) => {
+                warn!("Meeting not found while writing summary.md: {}", meeting_id);
+                return;
+            }
+            Err(e) => {
+                warn!(
+                    "Failed to read meeting folder for summary.md (meeting_id={}): {}",
+                    meeting_id, e
+                );
+                return;
+            }
+        };
+
+        let Some(folder_path) = meeting.folder_path.filter(|p| !p.trim().is_empty()) else {
+            info!(
+                "No recording folder for meeting {}; skipped summary.md",
+                meeting_id
+            );
+            return;
+        };
+
+        if let Err(e) = write_summary_markdown(Path::new(&folder_path), markdown) {
+            warn!(
+                "Failed to write summary.md for meeting_id={}: {}",
+                meeting_id, e
+            );
+        }
+    }
+
     async fn read_detected_summary_language(
         pool: &SqlitePool,
         meeting_id: &str,
@@ -658,6 +698,8 @@ impl SummaryService {
                 .await
                 {
                     Ok(true) => {
+                        Self::write_saved_summary_markdown(&pool, &meeting_id, &final_markdown)
+                            .await;
                         if let Some(name) =
                             extract_meeting_name_from_markdown(&final_markdown)
                                 .filter(|name| !name.is_empty())
