@@ -7,9 +7,14 @@
 export const MIC_IN_LABEL = 'Mic-In';
 export const SPEAKER_OUT_LABEL = 'Speaker-Out';
 
-/** Tailwind classes for a speaker label; unknown labels get neutral styling. */
+/**
+ * Tailwind classes for a speaker label; unknown labels get neutral styling.
+ * With diarization on, a label carries a 1-based voice number after the
+ * channel ("Speaker-Out 2"), so match the channel prefix.
+ */
 export function speakerLabelClass(speaker: string): string {
-  switch (speaker) {
+  const channel = speaker.replace(/ \d+$/, '');
+  switch (channel) {
     case MIC_IN_LABEL:
       return 'text-blue-600';
     case SPEAKER_OUT_LABEL:

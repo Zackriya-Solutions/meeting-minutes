@@ -31,7 +31,7 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
     const [isLockButtonVibrating, setIsLockButtonVibrating] = useState<boolean>(false);
     const [uiProvider, setUiProvider] = useState<TranscriptModelProps['provider']>(transcriptModelConfig.provider);
     const [deepgramKeyterm, setDeepgramKeyterm] = useState<string>('');
-    const [deepgramDiarize, setDeepgramDiarize] = useState<boolean>(true);
+    const [deepgramDiarize, setDeepgramDiarize] = useState<boolean>(false);
     const [deepgramMipOptOut, setDeepgramMipOptOut] = useState<boolean>(true);
     // Deepgram-specific language, kept separate from the global (Whisper/Parakeet) pref.
     const [deepgramLanguage, setDeepgramLanguage] = useState<string>('');
@@ -48,7 +48,7 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
             try {
                 const opts = await invoke('api_get_deepgram_options') as { keyterm: string; diarize: boolean; mipOptOut: boolean; language: string };
                 setDeepgramKeyterm(opts.keyterm || '');
-                setDeepgramDiarize(opts.diarize ?? true);
+                setDeepgramDiarize(opts.diarize ?? false);
                 setDeepgramMipOptOut(opts.mipOptOut ?? true);
                 setDeepgramLanguage(opts.language || '');
             } catch (err) {
@@ -174,7 +174,7 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                 <SelectContent>
                                     <SelectItem value="parakeet">⚡ Parakeet (Recommended - Real-time / Accurate)</SelectItem>
                                     <SelectItem value="localWhisper">🏠 Local Whisper (High Accuracy)</SelectItem>
-                                    <SelectItem value="deepgram">☁️ Deepgram (Realtime + Diarization)</SelectItem>
+                                    <SelectItem value="deepgram">☁️ Deepgram (Realtime)</SelectItem>
                                     {/* <SelectItem value="elevenLabs">☁️ ElevenLabs</SelectItem>
                                     <SelectItem value="groq">☁️ Groq</SelectItem>
                                     <SelectItem value="openai">☁️ OpenAI</SelectItem> */}
@@ -320,9 +320,14 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                             </div>
                             {!isFluxModel && (
                                 <div className="flex items-center justify-between mx-1">
-                                    <Label className="text-sm font-medium text-gray-700">
-                                        Speaker diarization
-                                    </Label>
+                                    <div className="pr-3">
+                                        <Label className="text-sm font-medium text-gray-700">
+                                            Speaker diarization
+                                        </Label>
+                                        <p className="text-xs text-gray-500 mt-0.5">
+                                            Off by default: your mic (Mic-In) and computer audio (Speaker-Out) are already transcribed as separate channels. Turn on to number several voices on one channel, e.g. Speaker-Out 1 and Speaker-Out 2.
+                                        </p>
+                                    </div>
                                     <Switch
                                         checked={deepgramDiarize}
                                         onCheckedChange={(checked) => {

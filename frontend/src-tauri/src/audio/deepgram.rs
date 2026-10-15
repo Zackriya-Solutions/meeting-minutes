@@ -85,7 +85,9 @@ impl Default for DeepgramOptions {
         Self {
             model: crate::config::DEFAULT_DEEPGRAM_REALTIME_MODEL.to_string(),
             keyterms: Vec::new(),
-            diarize: true,
+            // Opt-in: the Mic-In / Speaker-Out channels already separate the
+            // user from everyone else, and diarization is billed as an add-on.
+            diarize: false,
             mip_opt_out: true,
             language: None,
         }
@@ -123,10 +125,10 @@ struct Alternative {
 }
 
 // Deepgram splits utterances by speaker when diarization is on, so each utterance is
-// already a single-speaker turn. meetily's transcript model has no diarization
-// speaker field (its `speaker` column is audio-source: mic/system), so the
-// numeric speaker id is intentionally not carried — diarization manifests as
-// speaker-split segmentation, consistent with the existing Whisper/Parakeet behavior.
+// already a single-speaker turn. Prerecorded (file) transcription does not carry
+// the numeric speaker id: there, diarization only shows as speaker-split
+// segmentation. Realtime does carry it, as the number in "Speaker-Out 2" (see
+// `segment_label`).
 #[derive(Debug, Clone, Deserialize)]
 pub struct Utterance {
     #[serde(default)]
@@ -233,15 +235,18 @@ struct FinalSeg {
     start_ms: f64,
     end_ms: f64,
     confidence: f32,
+    /// Deepgram's 0-based diarization speaker id; None unless diarization is on.
+    diarized_speaker: Option<i64>,
 }
 
 /// A final nova `Results` message: which channel it covers, how far that
-/// channel is now finalized (stream ms), and its segment if it had words.
-/// Empty finals still matter: they advance the channel's watermark.
+/// channel is now finalized (stream ms), and its segments. Empty finals still
+/// matter: they advance the channel's watermark. More than one segment only
+/// when diarization split the final between speakers.
 struct NovaFinal {
     channel_index: Option<(usize, usize)>,
     finalized_through_ms: f64,
-    seg: Option<FinalSeg>,
+    segs: Vec<FinalSeg>,
 }
 
 /// Reduce a nova message to a final (None for interim and non-Results).
@@ -252,27 +257,74 @@ fn nova_final(m: RealtimeMessage) -> Option<NovaFinal> {
     let channel_index = parse_channel_index(&m.channel_index);
     let start_ms = m.start * 1000.0;
     let end_ms = (m.start + m.duration) * 1000.0;
-    let seg = m
+    let segs = m
         .channel
         .and_then(|c| c.alternatives.into_iter().next())
-        .and_then(|alternative| {
+        .map(|alternative| {
             let transcript = alternative.transcript.trim();
             if transcript.is_empty() {
-                return None;
+                return Vec::new();
+            }
+            if alternative.words.iter().any(|w| w.speaker.is_some()) {
+                return split_by_diarized_speaker(&alternative.words);
             }
             let confidence = alternative.confidence.unwrap_or_else(|| {
                 average_confidence(alternative.words.iter().filter_map(|w| w.confidence))
             });
-            Some(FinalSeg { transcript: transcript.to_string(), start_ms, end_ms, confidence })
-        });
-    Some(NovaFinal { channel_index, finalized_through_ms: end_ms, seg })
+            vec![FinalSeg {
+                transcript: transcript.to_string(),
+                start_ms,
+                end_ms,
+                confidence,
+                diarized_speaker: None,
+            }]
+        })
+        .unwrap_or_default();
+    Some(NovaFinal { channel_index, finalized_through_ms: end_ms, segs })
 }
 
-/// Reduce a nova `Results` message to a finalized segment (None for interim/other).
-/// Test shorthand: the realtime reader uses `nova_final` for the progress too.
+/// One segment per run of same-speaker words in a diarized final. Word times
+/// are stream-relative seconds, like the final's own `start`.
+fn split_by_diarized_speaker(words: &[DeepgramWord]) -> Vec<FinalSeg> {
+    let mut segs: Vec<FinalSeg> = Vec::new();
+    let mut confidences: Vec<Vec<f32>> = Vec::new();
+    for w in words {
+        let display = w.punctuated_word.as_deref().unwrap_or(&w.word);
+        if display.is_empty() {
+            continue;
+        }
+        match segs.last_mut() {
+            Some(last) if last.diarized_speaker == w.speaker => {
+                last.transcript.push(' ');
+                last.transcript.push_str(display);
+                last.end_ms = (w.end * 1000.0).max(last.end_ms);
+            }
+            _ => {
+                segs.push(FinalSeg {
+                    transcript: display.to_string(),
+                    start_ms: w.start * 1000.0,
+                    end_ms: (w.end * 1000.0).max(w.start * 1000.0),
+                    confidence: 0.0,
+                    diarized_speaker: w.speaker,
+                });
+                confidences.push(Vec::new());
+            }
+        }
+        if let (Some(c), Some(list)) = (w.confidence, confidences.last_mut()) {
+            list.push(c);
+        }
+    }
+    for (seg, list) in segs.iter_mut().zip(confidences) {
+        seg.confidence = average_confidence(list.into_iter());
+    }
+    segs
+}
+
+/// Reduce a nova `Results` message to its first finalized segment (None for
+/// interim/other). Test shorthand: the realtime reader uses `nova_final`.
 #[cfg(test)]
 fn nova_result_to_final(m: RealtimeMessage) -> Option<FinalSeg> {
-    nova_final(m)?.seg
+    nova_final(m)?.segs.into_iter().next()
 }
 
 /// Reduce a Flux `TurnInfo` to a finalized segment (only on `EndOfTurn`).
@@ -289,6 +341,8 @@ fn flux_turn_to_final(m: &FluxTurnInfo) -> Option<FinalSeg> {
         start_ms: m.audio_window_start * 1000.0,
         end_ms: m.audio_window_end * 1000.0,
         confidence: average_confidence(m.words.iter().filter_map(|w| w.confidence)),
+        // Flux has no diarization.
+        diarized_speaker: None,
     })
 }
 
@@ -780,6 +834,8 @@ struct LabeledSegment {
     end_ms: f64,
     confidence: f32,
     speaker: Option<&'static str>,
+    /// Deepgram diarization id within this channel, when diarization is on.
+    diarized_speaker: Option<i64>,
 }
 
 fn word_tokens(text: &str) -> std::collections::HashSet<String> {
@@ -1125,7 +1181,7 @@ where
 
                 // Reduce per protocol to (global channel, finalized-through ms,
                 // optional final). Both report `type:"Error"` on failure.
-                let (channel, finalized_through_ms, final_seg) = if flux {
+                let (channel, finalized_through_ms, final_segs) = if flux {
                     let m = match serde_json::from_str::<FluxTurnInfo>(&text) {
                         Ok(m) => m,
                         Err(e) => {
@@ -1142,7 +1198,7 @@ where
                         continue;
                     }
                     let through = flux_progress.observe(&m);
-                    (resolve_channel(lane, None), through, flux_turn_to_final(&m))
+                    (resolve_channel(lane, None), through, flux_turn_to_final(&m).into_iter().collect::<Vec<_>>())
                 } else {
                     let m = match serde_json::from_str::<RealtimeMessage>(&text) {
                         Ok(m) => m,
@@ -1164,11 +1220,11 @@ where
                             lane.channels, fin.channel_index
                         );
                     }
-                    (channel, fin.finalized_through_ms, fin.seg)
+                    (channel, fin.finalized_through_ms, fin.segs)
                 };
 
                 let entries = reader_time_map.lock().await.clone();
-                if let Some(seg) = final_seg {
+                for seg in final_segs {
                     let start_ms = map_stream_ms_to_original(&entries, seg.start_ms);
                     let end_ms = map_stream_ms_to_original(&entries, seg.end_ms).max(start_ms);
                     let _ = reader_events.send(LaneEvent::Final(LabeledSegment {
@@ -1177,6 +1233,7 @@ where
                         end_ms,
                         confidence: seg.confidence,
                         speaker: channel.and_then(|c| channel_label(layout, c)),
+                        diarized_speaker: seg.diarized_speaker,
                     }));
                 }
                 if layout == AudioLayout::MicSystemStereo && channel == Some(SPEAKER_OUT_CHANNEL) {
@@ -1350,8 +1407,20 @@ fn emit_labeled_segment<R: Runtime>(app: &AppHandle<R>, seg: LabeledSegment) {
         seg.end_ms,
         seg.confidence,
         false,
-        seg.speaker.map(str::to_string),
+        segment_label(seg.speaker, seg.diarized_speaker),
     );
+}
+
+/// The stored/displayed speaker for a segment. The channel label says which
+/// side spoke; diarization (opt-in) further numbers the voices on that
+/// channel, 1-based: "Speaker-Out 2". A diarized mono stream is "Speaker 1".
+fn segment_label(source: Option<&str>, diarized: Option<i64>) -> Option<String> {
+    match (source, diarized) {
+        (Some(src), Some(n)) => Some(format!("{} {}", src, n + 1)),
+        (Some(src), None) => Some(src.to_string()),
+        (None, Some(n)) => Some(format!("Speaker {}", n + 1)),
+        (None, None) => None,
+    }
 }
 
 pub fn map_stream_ms_to_original(entries: &[AudioTimeMapEntry], stream_ms: f64) -> f64 {
@@ -2145,7 +2214,60 @@ mod tests {
         let fin = nova_final(serde_json::from_str(json).unwrap()).unwrap();
         assert_eq!(fin.channel_index, Some((1, 2)));
         assert_eq!(fin.finalized_through_ms, 3000.0);
-        assert_eq!(fin.seg.unwrap().transcript, "Life moves pretty fast.");
+        assert_eq!(fin.segs[0].transcript, "Life moves pretty fast.");
+    }
+
+    #[test]
+    fn diarized_final_splits_into_one_segment_per_speaker_run() {
+        let json = r#"{
+            "type": "Results", "channel_index": [1, 2], "start": 2.0, "duration": 2.0,
+            "is_final": true,
+            "channel": { "alternatives": [ { "transcript": "Hi there. Hello.", "words": [
+                { "word": "hi", "punctuated_word": "Hi", "start": 2.0, "end": 2.3, "confidence": 0.8, "speaker": 0 },
+                { "word": "there", "punctuated_word": "there.", "start": 2.3, "end": 2.7, "confidence": 1.0, "speaker": 0 },
+                { "word": "hello", "punctuated_word": "Hello.", "start": 3.1, "end": 3.6, "confidence": 0.9, "speaker": 1 }
+            ] } ] }
+        }"#;
+        let fin = nova_final(serde_json::from_str(json).unwrap()).unwrap();
+        assert_eq!(fin.finalized_through_ms, 4000.0);
+        assert_eq!(fin.segs.len(), 2);
+        assert_eq!(fin.segs[0].transcript, "Hi there.");
+        assert_eq!(fin.segs[0].diarized_speaker, Some(0));
+        assert_eq!((fin.segs[0].start_ms, fin.segs[0].end_ms), (2000.0, 2700.0));
+        assert!((fin.segs[0].confidence - 0.9).abs() < 1e-6);
+        assert_eq!(fin.segs[1].transcript, "Hello.");
+        assert_eq!(fin.segs[1].diarized_speaker, Some(1));
+        assert_eq!((fin.segs[1].start_ms, fin.segs[1].end_ms), (3100.0, 3600.0));
+    }
+
+    #[test]
+    fn undiarized_final_is_one_segment_without_speaker() {
+        let json = r#"{ "type": "Results", "channel_index": [0, 2], "start": 0.0, "duration": 1.0,
+            "is_final": true, "channel": { "alternatives": [ { "transcript": "Just me.", "words": [
+                { "word": "just", "punctuated_word": "Just", "start": 0.1, "end": 0.3 },
+                { "word": "me", "punctuated_word": "me.", "start": 0.3, "end": 0.5 }
+            ] } ] } }"#;
+        let fin = nova_final(serde_json::from_str(json).unwrap()).unwrap();
+        assert_eq!(fin.segs.len(), 1);
+        assert_eq!(fin.segs[0].transcript, "Just me.");
+        assert_eq!(fin.segs[0].diarized_speaker, None);
+        assert_eq!((fin.segs[0].start_ms, fin.segs[0].end_ms), (0.0, 1000.0));
+    }
+
+    #[test]
+    fn segment_label_numbers_diarized_voices_from_one() {
+        assert_eq!(segment_label(Some(SPEAKER_OUT_LABEL), None).as_deref(), Some("Speaker-Out"));
+        assert_eq!(segment_label(Some(SPEAKER_OUT_LABEL), Some(1)).as_deref(), Some("Speaker-Out 2"));
+        assert_eq!(segment_label(Some(MIC_IN_LABEL), Some(0)).as_deref(), Some("Mic-In 1"));
+        assert_eq!(segment_label(None, Some(0)).as_deref(), Some("Speaker 1"));
+        assert_eq!(segment_label(None, None), None);
+    }
+
+    #[test]
+    fn diarization_is_off_by_default() {
+        let url = build_realtime_url(LISTEN_WS_URL, &DeepgramOptions::default(), None, 2);
+        assert!(!url.contains("diarize"));
+        assert!(url.contains("multichannel=true"));
     }
 
     #[test]
@@ -2154,7 +2276,7 @@ mod tests {
         let json = r#"{ "type": "Results", "channel_index": [1, 2], "start": 4.0, "duration": 2.0,
             "is_final": true, "channel": { "alternatives": [ { "transcript": "", "words": [] } ] } }"#;
         let fin = nova_final(serde_json::from_str(json).unwrap()).unwrap();
-        assert!(fin.seg.is_none());
+        assert!(fin.segs.is_empty());
         assert_eq!(fin.finalized_through_ms, 6000.0);
     }
 
@@ -2287,7 +2409,7 @@ mod tests {
     // ------------------------------------------------------------------
 
     fn seg(text: &str, start_ms: f64, end_ms: f64, speaker: Option<&'static str>) -> LabeledSegment {
-        LabeledSegment { text: text.to_string(), start_ms, end_ms, confidence: 0.9, speaker }
+        LabeledSegment { text: text.to_string(), start_ms, end_ms, confidence: 0.9, speaker, diarized_speaker: None }
     }
 
     #[test]

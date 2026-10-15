@@ -729,7 +729,7 @@ pub async fn api_get_deepgram_options<R: Runtime>(
     match SettingsRepository::get_deepgram_options(pool).await {
         Ok(opts) => Ok(serde_json::json!({
             "keyterm": opts.keyterm.unwrap_or_default(),
-            "diarize": opts.diarize.map(|d| d != 0).unwrap_or(true),
+            "diarize": opts.diarize.map(|d| d != 0).unwrap_or(false),
             // Privacy-first default: opt OUT of Deepgram's model-improvement program when unset.
             "mipOptOut": opts.mip_opt_out.map(|m| m != 0).unwrap_or(true),
             // Deepgram-specific language; empty string means "use nova-3 default (multi)".

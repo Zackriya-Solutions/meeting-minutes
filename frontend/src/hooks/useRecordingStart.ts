@@ -10,6 +10,7 @@ import { showRecordingNotification } from '@/lib/recordingNotification';
 import {
   getProviderCommands,
   hasDownloadingModel,
+  isCloudProvider,
   type ModelWithStatus,
 } from '@/lib/transcription-model-readiness';
 import { toast } from 'sonner';
@@ -82,6 +83,7 @@ export function useRecordingStart(
   const checkTranscriptionModelReady = useCallback(async (): Promise<boolean> => {
     try {
       const provider = await getTranscriptionProvider();
+      if (isCloudProvider(provider)) return true;
       const commands = getProviderCommands(provider);
 
       if (commands) {
