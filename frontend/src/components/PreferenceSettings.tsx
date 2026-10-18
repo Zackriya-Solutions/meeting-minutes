@@ -21,6 +21,8 @@ export function PreferenceSettings() {
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [previousNotificationsEnabled, setPreviousNotificationsEnabled] = useState<boolean | null>(null);
   const hasTrackedViewRef = useRef(false);
+  // null until the saved value loads, so the switch never shows the wrong state
+  const [closeToTray, setCloseToTray] = useState<boolean | null>(null);
 
   // Lazy load preferences on mount (only loads if not already cached)
   useEffect(() => {
@@ -28,6 +30,16 @@ export function PreferenceSettings() {
     // Reset tracking ref on mount (every tab visit)
     hasTrackedViewRef.current = false;
   }, [loadPreferences]);
+
+  // The close behaviour is read by the Rust window handler, so it lives in its store
+  useEffect(() => {
+    invoke<boolean>('get_close_to_tray')
+      .then(setCloseToTray)
+      .catch((error) => {
+        console.error('Failed to load close to tray setting:', error);
+        setCloseToTray(true);
+      });
+  }, []);
 
   // Track preferences viewed analytics on every tab visit (once per mount)
   useEffect(() => {
@@ -110,6 +122,17 @@ export function PreferenceSettings() {
     handleUpdateNotificationSettings();
   }, [notificationsEnabled, notificationSettings, isInitialLoad, previousNotificationsEnabled, updateNotificationSettings])
 
+  const handleCloseToTrayChange = async (enabled: boolean) => {
+    const previous = closeToTray;
+    setCloseToTray(enabled);
+    try {
+      await invoke('set_close_to_tray', { enabled });
+    } catch (error) {
+      console.error('Failed to save close to tray setting:', error);
+      setCloseToTray(previous);
+    }
+  };
+
   const handleOpenFolder = async (folderType: 'database' | 'models' | 'recordings') => {
     try {
       switch (folderType) {
@@ -156,6 +179,24 @@ export function PreferenceSettings() {
             <p className="text-sm text-gray-600">Enable or disable notifications of start and end of meeting</p>
           </div>
           <Switch checked={notificationsEnabledValue} onCheckedChange={setNotificationsEnabled} />
+        </div>
+      </div>
+
+      {/* Close Behavior Section */}
+      <div className="bg-white rounded-lg border border-gray-200 p-6 shadow-sm">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">Keep Running in Tray</h3>
+            <p className="text-sm text-gray-600">
+              Closing the window hides Meetily to the system tray. Turn off to quit the app instead.
+              A recording in progress always keeps running in the tray.
+            </p>
+          </div>
+          <Switch
+            checked={closeToTray ?? true}
+            onCheckedChange={handleCloseToTrayChange}
+            disabled={closeToTray === null}
+          />
         </div>
       </div>
 

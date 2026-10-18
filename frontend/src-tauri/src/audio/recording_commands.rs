@@ -51,6 +51,12 @@ fn recording_live() -> bool {
     IS_RECORDING.load(Ordering::SeqCst) && !IS_RECORDING_STOPPING.load(Ordering::SeqCst)
 }
 
+/// Same as [`is_recording`] for sync callers (window events). Stays true through the
+/// stop tail, while the recording is still being saved.
+pub(crate) fn is_recording_active() -> bool {
+    IS_RECORDING.load(Ordering::SeqCst)
+}
+
 /// Recording is live AND the global manager is still the session `s` belongs to.
 /// Used by the mic-disconnect fallback to refuse acting on a *later* recording
 /// after a Stop/Start swapped the manager out from under an in-flight task.
