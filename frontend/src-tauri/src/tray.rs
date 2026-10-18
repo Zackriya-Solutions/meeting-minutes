@@ -4,6 +4,43 @@ use tauri::{
     tray::TrayIconBuilder,
     AppHandle, Manager, Runtime,
 };
+use tauri_plugin_store::StoreExt;
+
+/// store.json key for what closing the main window does. Missing means hide to the
+/// tray, which is what the app did before the setting existed.
+const CLOSE_TO_TRAY_KEY: &str = "closeToTray";
+
+/// Whether closing the main window hides it to the tray (true) or quits the app (false)
+pub(crate) fn close_to_tray_enabled<R: Runtime>(app: &AppHandle<R>) -> bool {
+    match app.store("store.json") {
+        Ok(store) => store
+            .get(CLOSE_TO_TRAY_KEY)
+            .and_then(|value| value.as_bool())
+            .unwrap_or(true),
+        Err(e) => {
+            log::warn!("Failed to open store.json for the close to tray setting: {}", e);
+            true
+        }
+    }
+}
+
+#[tauri::command]
+pub async fn get_close_to_tray<R: Runtime>(app: AppHandle<R>) -> Result<bool, String> {
+    Ok(close_to_tray_enabled(&app))
+}
+
+#[tauri::command]
+pub async fn set_close_to_tray<R: Runtime>(app: AppHandle<R>, enabled: bool) -> Result<(), String> {
+    let store = app
+        .store("store.json")
+        .map_err(|e| format!("Failed to open store.json: {}", e))?;
+    store.set(CLOSE_TO_TRAY_KEY, serde_json::Value::Bool(enabled));
+    store
+        .save()
+        .map_err(|e| format!("Failed to save store.json: {}", e))?;
+    log::info!("Close to tray set to {}", enabled);
+    Ok(())
+}
 
 #[derive(Debug, Clone)]
 pub enum RecordingState {
