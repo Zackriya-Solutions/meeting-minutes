@@ -1,0 +1,23 @@
+# Build context for the frontend Docker build (frontend/Dockerfile.build).
+# The context is the repository root, so these patterns keep build output and
+# unrelated trees out of the image.
+
+.git
+.github
+
+# Rust build output (~5 GB) and downloaded sidecars
+target/
+frontend/src-tauri/binaries/
+
+# Frontend dependencies and build output, reinstalled inside the image
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/.env
+
+# Backend services are not part of the desktop app build
+backend/
+
+# Build bundles copied out of the image
+*.deb
+*.AppImage
