@@ -48,8 +48,6 @@ concurrency:
 env:
   RUST_BACKTRACE: 1
   CARGO_TERM_COLOR: always
-  WHISPER_NO_AVX: ON
-  WHISPER_NO_AVX2: ON
 
 jobs:
   build-linux:
@@ -145,18 +143,26 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libappindicator3-dev librsvg2-dev patchelf libasound2-dev libopenblas-dev libx11-dev libxtst-dev libxrandr-dev \
-            libwebkit2gtk-4.1-0=2.44.0-2 \
-            libwebkit2gtk-4.1-dev=2.44.0-2 \
-            libjavascriptcoregtk-4.1-0=2.44.0-2 \
-            libjavascriptcoregtk-4.1-dev=2.44.0-2 \
-            gir1.2-javascriptcoregtk-4.1=2.44.0-2 \
-            gir1.2-webkit2-4.1=2.44.0-2
+            cmake libclang-dev libssl-dev pkg-config \
+            libwebkit2gtk-4.1-0=2.52.6-0ubuntu0.24.04.1 \
+            libwebkit2gtk-4.1-dev=2.52.6-0ubuntu0.24.04.1 \
+            libjavascriptcoregtk-4.1-0=2.52.6-0ubuntu0.24.04.1 \
+            libjavascriptcoregtk-4.1-dev=2.52.6-0ubuntu0.24.04.1 \
+            gir1.2-javascriptcoregtk-4.1=2.52.6-0ubuntu0.24.04.1 \
+            gir1.2-webkit2-4.1=2.52.6-0ubuntu0.24.04.1
 
       - name: Install dependencies (Ubuntu 22.04)
         if: github.event.inputs.ubuntu-version == 'ubuntu-22.04' || github.event.inputs.ubuntu-version == ''
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libasound2-dev libopenblas-dev libx11-dev libxtst-dev libxrandr-dev
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libasound2-dev libopenblas-dev libx11-dev libxtst-dev libxrandr-dev cmake libclang-dev libssl-dev pkg-config
+
+      - name: Configure portable native build
+        run: |
+          # whisper-rs-sys forwards CMAKE_* variables, so the hook forces
+          # GGML_NATIVE=OFF and the Rust baseline keeps AVX2 without AVX-512.
+          echo "CMAKE_PROJECT_INCLUDE=$GITHUB_WORKSPACE/.github/force-portable-ggml.cmake" >> "$GITHUB_ENV"
+          echo "RUSTFLAGS=-C target-cpu=x86-64-v2" >> "$GITHUB_ENV"
 
       - name: Prepare Vulkan SDK (Ubuntu 24.04)
         if: github.event.inputs.ubuntu-version == 'ubuntu-24.04'
