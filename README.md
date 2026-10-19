@@ -122,6 +122,7 @@ Whether you're a defense consultant, enterprise executive, legal professional, o
 Build from source following our detailed guides:
 
 - [Building on Linux](docs/building_in_linux.md)
+- [Building with Docker](docs/building_with_docker.md) (Linux `.deb` for Debian/Ubuntu, AppImage for other distributions)
 - [General Build Instructions](docs/BUILDING.md)
 
 **Quick start:**

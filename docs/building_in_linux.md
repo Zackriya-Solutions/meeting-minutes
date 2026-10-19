@@ -2,6 +2,8 @@
 
 This guide helps you build Meetily on Linux with **automatic GPU acceleration**. The build system detects your hardware and configures the best performance automatically.
 
+To build without installing the Rust, Node and WebKit toolchains on the host, see [Building with Docker](building_with_docker.md). The Docker build runs on any distribution and produces a `.deb` (Debian/Ubuntu only) and a portable AppImage.
+
 ---
 
 ## 🚀 Quick Start (Recommended for Beginners)
@@ -13,7 +15,10 @@ If you're new to building on Linux, start here. These simple commands work for m
 ```bash
 # Ubuntu/Debian
 sudo apt update
-sudo apt install build-essential cmake git
+sudo apt install build-essential cmake git pkg-config libssl-dev \
+  libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf \
+  libasound2-dev libopenblas-dev libclang-dev \
+  libx11-dev libxtst-dev libxrandr-dev
 
 # Fedora/RHEL
 sudo dnf install gcc-c++ cmake git
@@ -21,6 +26,8 @@ sudo dnf install gcc-c++ cmake git
 # Arch Linux
 sudo pacman -S base-devel cmake git
 ```
+
+`pkg-config` and `libssl-dev` are required by `openssl-sys` and are not pulled in by `build-essential`. On Debian, `libappindicator3-dev` is named `libayatana-appindicator3-dev`. These are the same packages Tauri requires on Linux; see the [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) for the equivalent names on other distributions.
 
 ### 2. Build and Run
 
@@ -214,8 +221,11 @@ TAURI_GPU_FEATURE=openblas ./build-gpu.sh
 After successful build:
 
 ```
-src-tauri/target/release/bundle/appimage/Meetily_<version>_amd64.AppImage
+target/release/bundle/appimage/meetily_<version>_amd64.AppImage
+target/release/bundle/deb/meetily_<version>_amd64.deb
 ```
+
+The bundles land in the workspace root `target/` directory, which is declared by the root `Cargo.toml`, not in `frontend/src-tauri/target/`.
 
 ---
 
@@ -245,6 +255,16 @@ src-tauri/target/release/bundle/appimage/Meetily_<version>_amd64.AppImage
 - **Check detection:** Look at the build output for GPU detection messages
 - **Verify:** `nvidia-smi` (NVIDIA) or `rocm-smi` (AMD) should work
 - **Missing SDK:** Install the development toolkit, not just drivers
+
+### Build fails while compiling `openssl-sys`
+
+- **Fix:** Install `pkg-config` and `libssl-dev`; they are not part of `build-essential`
+- **Example:** `sudo apt install pkg-config libssl-dev`
+
+### `.deb` install fails with "trying to overwrite '/usr/bin/ffmpeg'"
+
+- **Cause:** the package ships its own `/usr/bin/ffmpeg`, which collides with the distro `ffmpeg` package
+- **Fix:** build with `SYSTEM_FFMPEG=1` through the Dockerfile, or repack the package without the bundled ffmpeg. See [Building with Docker](building_with_docker.md#the-deb-and-the-distro-ffmpeg-package)
 
 ---
 

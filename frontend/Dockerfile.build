@@ -1,0 +1,87 @@
+# Builds Meetily's Linux desktop bundles inside a container, so the host does
+# not need Rust, Node, WebKitGTK or the other native build dependencies.
+#
+# The build context MUST be the repository root: the Cargo workspace (and thus
+# the `target/` output directory) is defined by the root `Cargo.toml`, not by
+# `frontend/src-tauri`.
+#
+#   docker build -f frontend/Dockerfile.build -t meetily-builder .
+#   docker create --name meetily-artifacts meetily-builder
+#   docker cp meetily-artifacts:/src/target/release/bundle ./meetily-bundles
+#   docker rm meetily-artifacts
+#
+# Build arguments:
+#   BUNDLES         Comma separated bundle types. Default: deb
+#                   The .deb targets Debian/Ubuntu-based hosts only; use
+#                   `appimage` for other distributions. Both need glibc 2.35+
+#                   because the image is Ubuntu 22.04.
+#   SYSTEM_FFMPEG   Set to 1 to build a .deb that depends on the distro `ffmpeg`
+#                   package instead of shipping its own /usr/bin/ffmpeg. Needed
+#                   on Debian/Ubuntu systems that already have ffmpeg installed.
+
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Tauri v2 Linux prerequisites plus the native libraries Meetily's Rust
+# dependencies need. libclang-dev is required by the `ort` ONNX Runtime crate.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      build-essential \
+      ca-certificates \
+      cmake \
+      curl \
+      file \
+      git \
+      libappindicator3-dev \
+      libasound2-dev \
+      libclang-dev \
+      libfuse2 \
+      libgtk-3-dev \
+      libopenblas-dev \
+      librsvg2-dev \
+      libssl-dev \
+      libwebkit2gtk-4.1-dev \
+      libx11-dev \
+      libxrandr-dev \
+      libxtst-dev \
+      patchelf \
+      pkg-config \
+      wget \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV LIBCLANG_PATH=/usr/lib/llvm-14/lib
+
+# Node 22 ships the Corepack version that can activate the pinned pnpm.
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/* \
+    && corepack enable \
+    && corepack prepare pnpm@9.15.9 --activate
+
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+      | sh -s -- -y --default-toolchain stable
+ENV PATH=/root/.cargo/bin:$PATH
+
+WORKDIR /src
+COPY . .
+
+RUN cd frontend && pnpm install --frozen-lockfile
+
+# Build the llama-helper sidecar and place it where Tauri looks for sidecars.
+RUN cargo build --release -p llama-helper \
+    && mkdir -p frontend/src-tauri/binaries \
+    && cp target/release/llama-helper \
+          frontend/src-tauri/binaries/llama-helper-x86_64-unknown-linux-gnu
+
+ARG BUNDLES=deb
+ARG SYSTEM_FFMPEG=0
+
+# The bundles land in the workspace root `target/release/bundle`.
+# Updater artifacts are disabled because local builds have no signing key.
+RUN cd frontend \
+    && if [ "$SYSTEM_FFMPEG" = "1" ]; then \
+         config='{"bundle":{"createUpdaterArtifacts":false,"externalBin":["binaries/llama-helper"],"linux":{"deb":{"depends":["ffmpeg"]}}}}'; \
+       else \
+         config='{"bundle":{"createUpdaterArtifacts":false}}'; \
+       fi \
+    && pnpm tauri build --bundles "$BUNDLES" --config "$config"
