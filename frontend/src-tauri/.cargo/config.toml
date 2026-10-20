@@ -11,3 +11,9 @@ rustflags = [
 [env]
 MACOSX_DEPLOYMENT_TARGET = { value = "14.2", force = true }
 CMAKE_OSX_DEPLOYMENT_TARGET = "14.2"
+# Use whisper-rs-sys's bundled bindings.rs instead of running bindgen against
+# the system libclang. clang 22 (Arch/Omarchy) makes bindgen emit garbage
+# bindings (opaque whisper_full_params -> compile errors). Only
+# whisper-rs-sys reads this var; llama-cpp-sys-2's bindgen is unaffected.
+# Deterministic across Linux x86_64, Linux aarch64, and macOS.
+WHISPER_DONT_GENERATE_BINDINGS = "1"
