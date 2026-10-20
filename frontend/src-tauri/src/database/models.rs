@@ -127,4 +127,17 @@ pub struct TranscriptSetting {
     #[sqlx(rename = "openaiApiKey")]
     #[serde(rename = "openaiApiKey")]
     pub openai_api_key: Option<String>,
+    /// Custom OpenAI-compatible transcription endpoint configuration stored as JSON
+    #[sqlx(rename = "customOpenAIConfig")]
+    #[serde(rename = "customOpenAIConfig")]
+    pub custom_openai_config: Option<String>,
+}
+
+impl TranscriptSetting {
+    /// Parse the custom OpenAI-compatible transcription config from JSON
+    pub fn get_custom_openai_config(&self) -> Option<crate::audio::transcription::CustomTranscriptionConfig> {
+        self.custom_openai_config.as_ref().and_then(|json| {
+            serde_json::from_str(json).ok()
+        })
+    }
 }

@@ -204,7 +204,8 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
           setTranscriptModelConfig({
             provider: config.provider || 'parakeet',
             model: config.model || 'parakeet-tdt-0.6b-v3-int8',
-            apiKey: config.apiKey || null
+            apiKey: config.apiKey || null,
+            endpoint: config.endpoint || null
           });
         }
       } catch (error) {

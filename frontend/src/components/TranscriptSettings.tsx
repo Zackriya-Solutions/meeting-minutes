@@ -7,12 +7,14 @@ import { Label } from './ui/label';
 import { Eye, EyeOff, Lock, Unlock } from 'lucide-react';
 import { ModelManager } from './WhisperModelManager';
 import { ParakeetModelManager } from './ParakeetModelManager';
+import { configService } from '@/services/configService';
 
 
 export interface TranscriptModelProps {
-    provider: 'localWhisper' | 'parakeet' | 'deepgram' | 'elevenLabs' | 'groq' | 'openai';
+    provider: 'localWhisper' | 'parakeet' | 'deepgram' | 'elevenLabs' | 'groq' | 'openai' | 'custom-openai';
     model: string;
     apiKey?: string | null;
+    endpoint?: string | null;
 }
 
 export interface TranscriptSettingsProps {
@@ -27,6 +29,12 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
     const [isApiKeyLocked, setIsApiKeyLocked] = useState<boolean>(true);
     const [isLockButtonVibrating, setIsLockButtonVibrating] = useState<boolean>(false);
     const [uiProvider, setUiProvider] = useState<TranscriptModelProps['provider']>(transcriptModelConfig.provider);
+    const [customEndpoint, setCustomEndpoint] = useState<string>(transcriptModelConfig.endpoint || '');
+    const [customModel, setCustomModel] = useState<string>(
+        transcriptModelConfig.provider === 'custom-openai' ? transcriptModelConfig.model : ''
+    );
+    const [isSavingCustom, setIsSavingCustom] = useState(false);
+    const [customSaveError, setCustomSaveError] = useState<string | null>(null);
 
     // Sync uiProvider when backend config changes (e.g., after model selection or initial load)
     useEffect(() => {
@@ -59,6 +67,36 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
         openai: ['gpt-4o'],
     };
     const requiresApiKey = transcriptModelConfig.provider === 'deepgram' || transcriptModelConfig.provider === 'elevenLabs' || transcriptModelConfig.provider === 'openai' || transcriptModelConfig.provider === 'groq';
+
+    const handleCustomOpenAISave = async () => {
+        setCustomSaveError(null);
+        if (!customEndpoint.trim() || !customModel.trim()) {
+            setCustomSaveError('Endpoint and model are required.');
+            return;
+        }
+        setIsSavingCustom(true);
+        try {
+            await configService.saveCustomOpenAITranscriptConfig({
+                endpoint: customEndpoint.trim(),
+                apiKey: apiKey?.trim() || null,
+                model: customModel.trim(),
+            });
+            setTranscriptModelConfig({
+                ...transcriptModelConfig,
+                provider: 'custom-openai',
+                model: customModel.trim(),
+                endpoint: customEndpoint.trim(),
+                apiKey: apiKey?.trim() || null,
+            });
+            if (onModelSelect) {
+                onModelSelect();
+            }
+        } catch (err) {
+            setCustomSaveError(err instanceof Error ? err.message : 'Failed to save configuration.');
+        } finally {
+            setIsSavingCustom(false);
+        }
+    };
 
     const handleInputClick = () => {
         if (isApiKeyLocked) {
@@ -112,7 +150,16 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                 onValueChange={(value) => {
                                     const provider = value as TranscriptModelProps['provider'];
                                     setUiProvider(provider);
-                                    if (provider !== 'localWhisper' && provider !== 'parakeet') {
+                                    setCustomSaveError(null);
+                                    if (provider === 'custom-openai') {
+                                        configService.getCustomOpenAITranscriptConfig().then((config) => {
+                                            if (config) {
+                                                setCustomEndpoint(config.endpoint || '');
+                                                setCustomModel(config.model || '');
+                                                setApiKey(config.apiKey || '');
+                                            }
+                                        }).catch((err) => console.error('Error fetching custom transcription config:', err));
+                                    } else if (provider !== 'localWhisper' && provider !== 'parakeet') {
                                         fetchApiKey(provider);
                                     }
                                 }}
@@ -123,6 +170,7 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                 <SelectContent>
                                     <SelectItem value="parakeet">⚡ Parakeet (Recommended - Real-time / Accurate)</SelectItem>
                                     <SelectItem value="localWhisper">🏠 Local Whisper (High Accuracy)</SelectItem>
+                                    <SelectItem value="custom-openai">☁️ Custom Server (OpenAI-Compatible)</SelectItem>
                                     {/* <SelectItem value="deepgram">☁️ Deepgram (Backup)</SelectItem>
                                     <SelectItem value="elevenLabs">☁️ ElevenLabs</SelectItem>
                                     <SelectItem value="groq">☁️ Groq</SelectItem>
@@ -130,7 +178,7 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                 </SelectContent>
                             </Select>
 
-                            {uiProvider !== 'localWhisper' && uiProvider !== 'parakeet' && (
+                            {uiProvider !== 'localWhisper' && uiProvider !== 'parakeet' && uiProvider !== 'custom-openai' && (
                                 <Select
                                     value={transcriptModelConfig.model}
                                     onValueChange={(value) => {
@@ -173,7 +221,34 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                     )}
 
 
-                    {requiresApiKey && (
+                    {uiProvider === 'custom-openai' && (
+                        <div className="mt-6 space-y-4">
+                            <div>
+                                <Label className="block text-sm font-medium text-gray-700 mb-1">
+                                    Endpoint URL
+                                </Label>
+                                <Input
+                                    className="mx-1 focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                                    value={customEndpoint}
+                                    onChange={(e) => setCustomEndpoint(e.target.value)}
+                                    placeholder="https://api.openai.com/v1"
+                                />
+                            </div>
+                            <div>
+                                <Label className="block text-sm font-medium text-gray-700 mb-1">
+                                    Model
+                                </Label>
+                                <Input
+                                    className="mx-1 focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                                    value={customModel}
+                                    onChange={(e) => setCustomModel(e.target.value)}
+                                    placeholder="whisper-1"
+                                />
+                            </div>
+                        </div>
+                    )}
+
+                    {(requiresApiKey || uiProvider === 'custom-openai') && (
                         <div>
                             <Label className="block text-sm font-medium text-gray-700 mb-1">
                                 API Key
@@ -217,6 +292,21 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                     </Button>
                                 </div>
                             </div>
+                        </div>
+                    )}
+
+                    {uiProvider === 'custom-openai' && (
+                        <div className="mx-1">
+                            {customSaveError && (
+                                <p className="text-sm text-red-600 mb-2">{customSaveError}</p>
+                            )}
+                            <Button
+                                type="button"
+                                onClick={handleCustomOpenAISave}
+                                disabled={isSavingCustom}
+                            >
+                                {isSavingCustom ? 'Saving...' : 'Save'}
+                            </Button>
                         </div>
                     )}
                 </div>

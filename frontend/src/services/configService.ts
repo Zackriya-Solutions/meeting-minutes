@@ -36,6 +36,12 @@ export interface CustomOpenAIConfig {
   topP: number | null;
 }
 
+export interface CustomTranscriptionConfig {
+  endpoint: string;
+  apiKey: string | null;
+  model: string;
+}
+
 export interface RecordingPreferences {
   preferred_mic_device: string | null;
   preferred_system_device: string | null;
@@ -52,6 +58,27 @@ export class ConfigService {
    */
   async getTranscriptConfig(): Promise<TranscriptModelProps> {
     return invoke<TranscriptModelProps>('api_get_transcript_config');
+  }
+
+  /**
+   * Get saved custom OpenAI-compatible transcription configuration
+   * @returns Promise with CustomTranscriptionConfig or null if not configured
+   */
+  async getCustomOpenAITranscriptConfig(): Promise<CustomTranscriptionConfig | null> {
+    return invoke<CustomTranscriptionConfig | null>('api_get_custom_openai_transcript_config');
+  }
+
+  /**
+   * Save custom OpenAI-compatible transcription configuration
+   * @param config - CustomTranscriptionConfig to save
+   * @returns Promise with result status
+   */
+  async saveCustomOpenAITranscriptConfig(config: CustomTranscriptionConfig): Promise<{ status: string; message: string }> {
+    return invoke<{ status: string; message: string }>('api_save_custom_openai_transcript_config', {
+      endpoint: config.endpoint,
+      apiKey: config.apiKey,
+      model: config.model,
+    });
   }
 
   /**

@@ -101,6 +101,7 @@ pub struct TranscriptConfig {
     pub model: String,
     #[serde(rename = "apiKey")]
     pub api_key: Option<String>,
+    pub endpoint: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -612,6 +613,19 @@ pub async fn api_get_transcript_config<R: Runtime>(
                 &config.provider,
                 &config.model
             );
+
+            if config.provider == "custom-openai" {
+                return match config.get_custom_openai_config() {
+                    Some(custom) => Ok(Some(TranscriptConfig {
+                        provider: config.provider,
+                        model: custom.model,
+                        api_key: custom.api_key,
+                        endpoint: Some(custom.endpoint),
+                    })),
+                    None => Err("Custom OpenAI transcription config is missing or invalid".to_string()),
+                };
+            }
+
             match SettingsRepository::get_transcript_api_key(pool, &config.provider).await {
                 Ok(api_key) => {
                     log_info!("Successfully retrieved transcript config and API key.");
@@ -619,6 +633,7 @@ pub async fn api_get_transcript_config<R: Runtime>(
                         provider: config.provider,
                         model: config.model,
                         api_key,
+                        endpoint: None,
                     }))
                 }
                 Err(e) => {
@@ -637,6 +652,7 @@ pub async fn api_get_transcript_config<R: Runtime>(
                 provider: "parakeet".to_string(),
                 model: crate::config::DEFAULT_PARAKEET_MODEL.to_string(),
                 api_key: None,
+                endpoint: None,
             }))
         }
         Err(e) => {
@@ -1161,6 +1177,72 @@ pub async fn open_external_url(url: String) -> Result<(), String> {
     match result {
         Ok(_) => Ok(()),
         Err(e) => Err(format!("Failed to open URL: {}", e)),
+    }
+}
+
+// ===== CUSTOM OPENAI TRANSCRIPTION API COMMANDS =====
+
+/// Saves the custom OpenAI-compatible transcription configuration
+#[tauri::command]
+pub async fn api_save_custom_openai_transcript_config<R: Runtime>(
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    endpoint: String,
+    api_key: Option<String>,
+    model: String,
+) -> Result<serde_json::Value, String> {
+    log_info!(
+        "api_save_custom_openai_transcript_config called: endpoint='{}', model='{}'",
+        &endpoint,
+        &model
+    );
+
+    if endpoint.trim().is_empty() {
+        return Err("Endpoint URL is required".to_string());
+    }
+    if model.trim().is_empty() {
+        return Err("Model name is required".to_string());
+    }
+    if !endpoint.starts_with("http://") && !endpoint.starts_with("https://") {
+        return Err("Endpoint must start with http:// or https://".to_string());
+    }
+
+    let config = crate::audio::transcription::CustomTranscriptionConfig {
+        endpoint: endpoint.trim().to_string(),
+        api_key: api_key.filter(|k| !k.trim().is_empty()),
+        model: model.trim().to_string(),
+    };
+
+    let pool = state.db_manager.pool();
+
+    match SettingsRepository::save_custom_openai_transcript_config(pool, &config).await {
+        Ok(()) => Ok(serde_json::json!({
+            "status": "success",
+            "message": "Custom OpenAI transcription configuration saved successfully"
+        })),
+        Err(e) => {
+            log_error!("❌ Failed to save custom OpenAI transcript config: {}", e);
+            Err(format!("Failed to save custom OpenAI transcription configuration: {}", e))
+        }
+    }
+}
+
+/// Gets the custom OpenAI-compatible transcription configuration
+#[tauri::command]
+pub async fn api_get_custom_openai_transcript_config<R: Runtime>(
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+) -> Result<Option<crate::audio::transcription::CustomTranscriptionConfig>, String> {
+    log_info!("api_get_custom_openai_transcript_config called");
+
+    let pool = state.db_manager.pool();
+
+    match SettingsRepository::get_custom_openai_transcript_config(pool).await {
+        Ok(config) => Ok(config),
+        Err(e) => {
+            log_error!("❌ Failed to get custom OpenAI transcript config: {}", e);
+            Err(format!("Failed to get custom OpenAI transcription configuration: {}", e))
+        }
     }
 }
 

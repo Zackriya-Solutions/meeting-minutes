@@ -184,6 +184,7 @@ impl SettingsRepository {
             "elevenLabs" => "elevenLabsApiKey",
             "groq" => "groqApiKey",
             "openai" => "openaiApiKey",
+            "custom-openai" => return Ok(()), // Custom OpenAI stores its key in customOpenAIConfig JSON
             _ => {
                 return Err(sqlx::Error::Protocol(
                     format!("Invalid provider: {}", provider).into(),
@@ -216,6 +217,7 @@ impl SettingsRepository {
             "elevenLabs" => "elevenLabsApiKey",
             "groq" => "groqApiKey",
             "openai" => "openaiApiKey",
+            "custom-openai" => return Ok(None), // Custom OpenAI stores its key in customOpenAIConfig JSON
             _ => {
                 return Err(sqlx::Error::Protocol(
                     format!("Invalid provider: {}", provider).into(),
@@ -229,6 +231,66 @@ impl SettingsRepository {
         );
         let api_key = sqlx::query_scalar(&query).fetch_optional(pool).await?;
         Ok(api_key)
+    }
+
+    // ===== CUSTOM OPENAI TRANSCRIPTION CONFIG METHODS =====
+
+    /// Gets the custom OpenAI-compatible transcription config from JSON
+    pub async fn get_custom_openai_transcript_config(
+        pool: &SqlitePool,
+    ) -> std::result::Result<Option<crate::audio::transcription::CustomTranscriptionConfig>, sqlx::Error> {
+        use sqlx::Row;
+
+        let row = sqlx::query(
+            "SELECT customOpenAIConfig FROM transcript_settings WHERE id = '1' LIMIT 1",
+        )
+        .fetch_optional(pool)
+        .await?;
+
+        match row {
+            Some(record) => {
+                let config_json: Option<String> = record.get("customOpenAIConfig");
+                match config_json {
+                    Some(json) => {
+                        let config = serde_json::from_str(&json).map_err(|e| {
+                            sqlx::Error::Protocol(
+                                format!("Invalid JSON in customOpenAIConfig: {}", e).into(),
+                            )
+                        })?;
+                        Ok(Some(config))
+                    }
+                    None => Ok(None),
+                }
+            }
+            None => Ok(None),
+        }
+    }
+
+    /// Saves the custom OpenAI-compatible transcription config as JSON
+    pub async fn save_custom_openai_transcript_config(
+        pool: &SqlitePool,
+        config: &crate::audio::transcription::CustomTranscriptionConfig,
+    ) -> std::result::Result<(), sqlx::Error> {
+        let config_json = serde_json::to_string(config).map_err(|e| {
+            sqlx::Error::Protocol(format!("Failed to serialize config to JSON: {}", e).into())
+        })?;
+
+        sqlx::query(
+            r#"
+            INSERT INTO transcript_settings (id, provider, model, customOpenAIConfig)
+            VALUES ('1', 'custom-openai', $1, $2)
+            ON CONFLICT(id) DO UPDATE SET
+                provider = 'custom-openai',
+                model = excluded.model,
+                customOpenAIConfig = excluded.customOpenAIConfig
+            "#,
+        )
+        .bind(&config.model)
+        .bind(config_json)
+        .execute(pool)
+        .await?;
+
+        Ok(())
     }
 
     pub async fn delete_api_key(
