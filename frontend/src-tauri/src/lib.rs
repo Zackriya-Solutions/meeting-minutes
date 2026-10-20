@@ -51,6 +51,7 @@ pub mod groq;
 pub mod openrouter;
 pub mod parakeet_engine;
 pub mod state;
+pub mod substitutions;
 pub mod summary;
 pub mod tray;
 pub mod utils;
@@ -875,6 +876,10 @@ pub fn run() {
             summary::commands::api_cancel_summary,
             // Template commands
             summary::template_commands::api_list_templates,
+            substitutions::substitutions_list,
+            substitutions::substitutions_save,
+            substitutions::substitutions_test,
+            substitutions::substitutions_file_path,
             summary::template_commands::api_get_template_details,
             summary::template_commands::api_validate_template,
             // Built-in AI commands

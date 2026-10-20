@@ -552,7 +552,8 @@ impl ParakeetEngine {
             .map_err(|e| anyhow!("Parakeet transcription failed: {}", e))?;
 
 
-        Ok(result.text)
+        // Apply user vocabulary substitutions (Settings > Vocabulary)
+        Ok(crate::substitutions::apply(&result.text))
     }
 
     /// Get the models directory path

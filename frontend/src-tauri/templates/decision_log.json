@@ -1,0 +1,38 @@
+{
+  "name": "Decision Log",
+  "description": "A minimal, audit-ready record of decisions made: what was decided, options considered, rationale, owner, and reversibility.",
+  "sections": [
+    {
+      "title": "Decisions Made",
+      "instruction": "For EACH decision, state it as a full sentence in the present tense ('We adopt X', 'We stop doing Y'). Always add reference transcript segment and timestamp.",
+      "format": "list",
+      "item_format": "| Decision | Made By | Reference Transcript Segment | Segment Time stamp |\n| --- | --- | --- | --- |"
+    },
+    {
+      "title": "Options Considered",
+      "instruction": "For each major decision, list the alternatives discussed and why they were not chosen.",
+      "format": "list"
+    },
+    {
+      "title": "Rationale",
+      "instruction": "The reasoning, data, or constraints that drove each decision. Capture the 'why', not just the 'what'.",
+      "format": "list"
+    },
+    {
+      "title": "Risks & Reversibility",
+      "instruction": "Risks acknowledged for each decision, and whether the decision was described as reversible or one-way.",
+      "format": "list"
+    },
+    {
+      "title": "Follow-up Actions",
+      "instruction": "Actions spawned by these decisions, with owners and due dates. Always add reference transcript segment and timestamp.",
+      "format": "list",
+      "item_format": "| **Owner** | Action | Due | Reference Transcript Segment | Segment Time stamp |\n| --- | --- | --- | --- | --- |"
+    },
+    {
+      "title": "Deferred / Unresolved",
+      "instruction": "Questions left open or decisions explicitly postponed, with who owns pulling them forward.",
+      "format": "list"
+    }
+  ]
+}

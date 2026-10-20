@@ -1,0 +1,43 @@
+{
+  "name": "Dealership Sales Call",
+  "description": "Structured notes for dealership / vehicle sales calls: customer needs, vehicle interest, trade-in, numbers, objections, and next steps.",
+  "sections": [
+    {
+      "title": "Call Summary",
+      "instruction": "One paragraph: who called, what they want, and where the deal stands.",
+      "format": "paragraph"
+    },
+    {
+      "title": "Customer Profile",
+      "instruction": "Name, contact info, current vehicle, and how they heard about us.",
+      "format": "list"
+    },
+    {
+      "title": "Vehicle Interest",
+      "instruction": "Specific vehicles discussed: year, make, model, trim, stock number if mentioned, and must-have features.",
+      "format": "list"
+    },
+    {
+      "title": "Trade-In",
+      "instruction": "Trade-in vehicle details, condition notes, mileage, payoff if mentioned, and expectations on value.",
+      "format": "list"
+    },
+    {
+      "title": "Numbers Discussed",
+      "instruction": "Any prices, payments, terms, rates, down payments, or figures quoted. Include the exact numbers and context. Always add reference transcript segment and timestamp.",
+      "format": "list",
+      "item_format": "| Figure | Context | Reference Transcript Segment | Segment Time stamp |\n| --- | --- | --- | --- |"
+    },
+    {
+      "title": "Objections & Concerns",
+      "instruction": "Concerns the customer raised (price, payment, timing, vehicle condition, competitor comparisons) and how they were addressed.",
+      "format": "list"
+    },
+    {
+      "title": "Next Steps",
+      "instruction": "Committed follow-up actions with owner and timeframe. Include appointments set (date/time) and what to prepare. Always add reference transcript segment and timestamp.",
+      "format": "list",
+      "item_format": "| **Owner** | Action | When | Reference Transcript Segment | Segment Time stamp |\n| --- | --- | --- | --- | --- |"
+    }
+  ]
+}
