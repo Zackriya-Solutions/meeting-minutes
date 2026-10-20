@@ -1,0 +1,44 @@
+{
+  "name": "Property Walkthrough",
+  "description": "Field notes for real-estate property walkthroughs: unit/system condition, capital needs, rents and numbers, and a verdict.",
+  "sections": [
+    {
+      "title": "Property Snapshot",
+      "instruction": "Address or identifying details, property type, unit count, and who attended the walkthrough.",
+      "format": "list"
+    },
+    {
+      "title": "Overall Impression",
+      "instruction": "One paragraph honest assessment of the property's condition and curb appeal.",
+      "format": "paragraph"
+    },
+    {
+      "title": "Condition by Area",
+      "instruction": "Condition notes organized by area or system (roof, HVAC, plumbing, electrical, foundation, units, common areas, parking). Flag anything that looked original, damaged, or life-safety. Always add reference transcript segment and timestamp.",
+      "format": "list",
+      "item_format": "| Area / System | Condition | Est. Concern Level | Reference Transcript Segment | Segment Time stamp |\n| --- | --- | --- | --- | --- |"
+    },
+    {
+      "title": "Capital Needs",
+      "instruction": "Estimated capital expenditures discussed: item, rough cost if mentioned, urgency.",
+      "format": "list"
+    },
+    {
+      "title": "Numbers",
+      "instruction": "Rents, occupancy, taxes, insurance, utilities, asking price, and any deal math discussed (cap rate, cash-on-cash, price per unit). Always add reference transcript segment and timestamp.",
+      "format": "list",
+      "item_format": "| Figure | Value | Context | Reference Transcript Segment | Segment Time stamp |\n| --- | --- | --- | --- | --- |"
+    },
+    {
+      "title": "Neighborhood & Comps",
+      "instruction": "Observations about the area, comparable properties, or rental demand mentioned.",
+      "format": "list"
+    },
+    {
+      "title": "Verdict & Next Steps",
+      "instruction": "The verdict expressed (pursue / pass / needs more info), conditions attached, and follow-up actions with owners. Always add reference transcript segment and timestamp.",
+      "format": "list",
+      "item_format": "| Verdict / Action | **Owner** | When | Reference Transcript Segment | Segment Time stamp |\n| --- | --- | --- | --- | --- |"
+    }
+  ]
+}

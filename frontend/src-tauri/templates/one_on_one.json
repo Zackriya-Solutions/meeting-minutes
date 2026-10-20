@@ -1,0 +1,42 @@
+{
+  "name": "One-on-One Meeting",
+  "description": "Notes for recurring 1:1 meetings between a manager and team member: wins, blockers, feedback, and action items.",
+  "sections": [
+    {
+      "title": "Summary",
+      "instruction": "One paragraph capturing the tone and substance of the conversation.",
+      "format": "paragraph"
+    },
+    {
+      "title": "Wins & Progress",
+      "instruction": "What went well since the last meeting. Note completed work and achievements with specifics.",
+      "format": "list"
+    },
+    {
+      "title": "Blockers & Challenges",
+      "instruction": "What is stuck or slowing the person down, and what support was discussed.",
+      "format": "list"
+    },
+    {
+      "title": "Feedback Exchanged",
+      "instruction": "Feedback given and received, both constructive and positive. Be specific and reference the topic.",
+      "format": "list"
+    },
+    {
+      "title": "Career & Growth",
+      "instruction": "Any discussion of development, goals, skills, or trajectory.",
+      "format": "list"
+    },
+    {
+      "title": "Action Items",
+      "instruction": "All committed actions with owners and due dates. Always add reference transcript segment and timestamp.",
+      "format": "list",
+      "item_format": "| **Owner** | Action | Due | Reference Transcript Segment | Segment Time stamp |\n| --- | --- | --- | --- | --- |"
+    },
+    {
+      "title": "Topics for Next Time",
+      "instruction": "Anything parked or deferred to the next 1:1.",
+      "format": "list"
+    }
+  ]
+}
