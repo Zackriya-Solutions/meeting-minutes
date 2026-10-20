@@ -584,7 +584,7 @@ impl WhisperEngine {
 
         // Additional suppression to reduce C library verbosity
         params.set_suppress_blank(true);
-        params.set_suppress_non_speech_tokens(true);
+        params.set_suppress_nst(true);
         params.set_temperature(adaptive_config.temperature);
         params.set_max_initial_ts(1.0);
         params.set_entropy_thold(2.4);
@@ -689,8 +689,8 @@ impl WhisperEngine {
         params.set_print_realtime(false);
         params.set_print_timestamps(false);
         params.set_suppress_blank(true);
-        params.set_suppress_non_speech_tokens(true);
-        params.set_temperature(0.3);
+        params.set_suppress_nst(true);
+        params.set_temperature(0.3);             // Lower than 0.4 for consistency, higher than 0.0 for quality
         params.set_max_initial_ts(1.0);
         params.set_entropy_thold(2.4);
         params.set_logprob_thold(-1.0);
