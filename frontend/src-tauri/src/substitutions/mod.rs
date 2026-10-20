@@ -78,11 +78,21 @@ fn compile_rules(rules: &[SubstitutionRule]) -> Vec<CompiledRule> {
             if !r.case_sensitive {
                 pattern.push_str("(?i)");
             }
-            let escaped = regex::escape(r.find.trim());
+            let lit = r.find.trim();
+            let escaped = regex::escape(lit);
             if r.whole_word {
-                pattern.push_str(r#"\b"#);
+                // Word boundaries only make sense adjacent to word characters.
+                // A token like "c++" ends in '+', where `\b` can never match
+                // (boundary needs a word char on one side), so only add `\b`
+                // where the token edge is itself a word character.
+                let is_word = |c: char| c.is_alphanumeric() || c == '_';
+                if lit.chars().next().map(is_word).unwrap_or(false) {
+                    pattern.push_str(r#"\b"#);
+                }
                 pattern.push_str(&escaped);
-                pattern.push_str(r#"\b"#);
+                if lit.chars().last().map(is_word).unwrap_or(false) {
+                    pattern.push_str(r#"\b"#);
+                }
             } else {
                 pattern.push_str(&escaped);
             }
