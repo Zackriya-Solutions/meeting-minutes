@@ -100,6 +100,8 @@ Whether you're a defense consultant, enterprise executive, legal professional, o
 - **Multi-Platform:** Works on macOS, Windows, and Linux.
 - **Open Source:** Meetily is open source and free to use.
 - **Flexible AI Provider Support:** Choose from Ollama (local), Claude, Groq, OpenRouter, or use your own OpenAI-compatible endpoint.
+- **Vocabulary Substitutions:** Teach the transcriber the words it mishears. Rules in Settings → Vocabulary are applied to every transcript, and the glossary is fed to Whisper's initial prompt so names and jargon are recognized correctly in the first pass.
+- **Customizable Note Templates:** Bundled templates for standard meetings, standups, one-on-ones, decision logs, sales calls, retrospectives, and property walkthroughs — or drop your own JSON template into the templates directory.
 
 ## Installation
 
