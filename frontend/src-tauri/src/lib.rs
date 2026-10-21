@@ -64,6 +64,63 @@ use tokio::sync::RwLock;
 
 static RECORDING_FLAG: AtomicBool = AtomicBool::new(false);
 
+#[cfg(target_os = "windows")]
+static ONNX_RUNTIME_INIT_ERROR: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+pub(crate) fn ensure_onnx_runtime_available() -> anyhow::Result<()> {
+    #[cfg(target_os = "windows")]
+    if let Some(error) = ONNX_RUNTIME_INIT_ERROR.get() {
+        anyhow::bail!("{error}");
+    }
+
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn catch_onnx_runtime_init<F, E>(init: F) -> Result<(), String>
+where
+    F: FnOnce() -> Result<(), E>,
+    E: std::fmt::Display,
+{
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(init)) {
+        Ok(result) => result.map_err(|error| error.to_string()),
+        Err(payload) => {
+            let message = payload
+                .downcast_ref::<&str>()
+                .copied()
+                .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
+                .unwrap_or("unknown panic");
+            Err(format!("ONNX Runtime initialization panicked: {message}"))
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn record_onnx_runtime_failure(error: String) {
+    log::error!("{error}");
+    let _ = ONNX_RUNTIME_INIT_ERROR.set(error);
+}
+
+#[cfg(all(test, target_os = "windows"))]
+mod onnx_runtime_tests {
+    use super::catch_onnx_runtime_init;
+
+    #[test]
+    fn catch_onnx_runtime_init_converts_errors_and_panics() {
+        assert!(catch_onnx_runtime_init(|| Ok::<(), &str>(())).is_ok());
+        assert_eq!(
+            catch_onnx_runtime_init(|| Err::<(), _>("initializer error")),
+            Err("initializer error".to_string())
+        );
+
+        let error = catch_onnx_runtime_init(|| -> Result<(), &str> {
+            panic!("synthetic loader panic");
+        })
+        .unwrap_err();
+        assert!(error.contains("synthetic loader panic"));
+    }
+}
+
 // Global language preference storage (default to "auto-translate" for automatic translation to English)
 static LANGUAGE_PREFERENCE: std::sync::LazyLock<StdMutex<String>> =
     std::sync::LazyLock::new(|| StdMutex::new("auto-translate".to_string()));
@@ -418,6 +475,35 @@ pub fn run() {
         .manage(audio::init_system_audio_state())
         .manage(summary::summary_engine::ModelManagerState(Arc::new(tokio::sync::Mutex::new(None))))
         .setup(|_app| {
+            #[cfg(target_os = "windows")]
+            match _app.path().resolve(
+                "onnxruntime.dll",
+                tauri::path::BaseDirectory::Resource,
+            ) {
+                Ok(runtime_path) => {
+                    match catch_onnx_runtime_init(|| {
+                        ort::init_from(runtime_path.to_string_lossy().into_owned())
+                            .with_telemetry(false)
+                            .commit()
+                            .map(|_| ())
+                    }) {
+                        Ok(()) => log::info!(
+                            "Initialized bundled ONNX Runtime from {}",
+                            runtime_path.display()
+                        ),
+                        Err(error) => record_onnx_runtime_failure(format!(
+                            "Failed to initialize bundled ONNX Runtime from {}: {}",
+                            runtime_path.display(),
+                            error
+                        )),
+                    }
+                }
+                Err(error) => record_onnx_runtime_failure(format!(
+                    "Failed to resolve bundled ONNX Runtime resource: {}",
+                    error
+                )),
+            };
+
             log::info!("Application setup complete");
 
             // Initialize system tray
@@ -610,10 +696,6 @@ pub fn run() {
             // Reload sync commands (retrieve transcript history and meeting name)
             audio::recording_commands::get_transcript_history,
             audio::recording_commands::get_recording_meeting_name,
-            // Device monitoring commands (AirPods/Bluetooth disconnect/reconnect)
-            audio::recording_commands::poll_audio_device_events,
-            audio::recording_commands::get_reconnection_status,
-            audio::recording_commands::attempt_device_reconnect,
             // Playback device detection (Bluetooth warning)
             audio::recording_commands::get_active_audio_output,
             // Audio recovery commands (for transcript recovery feature)

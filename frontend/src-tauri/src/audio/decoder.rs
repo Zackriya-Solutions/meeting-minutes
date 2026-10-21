@@ -454,7 +454,7 @@ pub fn decode_audio_file_with_progress(
     let track_id = track.id;
 
     // Get audio parameters
-    let sample_rate = track
+    let mut sample_rate = track
         .codec_params
         .sample_rate
         .ok_or_else(|| anyhow!("Unknown sample rate"))?;
@@ -524,6 +524,19 @@ pub fn decode_audio_file_with_progress(
                         );
                         channels = actual_channels;
                     }
+                    // Detect actual sample rate from decoded audio. The container can
+                    // declare a different rate than the decoder produces: HE-AAC (SBR)
+                    // files declare e.g. 48000 Hz, but Symphonia has no SBR support and
+                    // decodes the AAC-LC core at half that rate. Trusting the container
+                    // rate makes the audio play at 2x speed and halves the duration.
+                    let actual_rate = spec.rate;
+                    if actual_rate != sample_rate {
+                        info!(
+                            "Sample rate corrected: metadata={} actual={} (using actual)",
+                            sample_rate, actual_rate
+                        );
+                        sample_rate = actual_rate;
+                    }
                     sample_buf = Some(SampleBuffer::<f32>::new(duration, spec));
                 }
 
@@ -580,6 +593,37 @@ pub fn decode_audio_file_with_progress(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_decode_he_aac_uses_decoded_rate_not_container_rate() {
+        // HE-AAC (SBR) fixture: the container declares 48 kHz stereo, but
+        // Symphonia has no SBR support and decodes only the AAC-LC core at
+        // 24 kHz. Trusting the container rate halves the duration and makes
+        // the audio play at 2x speed, which truncated long imported
+        // recordings to half their length.
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/he_aac_48k_5s.m4a");
+        let decoded = decode_audio_file(&path).expect("failed to decode HE-AAC fixture");
+
+        assert_eq!(
+            decoded.sample_rate, 24000,
+            "sample_rate must come from the decoder output, not container metadata"
+        );
+        assert!(
+            (decoded.duration_seconds - 5.16).abs() < 0.5,
+            "duration must be ~5s (was reported as ~2.6s before the fix), got {:.2}s",
+            decoded.duration_seconds
+        );
+
+        // The 16 kHz conversion must preserve the real duration as well.
+        let whisper_samples = decoded.to_whisper_format();
+        let duration_16k = whisper_samples.len() as f64 / 16000.0;
+        assert!(
+            (duration_16k - 5.16).abs() < 0.5,
+            "whisper-format duration must be ~5s, got {:.2}s",
+            duration_16k
+        );
+    }
 
     #[test]
     fn test_to_whisper_format_mono_16k() {

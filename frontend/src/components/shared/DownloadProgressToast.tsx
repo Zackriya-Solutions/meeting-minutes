@@ -5,6 +5,7 @@ import { listen } from '@tauri-apps/api/event';
 import { toast } from 'sonner';
 import { X, Download, Check, Loader2, ArrowBigDownDash } from 'lucide-react';
 import { getDownloadTotalMb } from '@/lib/onboarding-summary-model';
+import type { ParakeetDownloadProgressEvent } from '@/lib/parakeet';
 
 interface DownloadProgress {
   modelName: string;
@@ -221,38 +222,30 @@ export function useDownloadProgressToast() {
 
   // Listen to Parakeet download events
   useEffect(() => {
-    const unlistenProgress = listen<{
-      modelName: string;
-      progress: number;
-      downloaded_mb?: number;
-      total_mb?: number;
-      speed_mbps?: number;
-      status?: string;
-    }>('parakeet-model-download-progress', (event) => {
-      const { modelName, progress, downloaded_mb, total_mb, speed_mbps, status } = event.payload;
+    const unlistenProgress = listen<ParakeetDownloadProgressEvent>(
+      'parakeet-model-download-progress',
+      (event) => {
+        const { modelName, progress, downloaded_mb, total_mb, speed_mbps, status } = event.payload;
+        const downloadData: DownloadProgress = {
+          modelName,
+          displayName: 'Transcription Model (Parakeet)',
+          progress,
+          downloadedMb: downloaded_mb ?? 0,
+          totalMb: total_mb ?? 670,
+          speedMbps: speed_mbps ?? 0,
+          status: status === 'cancelled'
+            ? 'cancelled'
+            : status === 'completed'
+              ? 'completed'
+              : 'downloading',
+        };
 
-      const downloadData: DownloadProgress = {
-        modelName,
-        displayName: 'Transcription Model (Parakeet)',
-        progress,
-        downloadedMb: downloaded_mb ?? 0,
-        totalMb: total_mb ?? 670,
-        speedMbps: speed_mbps ?? 0,
-        status: status === 'cancelled'
-          ? 'cancelled'
-          : status === 'completed' || progress >= 100
-          ? 'completed'
-          : 'downloading',
-      };
-
-      updateDownload(modelName, downloadData);
-
-      // Clean up cancelled downloads after delay to auto-dismiss toast
-      if (downloadData.status === 'cancelled') {
-        cleanupDownload(modelName, 6000); // 5s toast + 1s buffer
+        updateDownload(modelName, downloadData);
+        if (downloadData.status === 'cancelled') {
+          cleanupDownload(modelName, 6000);
+        }
       }
-      // Removed direct showDownloadToast call here, handled by effect
-    });
+    );
 
     const unlistenComplete = listen<{ modelName: string }>(
       'parakeet-model-download-complete',

@@ -53,7 +53,6 @@ pub struct RecordingSaver {
     meeting_name: Option<String>,
     metadata: Option<MeetingMetadata>,
     transcript_segments: Arc<Mutex<Vec<TranscriptSegment>>>,
-    chunk_receiver: Option<mpsc::UnboundedReceiver<AudioChunk>>,
     is_saving: Arc<Mutex<bool>>,
 }
 
@@ -65,7 +64,6 @@ impl RecordingSaver {
             meeting_name: None,
             metadata: None,
             transcript_segments: Arc::new(Mutex::new(Vec::new())),
-            chunk_receiver: None,
             is_saving: Arc::new(Mutex::new(false)),
         }
     }
@@ -137,16 +135,16 @@ impl RecordingSaver {
     ///
     /// # Arguments
     /// * `auto_save` - If true, creates checkpoints and enables saving. If false, audio chunks are discarded.
-    pub fn start_accumulation(&mut self, auto_save: bool) -> mpsc::UnboundedSender<AudioChunk> {
+    pub fn start_accumulation(
+        &mut self,
+        auto_save: bool,
+        mut receiver: mpsc::UnboundedReceiver<AudioChunk>,
+    ) {
         if auto_save {
             info!("Initializing incremental audio saver for recording (auto-save ENABLED)");
         } else {
             info!("Starting recording without audio saving (auto-save DISABLED - transcripts only)");
         }
-
-        // Create channel for receiving audio chunks
-        let (sender, receiver) = mpsc::unbounded_channel::<AudioChunk>();
-        self.chunk_receiver = Some(receiver);
 
         // Initialize meeting folder and incremental saver ONLY if auto_save is enabled
         if auto_save {
@@ -177,49 +175,45 @@ impl RecordingSaver {
         let incremental_saver_arc = self.incremental_saver.clone();
         let save_audio = auto_save;
 
-        if let Some(mut receiver) = self.chunk_receiver.take() {
-            tokio::spawn(async move {
-                info!("Recording saver accumulation task started (save_audio: {})", save_audio);
+        tokio::spawn(async move {
+            info!("Recording saver accumulation task started (save_audio: {})", save_audio);
 
-                while let Some(chunk) = receiver.recv().await {
-                    // Check if we should continue
-                    let should_continue = if let Ok(is_saving) = is_saving_clone.lock() {
-                        *is_saving
-                    } else {
-                        false
-                    };
+            while let Some(chunk) = receiver.recv().await {
+                // Check if we should continue
+                let should_continue = if let Ok(is_saving) = is_saving_clone.lock() {
+                    *is_saving
+                } else {
+                    false
+                };
 
-                    if !should_continue {
-                        break;
-                    }
-
-                    // Only process audio chunks if auto_save is enabled
-                    if save_audio {
-                        // Add chunk to incremental saver
-                        if let Some(saver_arc) = &incremental_saver_arc {
-                            let mut saver_guard = saver_arc.lock().await;
-                            if let Err(e) = saver_guard.add_chunk(chunk) {
-                                error!("Failed to add chunk to incremental saver: {}", e);
-                            }
-                        } else {
-                            error!("Incremental saver not available while accumulating");
-                        }
-                    } else {
-                        // auto_save is false: discard audio chunk (no-op)
-                        // Transcription already happened in the pipeline before this point
-                    }
+                if !should_continue {
+                    break;
                 }
 
-                info!("Recording saver accumulation task ended");
-            });
-        }
+                // Only process audio chunks if auto_save is enabled
+                if save_audio {
+                    // Add chunk to incremental saver
+                    if let Some(saver_arc) = &incremental_saver_arc {
+                        let mut saver_guard = saver_arc.lock().await;
+                        if let Err(e) = saver_guard.add_chunk(chunk) {
+                            error!("Failed to add chunk to incremental saver: {}", e);
+                        }
+                    } else {
+                        error!("Incremental saver not available while accumulating");
+                    }
+                } else {
+                    // auto_save is false: discard audio chunk (no-op)
+                    // Transcription already happened in the pipeline before this point
+                }
+            }
+
+            info!("Recording saver accumulation task ended");
+        });
 
         // Set saving flag
         if let Ok(mut is_saving) = self.is_saving.lock() {
             *is_saving = true;
         }
-
-        sender
     }
 
     /// Initialize meeting folder structure and metadata

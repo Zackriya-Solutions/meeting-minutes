@@ -13,6 +13,19 @@ use super::recording_state::{AudioChunk, AudioError, RecordingState, DeviceType}
 use super::audio_processing::{audio_to_mono, LoudnessNormalizer, NoiseSuppressionProcessor, HighPassFilter};
 use super::vad::{ContinuousVadProcessor};
 
+/// How long a silence must last before the VAD closes a speech segment, and
+/// therefore how long the audio clips handed to the ASR engine are.
+///
+/// Live-path policy: 500ms (matches the established Meetily Pro live policy).
+/// The batch paths (`import.rs` / `retranscription.rs`) use 2000ms instead —
+/// they have no latency requirement, so they optimize purely for ASR request
+/// length. The live path cannot: with continuous audio (e.g. a podcast played
+/// as system audio) a 2000ms redemption keeps one VAD segment open
+/// indefinitely, withholds live transcript emission, and overruns the
+/// accumulated-speech-buffer warning threshold. Bounded live segmentation
+/// during continuous speech is tracked separately in #756.
+const VAD_REDEMPTION_TIME_MS: u32 = 500;
+
 /// Ring buffer for synchronized audio mixing
 /// Accumulates samples from mic and system streams until we have aligned windows
 struct AudioMixerRingBuffer {
@@ -707,7 +720,7 @@ impl AudioPipeline {
         mic_device_kind: super::device_detection::InputDeviceKind,
         system_device_name: String,
         system_device_kind: super::device_detection::InputDeviceKind,
-    ) -> Self {
+    ) -> Result<Self> {
         // Log device characteristics for adaptive buffering
         info!("🎛️ AudioPipeline initializing with device characteristics:");
         info!("   Mic: '{}' ({:?}) - Buffer: {:?}",
@@ -719,23 +732,35 @@ impl AudioPipeline {
         // For now, we log it for monitoring and potential optimization
         let _ = (mic_device_name, mic_device_kind, system_device_name, system_device_kind);
 
-        // Create VAD processor with balanced redemption time for speech accumulation
-        // The VAD processor now handles 48kHz->16kHz resampling internally
-        // This bridges natural pauses without excessive fragmentation
-        // For mac os core audio, 900ms, for windows 400ms seems good
-
-        let redemption_time = if cfg!(target_os = "macos") { 400 } else { 400 };
-
-        let vad_processor = match ContinuousVadProcessor::new(sample_rate, redemption_time) {
-            Ok(processor) => {
-                info!("VAD-driven pipeline: VAD segments will be sent directly to Whisper (no time-based accumulation)");
-                processor
-            }
-            Err(e) => {
-                error!("Failed to create VAD processor: {}", e);
-                panic!("VAD processor creation failed: {}", e);
-            }
-        };
+        // Create VAD processor. The VAD processor handles 48kHz->16kHz resampling
+        // internally.
+        //
+        // Redemption time is how long a silence must last before the VAD closes a
+        // speech segment, so it decides how long the audio clips handed to the ASR
+        // engine are. Conversational speech pauses constantly for breath and
+        // mid-sentence thought, and every pause longer than this becomes a segment
+        // boundary and therefore a separate transcription request.
+        //
+        // This was 400ms, which fragmented a 26-minute meeting into 322 requests with
+        // a median length of 3.5s. Whisper is a fixed 30-second-window model: below
+        // that it zero-pads the window and leans on its language-model prior, which
+        // was trained on web subtitles, so short clips come back as memorised
+        // boilerplate ("subscribe to the channel", "thank you") instead of speech.
+        // Measured on a real recording, 47% of segment boundaries sat in the
+        // 0.42-0.75s range that a longer redemption bridges.
+        //
+        // 500ms is the live-path policy (see the constant's doc comment). The
+        // batch value (2000ms, `import.rs`/`retranscription.rs`) was tried here
+        // first, but under continuous system audio it kept a VAD segment open
+        // indefinitely and withheld live transcript emission, so live and batch
+        // deliberately diverge. Bounded live segments under continuous speech
+        // are tracked in #756.
+        let vad_processor =
+            ContinuousVadProcessor::new(sample_rate, VAD_REDEMPTION_TIME_MS)?;
+        info!(
+            "VAD-driven pipeline: segments dispatched per speech burst (redemption_time={}ms)",
+            VAD_REDEMPTION_TIME_MS
+        );
 
         // Initialize professional audio mixing components
         let ring_buffer = AudioMixerRingBuffer::new(sample_rate);
@@ -744,7 +769,7 @@ impl AudioPipeline {
         // Note: target_chunk_duration_ms is ignored - VAD controls segmentation now
         let _ = target_chunk_duration_ms;
 
-        Self {
+        Ok(Self {
             receiver,
             transcription_sender,
             state,
@@ -760,7 +785,7 @@ impl AudioPipeline {
             ring_buffer,
             mixer,
             recording_sender_for_mixed: None,  // Will be set by manager
-        }
+        })
     }
 
     /// Run the VAD-driven audio processing pipeline
@@ -975,8 +1000,6 @@ impl AudioPipelineManager {
         // Create audio processing channel
         let (audio_sender, audio_receiver) = mpsc::unbounded_channel::<AudioChunk>();
 
-        // Set sender in state for audio captures to use
-        state.set_audio_sender(audio_sender.clone());
 
         // Create and start pipeline with device information for adaptive mixing
         let mut pipeline = AudioPipeline::new(
@@ -989,7 +1012,8 @@ impl AudioPipelineManager {
             mic_device_kind,
             system_device_name,
             system_device_kind,
-        );
+        )?;
+        state.set_audio_sender(audio_sender.clone());
 
         // CRITICAL FIX: Connect recording sender to receive pre-mixed audio
         // This ensures both mic AND system audio are captured in recordings
@@ -1076,5 +1100,17 @@ impl AudioPipelineManager {
 impl Default for AudioPipelineManager {
     fn default() -> Self {
         Self::new()
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_live_vad_redemption_matches_pro_policy() {
+        // Live uses the established 500ms pause policy; it does not bound
+        // uninterrupted speech. Batch import/retranscription use 2000ms.
+        // See #679 and #756.
+        assert_eq!(VAD_REDEMPTION_TIME_MS, 500);
     }
 }

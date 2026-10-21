@@ -108,9 +108,11 @@ Whether you're a defense consultant, enterprise executive, legal professional, o
 1. Download the latest `x64-setup.exe` from [Releases](https://github.com/Zackriya-Solutions/meeting-minutes/releases/latest)
 2. Run the installer
 
+> **Windows compatibility:** The packaged installer uses a Vulkan-enabled Whisper build. It requires an AVX2-capable x64 CPU; AVX-512 is not required. CUDA acceleration requires a source build configured with a compatible NVIDIA CUDA toolchain.
+
 ### 🍎 **macOS**
 
-1. Download `meetily_0.4.0_aarch64.dmg` from [Releases](https://github.com/Zackriya-Solutions/meeting-minutes/releases/latest)
+1. Download `meetily_0.4.1_aarch64.dmg` from [Releases](https://github.com/Zackriya-Solutions/meeting-minutes/releases/latest)
 2. Open the downloaded `.dmg` file
 3. Drag **Meetily** to your Applications folder
 4. Open **Meetily** from Applications folder
@@ -127,7 +129,7 @@ Build from source following our detailed guides:
 ```bash
 git clone https://github.com/Zackriya-Solutions/meeting-minutes
 cd meeting-minutes/frontend
-pnpm install
+pnpm install --frozen-lockfile
 ./build-gpu.sh
 ```
 
@@ -189,12 +191,13 @@ Capture microphone and system audio simultaneously with intelligent ducking and 
 
 ### ⚡ GPU Acceleration
 
-Built-in support for hardware acceleration across platforms:
+Acceleration depends on the platform and build you use:
 
-- **macOS**: Apple Silicon (Metal) + CoreML
-- **Windows/Linux**: NVIDIA (CUDA), AMD/Intel (Vulkan)
+- **macOS packages:** Metal and CoreML are enabled automatically.
+- **Windows packages:** Whisper is built with Vulkan support.
+- **Linux:** Build from source with the acceleration configuration appropriate for your system.
 
-Automatically enabled at build time - no configuration needed.
+CUDA is available through an appropriately configured NVIDIA source build; the standard Windows installer does not select it automatically.
 
 ## System Architecture
 

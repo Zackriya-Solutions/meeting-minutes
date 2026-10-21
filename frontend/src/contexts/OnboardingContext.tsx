@@ -5,6 +5,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import type { PermissionStatus, OnboardingPermissions } from '@/types/onboarding';
 import { resolveOnboardingSummaryModelStatus } from '@/lib/onboarding-summary-model';
+import type { ParakeetDownloadProgressEvent } from '@/lib/parakeet';
 
 const PARAKEET_MODEL = 'parakeet-tdt-0.6b-v3-int8';
 
@@ -234,28 +235,34 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
 
   // Listen to Parakeet download progress
   useEffect(() => {
-    const unlisten = listen<{
-      modelName: string;
-      progress: number;
-      downloaded_mb?: number;
-      total_mb?: number;
-      speed_mbps?: number;
-      status?: string;
-    }>(
+    const unlisten = listen<ParakeetDownloadProgressEvent>(
       'parakeet-model-download-progress',
       (event) => {
         const { modelName, progress, downloaded_mb, total_mb, speed_mbps, status } = event.payload;
-        if (modelName === PARAKEET_MODEL) {
-          setParakeetProgress(progress);
+        if (modelName !== PARAKEET_MODEL) return;
+
+        if (status === 'cancelled') {
+          setIsBackgroundDownloading(false);
+          setParakeetDownloaded(false);
+          setParakeetProgress(0);
           setParakeetProgressInfo({
-            percent: progress,
-            downloadedMb: downloaded_mb ?? 0,
-            totalMb: total_mb ?? 0,
-            speedMbps: speed_mbps ?? 0,
+            percent: 0,
+            downloadedMb: 0,
+            totalMb: 0,
+            speedMbps: 0,
           });
-          if (status === 'completed' || progress >= 100) {
-            setParakeetDownloaded(true);
-          }
+          return;
+        }
+
+        setParakeetProgress(progress);
+        setParakeetProgressInfo({
+          percent: progress,
+          downloadedMb: downloaded_mb ?? 0,
+          totalMb: total_mb ?? 0,
+          speedMbps: speed_mbps ?? 0,
+        });
+        if (status === 'completed') {
+          setParakeetDownloaded(true);
         }
       }
     );

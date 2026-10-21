@@ -185,9 +185,12 @@ impl AnalyticsClient {
     }
 
     pub async fn end_session(&self) -> Result<(), String> {
-        let mut session_guard = self.current_session.lock().await;
+        let session = {
+            let mut session_guard = self.current_session.lock().await;
+            session_guard.take()
+        };
         
-        if let Some(session) = session_guard.take() {
+        if let Some(session) = session {
             let mut properties = HashMap::new();
             properties.insert("session_id".to_string(), session.session_id.clone());
             properties.insert("session_duration".to_string(), session.duration_seconds().to_string());
@@ -460,6 +463,12 @@ pub async fn create_analytics_client(config: AnalyticsConfig) -> AnalyticsClient
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::{
+        io::{AsyncReadExt, AsyncWriteExt},
+        net::TcpListener,
+        time::{timeout, Duration},
+    };
+
 
     #[test]
     fn analytics_properties_drop_sensitive_meeting_metadata() {
@@ -508,6 +517,48 @@ mod tests {
         assert_eq!(sanitized.get("segments_count"), Some(&"42".to_string()));
         assert_eq!(sanitized.get("model_name"), Some(&"parakeet".to_string()));
         assert_eq!(sanitized.get("platform"), Some(&"Windows".to_string()));
+    }
+
+    #[tokio::test]
+    async fn ending_session_completes_and_emits_an_event() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let endpoint = format!("http://{}", listener.local_addr().unwrap());
+        let capture_server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = [0; 4096];
+            let bytes_read = stream.read(&mut request).await.unwrap();
+            assert!(String::from_utf8_lossy(&request[..bytes_read]).contains("session_ended"));
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                .await
+                .unwrap();
+        });
+        let analytics = AnalyticsClient {
+            client: Some(Arc::new(
+                posthog_rs::client(
+                    posthog_rs::ClientOptionsBuilder::default()
+                        .api_key("test".to_string())
+                        .api_endpoint(endpoint.clone())
+                        .request_timeout_seconds(1)
+                        .build()
+                        .unwrap(),
+                )
+                .await,
+            )),
+            config: AnalyticsConfig {
+                api_key: "test".to_string(),
+                host: Some(endpoint),
+                enabled: true,
+            },
+            user_id: Arc::new(Mutex::new(Some("user".to_string()))),
+            current_session: Arc::new(Mutex::new(Some(UserSession::new("user".to_string())))),
+        };
+
+        timeout(Duration::from_secs(1), analytics.end_session())
+            .await
+            .expect("ending a session must not wait on its own session mutex")
+            .unwrap();
+        capture_server.await.unwrap();
     }
 
     #[test]

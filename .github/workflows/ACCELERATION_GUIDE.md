@@ -1,399 +1,172 @@
 # CI/CD Hardware Acceleration Guide
 
-This document explains the hardware acceleration configuration for all CI/CD workflows.
+This document explains the hardware acceleration and CPU-portability configuration used by Meetily CI/CD workflows.
 
 ## Overview
 
-All workflows now build with optimal hardware acceleration based on the platform:
+CI chooses acceleration by platform while keeping Windows release assets portable across the supported CPU baseline:
 
-| Platform | Acceleration | Technology | Performance Boost |
-|----------|-------------|------------|------------------|
-| **macOS** | GPU | Metal (default) | ~10-15x faster than CPU |
-| **Windows** | GPU | Vulkan | ~5-10x faster than CPU |
-| **Linux** | CPU Optimized | OpenBLAS | ~2-3x faster than vanilla CPU |
+| Platform | Acceleration | Technology | Distribution baseline |
+| --- | --- | --- | --- |
+| **macOS** | GPU | Metal by default; CoreML available on Apple Silicon | Apple Silicon build target |
+| **Windows** | GPU | Vulkan | AVX2-capable x64 CPU; AVX-512 disabled |
+| **Linux** | CPU optimized in CI | OpenBLAS | Source-build configuration |
 
-## Previous Configuration (REMOVED)
+Windows release packages use Vulkan-enabled Whisper. They do not automatically select CUDA. CUDA requires NVIDIA hardware, the CUDA toolkit, and an appropriately configured source build. The Vulkan SDK is a native-build prerequisite and is separate from frontend dependency installation with pnpm.
 
-### ❌ What Was Wrong
+## Windows Package Configuration (Enabled)
 
-**Linux/Ubuntu builds:**
-```yaml
-env:
-  WHISPER_NO_AVX: ON      # Disabled AVX CPU instructions
-  WHISPER_NO_AVX2: ON     # Disabled AVX2 CPU instructions
-```
+### 1. Windows Builds (Vulkan GPU)
 
-This configuration **explicitly disabled CPU optimizations**, resulting in very slow transcription performance. Even though Vulkan SDK and OpenBLAS were installed, they were not being used because the build didn't enable the required features.
-
-**Windows builds:**
-```yaml
-# Vulkan SDK installed but not used
-# No --features flag specified
-```
-
-The Vulkan SDK was installed but the build didn't include `--features vulkan`, so it fell back to unoptimized CPU mode.
-
-## New Configuration (ENABLED)
-
-### ✅ What's Fixed
-
-**All workflows now include:**
-
-#### 1. Windows Builds (Vulkan GPU)
 ```yaml
 args: --target x86_64-pc-windows-msvc --features vulkan
 ```
 
-**Benefits:**
-- Uses Vulkan API for GPU acceleration
-- Works with AMD, Intel, and NVIDIA GPUs
-- 5-10x faster transcription than CPU
-- Compatible with GitHub Actions Windows runners
+**What this provides:**
+
+- Vulkan-enabled Whisper for Windows packages.
+- Compatibility with Vulkan-capable AMD, Intel, and NVIDIA hardware.
+- A repeatable CI configuration instead of a package specialized for the CI runner.
 
 **How it works:**
-- Vulkan SDK installed via `humbletim/install-vulkan-sdk@v1.2`
-- Whisper.cpp compiled with Vulkan backend
-- GPU automatically used for inference
 
-#### 2. Linux Builds (OpenBLAS CPU)
+- CI installs Vulkan SDK `1.4.309.0` and validates its environment before building.
+- The Tauri build enables the Vulkan feature for Windows.
+- The packaged artifact remains Vulkan-based; CUDA is a source-build choice.
+
+### 2. Windows CPU Portability
+
+A release installer is intentionally different from a build optimized for one local machine:
+
+- Rust targets `x86-64-v2`.
+- Native Whisper retains AVX2 with host-native specialization disabled.
+- `GGML_AVX512`, `GGML_AVX512_VBMI`, `GGML_AVX512_VNNI`, and `GGML_AVX512_BF16` must all be OFF.
+
+The workflows set `CMAKE_PROJECT_INCLUDE` to `force-portable-ggml.cmake`, which forces:
+
+```cmake
+set(GGML_NATIVE OFF CACHE BOOL "Build without host CPU specialization" FORCE)
+```
+
+Rust target flags do not configure Whisper's native C/C++ compilation. Do not replace the checked-in release configuration with the old `WHISPER_NATIVE=OFF` workaround or plain `GGML_*` environment variables.
+
+### 3. Portable Cache and Pre-Bundle Verification
+
+Windows portable builds use the `windows-portable-v1` Rust-cache prefix, preventing an earlier host-native target cache from being restored through a fallback key.
+
+Before bundling, `verify-portable-ggml.cjs` reads Whisper's generated CMake cache. It fails the build if native-build evidence is missing, `GGML_NATIVE` is enabled, or any of the four AVX-512 options is enabled. This prevents an unverified native library from becoming an installer asset.
+
+## Linux Builds (OpenBLAS CPU)
+
 ```yaml
 args: --target x86_64-unknown-linux-gnu --features openblas
 ```
 
-**Benefits:**
-- Optimized BLAS (Basic Linear Algebra Subprograms)
-- Hardware-optimized CPU operations
-- 2-3x faster than vanilla CPU
-- No GPU required (works on GitHub Actions runners)
+**Why OpenBLAS in CI:**
 
-**Why not Vulkan on Linux?**
-- GitHub Actions runners don't have GPUs
-- OpenBLAS provides best performance for CPU-only
-- More reliable than trying to use virtual GPU
+- GitHub Actions Linux runners do not provide a GPU for release-style acceleration tests.
+- OpenBLAS provides optimized CPU operations without a GPU dependency.
+- Linux installation remains source-built, so local acceleration should match the configured source environment.
 
-**How it works:**
-- OpenBLAS libraries installed (`libopenblas-dev`)
-- Whisper.cpp linked against OpenBLAS
-- Optimized matrix operations for transcription
+Linux source builds can use a CUDA, Vulkan, ROCm, OpenBLAS, or CPU configuration when the required hardware and toolchain are available. See the source-build guide for local setup.
 
-#### 3. macOS Builds (Metal GPU)
-```yaml
-# Metal enabled by default, no flags needed
-# Automatically uses Apple Silicon GPU
-```
+## macOS Builds (Metal GPU)
 
-**Benefits:**
-- Native Apple Metal GPU acceleration
-- 10-15x faster than CPU
-- CoreML acceleration also available
-- Built-in on macOS runners
-
-**How it works:**
-- Metal support is default on macOS
-- Automatically uses M1/M2/M3 GPU
-- No additional configuration needed
+Metal is enabled by default for macOS builds. Apple Silicon builds can also use CoreML. No separate feature flag is required for the standard macOS package build.
 
 ## Updated Workflows
 
-### 1. `build.yml` (Reusable Workflow)
+### 1. `build.yml` (Shared Release Workflow)
 
-**New step added:**
-```yaml
-- name: Determine build features
-  id: build-features
-  shell: bash
-  run: |
-    FEATURES=""
+When building Windows, the shared workflow:
 
-    # Windows: Use Vulkan for GPU acceleration
-    if [[ "${{ inputs.platform }}" == *"windows"* ]]; then
-      FEATURES="--features vulkan"
-      echo "Windows build with Vulkan GPU acceleration"
-    fi
+- Enables the Vulkan feature.
+- Installs and validates Vulkan SDK `1.4.309.0`.
+- Applies the portable CMake hook and `x86-64-v2` Rust target.
+- Uses the `windows-portable-v1` cache prefix.
+- Runs the pre-bundle Whisper verification.
 
-    # Linux: Use OpenBLAS for optimized CPU performance
-    if [[ "${{ inputs.platform }}" == *"ubuntu"* ]]; then
-      FEATURES="--features openblas"
-      echo "Linux build with OpenBLAS CPU optimization"
-    fi
+For Linux builds, it can enable OpenBLAS. macOS uses Metal by default.
 
-    # macOS: Uses Metal by default
-    if [[ "${{ inputs.platform }}" == *"macos"* ]]; then
-      echo "macOS build with Metal GPU acceleration (default)"
-    fi
+### 2. `build-devtest.yml` (Windows DevTest)
 
-    echo "features=$FEATURES" >> "$GITHUB_OUTPUT"
-```
+The Windows DevTest path applies the same portable CMake hook, Rust target, cache prefix, Vulkan setup, and pre-bundle verification as a release build. Keep those safeguards in place when changing DevTest behavior.
 
-**Build command updated:**
-```yaml
-args: ${{ inputs.build-args }} ${{ steps.build-features.outputs.features }}
-```
+### 3. `build-windows.yml` (Standalone Windows)
 
-**Removed:**
-```yaml
-# REMOVED: These were disabling CPU optimizations
-WHISPER_NO_AVX: ${{ contains(inputs.platform, 'ubuntu') && 'ON' || '' }}
-WHISPER_NO_AVX2: ${{ contains(inputs.platform, 'ubuntu') && 'ON' || '' }}
-```
-
-### 2. `build-devtest.yml` (DevTest Workflow)
-
-Same changes as `build.yml`:
-- ✅ Added feature detection step
-- ✅ Removed `WHISPER_NO_AVX` and `WHISPER_NO_AVX2`
-- ✅ Appends features to build args
-
-### 3. `build-windows.yml` (Windows Standalone)
-
-**Build command updated:**
-```yaml
-args: --target x86_64-pc-windows-msvc --features vulkan ${{ steps.build-profile.outputs.args }}
-```
-
-Now explicitly enables Vulkan acceleration.
-
-### 4. `build-linux.yml` (Linux Standalone)
-
-**Build command updated:**
-```yaml
-args: --target x86_64-unknown-linux-gnu --features openblas ${{ steps.build-profile.outputs.args }}
-```
-
-Now explicitly enables OpenBLAS optimization.
-
-### 5. `build-macos.yml` (macOS Standalone)
-
-**New info step added:**
-```yaml
-- name: Configure build acceleration
-  run: |
-    echo "✓ macOS build will use Metal GPU acceleration (enabled by default)"
-    echo "✓ CoreML acceleration available for Apple Silicon"
-```
-
-Documents that Metal is enabled by default.
-
-## Performance Impact
-
-### Transcription Speed Comparison
-
-For a **10-minute meeting recording** (Whisper `base` model):
-
-| Configuration | Time to Transcribe | Real-time Factor |
-|--------------|-------------------|------------------|
-| **Old Linux (no AVX)** | ~15 minutes | 1.5x slower than real-time ⚠️ |
-| **New Linux (OpenBLAS)** | ~5 minutes | 2x faster than real-time ✅ |
-| **Old Windows (CPU)** | ~10 minutes | Same as real-time ⚠️ |
-| **New Windows (Vulkan)** | ~2 minutes | 5x faster than real-time ✅ |
-| **macOS (Metal)** | ~1 minute | 10x faster than real-time ✅ |
-
-### Build Time Impact
-
-The acceleration changes **do not significantly increase build time**:
-- Vulkan SDK: Already being installed
-- OpenBLAS: Lightweight library
-- Compilation time: ~same (30-45 minutes total)
+The standalone Windows workflow uses the Vulkan feature and applies the same portability safeguards before packaging. A change is incomplete if it updates only the shared workflow or only this standalone workflow.
 
 ## Verification
 
-### How to Verify Acceleration is Working
+### How to Verify a Windows Package Build
 
-**1. Check Build Logs**
+1. **Check the workflow configuration**
+   - Windows build arguments include `--features vulkan`.
+   - Vulkan SDK `1.4.309.0` is installed and validated.
+   - `CMAKE_PROJECT_INCLUDE` uses the portable hook.
+   - Rust uses `-C target-cpu=x86-64-v2`.
 
-Look for these messages in the workflow output:
+2. **Check native Whisper configuration**
+   - `GGML_NATIVE` is OFF.
+   - All four AVX-512 options are OFF.
+   - The `verify-portable-ggml.cjs` command completes before bundling.
 
-```
-Windows build with Vulkan GPU acceleration
-✓ Windows build with Vulkan GPU acceleration
-```
+3. **Check cache isolation**
+   - Windows builds use the `windows-portable-v1` cache prefix.
+   - Do not reuse a native cache whose CPU configuration is unknown.
 
-```
-Linux build with OpenBLAS CPU optimization
-✓ Linux build with OpenBLAS CPU optimization
-```
+### Runtime Verification
 
-```
-macOS build with Metal GPU acceleration (default)
-✓ macOS build will use Metal GPU acceleration (enabled by default)
-```
-
-**2. Check Build Command**
-
-In the "Build with Tauri" step, verify the command includes:
-
-```bash
-# Windows
-tauri build --target x86_64-pc-windows-msvc --features vulkan
-
-# Linux
-tauri build --target x86_64-unknown-linux-gnu --features openblas
-
-# macOS (features implicit)
-tauri build --target aarch64-apple-darwin
-```
-
-**3. Runtime Verification**
-
-When using the built application:
-- Transcription should feel snappy
-- Real-time transcription should keep up with speech
-- No noticeable lag when processing audio
-
-### Checking Locally
-
-You can verify the features locally:
-
-```bash
-# Windows (from frontend directory)
-pnpm run tauri build -- --features vulkan
-
-# Linux
-pnpm run tauri build -- --features openblas
-
-# macOS (Metal is default)
-pnpm run tauri build
-```
+Confirm the packaged application runs on an AVX2-capable Windows computer without AVX-512. Treat non-AVX2 coverage as separate from this Whisper package baseline.
 
 ## Technical Details
 
-### Whisper.cpp Features
+### Whisper Backends
 
-The `whisper-rs` crate (which wraps whisper.cpp) supports these features:
+The Whisper integration supports these acceleration paths:
 
 ```toml
-[features]
-metal = ["whisper-rs/metal"]       # macOS Metal
-cuda = ["whisper-rs/cuda"]          # NVIDIA CUDA
-vulkan = ["whisper-rs/vulkan"]      # Cross-platform Vulkan
-hipblas = ["whisper-rs/hipblas"]    # AMD ROCm
-openblas = ["whisper-rs/openblas"]  # Optimized CPU BLAS
+metal = ["whisper-rs/metal"]
+cuda = ["whisper-rs/cuda"]
+vulkan = ["whisper-rs/vulkan"]
+hipblas = ["whisper-rs/hipblas"]
+openblas = ["whisper-rs/openblas"]
 ```
 
-### Why Not CUDA?
+### Why Windows CI Uses Vulkan Instead of CUDA
 
-**CUDA requires:**
-- NVIDIA GPU hardware
-- CUDA toolkit installation
-- NVIDIA drivers
+CUDA needs compatible NVIDIA hardware, drivers, and the CUDA toolkit. The standard Windows package instead uses Vulkan so CI can produce one configured artifact without selecting CUDA for end users. Contributors who need CUDA should create a compatible source build.
 
-**GitHub Actions runners:**
-- Don't have NVIDIA GPUs
-- Can't use CUDA
+### Linux Source Builds
 
-**Vulkan is better for CI/CD because:**
-- Software-based fallback available
-- Works without dedicated GPU hardware
-- Broader compatibility
-
-### OpenBLAS vs Vulkan on Linux
-
-We chose **OpenBLAS** over Vulkan for Linux because:
-- ✅ More reliable on CI runners
-- ✅ Better CPU optimization
-- ✅ No GPU hardware needed
-- ✅ Consistent performance
-- ⚠️ Vulkan without GPU gives minimal benefit
-
-For **local Linux development with GPU**, users can manually build with:
-```bash
-pnpm run tauri build -- --features vulkan
-```
+OpenBLAS is appropriate for Linux CI runners without a GPU. For local Linux development, choose the backend that matches the installed SDK and hardware rather than assuming the Windows package configuration applies.
 
 ## Troubleshooting
 
-### Build Fails with Vulkan Error (Windows)
+### Build Fails with a Windows Vulkan Error
 
-**Error:**
-```
-error: failed to compile whisper-rs with Vulkan support
-```
+- Confirm the Vulkan SDK installation and environment-validation steps completed.
+- Confirm the workflow still uses SDK `1.4.309.0`.
+- pnpm installation does not install or repair the Vulkan SDK.
 
-**Solution:**
-- Ensure Vulkan SDK step runs successfully
-- Check `humbletim/install-vulkan-sdk@v1.2` output
-- Verify Vulkan version matches (1.4.309.0)
+### Portability Verification Fails
 
-### Build Fails with OpenBLAS Error (Linux)
+Treat the failure as a packaging blocker. Inspect the generated Whisper CMake cache and the portable cache prefix; do not bypass the pre-bundle verifier. A fresh portable build is safer than reusing a cache with unknown CPU flags.
 
-**Error:**
-```
-error: could not find OpenBLAS library
-```
+### CUDA Is Needed
 
-**Solution:**
-- Ensure `libopenblas-dev` is in apt install list
-- Check dependency installation step completed
-- Verify OpenBLAS package is available for Ubuntu version
-
-### Performance Still Slow
-
-**Check:**
-1. ✅ Build logs show correct features enabled
-2. ✅ Build command includes `--features` flag
-3. ✅ No error messages during Whisper compilation
-4. ✅ Application binary is from new build (not cached old version)
-
-**If still slow:**
-- May be Whisper model size (try smaller model)
-- May be audio file issues (check format)
-- May be system resource constraints
-
-## Future Improvements
-
-### Potential Enhancements
-
-1. **Add CUDA support** for users with NVIDIA GPUs
-   - Detect if NVIDIA GPU available
-   - Optionally enable CUDA feature
-   - Fallback to Vulkan if CUDA fails
-
-2. **Add CoreML support** for macOS
-   - Enable explicit CoreML acceleration
-   - Test performance vs Metal alone
-   - Document benefits
-
-3. **Dynamic feature detection**
-   - Detect available hardware at runtime
-   - Automatically select best backend
-   - Provide user override options
-
-4. **Performance metrics**
-   - Log transcription performance in CI
-   - Compare across builds
-   - Alert if performance degrades
+Use a compatible NVIDIA source-build environment with the CUDA toolkit. The standard Windows installer intentionally remains the Vulkan build.
 
 ## Related Documentation
 
-- [CLAUDE.md](../../CLAUDE.md) - Project overview with build commands
-- [WORKFLOWS_OVERVIEW.md](WORKFLOWS_OVERVIEW.md) - All workflows comparison
-- [README_DEVTEST.md](README_DEVTEST.md) - DevTest workflow guide
-- [Whisper.cpp GitHub](https://github.com/ggerganov/whisper.cpp) - Upstream project
+- [Building from Source](../../docs/BUILDING.md)
+- [Workflow Overview](WORKFLOWS_OVERVIEW.md)
+- [DevTest Workflow Guide](README_DEVTEST.md)
+- [Whisper.cpp](https://github.com/ggerganov/whisper.cpp)
 
 ## Summary
 
-✅ **All CI/CD workflows now use hardware acceleration**
-- Windows: Vulkan GPU
-- Linux: OpenBLAS CPU optimization
-- macOS: Metal GPU (default)
-
-✅ **Performance improvements**
-- 2-10x faster transcription
-- Better real-time factor
-- Improved user experience
-
-✅ **No build time increase**
-- Same overall build duration
-- Dependencies already installed
-- Just enabling features
-
-❌ **Removed slow configurations**
-- No more `WHISPER_NO_AVX`
-- No more `WHISPER_NO_AVX2`
-- No more unoptimized CPU-only
-
----
-
-**Last Updated:** 2025-01-15
-**Version:** 1.0
-**Impact:** All workflows
+- Windows packages use Vulkan-enabled Whisper, retain AVX2, and disable AVX-512.
+- The portable CMake hook, Rust target, cache prefix, Vulkan setup, and pre-bundle verification work together; preserve them as a unit.
+- CUDA remains an appropriately configured source-build option.
+- Linux remains source-built; macOS uses Metal by default.

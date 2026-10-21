@@ -102,8 +102,8 @@ const GROQ_FALLBACK_MODELS = [
 ];
 
 const MINIMAX_FALLBACK_MODELS = [
+  'MiniMax-M3.1-Flash',
   'MiniMax-M3',
-  'MiniMax-M2.7',
 ];
 
 interface ModelSettingsModalProps {
@@ -228,13 +228,18 @@ export function ModelSettingsModal({
     }
   }, [apiKey]);
 
+  const minimaxModels = modelConfig.provider === 'minimax' && modelConfig.model.trim() &&
+    !MINIMAX_FALLBACK_MODELS.includes(modelConfig.model)
+    ? [...MINIMAX_FALLBACK_MODELS, modelConfig.model]
+    : MINIMAX_FALLBACK_MODELS;
+
   const modelOptions: Record<string, string[]> = {
     ollama: models.map((model) => model.name),
     claude: claudeModels.length > 0 ? claudeModels : CLAUDE_FALLBACK_MODELS,
     groq: groqModels.length > 0 ? groqModels : GROQ_FALLBACK_MODELS,
     openai: openaiModels.length > 0 ? openaiModels : OPENAI_FALLBACK_MODELS,
     openrouter: openRouterModels.map((m) => m.id),
-    minimax: MINIMAX_FALLBACK_MODELS,
+    minimax: minimaxModels,
     'builtin-ai': builtinAiModels.map((m) => m.name),
     'custom-openai': customOpenAIModel ? [customOpenAIModel] : [], // User specifies model manually
   };
@@ -616,7 +621,7 @@ export function ModelSettingsModal({
     // Try to restore from localStorage cache
     const map = JSON.parse(localStorage.getItem('providerModelMap') || '{}');
     const cachedModel = map[modelConfig.provider];
-    if (cachedModel && providerModels.includes(cachedModel)) {
+    if (cachedModel) {
       setModelConfig((prev: ModelConfig) => ({ ...prev, model: cachedModel }));
     }
   }, [models, openRouterModels, builtinAiModels, openaiModels, claudeModels, groqModels, modelConfig.provider]);
@@ -839,9 +844,10 @@ export function ModelSettingsModal({
                 const defaultModel = providerModels && providerModels.length > 0
                   ? providerModels[0]
                   : '';
-                const model = (savedModel && providerModels?.includes(savedModel))
-                  ? savedModel
-                  : defaultModel;
+                // An explicit saved model remains valid even when it is no longer
+                // part of the provider's ordinary suggestions (for example, a
+                // legacy MiniMax model or a user-managed gateway ID).
+                const model = savedModel || defaultModel;
 
                 setModelConfig({
                   ...modelConfig,
