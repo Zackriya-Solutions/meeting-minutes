@@ -5,6 +5,26 @@ use tauri::{
     AppHandle, Manager, Runtime,
 };
 
+/// All app-controlled explicit quit paths use the same recording lifecycle guard.
+pub(crate) fn quit_is_blocked() -> bool {
+    crate::audio::recording_commands::is_recording_active()
+}
+
+pub(crate) fn notify_quit_blocked<R: Runtime>(app: &AppHandle<R>) {
+    log::warn!("Quit prevented: recording is starting, running or being saved");
+    focus_main_window(app);
+    let _ = app.emit("recording-quit-blocked", ());
+}
+
+fn request_quit<R: Runtime>(app: &AppHandle<R>) {
+    // Check before app.exit, including its forced-exit fallback on runtime failure.
+    if quit_is_blocked() {
+        notify_quit_blocked(app);
+    } else {
+        app.exit(0);
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum RecordingState {
     Stopped,
@@ -48,7 +68,7 @@ fn handle_menu_event<R: Runtime>(app: &AppHandle<R>, item_id: &str) {
             }
         }
         "check_updates" => check_updates_handler(app),
-        "quit" => app.exit(0),
+        "quit" => request_quit(app),
         _ => {}
     }
 }
