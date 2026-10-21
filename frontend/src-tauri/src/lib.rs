@@ -959,6 +959,12 @@ pub fn run() {
         .expect("error while building tauri application")
         .run(|_app_handle, event| {
             match event {
+                tauri::RunEvent::ExitRequested { api, .. } => {
+                    if tray::quit_is_blocked() {
+                        api.prevent_exit();
+                        tray::notify_quit_blocked(_app_handle);
+                    }
+                }
                 #[cfg(target_os = "macos")]
                 tauri::RunEvent::Reopen { .. } => {
                     tray::focus_main_window(_app_handle);

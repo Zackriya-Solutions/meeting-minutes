@@ -35,6 +35,16 @@ pub use super::transcription::TranscriptUpdate;
 // GLOBAL STATE
 // ============================================================================
 
+#[path = "recording_activity.rs"]
+mod recording_activity;
+
+static IS_RECORDING_STARTING: AtomicBool = AtomicBool::new(false);
+
+/// Synchronous normal-exit protection through initialization, capture and save.
+pub(crate) fn is_recording_active() -> bool {
+    recording_activity::active(&IS_RECORDING_STARTING, &IS_RECORDING, &IS_RECORDING_STOPPING)
+}
+
 // Simple recording state tracking
 static IS_RECORDING: AtomicBool = AtomicBool::new(false);
 
@@ -66,27 +76,6 @@ fn session_live(s: &Arc<super::RecordingState>) -> bool {
             .unwrap()
             .as_ref()
             .map_or(false, |m| Arc::ptr_eq(m.get_state(), s))
-}
-
-/// RAII guard for the stop-tail flag. Sets `IS_RECORDING_STOPPING` true on
-/// construction and clears it on Drop — including during unwind — so a panic
-/// anywhere in the ~320-line stop tail can't leave the flag stuck true and
-/// silently kill the mic-disconnect fallback for every later recording.
-///
-/// This unwind-clears behaviour depends on `panic = "unwind"` (the default).
-/// If a release profile ever sets `panic = "abort"`, Drop won't run on panic
-/// and the stuck-flag failure mode returns — add a start-time reset then.
-struct StoppingGuard;
-impl StoppingGuard {
-    fn new() -> Self {
-        IS_RECORDING_STOPPING.store(true, Ordering::SeqCst);
-        StoppingGuard
-    }
-}
-impl Drop for StoppingGuard {
-    fn drop(&mut self) {
-        IS_RECORDING_STOPPING.store(false, Ordering::SeqCst);
-    }
 }
 
 /// Shared start-path finalize. Both start commands MUST call this so a new
@@ -313,12 +302,14 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
         meeting_name.is_some()
     );
 
+    let _starting_guard = recording_activity::StartingGuard::acquire(&IS_RECORDING_STARTING)
+        .ok_or("Recording initialization already in progress")?;
     let engine_lifecycle_guard = super::common::acquire_engine_lifecycle_lock().await;
 
     // Check if already recording
     let current_recording_state = IS_RECORDING.load(Ordering::SeqCst);
     info!("🔍 IS_RECORDING state check: {}", current_recording_state);
-    if current_recording_state {
+    if current_recording_state || IS_RECORDING_STOPPING.load(Ordering::SeqCst) {
         return Err("Recording already in progress".to_string());
     }
 
@@ -505,12 +496,14 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
         meeting_name.is_some()
     );
 
+    let _starting_guard = recording_activity::StartingGuard::acquire(&IS_RECORDING_STARTING)
+        .ok_or("Recording initialization already in progress")?;
     let engine_lifecycle_guard = super::common::acquire_engine_lifecycle_lock().await;
 
     // Check if already recording
     let current_recording_state = IS_RECORDING.load(Ordering::SeqCst);
     info!("🔍 IS_RECORDING state check: {}", current_recording_state);
-    if current_recording_state {
+    if current_recording_state || IS_RECORDING_STOPPING.load(Ordering::SeqCst) {
         return Err("Recording already in progress".to_string());
     }
 
@@ -689,6 +682,11 @@ pub async fn stop_recording<R: Runtime>(
         return Ok(());
     }
 
+    // Acquire before taking the manager; duplicate Stop must not clear the first tail.
+    let Some(_stopping_guard) = recording_activity::StoppingGuard::acquire(&IS_RECORDING_STOPPING) else {
+        return Ok(());
+    };
+
     // Emit shutdown progress to frontend
     let _ = app.emit(
         "recording-shutdown-progress",
@@ -704,13 +702,6 @@ pub async fn stop_recording<R: Runtime>(
         let mut global_manager = RECORDING_MANAGER.lock().unwrap();
         global_manager.take()
     };
-
-    // Mark the stop tail as in progress so a mic-disconnect fallback that was
-    // queued before Stop short-circuits instead of retrying against the taken
-    // manager. IS_RECORDING itself stays true until the tail completes — the
-    // frontend polls it to keep the stop UI up. RAII so a panic in the tail
-    // below can't leave the flag stuck true.
-    let _stopping_guard = StoppingGuard::new();
 
     let stop_result = if let Some(mut manager) = manager_for_cleanup {
         // Use FORCE FLUSH to immediately process all accumulated audio - eliminates 30s delay!
