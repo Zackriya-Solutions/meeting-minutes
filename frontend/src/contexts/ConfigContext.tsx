@@ -104,7 +104,8 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     provider: 'ollama',
     model: 'llama3.2:latest',
     whisperModel: 'large-v3',
-    ollamaEndpoint: null
+    ollamaEndpoint: null,
+    minimaxRegion: 'global'
   });
   const [isModelConfigLoading, setIsModelConfigLoading] = useState(true);
 
@@ -281,6 +282,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
             model: data.model || prev.model,
             whisperModel: data.whisperModel || prev.whisperModel,
             ollamaEndpoint: data.ollamaEndpoint,
+            minimaxRegion: data.minimaxRegion || prev.minimaxRegion || 'global',
           }));
 
           // Seed per-provider model cache from DB

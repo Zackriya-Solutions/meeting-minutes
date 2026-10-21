@@ -18,6 +18,7 @@ export interface ModelConfig {
    */
   apiKey?: string | null;
   ollamaEndpoint?: string | null;
+  minimaxRegion?: string;
   // Custom OpenAI fields (only populated when provider is 'custom-openai')
   customOpenAIEndpoint?: string | null;
   customOpenAIModel?: string | null;

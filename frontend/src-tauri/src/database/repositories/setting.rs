@@ -12,6 +12,8 @@ pub struct SaveModelConfigRequest {
     pub api_key: Option<String>,
     #[serde(rename = "ollamaEndpoint")]
     pub ollama_endpoint: Option<String>,
+    #[serde(rename = "minimaxRegion")]
+    pub minimax_region: Option<String>,
 }
 
 #[derive(serde::Deserialize, Debug)]
@@ -44,23 +46,29 @@ impl SettingsRepository {
         model: &str,
         whisper_model: &str,
         ollama_endpoint: Option<&str>,
+        minimax_region: Option<&str>,
     ) -> std::result::Result<(), sqlx::Error> {
         // Using id '1' for backward compatibility
         sqlx::query(
             r#"
-            INSERT INTO settings (id, provider, model, whisperModel, ollamaEndpoint)
-            VALUES ('1', $1, $2, $3, $4)
+            INSERT INTO settings (id, provider, model, whisperModel, ollamaEndpoint, minimaxRegion)
+            VALUES ('1', $1, $2, $3, $4, COALESCE($5, 'global'))
             ON CONFLICT(id) DO UPDATE SET
                 provider = excluded.provider,
                 model = excluded.model,
                 whisperModel = excluded.whisperModel,
-                ollamaEndpoint = excluded.ollamaEndpoint
+                ollamaEndpoint = excluded.ollamaEndpoint,
+                minimaxRegion = CASE
+                    WHEN $5 IS NULL THEN settings.minimaxRegion
+                    ELSE excluded.minimaxRegion
+                END
             "#,
         )
         .bind(provider)
         .bind(model)
         .bind(whisper_model)
         .bind(ollama_endpoint)
+        .bind(minimax_region)
         .execute(pool)
         .await?;
 

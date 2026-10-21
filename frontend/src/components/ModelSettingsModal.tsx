@@ -36,6 +36,7 @@ export interface ModelConfig {
   whisperModel: string;
   apiKey?: string | null;
   ollamaEndpoint?: string | null;
+  minimaxRegion?: string;
   // Custom OpenAI fields
   customOpenAIEndpoint?: string | null;
   customOpenAIModel?: string | null;
@@ -957,6 +958,26 @@ export function ModelSettingsModal({
             )}
           </div>
         </div>
+
+        {modelConfig.provider === 'minimax' && (
+          <div className="space-y-2">
+            <Label htmlFor="minimax-region">MiniMax endpoint region</Label>
+            <Select
+              value={modelConfig.minimaxRegion || 'global'}
+              onValueChange={(value) =>
+                setModelConfig((prev: ModelConfig) => ({ ...prev, minimaxRegion: value }))
+              }
+            >
+              <SelectTrigger id="minimax-region">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="global">Global (api.minimax.io)</SelectItem>
+                <SelectItem value="cn">China (api.minimaxi.com)</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        )}
 
         {/* Custom OpenAI Configuration Section */}
         {modelConfig.provider === 'custom-openai' && (

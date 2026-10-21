@@ -265,6 +265,7 @@ impl LLMProvider {
 /// * `system_prompt` - System instructions for the LLM
 /// * `user_prompt` - User query/content to process
 /// * `ollama_endpoint` - Optional custom Ollama endpoint (defaults to localhost:11434)
+/// * `minimax_region` - Optional MiniMax endpoint region (defaults to global)
 /// * `custom_openai_endpoint` - Optional custom OpenAI-compatible endpoint
 /// * `max_tokens` - Optional max tokens (for CustomOpenAI provider)
 /// * `temperature` - Optional temperature (for CustomOpenAI provider)
@@ -281,6 +282,7 @@ pub(crate) async fn generate_summary(
     system_prompt: &str,
     user_prompt: &str,
     ollama_endpoint: Option<&str>,
+    minimax_region: Option<&str>,
     custom_openai_endpoint: Option<&str>,
     max_tokens: Option<u32>,
     temperature: Option<f32>,
@@ -329,7 +331,10 @@ pub(crate) async fn generate_summary(
             header::HeaderMap::new(),
         ),
         LLMProvider::MiniMax => (
-            format!("{}/chat/completions", minimax_base_url(MINIMAX_DEFAULT_REGION)),
+            format!(
+                "{}/chat/completions",
+                minimax_base_url(minimax_region.unwrap_or(MINIMAX_DEFAULT_REGION))
+            ),
             header::HeaderMap::new(),
         ),
         LLMProvider::Ollama => {
@@ -732,6 +737,7 @@ mod tests {
             None,
             None,
             None,
+            None,
             Some(&cancellation_token),
         );
         tokio::pin!(generation);
@@ -818,6 +824,7 @@ mod tests {
             None,
             None,
             None,
+            None,
             Some(&cancellation_token),
         );
         tokio::pin!(generation);
@@ -896,6 +903,7 @@ mod tests {
                 None,
                 None,
                 None,
+                None,
                 Some(&cancellation_token),
             ),
         )
@@ -949,7 +957,53 @@ fn provider_name(provider: &LLMProvider) -> &str {
 
 #[cfg(test)]
 mod minimax_tests {
-    use super::{minimax_base_url, provider_name, LLMProvider};
+    use super::{generate_summary, minimax_base_url, provider_name, LLMProvider};
+    use std::time::Duration;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    // A local proxy rejects CONNECT after capturing the actual production target.
+    // No DNS lookup, TLS connection, credentials, or inference reaches MiniMax.
+    #[tokio::test]
+    async fn configured_region_controls_the_production_request_target() {
+        for (region, host) in [
+            (None, "api.minimax.io"),
+            (Some("global"), "api.minimax.io"),
+            (Some("cn"), "api.minimaxi.com"),
+        ] {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let address = listener.local_addr().unwrap();
+            let server = tokio::spawn(async move {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let mut request = Vec::new();
+                while !request.ends_with(b"\r\n\r\n") {
+                    request.push(socket.read_u8().await.unwrap());
+                    assert!(request.len() < 8192);
+                }
+                let request = String::from_utf8(request).unwrap();
+                assert!(request.starts_with(&format!("CONNECT {host}:443 HTTP/1.1\r\n")));
+                socket
+                    .write_all(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n")
+                    .await
+                    .unwrap();
+            });
+            let client = reqwest::Client::builder()
+                .proxy(reqwest::Proxy::all(format!("http://{address}")).unwrap())
+                .build()
+                .unwrap();
+            let result = tokio::time::timeout(Duration::from_secs(5), generate_summary(
+                &client, &LLMProvider::MiniMax, "MiniMax-M3.1-Flash", "mock-key",
+                "system", "user", None, region, None, None, None, None, None, None,
+            ))
+            .await
+            .expect("request should finish at the local proxy");
+            assert!(result.is_err());
+            tokio::time::timeout(Duration::from_secs(5), server)
+                .await
+                .unwrap()
+                .unwrap();
+        }
+    }
 
     #[test]
     fn parses_minimax_provider() {
