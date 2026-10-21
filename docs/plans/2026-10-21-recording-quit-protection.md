@@ -11,6 +11,6 @@ rustc --edition=2021 --test frontend/src-tauri/src/audio/recording_activity.rs -
 /tmp/meetily-recording-activity-tests
 ```
 
-The KH integration also checks the shared policy in its complete native CI. This focused upstream branch needs its own full cargo build/CI; native GUI/audio smoke has not been performed. Pending manual checks: Quit from tray/Cmd+Q during model startup, live and paused capture, stop-tail; then confirm idle quit performs normal cleanup and saved audio is retained.
+Independent design and implementation review cleared the native paths. The standalone lifecycle tests pass, including duplicate-Stop protection. Full native CI runs separately with identical native source files and fork-only verification configuration kept outside this contribution. Native GUI/audio smoke has not been performed. Pending manual checks: Quit from tray/Cmd+Q during model startup, live and paused capture, stop-tail; then confirm idle quit performs normal cleanup and saved audio is retained.
 
 This fixes explicit quit entry points independently of the close-preference feature proposed in PR864; it does not resubmit that feature or change its preference UI.
