@@ -200,6 +200,7 @@ pub async fn initialize_fresh_database(app: AppHandle) -> Result<(), String> {
         default_summary_model,
         "large-v3", // Default whisper model (unused for builtin but required)
         None,
+        None,
     ).await {
         error!("Failed to set default summary model config: {}", e);
     }

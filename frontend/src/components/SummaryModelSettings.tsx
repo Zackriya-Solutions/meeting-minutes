@@ -107,6 +107,7 @@ export function SummaryModelSettings({ refetchTrigger }: SummaryModelSettingsPro
         whisperModel: config.whisperModel,
         apiKey: config.apiKey,
         ollamaEndpoint: config.ollamaEndpoint,
+        minimaxRegion: config.minimaxRegion,
       });
 
       setModelConfig(config);

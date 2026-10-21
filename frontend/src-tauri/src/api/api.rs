@@ -76,6 +76,8 @@ pub struct ModelConfig {
     pub api_key: Option<String>,
     #[serde(rename = "ollamaEndpoint")]
     pub ollama_endpoint: Option<String>,
+    #[serde(rename = "minimaxRegion")]
+    pub minimax_region: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -490,6 +492,7 @@ pub async fn api_get_model_config<R: Runtime>(
                         whisper_model: config.whisper_model,
                         api_key,
                         ollama_endpoint: config.ollama_endpoint,
+                        minimax_region: Some(config.minimax_region),
                     }))
                 }
                 Err(e) => {
@@ -522,6 +525,7 @@ pub async fn api_save_model_config<R: Runtime>(
     whisper_model: String,
     api_key: Option<String>,
     ollama_endpoint: Option<String>,
+    minimax_region: Option<String>,
     _auth_token: Option<String>,
 ) -> Result<serde_json::Value, String> {
     log_info!(
@@ -533,12 +537,22 @@ pub async fn api_save_model_config<R: Runtime>(
     );
     let pool = state.db_manager.pool();
 
+    let minimax_region = if provider == "minimax" {
+        match minimax_region.as_deref() {
+            None | Some("global") | Some("cn") => minimax_region.as_deref(),
+            Some(_) => return Err("MiniMax region must be global or cn".to_string()),
+        }
+    } else {
+        None
+    };
+
     if let Err(e) = SettingsRepository::save_model_config(
         pool,
         &provider,
         &model,
         &whisper_model,
         ollama_endpoint.as_deref(),
+        minimax_region,
     )
     .await
     {

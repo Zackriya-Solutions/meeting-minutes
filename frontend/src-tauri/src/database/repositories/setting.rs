@@ -12,6 +12,8 @@ pub struct SaveModelConfigRequest {
     pub api_key: Option<String>,
     #[serde(rename = "ollamaEndpoint")]
     pub ollama_endpoint: Option<String>,
+    #[serde(rename = "minimaxRegion")]
+    pub minimax_region: Option<String>,
 }
 
 #[derive(serde::Deserialize, Debug)]
@@ -25,7 +27,7 @@ pub struct SaveTranscriptConfigRequest {
 pub struct SettingsRepository;
 
 // Transcript providers: localWhisper, deepgram, elevenLabs, groq, openai
-// Summary providers: openai, claude, ollama, groq, added openrouter
+// Summary providers: openai, claude, ollama, groq, openrouter, minimax
 // NOTE: Handle data exclusion in the higher layer as this is database abstraction layer(using SELECT *)
 
 impl SettingsRepository {
@@ -44,23 +46,29 @@ impl SettingsRepository {
         model: &str,
         whisper_model: &str,
         ollama_endpoint: Option<&str>,
+        minimax_region: Option<&str>,
     ) -> std::result::Result<(), sqlx::Error> {
         // Using id '1' for backward compatibility
         sqlx::query(
             r#"
-            INSERT INTO settings (id, provider, model, whisperModel, ollamaEndpoint)
-            VALUES ('1', $1, $2, $3, $4)
+            INSERT INTO settings (id, provider, model, whisperModel, ollamaEndpoint, minimaxRegion)
+            VALUES ('1', $1, $2, $3, $4, COALESCE($5, 'global'))
             ON CONFLICT(id) DO UPDATE SET
                 provider = excluded.provider,
                 model = excluded.model,
                 whisperModel = excluded.whisperModel,
-                ollamaEndpoint = excluded.ollamaEndpoint
+                ollamaEndpoint = excluded.ollamaEndpoint,
+                minimaxRegion = CASE
+                    WHEN $5 IS NULL THEN settings.minimaxRegion
+                    ELSE excluded.minimaxRegion
+                END
             "#,
         )
         .bind(provider)
         .bind(model)
         .bind(whisper_model)
         .bind(ollama_endpoint)
+        .bind(minimax_region)
         .execute(pool)
         .await?;
 
@@ -85,6 +93,7 @@ impl SettingsRepository {
             "ollama" => "ollamaApiKey",
             "groq" => "groqApiKey",
             "openrouter" => "openRouterApiKey",
+            "minimax" => "minimaxApiKey",
             "builtin-ai" => return Ok(()), // No API key needed
             _ => {
                 return Err(sqlx::Error::Protocol(
@@ -123,6 +132,7 @@ impl SettingsRepository {
             "groq" => "groqApiKey",
             "claude" => "anthropicApiKey",
             "openrouter" => "openRouterApiKey",
+            "minimax" => "minimaxApiKey",
             "builtin-ai" => return Ok(None), // No API key needed
             _ => {
                 return Err(sqlx::Error::Protocol(
@@ -249,6 +259,7 @@ impl SettingsRepository {
             "groq" => "groqApiKey",
             "claude" => "anthropicApiKey",
             "openrouter" => "openRouterApiKey",
+            "minimax" => "minimaxApiKey",
             "builtin-ai" => return Ok(()), // No API key needed
             _ => {
                 return Err(sqlx::Error::Protocol(

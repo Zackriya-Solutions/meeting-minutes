@@ -393,6 +393,20 @@ impl SummaryService {
             None
         };
 
+        // Use the persisted MiniMax region for every request in this summary job.
+        let minimax_region = if provider == LLMProvider::MiniMax {
+            match SettingsRepository::get_model_config(&pool).await {
+                Ok(config) => config.map(|config| config.minimax_region),
+                Err(e) => {
+                    let message = format!("Failed to retrieve MiniMax region: {}", e);
+                    Self::fail_and_cleanup(&pool, &meeting_id, started_at, &message).await;
+                    return;
+                }
+            }
+        } else {
+            None
+        };
+
         // Get CustomOpenAI config if provider is CustomOpenAI
         let (custom_openai_endpoint, custom_openai_api_key, custom_openai_max_tokens, custom_openai_temperature, custom_openai_top_p) =
             if provider == LLMProvider::CustomOpenAI {
@@ -555,6 +569,7 @@ impl SummaryService {
             &template,
             token_threshold,
             ollama_endpoint.as_deref(),
+            minimax_region.as_deref(),
             custom_openai_endpoint.as_deref(),
             custom_openai_max_tokens,
             custom_openai_temperature,

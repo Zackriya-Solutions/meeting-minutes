@@ -9,7 +9,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { TranscriptModelProps } from '@/components/TranscriptSettings';
 
 export interface ModelConfig {
-  provider: 'ollama' | 'groq' | 'claude' | 'openrouter' | 'openai' | 'builtin-ai' | 'custom-openai';
+  provider: 'ollama' | 'groq' | 'claude' | 'openrouter' | 'minimax' | 'openai' | 'builtin-ai' | 'custom-openai';
   model: string;
   whisperModel: string;
   /**
@@ -18,6 +18,7 @@ export interface ModelConfig {
    */
   apiKey?: string | null;
   ollamaEndpoint?: string | null;
+  minimaxRegion?: string;
   // Custom OpenAI fields (only populated when provider is 'custom-openai')
   customOpenAIEndpoint?: string | null;
   customOpenAIModel?: string | null;

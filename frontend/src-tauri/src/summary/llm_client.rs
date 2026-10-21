@@ -8,6 +8,21 @@ use tracing::{info, warn};
 
 const REQUEST_TIMEOUT_DURATION: Duration = Duration::from_secs(300);
 
+/// MiniMax OpenAI-compatible base URLs by region.
+const MINIMAX_GLOBAL_BASE_URL: &str = "https://api.minimax.io/v1";
+const MINIMAX_CN_BASE_URL: &str = "https://api.minimaxi.com/v1";
+/// Region used for MiniMax summary dispatch by default.
+const MINIMAX_DEFAULT_REGION: &str = "global";
+
+/// Resolve the MiniMax OpenAI-compatible base URL for a region.
+/// Any unrecognized region falls back to the global endpoint.
+fn minimax_base_url(region: &str) -> &'static str {
+    match region.to_lowercase().as_str() {
+        "cn" | "cn_zh" | "china" => MINIMAX_CN_BASE_URL,
+        _ => MINIMAX_GLOBAL_BASE_URL,
+    }
+}
+
 async fn await_or_cancel<T>(
     operation: impl Future<Output = T>,
     cancellation_token: Option<&CancellationToken>,
@@ -218,6 +233,7 @@ pub enum LLMProvider {
     Groq,
     Ollama,
     OpenRouter,
+    MiniMax,
     BuiltInAI,
     CustomOpenAI,
 }
@@ -231,6 +247,7 @@ impl LLMProvider {
             "groq" => Ok(Self::Groq),
             "ollama" => Ok(Self::Ollama),
             "openrouter" => Ok(Self::OpenRouter),
+            "minimax" => Ok(Self::MiniMax),
             "builtin-ai" | "local-llama" | "localllama" => Ok(Self::BuiltInAI),
             "custom-openai" => Ok(Self::CustomOpenAI),
             _ => Err(format!("Unsupported LLM provider: {}", s)),
@@ -248,6 +265,7 @@ impl LLMProvider {
 /// * `system_prompt` - System instructions for the LLM
 /// * `user_prompt` - User query/content to process
 /// * `ollama_endpoint` - Optional custom Ollama endpoint (defaults to localhost:11434)
+/// * `minimax_region` - Optional MiniMax endpoint region (defaults to global)
 /// * `custom_openai_endpoint` - Optional custom OpenAI-compatible endpoint
 /// * `max_tokens` - Optional max tokens (for CustomOpenAI provider)
 /// * `temperature` - Optional temperature (for CustomOpenAI provider)
@@ -264,6 +282,7 @@ pub(crate) async fn generate_summary(
     system_prompt: &str,
     user_prompt: &str,
     ollama_endpoint: Option<&str>,
+    minimax_region: Option<&str>,
     custom_openai_endpoint: Option<&str>,
     max_tokens: Option<u32>,
     temperature: Option<f32>,
@@ -309,6 +328,13 @@ pub(crate) async fn generate_summary(
         ),
         LLMProvider::OpenRouter => (
             "https://openrouter.ai/api/v1/chat/completions".to_string(),
+            header::HeaderMap::new(),
+        ),
+        LLMProvider::MiniMax => (
+            format!(
+                "{}/chat/completions",
+                minimax_base_url(minimax_region.unwrap_or(MINIMAX_DEFAULT_REGION))
+            ),
             header::HeaderMap::new(),
         ),
         LLMProvider::Ollama => {
@@ -711,6 +737,7 @@ mod tests {
             None,
             None,
             None,
+            None,
             Some(&cancellation_token),
         );
         tokio::pin!(generation);
@@ -797,6 +824,7 @@ mod tests {
             None,
             None,
             None,
+            None,
             Some(&cancellation_token),
         );
         tokio::pin!(generation);
@@ -875,6 +903,7 @@ mod tests {
                 None,
                 None,
                 None,
+                None,
                 Some(&cancellation_token),
             ),
         )
@@ -921,8 +950,78 @@ fn provider_name(provider: &LLMProvider) -> &str {
         LLMProvider::Ollama => "Ollama",
         LLMProvider::BuiltInAI => "Built-in AI",
         LLMProvider::OpenRouter => "OpenRouter",
+        LLMProvider::MiniMax => "MiniMax",
         LLMProvider::CustomOpenAI => "Custom OpenAI",
     }
 }
 
+#[cfg(test)]
+mod minimax_tests {
+    use super::{generate_summary, minimax_base_url, provider_name, LLMProvider};
+    use std::time::Duration;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
 
+    // A local proxy rejects CONNECT after capturing the actual production target.
+    // No DNS lookup, TLS connection, credentials, or inference reaches MiniMax.
+    #[tokio::test]
+    async fn configured_region_controls_the_production_request_target() {
+        for (region, host) in [
+            (None, "api.minimax.io"),
+            (Some("global"), "api.minimax.io"),
+            (Some("cn"), "api.minimaxi.com"),
+        ] {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let address = listener.local_addr().unwrap();
+            let server = tokio::spawn(async move {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let mut request = Vec::new();
+                while !request.ends_with(b"\r\n\r\n") {
+                    request.push(socket.read_u8().await.unwrap());
+                    assert!(request.len() < 8192);
+                }
+                let request = String::from_utf8(request).unwrap();
+                assert!(request.starts_with(&format!("CONNECT {host}:443 HTTP/1.1\r\n")));
+                socket
+                    .write_all(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n")
+                    .await
+                    .unwrap();
+            });
+            let client = reqwest::Client::builder()
+                .proxy(reqwest::Proxy::all(format!("http://{address}")).unwrap())
+                .build()
+                .unwrap();
+            let result = tokio::time::timeout(Duration::from_secs(5), generate_summary(
+                &client, &LLMProvider::MiniMax, "MiniMax-M3.1-Flash", "mock-key",
+                "system", "user", None, region, None, None, None, None, None, None,
+            ))
+            .await
+            .expect("request should finish at the local proxy");
+            assert!(result.is_err());
+            tokio::time::timeout(Duration::from_secs(5), server)
+                .await
+                .unwrap()
+                .unwrap();
+        }
+    }
+
+    #[test]
+    fn parses_minimax_provider() {
+        assert_eq!(LLMProvider::from_str("minimax"), Ok(LLMProvider::MiniMax));
+        assert_eq!(LLMProvider::from_str("MiniMax"), Ok(LLMProvider::MiniMax));
+    }
+
+    #[test]
+    fn exposes_minimax_provider_name() {
+        assert_eq!(provider_name(&LLMProvider::MiniMax), "MiniMax");
+    }
+
+    #[test]
+    fn resolves_minimax_regional_base_urls() {
+        assert_eq!(minimax_base_url("global"), "https://api.minimax.io/v1");
+        assert_eq!(minimax_base_url("cn_zh"), "https://api.minimaxi.com/v1");
+        assert_eq!(minimax_base_url("cn"), "https://api.minimaxi.com/v1");
+        // Unknown regions fall back to the global endpoint.
+        assert_eq!(minimax_base_url("unknown"), "https://api.minimax.io/v1");
+    }
+}

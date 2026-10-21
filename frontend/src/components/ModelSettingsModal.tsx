@@ -31,11 +31,12 @@ import { cn, isOllamaNotInstalledError } from '@/lib/utils';
 import { toast } from 'sonner';
 
 export interface ModelConfig {
-  provider: 'ollama' | 'groq' | 'claude' | 'openai' | 'openrouter' | 'builtin-ai' | 'custom-openai';
+  provider: 'ollama' | 'groq' | 'claude' | 'openai' | 'openrouter' | 'minimax' | 'builtin-ai' | 'custom-openai';
   model: string;
   whisperModel: string;
   apiKey?: string | null;
   ollamaEndpoint?: string | null;
+  minimaxRegion?: string;
   // Custom OpenAI fields
   customOpenAIEndpoint?: string | null;
   customOpenAIModel?: string | null;
@@ -99,6 +100,11 @@ const GROQ_FALLBACK_MODELS = [
   'llama-3.1-70b-versatile',
   'mixtral-8x7b-32768',
   'gemma2-9b-it',
+];
+
+const MINIMAX_FALLBACK_MODELS = [
+  'MiniMax-M3.1-Flash',
+  'MiniMax-M3',
 ];
 
 interface ModelSettingsModalProps {
@@ -223,12 +229,18 @@ export function ModelSettingsModal({
     }
   }, [apiKey]);
 
+  const minimaxModels = modelConfig.provider === 'minimax' && modelConfig.model.trim() &&
+    !MINIMAX_FALLBACK_MODELS.includes(modelConfig.model)
+    ? [...MINIMAX_FALLBACK_MODELS, modelConfig.model]
+    : MINIMAX_FALLBACK_MODELS;
+
   const modelOptions: Record<string, string[]> = {
     ollama: models.map((model) => model.name),
     claude: claudeModels.length > 0 ? claudeModels : CLAUDE_FALLBACK_MODELS,
     groq: groqModels.length > 0 ? groqModels : GROQ_FALLBACK_MODELS,
     openai: openaiModels.length > 0 ? openaiModels : OPENAI_FALLBACK_MODELS,
     openrouter: openRouterModels.map((m) => m.id),
+    minimax: minimaxModels,
     'builtin-ai': builtinAiModels.map((m) => m.name),
     'custom-openai': customOpenAIModel ? [customOpenAIModel] : [], // User specifies model manually
   };
@@ -237,7 +249,8 @@ export function ModelSettingsModal({
     modelConfig.provider === 'claude' ||
     modelConfig.provider === 'groq' ||
     modelConfig.provider === 'openai' ||
-    modelConfig.provider === 'openrouter';
+    modelConfig.provider === 'openrouter' ||
+    modelConfig.provider === 'minimax';
 
   // Check if Ollama endpoint has changed but models haven't been fetched yet
   const ollamaEndpointChanged = modelConfig.provider === 'ollama' &&
@@ -609,7 +622,7 @@ export function ModelSettingsModal({
     // Try to restore from localStorage cache
     const map = JSON.parse(localStorage.getItem('providerModelMap') || '{}');
     const cachedModel = map[modelConfig.provider];
-    if (cachedModel && providerModels.includes(cachedModel)) {
+    if (cachedModel) {
       setModelConfig((prev: ModelConfig) => ({ ...prev, model: cachedModel }));
     }
   }, [models, openRouterModels, builtinAiModels, openaiModels, claudeModels, groqModels, modelConfig.provider]);
@@ -832,9 +845,10 @@ export function ModelSettingsModal({
                 const defaultModel = providerModels && providerModels.length > 0
                   ? providerModels[0]
                   : '';
-                const model = (savedModel && providerModels?.includes(savedModel))
-                  ? savedModel
-                  : defaultModel;
+                // An explicit saved model remains valid even when it is no longer
+                // part of the provider's ordinary suggestions (for example, a
+                // legacy MiniMax model or a user-managed gateway ID).
+                const model = savedModel || defaultModel;
 
                 setModelConfig({
                   ...modelConfig,
@@ -878,6 +892,7 @@ export function ModelSettingsModal({
                 <SelectItem value="claude">Claude</SelectItem>
                 <SelectItem value="custom-openai">Custom Server (OpenAI)</SelectItem>
                 <SelectItem value="groq">Groq</SelectItem>
+                <SelectItem value="minimax">MiniMax</SelectItem>
                 <SelectItem value="ollama">Ollama</SelectItem>
                 <SelectItem value="openai">OpenAI</SelectItem>
                 <SelectItem value="openrouter">OpenRouter</SelectItem>
@@ -943,6 +958,26 @@ export function ModelSettingsModal({
             )}
           </div>
         </div>
+
+        {modelConfig.provider === 'minimax' && (
+          <div className="space-y-2">
+            <Label htmlFor="minimax-region">MiniMax endpoint region</Label>
+            <Select
+              value={modelConfig.minimaxRegion || 'global'}
+              onValueChange={(value) =>
+                setModelConfig((prev: ModelConfig) => ({ ...prev, minimaxRegion: value }))
+              }
+            >
+              <SelectTrigger id="minimax-region">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="global">Global (api.minimax.io)</SelectItem>
+                <SelectItem value="cn">China (api.minimaxi.com)</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        )}
 
         {/* Custom OpenAI Configuration Section */}
         {modelConfig.provider === 'custom-openai' && (

@@ -137,6 +137,7 @@ export function useModelConfiguration({ serverAddress }: UseModelConfigurationPr
         whisperModel: payload.whisperModel,
         apiKey: payload.apiKey,
         ollamaEndpoint: payload.ollamaEndpoint,
+        minimaxRegion: payload.minimaxRegion,
       });
 
       console.log('Save model config success');

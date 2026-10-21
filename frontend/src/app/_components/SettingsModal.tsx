@@ -57,6 +57,10 @@ export function SettingsModals({
   } = useConfig();
 
   const { isRecording } = useRecordingState();
+  const currentProviderModels = modelOptions[modelConfig.provider] || [];
+  const visibleModelOptions = modelConfig.model && !currentProviderModels.includes(modelConfig.model)
+    ? [...currentProviderModels, modelConfig.model]
+    : currentProviderModels;
 
   return <>
     {/* Legacy Settings Modal */}
@@ -96,16 +100,23 @@ export function SettingsModals({
                       value={modelConfig.provider}
                       onChange={(e) => {
                         const provider = e.target.value as ModelConfig['provider'];
+                        const map = JSON.parse(localStorage.getItem('providerModelMap') || '{}');
+                        if (modelConfig.model) {
+                          map[modelConfig.provider] = modelConfig.model;
+                          localStorage.setItem('providerModelMap', JSON.stringify(map));
+                        }
+                        const providerModels = modelOptions[provider] || [];
                         setModelConfig({
                           ...modelConfig,
                           provider,
-                          model: modelOptions[provider][0]
+                          model: map[provider] || providerModels[0] || ''
                         });
                       }}
                     >
                       <option value="builtin-ai">Built-in AI</option>
                       <option value="claude">Claude</option>
                       <option value="groq">Groq</option>
+                      <option value="minimax">MiniMax</option>
                       <option value="ollama">Ollama</option>
                       <option value="openrouter">OpenRouter</option>
                       <option value="openai">OpenAI</option>
@@ -116,7 +127,7 @@ export function SettingsModals({
                       value={modelConfig.model}
                       onChange={(e) => setModelConfig((prev: ModelConfig) => ({ ...prev, model: e.target.value }))}
                     >
-                      {modelOptions[modelConfig.provider].map((model: string) => (
+                      {visibleModelOptions.map((model: string) => (
                         <option key={model} value={model}>
                           {model}
                         </option>
