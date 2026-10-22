@@ -7,6 +7,7 @@ pub mod whisper_provider;
 pub mod parakeet_provider;
 pub mod engine;
 pub mod worker;
+pub mod gemini_live; // Fork addition: Gemini Live cloud engine
 
 // Re-export commonly used types
 pub use provider::{TranscriptionError, TranscriptionProvider, TranscriptResult};

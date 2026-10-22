@@ -13,6 +13,7 @@ import {
   type ModelWithStatus,
 } from '@/lib/transcription-model-readiness';
 import { toast } from 'sonner';
+import { GEMINI_LIVE_PROVIDER, getGeminiLiveFallbackProvider } from '@/lib/gemini-live';
 
 const TRANSCRIPTION_RUNTIME_START_ERROR_CODE = 'TRANSCRIPTION_RUNTIME_INITIALIZATION_FAILED';
 const TRANSCRIPTION_RUNTIME_USER_MESSAGE = 'Speech recognition could not initialize. Restart Meetily. If the problem continues, repair or reinstall the app.';
@@ -71,7 +72,9 @@ export function useRecordingStart(
   const getTranscriptionProvider = useCallback(async (): Promise<string> => {
     try {
       const config = await invoke<TranscriptConfig | null>('api_get_transcript_config');
-      return config?.provider || 'parakeet';
+      const provider = config?.provider || 'parakeet';
+      // Gemini Live is a cloud engine; readiness means its local fallback model is ready.
+      return provider === GEMINI_LIVE_PROVIDER ? await getGeminiLiveFallbackProvider() : provider;
     } catch (error) {
       console.error('Failed to load transcription provider:', error);
       return 'parakeet';

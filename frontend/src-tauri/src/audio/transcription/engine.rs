@@ -135,6 +135,10 @@ pub async fn validate_transcription_model_ready<R: Runtime>(app: &AppHandle<R>) 
                 }
             }
         }
+        super::gemini_live::PROVIDER_ID => {
+            info!("🔍 Validating Gemini Live configuration...");
+            super::gemini_live::validate_ready(app).await
+        }
         other => {
             warn!("❌ Unsupported transcription provider for local recording: {}", other);
             Err(format!(
@@ -212,6 +216,7 @@ pub async fn get_or_init_transcription_engine<R: Runtime>(
                 }
             }
         }
+        super::gemini_live::PROVIDER_ID => super::gemini_live::build_engine(app).await,
         "localWhisper" | _ => {
             info!("🎤 Initializing Whisper transcription engine");
             let whisper_engine = get_or_init_whisper(app).await?;

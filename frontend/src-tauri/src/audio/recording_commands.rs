@@ -846,6 +846,9 @@ pub async fn stop_recording<R: Runtime>(
     };
 
     match config.as_deref() {
+        Some(transcription::gemini_live::PROVIDER_ID) => {
+            transcription::gemini_live::unload_fallback_engine(&app).await;
+        }
         Some("parakeet") => {
             info!("🦜 Unloading Parakeet model...");
             let engine_clone = {

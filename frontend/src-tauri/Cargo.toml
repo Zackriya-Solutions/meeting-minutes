@@ -112,6 +112,10 @@ tokio = { version = "1.32.0", features = ["full", "tracing"] }
 tokio-util = "0.7"  # Utilities for tokio including CancellationToken
 async-trait = "0.1"  # Trait abstraction for async methods
 
+# Gemini Live transcription (fork addition): WebSocket client + base64 PCM framing
+tokio-tungstenite = { version = "0.24", features = ["native-tls"] }
+base64 = "0.22"
+
 reqwest = { version = "0.11", features = ["blocking", "multipart", "json", "stream"] }
 
 # crossbeam

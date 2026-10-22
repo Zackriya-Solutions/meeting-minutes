@@ -505,6 +505,7 @@ jobs:
         shell: pwsh
         env:
           PORTABLE_BUILD_PROFILE: ${{ steps.build-profile.outputs.profile }}
+          HAS_UPDATER_SIGNING_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
         run: |
           $cmakeHook = (Join-Path $env:GITHUB_WORKSPACE ".github/force-portable-ggml.cmake").Replace('\', '/')
           "CMAKE_PROJECT_INCLUDE=$cmakeHook" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
@@ -512,14 +513,31 @@ jobs:
 
           $buildDirectory = "target/x86_64-pc-windows-msvc/$env:PORTABLE_BUILD_PROFILE"
           $configPath = (Join-Path $env:RUNNER_TEMP "tauri.windows-portable.conf.json").Replace('\', '/')
-          @{
+          $config = @{
             build = @{
               beforeBundleCommand = @{
                 script = "node .github/verify-portable-ggml.cjs $buildDirectory"
                 cwd = $env:GITHUB_WORKSPACE
               }
             }
-          } | ConvertTo-Json -Depth 4 | Set-Content -Path $configPath -Encoding utf8
+          }
+
+          # Forks don't have the upstream updater signing key; without it Tauri fails while
+          # signing updater artifacts, so skip them (the installers are unaffected).
+          if ($env:HAS_UPDATER_SIGNING_KEY -ne 'true') {
+            Write-Host "No TAURI_SIGNING_PRIVATE_KEY: building without updater artifacts"
+            $config.bundle = @{ createUpdaterArtifacts = $false }
+          }
+
+          # Forks must not auto-update to upstream releases (that would replace fork features).
+          if ($env:GITHUB_REPOSITORY -ne 'Zackriya-Solutions/meeting-minutes') {
+            $endpoint = "https://github.com/$env:GITHUB_REPOSITORY/releases/latest/download/latest.json"
+            Write-Host "Fork build: update checks use $endpoint"
+            $config.plugins = @{ updater = @{ endpoints = @($endpoint) } }
+          }
+
+          $config | ConvertTo-Json -Depth 8 | Set-Content -Path $configPath -Encoding utf8
+          Get-Content $configPath
           "args=--config `"$configPath`"" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
       - name: Rust cache
