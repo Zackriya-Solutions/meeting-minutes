@@ -214,8 +214,9 @@ export function GeminiLiveSettings({ isActive, onActivated }: GeminiLiveSettings
             </SelectContent>
           </Select>
           <p className="mt-1 text-xs text-gray-500">
-            A model for this engine must be downloaded. Choose it under the engine's own entry in the
-            Transcript Model list.
+            A model for this engine must be downloaded (Parakeet usually is, from setup). To download
+            one, pick the engine in the list above, download a model, then come back to Gemini Live
+            and click Save again.
           </p>
         </div>
       </div>
