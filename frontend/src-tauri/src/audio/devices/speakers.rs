@@ -39,14 +39,23 @@ pub fn default_output_device() -> Result<AudioDevice> {
     {
         // System audio on Linux is captured natively via PulseAudio/PipeWire
         // (see audio/capture/pulse_linux.rs), not via cpal's ALSA host, so the
-        // "default" device must be one of the real Pulse sinks, decorated the
-        // same way configure_linux_audio() lists them.
-        let sinks = crate::audio::capture::list_pulse_sinks()
-            .map_err(|e| anyhow!("Failed to list PulseAudio/PipeWire sinks: {}", e))?;
-        let sink = sinks
-            .into_iter()
-            .next()
-            .ok_or_else(|| anyhow!("No PulseAudio/PipeWire sink found"))?;
+        // "default" device must be a real Pulse sink, decorated the same way
+        // configure_linux_audio() lists them. Use the server's actual default
+        // sink; the first listed sink is not necessarily the one in use.
+        let sink = match crate::audio::capture::default_pulse_sink() {
+            Ok(Some(sink)) => sink,
+            Ok(None) => {
+                return Err(anyhow!(
+                    "PulseAudio/PipeWire reports no default output with a monitor source"
+                ))
+            }
+            Err(e) => {
+                return Err(anyhow!(
+                    "Failed to query the default PulseAudio/PipeWire sink: {}",
+                    e
+                ))
+            }
+        };
         return Ok(AudioDevice::new(
             format!("{} (System Audio)", sink.description),
             DeviceType::Output,

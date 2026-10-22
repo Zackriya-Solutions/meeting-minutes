@@ -50,6 +50,7 @@ enum Request {
     ListSinks(mpsc::Sender<Result<Vec<PulseSink>>>),
     ListSources(mpsc::Sender<Result<Vec<PulseSource>>>),
     DefaultSourceName(mpsc::Sender<Result<Option<String>>>),
+    DefaultSinkName(mpsc::Sender<Result<Option<String>>>),
 }
 
 /// Sender to the single enumerator thread. Created lazily on first use and
@@ -134,7 +135,15 @@ fn enumerator_thread(receiver: mpsc::Receiver<Request>) {
                 let _ = reply.send(result);
             }
             Request::DefaultSourceName(reply) => {
-                let result = default_source_name_impl(mainloop, context);
+                let result = default_name_impl(mainloop, context, |info| {
+                    info.default_source_name.as_deref().map(str::to_string)
+                });
+                let _ = reply.send(result);
+            }
+            Request::DefaultSinkName(reply) => {
+                let result = default_name_impl(mainloop, context, |info| {
+                    info.default_sink_name.as_deref().map(str::to_string)
+                });
                 let _ = reply.send(result);
             }
         }
@@ -157,7 +166,7 @@ fn send_error(request: Request, error: anyhow::Error) {
         Request::ListSources(reply) => {
             let _ = reply.send(Err(error));
         }
-        Request::DefaultSourceName(reply) => {
+        Request::DefaultSourceName(reply) | Request::DefaultSinkName(reply) => {
             let _ = reply.send(Err(error));
         }
     }
@@ -267,6 +276,7 @@ fn list_sinks_impl(mainloop: &mut Mainloop, context: &Context) -> Result<Vec<Pul
                 .to_string();
 
             sinks_cb.borrow_mut().push(PulseSink {
+                name: info.name.as_deref().unwrap_or_default().to_string(),
                 description,
                 monitor_source_name: monitor_source_name.to_string(),
             });
@@ -317,17 +327,16 @@ fn list_sources_impl(mainloop: &mut Mainloop, context: &Context) -> Result<Vec<P
     Ok(result)
 }
 
-fn default_source_name_impl(
+fn default_name_impl(
     mainloop: &mut Mainloop,
     context: &Context,
+    pick: impl Fn(&ServerInfo) -> Option<String> + 'static,
 ) -> Result<Option<String>> {
     let default_name: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(None));
     let default_name_cb = default_name.clone();
 
     let operation = context.introspect().get_server_info(move |info: &ServerInfo| {
-        if let Some(name) = info.default_source_name.as_deref() {
-            *default_name_cb.borrow_mut() = Some(name.to_string());
-        }
+        *default_name_cb.borrow_mut() = pick(info);
     });
 
     run_operation_to_completion(mainloop, &operation)?;
@@ -389,10 +398,12 @@ pub fn list_sources() -> Result<Vec<PulseSource>> {
     result
 }
 
-pub fn default_source_name() -> Result<Option<String>> {
+fn request_default_name(
+    make: impl FnOnce(mpsc::Sender<Result<Option<String>>>) -> Request,
+) -> Result<Option<String>> {
     let (tx, rx) = mpsc::channel();
     get_sender()?
-        .send(Request::DefaultSourceName(tx))
+        .send(make(tx))
         .map_err(|e| anyhow!("PulseAudio enumerator request failed: {}", e))?;
 
     rx.recv_timeout(CALLER_TIMEOUT)
@@ -406,4 +417,12 @@ pub fn default_source_name() -> Result<Option<String>> {
             }
         })
         .and_then(|r| r)
+}
+
+pub fn default_source_name() -> Result<Option<String>> {
+    request_default_name(Request::DefaultSourceName)
+}
+
+pub fn default_sink_name() -> Result<Option<String>> {
+    request_default_name(Request::DefaultSinkName)
 }

@@ -27,6 +27,8 @@ use super::pulse_enumerator;
 /// capture device: a real display description and its monitor source name.
 #[derive(Debug, Clone)]
 pub struct PulseSink {
+    /// Real PulseAudio sink name, as reported by the server in `default_sink_name`.
+    pub name: String,
     pub description: String,
     pub monitor_source_name: String,
 }
@@ -61,6 +63,22 @@ pub fn list_sinks() -> Result<Vec<PulseSink>> {
         debug!("pulse_linux::list_sinks: got {} sink(s)", sinks.len());
     }
     result
+}
+
+/// The sink the server currently routes playback to (`default_sink_name`), or
+/// `None` if the server reports no default or the sink has no monitor source.
+pub fn default_sink() -> Result<Option<PulseSink>> {
+    let Some(default_name) = pulse_enumerator::default_sink_name()? else {
+        return Ok(None);
+    };
+    let sink = list_sinks()?.into_iter().find(|s| s.name == default_name);
+    if sink.is_none() {
+        warn!(
+            "pulse_linux::default_sink: default sink '{}' not found in sink list",
+            default_name
+        );
+    }
+    Ok(sink)
 }
 
 /// Resolve a sink's real monitor source name from its display description (as
