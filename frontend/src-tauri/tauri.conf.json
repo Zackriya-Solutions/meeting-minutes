@@ -91,6 +91,11 @@
         "createUpdaterArtifacts": true,
         "icon": [
             "icons/icon.png",
+            "icons/icon_512x512.png",
+            "icons/icon_256x256.png",
+            "icons/128x128.png",
+            "icons/32x32.png",
+            "icons/icon_16x16.png",
             "icons/app_icon.icns",
             "icons/app_icon.ico"
         ],
