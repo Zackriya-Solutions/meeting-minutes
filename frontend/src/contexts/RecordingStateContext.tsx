@@ -260,9 +260,9 @@ export function RecordingStateProvider({ children }: { children: React.ReactNode
 
     const setup = async () => {
       try {
-        const fnSwitched = await recordingService.onMicDeviceSwitched(async ({ device_name }) => {
+        const fnSwitched = await recordingService.onMicDeviceSwitched(async ({ device_name, device_label }) => {
           console.log('[RecordingStateContext] mic-device-switched →', device_name);
-          const label = await resolveDeviceLabel(device_name);
+          const label = device_label || await resolveDeviceLabel(device_name);
           // Fires for both cases: a mic that disconnects mid-recording, and a
           // selected mic that wasn't available at start (backend fell back to
           // the default). Copy is worded to be accurate for both.
@@ -274,9 +274,9 @@ export function RecordingStateProvider({ children }: { children: React.ReactNode
         if (cancelled) { fnSwitched(); return; }
         unlistenSwitched = fnSwitched;
 
-        const fnFailed = await recordingService.onMicSwapFailed(async ({ error, device_name }) => {
+        const fnFailed = await recordingService.onMicSwapFailed(async ({ error, device_name, device_label }) => {
           console.error('[RecordingStateContext] mic-swap-failed →', device_name, error);
-          const label = await resolveDeviceLabel(device_name);
+          const label = device_label || await resolveDeviceLabel(device_name);
           // Only alarm the user if recording is still active. A Stop clicked
           // during a hot-swap race fails with "Recording manager not
           // available" — expected, not an error worth a toast.
@@ -302,9 +302,9 @@ export function RecordingStateProvider({ children }: { children: React.ReactNode
         if (cancelled) { fnUnavailable(); return; }
         unlistenMicUnavailable = fnUnavailable;
 
-        const fnExhausted = await recordingService.onMicRecoveryExhausted(async ({ device_name }) => {
+        const fnExhausted = await recordingService.onMicRecoveryExhausted(async ({ device_name, device_label }) => {
           console.error('[RecordingStateContext] mic-recovery-exhausted →', device_name);
-          const label = await resolveDeviceLabel(device_name);
+          const label = device_label || await resolveDeviceLabel(device_name);
           // Fires mid-recording only — gate on the recording ref like
           // mic-swap-failed so a stale event after Stop doesn't alarm the user.
           if (isRecordingRef.current) {
