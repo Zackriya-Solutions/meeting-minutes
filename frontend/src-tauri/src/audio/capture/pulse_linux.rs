@@ -6,7 +6,7 @@
 // in ~/.asoundrc: sink descriptions and monitor sources come straight from the
 // server's real metadata.
 //
-// Device enumeration (list_sinks, list_sources, default_source_description)
+// Device enumeration (list_sinks, list_sources, default_source_name)
 // is delegated to `pulse_enumerator.rs`, which keeps a single persistent
 // libpulse connection on a dedicated thread instead of opening and destroying
 // two fresh connections every 2 seconds for the whole meeting. See TECH-02
@@ -27,7 +27,7 @@ use super::pulse_enumerator;
 /// capture device: a real display description and its monitor source name.
 #[derive(Debug, Clone)]
 pub struct PulseSink {
-    /// Real PulseAudio sink name, as reported by the server in `default_sink_name`.
+    /// Exact PulseAudio sink name: the identity of the "System Audio" device.
     pub name: String,
     pub description: String,
     pub monitor_source_name: String,
@@ -81,14 +81,21 @@ pub fn default_sink() -> Result<Option<PulseSink>> {
     Ok(sink)
 }
 
-/// Resolve a sink's real monitor source name from its display description (as
-/// shown in the "System Audio" picker, e.g. "JBL Tune 770NC").
-pub fn find_monitor_source_by_description(description: &str) -> Result<String> {
-    list_sinks()?
+/// Resolve a sink by its exact PulseAudio name. A missing sink is an error:
+/// there is deliberately no fallback to another endpoint.
+pub fn find_sink_by_name(name: &str) -> Result<PulseSink> {
+    pick_sink(list_sinks()?, name)
+}
+
+fn pick_sink(sinks: Vec<PulseSink>, name: &str) -> Result<PulseSink> {
+    sinks
         .into_iter()
-        .find(|sink| sink.description == description)
-        .map(|sink| sink.monitor_source_name)
-        .ok_or_else(|| anyhow!("No PulseAudio sink found matching '{}'", description))
+        .find(|sink| sink.name == name)
+        .ok_or_else(|| not_found_error(name))
+}
+
+fn not_found_error(name: &str) -> anyhow::Error {
+    anyhow!("Périphérique '{}' introuvable, re-sélectionnez-le", name)
 }
 
 /// List all real input sources (sink monitors excluded — those are offered as
@@ -102,55 +109,27 @@ pub fn list_sources() -> Result<Vec<PulseSource>> {
     result
 }
 
-/// Resolve a source's real PulseAudio name from its display description.
-pub fn find_source_by_description(description: &str) -> Result<String> {
-    let mut matches = list_sources()?
-        .into_iter()
-        .filter(|source| source.description == description)
-        .peekable();
-
-    if matches.peek().is_some() {
-        let count = matches.clone().count();
-        if count > 1 {
-            warn!(
-                "pulse_linux::find_source_by_description: {} sources share the description '{}'; using the first one",
-                count, description
-            );
-        }
-    }
-
-    matches
-        .next()
-        .map(|source| source.source_name)
-        .ok_or_else(|| anyhow!("No PulseAudio source found matching '{}'", description))
+/// Resolve a source by its exact PulseAudio name. A missing source is an
+/// error: there is deliberately no fallback to another endpoint.
+pub fn find_source_by_name(name: &str) -> Result<PulseSource> {
+    pick_source(list_sources()?, name)
 }
 
-/// Description of the server's default input source, if any.
-/// Used to resolve "Default Microphone".
-pub fn default_source_description() -> Result<Option<String>> {
-    debug!("pulse_linux::default_source_description: requesting server info");
-    let default_name = pulse_enumerator::default_source_name()?;
+fn pick_source(sources: Vec<PulseSource>, name: &str) -> Result<PulseSource> {
+    sources
+        .into_iter()
+        .find(|source| source.source_name == name)
+        .ok_or_else(|| not_found_error(name))
+}
 
-    let Some(default_name) = default_name else {
-        return Ok(None);
-    };
+/// Exact name of the server's default input source, if any.
+pub fn default_source_name() -> Result<Option<String>> {
+    pulse_enumerator::default_source_name()
+}
 
-    // Resolve the display description for the default source. The second
-    // introspection call now travels through the same persistent connection as
-    // the first one, so this no longer opens a second libpulse client.
-    let sources = list_sources()?;
-    let default_source = sources.iter().find(|s| s.source_name == default_name);
-
-    if let Some(source) = default_source {
-        debug!("pulse_linux::default_source_description: resolved");
-        Ok(Some(source.description.clone()))
-    } else {
-        warn!(
-            "pulse_linux::default_source_description: default source '{}' not found in source list",
-            default_name
-        );
-        Ok(None)
-    }
+/// Exact name of the server's default sink, if any.
+pub fn default_sink_name() -> Result<Option<String>> {
+    pulse_enumerator::default_sink_name()
 }
 
 /// Blocking PulseAudio record stream, backed by libpulse-simple's record API.
@@ -316,5 +295,51 @@ mod tests {
         let total = received.load(std::sync::atomic::Ordering::Relaxed);
         println!("Received {} samples", total);
         assert!(total > 0, "Expected to receive some samples from the monitor source");
+    }
+
+    fn sink(name: &str, description: &str) -> PulseSink {
+        PulseSink {
+            name: name.to_string(),
+            description: description.to_string(),
+            monitor_source_name: format!("{}.monitor", name),
+        }
+    }
+
+    fn source(name: &str, description: &str) -> PulseSource {
+        PulseSource {
+            description: description.to_string(),
+            source_name: name.to_string(),
+        }
+    }
+
+    #[test]
+    fn pick_sink_matches_exact_name_among_same_description() {
+        let sinks = vec![sink("sink_a", "Speakers"), sink("sink_b", "Speakers")];
+        let picked = pick_sink(sinks, "sink_b").expect("sink_b exists");
+        assert_eq!(picked.monitor_source_name, "sink_b.monitor");
+    }
+
+    #[test]
+    fn pick_sink_missing_is_reselect_error() {
+        let err = pick_sink(vec![sink("sink_a", "Speakers")], "gone").unwrap_err();
+        assert!(err.to_string().contains("re-sélectionnez-le"));
+        assert!(err.to_string().contains("gone"));
+    }
+
+    #[test]
+    fn pick_sink_does_not_match_on_description() {
+        assert!(pick_sink(vec![sink("sink_a", "Speakers")], "Speakers").is_err());
+    }
+
+    #[test]
+    fn pick_source_matches_exact_name_among_same_description() {
+        let sources = vec![source("src_a", "Mic"), source("src_b", "Mic")];
+        assert_eq!(pick_source(sources, "src_b").unwrap().source_name, "src_b");
+    }
+
+    #[test]
+    fn pick_source_missing_is_reselect_error() {
+        let err = pick_source(vec![], "src_x").unwrap_err();
+        assert!(err.to_string().contains("re-sélectionnez-le"));
     }
 }
