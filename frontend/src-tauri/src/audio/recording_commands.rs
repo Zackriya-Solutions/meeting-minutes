@@ -188,6 +188,15 @@ fn resolve_mic_or_default<R: Runtime>(
     if let Some(name) = requested_name {
         match parse_audio_device(name) {
             Ok(device) => {
+                #[cfg(target_os = "linux")]
+                let exists = match super::capture::list_pulse_sources() {
+                    Ok(sources) => sources.iter().any(|s| s.source_name == device.name),
+                    Err(_) => cpal::default_host()
+                        .input_devices()
+                        .map(|mut it| it.any(|d| d.name().map(|n| n == device.name).unwrap_or(false)))
+                        .unwrap_or(false),
+                };
+                #[cfg(not(target_os = "linux"))]
                 let exists = cpal::default_host()
                     .input_devices()
                     .map(|mut it| it.any(|d| d.name().map(|n| n == device.name).unwrap_or(false)))
@@ -219,7 +228,7 @@ fn resolve_mic_or_default<R: Runtime>(
                 // listener the disconnect path wires up.
                 let _ = app.emit(
                     "mic-device-switched",
-                    serde_json::json!({ "device_name": device.name }),
+                    serde_json::json!({ "device_name": device.name, "device_label": device.label.clone().unwrap_or_else(|| super::devices::device_label(&device.name)) }),
                 );
             }
             Some(Arc::new(device))
@@ -1299,7 +1308,8 @@ async fn perform_mic_hot_swap_task<R: Runtime>(
         Ok(()) => {
             info!("[HOT_SWAP] Mic switched to '{}'", new_device_name);
             let _ = app.emit("mic-device-switched", serde_json::json!({
-                "device_name": new_device_name
+                "device_name": new_device_name,
+                "device_label": super::devices::device_label(&new_device_name),
             }));
             Ok(())
         }
@@ -1314,7 +1324,8 @@ async fn perform_mic_hot_swap_task<R: Runtime>(
                 Ok(()) => {
                     info!("[HOT_SWAP] Mic switched to '{}' on retry", new_device_name);
                     let _ = app.emit("mic-device-switched", serde_json::json!({
-                        "device_name": new_device_name
+                        "device_name": new_device_name,
+                        "device_label": super::devices::device_label(&new_device_name),
                     }));
                     Ok(())
                 }
@@ -1323,7 +1334,8 @@ async fn perform_mic_hot_swap_task<R: Runtime>(
                     if session_live(session) {
                         let _ = app.emit("mic-swap-failed", serde_json::json!({
                             "error": e,
-                            "device_name": new_device_name
+                            "device_name": new_device_name,
+                            "device_label": super::devices::device_label(&new_device_name),
                         }));
                     }
                     Err(e)
@@ -1552,13 +1564,14 @@ async fn trigger_mic_fallback_to_default<R: Runtime>(
                 serde_json::json!({
                     "error": format!("Failed to query default input: {}", e),
                     "device_name": disconnected_name,
+                    "device_label": super::devices::device_label(&disconnected_name),
                 }),
             );
             let n = MIC_FALLBACK_FAILED_ATTEMPTS.fetch_add(1, Ordering::SeqCst) + 1;
             if n == MAX_MIC_FALLBACK_ATTEMPTS {
                 let _ = app.emit(
                     "mic-recovery-exhausted",
-                    serde_json::json!({ "device_name": disconnected_name }),
+                    serde_json::json!({ "device_name": disconnected_name, "device_label": super::devices::device_label(&disconnected_name) }),
                 );
             }
             return;
@@ -1587,13 +1600,14 @@ async fn trigger_mic_fallback_to_default<R: Runtime>(
                     serde_json::json!({
                         "error": "System default input still reports disconnected device after retry",
                         "device_name": disconnected_name,
+                        "device_label": super::devices::device_label(&disconnected_name),
                     }),
                 );
                 let n = MIC_FALLBACK_FAILED_ATTEMPTS.fetch_add(1, Ordering::SeqCst) + 1;
                 if n == MAX_MIC_FALLBACK_ATTEMPTS {
                     let _ = app.emit(
                         "mic-recovery-exhausted",
-                        serde_json::json!({ "device_name": disconnected_name }),
+                        serde_json::json!({ "device_name": disconnected_name, "device_label": super::devices::device_label(&disconnected_name) }),
                     );
                 }
                 return;
@@ -1605,13 +1619,14 @@ async fn trigger_mic_fallback_to_default<R: Runtime>(
                     serde_json::json!({
                         "error": format!("Failed to re-query default input: {}", e),
                         "device_name": disconnected_name,
+                        "device_label": super::devices::device_label(&disconnected_name),
                     }),
                 );
                 let n = MIC_FALLBACK_FAILED_ATTEMPTS.fetch_add(1, Ordering::SeqCst) + 1;
                 if n == MAX_MIC_FALLBACK_ATTEMPTS {
                     let _ = app.emit(
                         "mic-recovery-exhausted",
-                        serde_json::json!({ "device_name": disconnected_name }),
+                        serde_json::json!({ "device_name": disconnected_name, "device_label": super::devices::device_label(&disconnected_name) }),
                     );
                 }
                 return;
@@ -1689,7 +1704,7 @@ async fn trigger_mic_fallback_to_default<R: Runtime>(
             if n == MAX_MIC_FALLBACK_ATTEMPTS {
                 let _ = app.emit(
                     "mic-recovery-exhausted",
-                    serde_json::json!({ "device_name": disconnected_name }),
+                    serde_json::json!({ "device_name": disconnected_name, "device_label": super::devices::device_label(&disconnected_name) }),
                 );
             }
         }

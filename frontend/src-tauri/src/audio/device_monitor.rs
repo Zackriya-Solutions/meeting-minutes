@@ -49,6 +49,7 @@ impl MonitoredDevice {
         // Heuristic: check if device name contains bluetooth-related keywords
         let is_bluetooth = name.to_lowercase().contains("airpods")
             || name.to_lowercase().contains("bluetooth")
+            || name.to_lowercase().contains("bluez")
             || name.to_lowercase().contains("wireless");
 
         Self {
