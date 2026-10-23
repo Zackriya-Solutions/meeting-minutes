@@ -4,8 +4,30 @@ use log::{info, warn};
 
 use super::configuration::{AudioDevice, DeviceType};
 
-/// Get the default input (microphone) device for the system
+/// Get the default input (microphone) device for the system.
+///
+/// On Linux, ask PulseAudio/PipeWire for the default source description so that
+/// "Default Microphone" points to the same item shown in the device list. Fall
+/// back to cpal's default input device if the server is unreachable.
 pub fn default_input_device() -> Result<AudioDevice> {
+    #[cfg(target_os = "linux")]
+    {
+        match crate::audio::capture::default_source_description() {
+            Ok(Some(description)) => {
+                return Ok(AudioDevice::new(description, DeviceType::Input));
+            }
+            Ok(None) => {
+                warn!("🎤 No default PulseAudio source reported, falling back to CPAL");
+            }
+            Err(e) => {
+                warn!(
+                    "🎤 Failed to query default PulseAudio source ({}), falling back to CPAL",
+                    e
+                );
+            }
+        }
+    }
+
     let host = cpal::default_host();
     let device = host
         .default_input_device()

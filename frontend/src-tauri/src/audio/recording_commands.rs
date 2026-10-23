@@ -1355,7 +1355,7 @@ async fn do_mic_swap(device_name: &str, session: &Arc<super::RecordingState>) ->
     // Non-fatal: the replacement stream is created next regardless, so a
     // teardown error/stall on the already-dead device must not abort the swap.
     if let Some(s) = old_mic {
-        if let Err(e) = s.stop() {
+        if let Err(e) = s.stop().await {
             warn!("[HOT_SWAP] Failed to stop old mic stream (proceeding): {}", e);
         }
     }

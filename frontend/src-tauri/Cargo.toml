@@ -198,6 +198,11 @@ futures-channel = "0.3.31"
 whisper-rs = { version = "0.13.2", features = ["raw-api"] }
 futures-channel = "0.3.31"
 
+# Native PipeWire/PulseAudio client for system-audio capture (bypasses cpal's
+# ALSA-only host on Linux, no ~/.asoundrc setup required)
+libpulse-binding = "2.30.1"
+libpulse-simple-binding = "2.29.0"
+
 [dev-dependencies]
 tempfile = "3.3.0"
 infer = "0.15"

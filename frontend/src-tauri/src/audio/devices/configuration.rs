@@ -124,6 +124,11 @@ pub async fn get_device_and_config(
 
         match audio_device.device_type {
             DeviceType::Input => {
+                #[cfg(target_os = "linux")]
+                let _guard = super::platform::linux::ALSA_GLOBAL_LOCK
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner());
+
                 for device in host.input_devices()? {
                     if let Ok(name) = device.name() {
                         if name == audio_device.name {
@@ -154,7 +159,12 @@ pub async fn get_device_and_config(
 
                 #[cfg(target_os = "linux")]
                 {
-                    // For Linux, we use PulseAudio monitor sources for system audio
+                    // For Linux, we use PulseAudio monitor sources for system audio.
+                    // Serialize every alsa-lib call: see ALSA_GLOBAL_LOCK doc comment.
+                    let _guard = super::platform::linux::ALSA_GLOBAL_LOCK
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner());
+
                     if let Ok(pulse_host) = cpal::host_from_id(cpal::HostId::Alsa) {
                         for device in pulse_host.input_devices()? {
                             if let Ok(name) = device.name() {

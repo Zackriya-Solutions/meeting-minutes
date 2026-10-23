@@ -318,7 +318,7 @@ impl RecordingManager {
         self.state.stop_recording();
 
         // Stop audio streams
-        if let Err(e) = self.stream_manager.stop_streams() {
+        if let Err(e) = self.stream_manager.stop_streams().await {
             error!("Error stopping audio streams: {}", e);
         }
 
@@ -346,7 +346,7 @@ impl RecordingManager {
         self.state.stop_recording();
 
         // Stop audio streams immediately
-        if let Err(e) = self.stream_manager.stop_streams() {
+        if let Err(e) = self.stream_manager.stop_streams().await {
             error!("Error stopping audio streams: {}", e);
         }
 
@@ -402,7 +402,7 @@ impl RecordingManager {
         self.state.stop_recording();
 
         // Stop audio streams
-        if let Err(e) = self.stream_manager.stop_streams() {
+        if let Err(e) = self.stream_manager.stop_streams().await {
             error!("Error stopping audio streams: {}", e);
         }
 
@@ -545,7 +545,7 @@ impl RecordingManager {
             self.state.stop_recording();
 
             // Stop audio streams
-            if let Err(e) = self.stream_manager.stop_streams() {
+            if let Err(e) = self.stream_manager.stop_streams().await {
                 error!("Error stopping audio streams during cleanup: {}", e);
             }
 

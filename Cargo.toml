@@ -16,3 +16,12 @@ anyhow = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tokio = { version = "1.32.0", features = ["full"] }
+
+# Keep debug symbols in release builds. Meetily is shipped as an AppImage on
+# Linux and crashes are diagnosed post-mortem via coredumpctl; without this,
+# core dumps contain nothing but raw offsets (see TECH-02). `debug = 1`
+# (line tables + function names) is enough for a usable backtrace and does not
+# change codegen or runtime performance — it only grows the binary.
+[profile.release]
+debug = 1
+strip = "none"
