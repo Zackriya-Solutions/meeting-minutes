@@ -342,4 +342,34 @@ mod tests {
         let err = pick_source(vec![], "src_x").unwrap_err();
         assert!(err.to_string().contains("re-sélectionnez-le"));
     }
+
+    #[test]
+    #[ignore] // Needs two null sinks "meetily_test_a"/"meetily_test_b" with the same description, b being the default.
+    fn test_exact_ids_with_duplicate_descriptions() {
+        use crate::audio::devices::{configuration::DeviceType, default_output_device, default_input_device};
+
+        let default = default_output_device().expect("default output");
+        println!("default output id: {:?}", default);
+        assert_eq!(default.name, "meetily_test_b", "default must be the server default sink, not the first listed");
+
+        let host = cpal::default_host();
+        let listed = crate::audio::devices::platform::configure_linux_audio(&host).expect("list");
+        for d in listed.iter().filter(|d| d.device_type == DeviceType::Output) {
+            println!("listed output: id={} label={:?} default={}", d.name, d.label, d.is_default);
+        }
+        let a = listed.iter().find(|d| d.name == "meetily_test_a").expect("a listed");
+        let b = listed.iter().find(|d| d.name == "meetily_test_b").expect("b listed");
+        assert_ne!(a.label, b.label, "equal descriptions must get distinct labels");
+        assert!(b.is_default && !a.is_default);
+
+        let sink_a = find_sink_by_name("meetily_test_a").unwrap();
+        let sink_b = find_sink_by_name("meetily_test_b").unwrap();
+        assert_eq!(sink_a.monitor_source_name, "meetily_test_a.monitor");
+        assert_eq!(sink_b.monitor_source_name, "meetily_test_b.monitor");
+        assert!(find_sink_by_name("meetily_test_missing").is_err());
+
+        let mic = default_input_device().expect("default input");
+        println!("default input id: {:?}", mic);
+        assert!(find_source_by_name(&mic.name).is_ok());
+    }
 }
