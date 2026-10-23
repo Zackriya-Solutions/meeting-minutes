@@ -4,6 +4,7 @@ import { FolderOpen } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { DeviceSelection, SelectedDevices } from '@/components/DeviceSelection';
 import Analytics from '@/lib/analytics';
+import { cachedDeviceLabel } from '@/lib/audioDevices';
 import { toast } from 'sonner';
 import { useRecordingState } from '@/contexts/RecordingStateContext';
 import { useConfig } from '@/contexts/ConfigContext';
@@ -137,8 +138,8 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
       onSave?.(prefs);
 
       // Show success toast with device details
-      const micDevice = prefs.preferred_mic_device || 'Default';
-      const systemDevice = prefs.preferred_system_device || 'Default';
+      const micDevice = prefs.preferred_mic_device ? cachedDeviceLabel(prefs.preferred_mic_device) : 'Default';
+      const systemDevice = prefs.preferred_system_device ? cachedDeviceLabel(prefs.preferred_system_device) : 'Default';
       toast.success("Device preferences saved", {
         description: `Microphone: ${micDevice}, System Audio: ${systemDevice}`
       });

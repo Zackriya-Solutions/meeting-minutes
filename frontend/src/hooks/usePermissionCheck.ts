@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { fetchAudioDevices } from '@/lib/audioDevices';
 
 export interface PermissionStatus {
   hasMicrophone: boolean;
@@ -21,7 +22,7 @@ export function usePermissionCheck() {
 
     try {
       // Get audio devices to check for microphone and system audio availability
-      const devices = await invoke<Array<{ name: string; device_type: 'Input' | 'Output' }>>('get_audio_devices');
+      const devices = await fetchAudioDevices();
 
       // Check for microphone devices (Input)
       const inputDevices = devices.filter(d => d.device_type === 'Input');

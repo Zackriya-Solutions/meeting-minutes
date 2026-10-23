@@ -7,16 +7,17 @@ import { AudioBackendSelector } from './AudioBackendSelector';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import Analytics from '@/lib/analytics';
+import {
+  AudioDevice,
+  SelectedDevices,
+  decodeDeviceOption,
+  deviceLabel,
+  encodeDeviceOption,
+  fetchAudioDevices,
+  isDeviceAvailable,
+} from '@/lib/audioDevices';
 
-export interface AudioDevice {
-  name: string;
-  device_type: 'Input' | 'Output';
-}
-
-export interface SelectedDevices {
-  micDevice: string | null;
-  systemDevice: string | null;
-}
+export type { AudioDevice, SelectedDevices };
 
 export interface AudioLevelData {
   device_name: string;
@@ -54,7 +55,7 @@ export function DeviceSelection({ selectedDevices, onDeviceChange, disabled = fa
   const fetchDevices = async () => {
     try {
       setError(null);
-      const result = await invoke<AudioDevice[]>('get_audio_devices');
+      const result = await fetchAudioDevices();
       setDevices(result);
       console.log('Fetched audio devices:', result);
     } catch (err) {
@@ -77,10 +78,9 @@ export function DeviceSelection({ selectedDevices, onDeviceChange, disabled = fa
   // empty/stale trigger for a value not among its options — and start would
   // send a name the backend can't open. Matches Pro's DeviceSelection prune.
   //
-  // Format trap: selected values carry the " (input)"/" (output)" suffix (the
-  // SelectItem value form below), while enumeration returns raw device names —
-  // so compare against the suffixed form, else every non-default selection is
-  // wrongly pruned.
+  // Selections hold exact device IDs (AudioDevice.name), compared as-is. The
+  // display label is never part of the comparison, so a label change cannot
+  // look like a disconnection.
   //
   // ponytail: enumeration-driven prune only (fires on mount + manual refresh).
   // We deliberately do NOT mutate the selection from the mic-device-switched
@@ -104,7 +104,7 @@ export function DeviceSelection({ selectedDevices, onDeviceChange, disabled = fa
     if (
       selectedDevices.micDevice &&
       inputs.length > 0 &&
-      !inputs.some(d => `${d.name} (input)` === selectedDevices.micDevice)
+      !isDeviceAvailable(inputs, 'Input', selectedDevices.micDevice)
     ) {
       console.warn(`[DeviceSelection] Selected mic '${selectedDevices.micDevice}' not available — resetting to default`);
       next = { ...next, micDevice: null };
@@ -112,7 +112,7 @@ export function DeviceSelection({ selectedDevices, onDeviceChange, disabled = fa
     if (
       selectedDevices.systemDevice &&
       outputs.length > 0 &&
-      !outputs.some(d => `${d.name} (output)` === selectedDevices.systemDevice)
+      !isDeviceAvailable(outputs, 'Output', selectedDevices.systemDevice)
     ) {
       console.warn(`[DeviceSelection] Selected system audio '${selectedDevices.systemDevice}' not available — resetting to default`);
       next = { ...next, systemDevice: null };
@@ -167,7 +167,13 @@ export function DeviceSelection({ selectedDevices, onDeviceChange, disabled = fa
   };
 
   // Helper function to detect device category and Bluetooth status
-  const getDeviceMetadata = (deviceName: string) => {
+  const labelFor = (id: string) => {
+    const match = devices.find(d => d.name === id);
+    return match ? deviceLabel(match) : id;
+  };
+
+  const getDeviceMetadata = (deviceName: string | null) => {
+    if (deviceName === null) return { isBluetooth: false, category: 'default' };
     const nameLower = deviceName.toLowerCase();
 
     // Detect if it's Bluetooth
@@ -179,9 +185,7 @@ export function DeviceSelection({ selectedDevices, onDeviceChange, disabled = fa
 
     // Categorize device
     let category = 'wired';
-    if (deviceName === 'default') {
-      category = 'default';
-    } else if (nameLower.includes('airpods')) {
+    if (nameLower.includes('airpods')) {
       category = 'airpods';
     } else if (isBluetooth) {
       category = 'bluetooth';
@@ -191,15 +195,17 @@ export function DeviceSelection({ selectedDevices, onDeviceChange, disabled = fa
   };
 
   // Handle microphone device selection
-  const handleMicDeviceChange = (deviceName: string) => {
+  const handleMicDeviceChange = (optionValue: string) => {
+    const deviceName = decodeDeviceOption(optionValue);
+    if (deviceName === undefined) return;
     const newDevices = {
       ...selectedDevices,
-      micDevice: deviceName === 'default' ? null : deviceName
+      micDevice: deviceName
     };
     onDeviceChange(newDevices);
 
     // Track device selection analytics with enhanced metadata
-    const metadata = getDeviceMetadata(deviceName);
+    const metadata = getDeviceMetadata(deviceName === null ? null : labelFor(deviceName));
     Analytics.track('microphone_selected', {
       device_category: metadata.category,
       is_bluetooth: metadata.isBluetooth.toString(),
@@ -208,15 +214,17 @@ export function DeviceSelection({ selectedDevices, onDeviceChange, disabled = fa
   };
 
   // Handle system audio device selection
-  const handleSystemDeviceChange = (deviceName: string) => {
+  const handleSystemDeviceChange = (optionValue: string) => {
+    const deviceName = decodeDeviceOption(optionValue);
+    if (deviceName === undefined) return;
     const newDevices = {
       ...selectedDevices,
-      systemDevice: deviceName === 'default' ? null : deviceName
+      systemDevice: deviceName
     };
     onDeviceChange(newDevices);
 
     // Track device selection analytics with enhanced metadata
-    const metadata = getDeviceMetadata(deviceName);
+    const metadata = getDeviceMetadata(deviceName === null ? null : labelFor(deviceName));
     Analytics.track('system_audio_selected', {
       device_category: metadata.category,
       is_bluetooth: metadata.isBluetooth.toString(),
@@ -321,7 +329,7 @@ export function DeviceSelection({ selectedDevices, onDeviceChange, disabled = fa
             </Label>
           </div>
           <Select
-            value={selectedDevices.micDevice || 'default'}
+            value={encodeDeviceOption(selectedDevices.micDevice)}
             onValueChange={handleMicDeviceChange}
             disabled={disabled}
           >
@@ -329,13 +337,13 @@ export function DeviceSelection({ selectedDevices, onDeviceChange, disabled = fa
               <SelectValue placeholder="Select Microphone" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="default">Default Microphone</SelectItem>
+              <SelectItem value={encodeDeviceOption(null)}>Default Microphone</SelectItem>
               {inputDevices.map((device) => (
                 <SelectItem
                   key={device.name}
-                  value={`${device.name} (${device.device_type.toLowerCase()})`}
+                  value={encodeDeviceOption(device.name)}
                 >
-                  {device.name}
+                  {deviceLabel(device)}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -354,7 +362,7 @@ export function DeviceSelection({ selectedDevices, onDeviceChange, disabled = fa
                   <div key={`level-${device.name}`} className="space-y-1">
                     <div className="flex items-center justify-between">
                       <span className="text-xs text-gray-600 truncate max-w-[200px]">
-                        {device.name}
+                        {deviceLabel(device)}
                       </span>
                       {levelData && (
                         <CompactAudioLevelMeter
@@ -369,7 +377,7 @@ export function DeviceSelection({ selectedDevices, onDeviceChange, disabled = fa
                         rmsLevel={levelData.rms_level}
                         peakLevel={levelData.peak_level}
                         isActive={levelData.is_active}
-                        deviceName={device.name}
+                        deviceName={deviceLabel(device)}
                         size="small"
                       />
                     )}
@@ -390,7 +398,7 @@ export function DeviceSelection({ selectedDevices, onDeviceChange, disabled = fa
           </div>
 
           <Select
-            value={selectedDevices.systemDevice || 'default'}
+            value={encodeDeviceOption(selectedDevices.systemDevice)}
             onValueChange={handleSystemDeviceChange}
             disabled={disabled}
           >
@@ -398,13 +406,13 @@ export function DeviceSelection({ selectedDevices, onDeviceChange, disabled = fa
               <SelectValue placeholder="Select System Audio" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="default">Default System Audio</SelectItem>
+              <SelectItem value={encodeDeviceOption(null)}>Default System Audio</SelectItem>
               {outputDevices.map((device) => (
                 <SelectItem
                   key={device.name}
-                  value={`${device.name} (${device.device_type.toLowerCase()})`}
+                  value={encodeDeviceOption(device.name)}
                 >
-                  {device.name}
+                  {deviceLabel(device)}
                 </SelectItem>
               ))}
             </SelectContent>

@@ -3,6 +3,7 @@
 import React, { createContext, useContext, useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { recordingService } from '@/services/recordingService';
 import { toast } from 'sonner';
+import { resolveDeviceLabel } from '@/lib/audioDevices';
 
 /**
  * Recording state synchronized with backend
@@ -259,27 +260,29 @@ export function RecordingStateProvider({ children }: { children: React.ReactNode
 
     const setup = async () => {
       try {
-        const fnSwitched = await recordingService.onMicDeviceSwitched(({ device_name }) => {
+        const fnSwitched = await recordingService.onMicDeviceSwitched(async ({ device_name }) => {
           console.log('[RecordingStateContext] mic-device-switched →', device_name);
+          const label = await resolveDeviceLabel(device_name);
           // Fires for both cases: a mic that disconnects mid-recording, and a
           // selected mic that wasn't available at start (backend fell back to
           // the default). Copy is worded to be accurate for both.
           toast.info(
-            `Microphone switched to ${device_name} for this meeting.`,
+            `Microphone switched to ${label} for this meeting.`,
             { duration: 6000 }
           );
         });
         if (cancelled) { fnSwitched(); return; }
         unlistenSwitched = fnSwitched;
 
-        const fnFailed = await recordingService.onMicSwapFailed(({ error, device_name }) => {
+        const fnFailed = await recordingService.onMicSwapFailed(async ({ error, device_name }) => {
           console.error('[RecordingStateContext] mic-swap-failed →', device_name, error);
+          const label = await resolveDeviceLabel(device_name);
           // Only alarm the user if recording is still active. A Stop clicked
           // during a hot-swap race fails with "Recording manager not
           // available" — expected, not an error worth a toast.
           if (isRecordingRef.current) {
             toast.error(
-              `Microphone fallback failed for ${device_name}: ${error}`,
+              `Microphone fallback failed for ${label}: ${error}`,
               { duration: 8000 }
             );
           }
@@ -299,13 +302,14 @@ export function RecordingStateProvider({ children }: { children: React.ReactNode
         if (cancelled) { fnUnavailable(); return; }
         unlistenMicUnavailable = fnUnavailable;
 
-        const fnExhausted = await recordingService.onMicRecoveryExhausted(({ device_name }) => {
+        const fnExhausted = await recordingService.onMicRecoveryExhausted(async ({ device_name }) => {
           console.error('[RecordingStateContext] mic-recovery-exhausted →', device_name);
+          const label = await resolveDeviceLabel(device_name);
           // Fires mid-recording only — gate on the recording ref like
           // mic-swap-failed so a stale event after Stop doesn't alarm the user.
           if (isRecordingRef.current) {
             toast.error(
-              `Microphone '${device_name}' could not be recovered — recording continues without a microphone. Stop and restart to fix.`,
+              `Microphone '${label}' could not be recovered — recording continues without a microphone. Stop and restart to fix.`,
               { duration: 10000 }
             );
           }
