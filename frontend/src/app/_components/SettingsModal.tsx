@@ -1,6 +1,7 @@
 import { ModelConfig } from "@/components/ModelSettingsModal";
 import { PreferenceSettings } from "@/components/PreferenceSettings";
 import { DeviceSelection } from "@/components/DeviceSelection";
+import { cachedDeviceLabel } from "@/lib/audioDevices";
 import { LanguageSelection } from "@/components/LanguageSelection";
 import { TranscriptSettings } from "@/components/TranscriptSettings";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -190,8 +191,8 @@ export function SettingsModals({
           <div className="mt-6 flex justify-end">
             <button
               onClick={() => {
-                const micDevice = selectedDevices.micDevice || 'Default';
-                const systemDevice = selectedDevices.systemDevice || 'Default';
+                const micDevice = selectedDevices.micDevice ? cachedDeviceLabel(selectedDevices.micDevice) : 'Default';
+                const systemDevice = selectedDevices.systemDevice ? cachedDeviceLabel(selectedDevices.systemDevice) : 'Default';
                 toast.success("Devices selected", {
                   description: `Microphone: ${micDevice}, System Audio: ${systemDevice}`
                 });

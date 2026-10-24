@@ -14,7 +14,7 @@ use super::capture::{AudioCaptureBackend, get_current_backend};
 use super::capture::CoreAudioCapture;
 
 #[cfg(target_os = "linux")]
-use super::capture::{find_monitor_source_by_description, find_source_by_description, PulseCapture};
+use super::capture::{find_sink_by_name, find_source_by_name, list_pulse_sources, PulseCapture};
 #[cfg(target_os = "linux")]
 use std::sync::atomic::AtomicBool;
 
@@ -109,24 +109,24 @@ impl AudioStream {
             return Self::create_pulse_stream(device, state, device_type, recording_sender).await;
         }
 
-        // Linux microphones come from the PulseAudio/PipeWire source list (real
-        // human-readable descriptions, see devices/platform/linux.rs). Fall back
-        // to CPAL when the name isn't a known Pulse source: stale saved
-        // preferences and degraded-mode (no Pulse server) entries must keep
-        // working.
+        // Linux microphones are identified by their exact PulseAudio source
+        // name. CPAL is only a degraded mode for an unreachable Pulse server:
+        // a reachable server that doesn't know the ID is a hard error, never
+        // a reinterpretation of the ID as an ALSA name.
         #[cfg(target_os = "linux")]
         if device_type == DeviceType::Microphone {
-            match Self::create_pulse_mic_stream(
-                device.clone(),
-                state.clone(),
-                device_type.clone(),
-                recording_sender.clone(),
-            )
-            .await
-            {
-                Ok(stream) => return Ok(stream),
+            match list_pulse_sources() {
+                Ok(_) => {
+                    return Self::create_pulse_mic_stream(
+                        device,
+                        state,
+                        device_type,
+                        recording_sender,
+                    )
+                    .await;
+                }
                 Err(e) => warn!(
-                    "🎤 Stream: native PulseAudio mic path unavailable ({}), falling back to CPAL",
+                    "🎤 Stream: PulseAudio/PipeWire server unreachable ({}), falling back to CPAL",
                     e
                 ),
             }
@@ -288,18 +288,9 @@ impl AudioStream {
     ) -> Result<Self> {
         info!("🔊 Stream: Creating PulseAudio stream for device: {}", device.name);
 
-        // The picker shows "<sink description> (System Audio)" (see
-        // devices/platform/linux.rs); strip that suffix to recover the sink
-        // description and resolve it to its real monitor source name.
-        let description = device
-            .name
-            .strip_suffix(" (System Audio)")
-            .unwrap_or(&device.name);
+        let sink = find_sink_by_name(&device.name)?;
 
-        let monitor_source_name = find_monitor_source_by_description(description)
-            .map_err(|e| anyhow::anyhow!("Failed to resolve PulseAudio sink '{}': {}", description, e))?;
-
-        let capture_impl = PulseCapture::new_system(&monitor_source_name)
+        let capture_impl = PulseCapture::new_system(&sink.monitor_source_name)
             .map_err(|e| anyhow::anyhow!("Failed to open PulseAudio record stream: {}", e))?;
 
         let sample_rate = capture_impl.sample_rate();
@@ -347,14 +338,9 @@ impl AudioStream {
             device.name
         );
 
-        // Microphone names are stored as the PulseAudio source description.
-        // from_name() has already stripped the "(input)" suffix. If the
-        // description isn't known (stale saved preference or degraded-mode
-        // entry), this errors out and the caller falls back to CPAL.
-        let source_name = find_source_by_description(&device.name)
-            .map_err(|e| anyhow::anyhow!("Failed to resolve PulseAudio source '{}': {}", device.name, e))?;
+        let source = find_source_by_name(&device.name)?;
 
-        let capture_impl = PulseCapture::new_microphone(&source_name)
+        let capture_impl = PulseCapture::new_microphone(&source.source_name)
             .map_err(|e| anyhow::anyhow!("Failed to open PulseAudio record stream: {}", e))?;
 
         let sample_rate = capture_impl.sample_rate();

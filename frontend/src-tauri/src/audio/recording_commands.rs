@@ -15,7 +15,8 @@ use tokio::task::JoinHandle;
 
 use super::{
     recording_manager::RecordingStartError,
-    parse_audio_device,
+    device_from_id,
+    DeviceType,
     default_input_device,   // Get default microphone
     default_output_device,  // Get default system audio
     RecordingManager,
@@ -181,20 +182,53 @@ fn resolve_mic_or_default<R: Runtime>(
     app: &AppHandle<R>,
     requested_name: Option<&str>,
 ) -> Option<Arc<super::AudioDevice>> {
-    use cpal::traits::{DeviceTrait, HostTrait};
-
     let requested_specific = requested_name.is_some();
 
-    if let Some(name) = requested_name {
-        match parse_audio_device(name) {
+    match choose_microphone(requested_name, microphone_enumerated, default_input_device) {
+        MicChoice::Requested(device) => {
+            info!("✅ Using requested microphone: '{}'", device.name);
+            Some(Arc::new(device))
+        }
+        MicChoice::Default(device) => {
+            info!("✅ Using default microphone: '{}'", device.name);
+            if requested_specific {
+                // Tell the user their selected mic wasn't available and which
+                // mic is actually recording. Reuses the mic-device-switched
+                // listener the disconnect path wires up.
+                let _ = app.emit(
+                    "mic-device-switched",
+                    serde_json::json!({ "device_name": device.name, "device_label": device.label.clone().unwrap_or_else(|| super::devices::device_label(&device.name)) }),
+                );
+            }
+            Some(Arc::new(device))
+        }
+        MicChoice::Unavailable(e) => {
+            warn!("❌ No microphone available: {} — recording system audio only", e);
+            let _ = app.emit("mic-unavailable", serde_json::json!({}));
+            None
+        }
+    }
+}
+
+enum MicChoice {
+    Requested(super::AudioDevice),
+    Default(super::AudioDevice),
+    Unavailable(anyhow::Error),
+}
+
+/// Pure decision core of `resolve_mic_or_default`. The requested value is the
+/// exact device ID the picker sent (or the saved preference), never a
+/// "<name> (input)" form.
+fn choose_microphone(
+    requested_id: Option<&str>,
+    is_enumerated: impl FnOnce(&super::AudioDevice) -> bool,
+    default_device: impl FnOnce() -> Result<super::AudioDevice>,
+) -> MicChoice {
+    if let Some(id) = requested_id {
+        match device_from_id(id, DeviceType::Input) {
             Ok(device) => {
-                let exists = cpal::default_host()
-                    .input_devices()
-                    .map(|mut it| it.any(|d| d.name().map(|n| n == device.name).unwrap_or(false)))
-                    .unwrap_or(false);
-                if exists {
-                    info!("✅ Using requested microphone: '{}'", device.name);
-                    return Some(Arc::new(device));
+                if is_enumerated(&device) {
+                    return MicChoice::Requested(device);
                 }
                 warn!(
                     "⚠️ Requested mic '{}' not enumerated — falling back to system default",
@@ -204,60 +238,74 @@ fn resolve_mic_or_default<R: Runtime>(
             Err(e) => {
                 warn!(
                     "⚠️ Requested mic '{}' not available: {} — falling back to system default",
-                    name, e
+                    id, e
                 );
             }
         }
     }
 
-    match default_input_device() {
-        Ok(device) => {
-            info!("✅ Using default microphone: '{}'", device.name);
-            if requested_specific {
-                // Tell the user their selected mic wasn't available and which
-                // mic is actually recording. Reuses the mic-device-switched
-                // listener the disconnect path wires up.
-                let _ = app.emit(
-                    "mic-device-switched",
-                    serde_json::json!({ "device_name": device.name }),
-                );
-            }
-            Some(Arc::new(device))
-        }
-        Err(e) => {
-            warn!("❌ No microphone available: {} — recording system audio only", e);
-            let _ = app.emit("mic-unavailable", serde_json::json!({}));
-            None
-        }
+    match default_device() {
+        Ok(device) => MicChoice::Default(device),
+        Err(e) => MicChoice::Unavailable(e),
     }
 }
 
-/// System-audio analog of `resolve_mic_or_default`: `Some(name)` -> parse it,
-/// falling back to the default output if unparseable; `None` ("Default System
-/// Audio" in the UI) -> default output. Returns `None` only when no output
-/// device exists — system audio is optional, mic-only recording proceeds.
+fn microphone_enumerated(device: &super::AudioDevice) -> bool {
+    use cpal::traits::{DeviceTrait, HostTrait};
+
+    let cpal_has = || {
+        cpal::default_host()
+            .input_devices()
+            .map(|mut it| it.any(|d| d.name().map(|n| n == device.name).unwrap_or(false)))
+            .unwrap_or(false)
+    };
+
+    #[cfg(target_os = "linux")]
+    {
+        match super::capture::list_pulse_sources() {
+            Ok(sources) => sources.iter().any(|s| s.source_name == device.name),
+            Err(_) => cpal_has(),
+        }
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        cpal_has()
+    }
+}
+
+/// System-audio analog of `resolve_mic_or_default`: `Some(id)` -> that exact
+/// device; `None` ("Default System Audio" in the UI) -> default output. Returns
+/// `None` only when no output device exists — system audio is optional,
+/// mic-only recording proceeds.
 ///
 /// ponytail: no cpal enumeration check (unlike the mic helper) — Linux system
 /// devices are Pulse/ALSA monitor *inputs* tagged Output, so output_devices()
 /// would false-negative them. stream.rs still hard-fails on a missing device.
-fn resolve_system_or_default(requested_name: Option<&str>) -> Option<Arc<super::AudioDevice>> {
-    if let Some(name) = requested_name {
-        match parse_audio_device(name) {
+fn resolve_system_or_default(requested_id: Option<&str>) -> Option<Arc<super::AudioDevice>> {
+    choose_system(requested_id, default_output_device).map(Arc::new)
+}
+
+fn choose_system(
+    requested_id: Option<&str>,
+    default_device: impl FnOnce() -> Result<super::AudioDevice>,
+) -> Option<super::AudioDevice> {
+    if let Some(id) = requested_id {
+        match device_from_id(id, DeviceType::Output) {
             Ok(device) => {
                 info!("✅ Using requested system audio: '{}'", device.name);
-                return Some(Arc::new(device));
+                return Some(device);
             }
             Err(e) => warn!(
                 "⚠️ Requested system audio '{}' not available: {} — falling back to system default",
-                name, e
+                id, e
             ),
         }
     }
 
-    match default_output_device() {
+    match default_device() {
         Ok(device) => {
             info!("✅ Using default system audio: '{}'", device.name);
-            Some(Arc::new(device))
+            Some(device)
         }
         Err(e) => {
             warn!("⚠️ No system audio available: {} — recording will continue with microphone only", e);
@@ -1300,7 +1348,8 @@ async fn perform_mic_hot_swap_task<R: Runtime>(
         Ok(()) => {
             info!("[HOT_SWAP] Mic switched to '{}'", new_device_name);
             let _ = app.emit("mic-device-switched", serde_json::json!({
-                "device_name": new_device_name
+                "device_name": new_device_name,
+                "device_label": super::devices::device_label(&new_device_name),
             }));
             Ok(())
         }
@@ -1315,7 +1364,8 @@ async fn perform_mic_hot_swap_task<R: Runtime>(
                 Ok(()) => {
                     info!("[HOT_SWAP] Mic switched to '{}' on retry", new_device_name);
                     let _ = app.emit("mic-device-switched", serde_json::json!({
-                        "device_name": new_device_name
+                        "device_name": new_device_name,
+                        "device_label": super::devices::device_label(&new_device_name),
                     }));
                     Ok(())
                 }
@@ -1324,7 +1374,8 @@ async fn perform_mic_hot_swap_task<R: Runtime>(
                     if session_live(session) {
                         let _ = app.emit("mic-swap-failed", serde_json::json!({
                             "error": e,
-                            "device_name": new_device_name
+                            "device_name": new_device_name,
+                            "device_label": super::devices::device_label(&new_device_name),
                         }));
                     }
                     Err(e)
@@ -1553,13 +1604,14 @@ async fn trigger_mic_fallback_to_default<R: Runtime>(
                 serde_json::json!({
                     "error": format!("Failed to query default input: {}", e),
                     "device_name": disconnected_name,
+                    "device_label": super::devices::device_label(&disconnected_name),
                 }),
             );
             let n = MIC_FALLBACK_FAILED_ATTEMPTS.fetch_add(1, Ordering::SeqCst) + 1;
             if n == MAX_MIC_FALLBACK_ATTEMPTS {
                 let _ = app.emit(
                     "mic-recovery-exhausted",
-                    serde_json::json!({ "device_name": disconnected_name }),
+                    serde_json::json!({ "device_name": disconnected_name, "device_label": super::devices::device_label(&disconnected_name) }),
                 );
             }
             return;
@@ -1588,13 +1640,14 @@ async fn trigger_mic_fallback_to_default<R: Runtime>(
                     serde_json::json!({
                         "error": "System default input still reports disconnected device after retry",
                         "device_name": disconnected_name,
+                        "device_label": super::devices::device_label(&disconnected_name),
                     }),
                 );
                 let n = MIC_FALLBACK_FAILED_ATTEMPTS.fetch_add(1, Ordering::SeqCst) + 1;
                 if n == MAX_MIC_FALLBACK_ATTEMPTS {
                     let _ = app.emit(
                         "mic-recovery-exhausted",
-                        serde_json::json!({ "device_name": disconnected_name }),
+                        serde_json::json!({ "device_name": disconnected_name, "device_label": super::devices::device_label(&disconnected_name) }),
                     );
                 }
                 return;
@@ -1606,13 +1659,14 @@ async fn trigger_mic_fallback_to_default<R: Runtime>(
                     serde_json::json!({
                         "error": format!("Failed to re-query default input: {}", e),
                         "device_name": disconnected_name,
+                        "device_label": super::devices::device_label(&disconnected_name),
                     }),
                 );
                 let n = MIC_FALLBACK_FAILED_ATTEMPTS.fetch_add(1, Ordering::SeqCst) + 1;
                 if n == MAX_MIC_FALLBACK_ATTEMPTS {
                     let _ = app.emit(
                         "mic-recovery-exhausted",
-                        serde_json::json!({ "device_name": disconnected_name }),
+                        serde_json::json!({ "device_name": disconnected_name, "device_label": super::devices::device_label(&disconnected_name) }),
                     );
                 }
                 return;
@@ -1690,9 +1744,97 @@ async fn trigger_mic_fallback_to_default<R: Runtime>(
             if n == MAX_MIC_FALLBACK_ATTEMPTS {
                 let _ = app.emit(
                     "mic-recovery-exhausted",
-                    serde_json::json!({ "device_name": disconnected_name }),
+                    serde_json::json!({ "device_name": disconnected_name, "device_label": super::devices::device_label(&disconnected_name) }),
                 );
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod device_resolution_tests {
+    use super::*;
+    use crate::audio::AudioDevice;
+    use anyhow::anyhow;
+
+    fn input(name: &str) -> AudioDevice {
+        AudioDevice::new(name.to_string(), DeviceType::Input)
+    }
+
+    fn output(name: &str) -> AudioDevice {
+        AudioDevice::new(name.to_string(), DeviceType::Output)
+    }
+
+    const IDS: [&str; 4] = [
+        "alsa_input.usb-1.analog-stereo",
+        "Microphone (Realtek High Definition Audio)",
+        "MacBook Pro Microphone",
+        "Speakers (USB Audio)",
+    ];
+
+    #[test]
+    fn selected_available_mic_wins_over_the_default() {
+        for id in IDS {
+            let choice = choose_microphone(
+                Some(id),
+                |d| d.name == id,
+                || Ok(input("some.other.default")),
+            );
+            match choice {
+                MicChoice::Requested(d) => {
+                    assert_eq!(d.name, id);
+                    assert_eq!(d.device_type, DeviceType::Input);
+                }
+                _ => panic!("'{id}' should resolve to itself"),
+            }
+        }
+    }
+
+    #[test]
+    fn missing_selected_mic_falls_back_to_the_default() {
+        let choice = choose_microphone(Some("gone"), |_| false, || Ok(input("def")));
+        match choice {
+            MicChoice::Default(d) => assert_eq!(d.name, "def"),
+            _ => panic!("expected default fallback"),
+        }
+    }
+
+    #[test]
+    fn no_request_follows_the_default_without_enumerating() {
+        let choice = choose_microphone(
+            None,
+            |_| panic!("must not enumerate"),
+            || Ok(input("def")),
+        );
+        assert!(matches!(choice, MicChoice::Default(d) if d.name == "def"));
+    }
+
+    #[test]
+    fn unavailable_default_is_reported_as_unavailable_not_replaced() {
+        let choice = choose_microphone(None, |_| true, || Err(anyhow!("excluded")));
+        assert!(matches!(choice, MicChoice::Unavailable(_)));
+    }
+
+    #[test]
+    fn selected_system_output_wins_over_the_default() {
+        for id in IDS {
+            let device = choose_system(Some(id), || Ok(output("some.other.default")))
+                .expect("a requested output resolves");
+            assert_eq!(device.name, id);
+            assert_eq!(device.device_type, DeviceType::Output);
+        }
+    }
+
+    #[test]
+    fn no_request_follows_the_default_output() {
+        let device = choose_system(None, || Ok(output("def"))).expect("default output");
+        assert_eq!(device.name, "def");
+        assert!(choose_system(None, || Err(anyhow!("none"))).is_none());
+    }
+
+    #[test]
+    fn empty_requested_id_follows_the_default() {
+        let device = choose_system(Some("  "), || Ok(output("def"))).expect("default output");
+        assert_eq!(device.name, "def");
     }
 }
