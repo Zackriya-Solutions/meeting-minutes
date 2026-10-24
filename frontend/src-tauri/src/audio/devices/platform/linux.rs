@@ -1,7 +1,7 @@
 use anyhow::Result;
 use cpal::traits::{DeviceTrait, HostTrait};
 use log::{info, warn};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Mutex;
 
 use crate::audio::capture::{
@@ -63,19 +63,12 @@ pub fn cached_label(id: &str) -> String {
 const GENERIC_INPUT_LABEL: &str = "Microphone";
 const GENERIC_OUTPUT_LABEL: &str = "Sortie audio";
 
-/// Short, human-scannable form of a PulseAudio name, used only to tell apart
-/// identical labels: drops the `alsa_input.` / `bluez_output.` style prefix.
-fn short_id(id: &str) -> &str {
-    match id.split_once('.') {
-        Some((_, rest)) if !rest.is_empty() => rest,
-        _ => id,
-    }
-}
-
-/// Display labels for one role (inputs or outputs). Empty descriptions become
-/// the generic role label, never the raw ID; labels that collide within the
-/// role get the short ID appended. The suffix is display-only and never part
-/// of an identity.
+/// Display labels for one role (inputs or outputs), aligned with `entries`
+/// (`(id, description)`). Empty descriptions become the generic role label,
+/// never the raw ID. Devices sharing a label get a number, assigned by the
+/// rank of their exact ID so it does not depend on enumeration order. A
+/// generated caption never equals another device's literal description. The
+/// numbering is display-only and never part of an identity.
 fn role_labels(entries: &[(&str, &str)], generic: &str) -> Vec<String> {
     let base: Vec<String> = entries
         .iter()
@@ -89,16 +82,32 @@ fn role_labels(entries: &[(&str, &str)], generic: &str) -> Vec<String> {
         })
         .collect();
 
-    base.iter()
-        .zip(entries)
-        .map(|(label, (id, _))| {
-            if base.iter().filter(|other| *other == label).count() > 1 {
-                format!("{} ({})", label, short_id(id))
-            } else {
-                label.clone()
-            }
-        })
-        .collect()
+    let mut groups: BTreeMap<&str, Vec<usize>> = BTreeMap::new();
+    for (index, label) in base.iter().enumerate() {
+        groups.entry(label.as_str()).or_default().push(index);
+    }
+
+    let mut taken: HashSet<String> = base.iter().cloned().collect();
+    let mut labels = base.clone();
+    for (label, mut members) in groups {
+        if members.len() < 2 {
+            continue;
+        }
+        members.sort_by(|a, b| entries[*a].0.cmp(entries[*b].0).then(a.cmp(b)));
+        let mut number = 1usize;
+        for index in members {
+            let candidate = loop {
+                let candidate = format!("{} {}", label, number);
+                number += 1;
+                if !taken.contains(&candidate) {
+                    break candidate;
+                }
+            };
+            taken.insert(candidate.clone());
+            labels[index] = candidate;
+        }
+    }
+    labels
 }
 
 fn pulse_source_devices(sources: &[PulseSource], default_name: Option<&str>) -> Vec<AudioDevice> {
@@ -255,8 +264,17 @@ mod tests {
         assert_eq!(devices[1].label.as_deref(), Some("Mic B"));
     }
 
+    fn labels_of(devices: &[AudioDevice]) -> Vec<String> {
+        devices.iter().map(|d| d.label.clone().unwrap()).collect()
+    }
+
+    fn assert_distinct(labels: &[String]) {
+        let unique: HashSet<&String> = labels.iter().collect();
+        assert_eq!(unique.len(), labels.len(), "labels collide: {labels:?}");
+    }
+
     #[test]
-    fn duplicate_labels_in_a_role_get_short_id_suffix_but_keep_exact_ids() {
+    fn duplicate_descriptions_get_distinct_labels_without_ids_but_keep_exact_ids() {
         let devices = pulse_source_devices(
             &[
                 source("alsa_input.usb-1.analog", "USB Mic"),
@@ -265,8 +283,86 @@ mod tests {
             None,
         );
         assert_eq!(devices[0].name, "alsa_input.usb-1.analog");
-        assert_eq!(devices[0].label.as_deref(), Some("USB Mic (usb-1.analog)"));
-        assert_eq!(devices[1].label.as_deref(), Some("USB Mic (usb-2.analog)"));
+        assert_eq!(devices[1].name, "alsa_input.usb-2.analog");
+        let labels = labels_of(&devices);
+        assert_distinct(&labels);
+        for label in &labels {
+            assert!(label.starts_with("USB Mic"));
+            assert!(!label.contains("usb-1") && !label.contains("usb-2"));
+            assert!(!label.contains("alsa_input"));
+        }
+    }
+
+    #[test]
+    fn ids_sharing_a_short_form_are_still_distinguished() {
+        let devices = pulse_sink_devices(
+            &[sink("a.same", "Same device"), sink("b.same", "Same device")],
+            None,
+        );
+        let labels = labels_of(&devices);
+        assert_distinct(&labels);
+        assert!(labels.iter().all(|l| !l.contains("same)") && !l.contains("a.same")));
+    }
+
+    #[test]
+    fn generated_label_never_collides_with_another_literal_description() {
+        let probe = pulse_source_devices(
+            &[source("id.1", "Mic"), source("id.2", "Mic")],
+            None,
+        );
+        let generated = labels_of(&probe);
+        for literal in &generated {
+            let devices = pulse_source_devices(
+                &[
+                    source("id.1", "Mic"),
+                    source("id.2", "Mic"),
+                    source("id.3", literal),
+                ],
+                None,
+            );
+            let labels = labels_of(&devices);
+            assert_distinct(&labels);
+            assert_eq!(devices[2].label.as_deref(), Some(literal.as_str()));
+        }
+    }
+
+    #[test]
+    fn labels_do_not_depend_on_enumeration_order() {
+        let forward = [
+            source("id.c", "Mic"),
+            source("id.a", "Mic"),
+            source("id.b", "Mic"),
+            source("id.z", "Other"),
+        ];
+        let mut reversed = forward.to_vec();
+        reversed.reverse();
+        let by_id = |devices: Vec<AudioDevice>| -> BTreeMap<String, String> {
+            devices
+                .into_iter()
+                .map(|d| (d.name.clone(), d.label.clone().unwrap()))
+                .collect()
+        };
+        let a = by_id(pulse_source_devices(&forward, None));
+        let b = by_id(pulse_source_devices(&reversed, None));
+        assert_eq!(a, b);
+        assert_distinct(&a.values().cloned().collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn empty_descriptions_of_several_devices_are_distinct_too() {
+        let devices = pulse_sink_devices(&[sink("s.1", ""), sink("s.2", "  ")], None);
+        assert_distinct(&labels_of(&devices));
+    }
+
+    #[test]
+    fn ids_and_default_flags_are_untouched_by_labelling() {
+        let devices = pulse_sink_devices(
+            &[sink("s.b", "Same"), sink("s.a", "Same")],
+            Some("s.a"),
+        );
+        assert_eq!(devices[0].name, "s.b");
+        assert_eq!(devices[1].name, "s.a");
+        assert!(!devices[0].is_default && devices[1].is_default);
     }
 
     #[test]
