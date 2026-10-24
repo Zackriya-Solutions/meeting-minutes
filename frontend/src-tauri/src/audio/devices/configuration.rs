@@ -143,6 +143,16 @@ pub fn parse_audio_device(name: &str) -> Result<AudioDevice> {
     AudioDevice::from_name(name)
 }
 
+/// Builds the device for an exact ID whose role is known from the caller
+/// (microphone or system parameter). IDs are never parsed for a type suffix:
+/// a real device name may legitimately end with "(input)" or "(output)".
+pub fn device_from_id(id: &str, device_type: DeviceType) -> Result<AudioDevice> {
+    if id.trim().is_empty() {
+        return Err(anyhow!("Device name cannot be empty"));
+    }
+    Ok(AudioDevice::new(id.to_string(), device_type))
+}
+
 /// Get device and config for audio operations
 pub async fn get_device_and_config(
     audio_device: &AudioDevice,
@@ -260,5 +270,16 @@ mod tests {
         )
         .unwrap();
         assert_eq!(json["label"], "L");
+    }
+
+    #[test]
+    fn device_from_id_keeps_the_exact_id_even_with_a_type_like_suffix() {
+        let plain = device_from_id("MacBook Pro Microphone", DeviceType::Input).unwrap();
+        assert_eq!(plain.name, "MacBook Pro Microphone");
+        assert_eq!(plain.device_type, DeviceType::Input);
+        let odd = device_from_id("Weird Mic (input)", DeviceType::Output).unwrap();
+        assert_eq!(odd.name, "Weird Mic (input)");
+        assert_eq!(odd.device_type, DeviceType::Output);
+        assert!(device_from_id("  ", DeviceType::Input).is_err());
     }
 }
