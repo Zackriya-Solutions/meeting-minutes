@@ -2,6 +2,8 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>Meetily checks conference links in your browser to detect calls when you enable browser call detection.</string>
     <key>NSMicrophoneUsageDescription</key>
     <string>This application needs access to your microphone to record meeting audio.</string>
     <key>NSScreenCaptureUsageDescription</key>
