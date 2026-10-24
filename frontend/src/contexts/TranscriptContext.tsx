@@ -93,6 +93,10 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
 
         // Listen for recording-started event
         unlistenRecordingStarted = await recordingService.onRecordingStarted(async () => {
+          // Native automatic starts bypass the home-page start hook. Reset the
+          // previous transcript before the new session emits any segments.
+          setTranscripts([]);
+          transcriptsRef.current = [];
           try {
             // Generate unique meeting ID
             const meetingId = `meeting-${Date.now()}`;

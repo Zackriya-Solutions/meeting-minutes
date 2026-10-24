@@ -679,6 +679,37 @@ pub async fn stop_recording<R: Runtime>(
     app: AppHandle<R>,
     _args: RecordingArgs,
 ) -> Result<(), String> {
+    stop_recording_inner(app, None).await
+}
+
+/// The detector may stop only the exact recording it started. Identity check
+/// and manager removal share a mutex, so a concurrent manual Stop/Start cannot
+/// redirect this operation to a new session.
+pub(crate) async fn stop_automatic_recording<R: Runtime>(
+    app: AppHandle<R>,
+    expected_name: &str,
+) -> Result<(), String> {
+    stop_recording_inner(app, Some(expected_name)).await
+}
+
+async fn stop_recording_inner<R: Runtime>(
+    app: AppHandle<R>,
+    expected_name: Option<&str>,
+) -> Result<(), String> {
+    let manager_for_cleanup = {
+        let mut manager = RECORDING_MANAGER.lock().unwrap();
+        if let Some(expected) = expected_name {
+            if manager.as_ref().and_then(|m| m.get_meeting_name()).as_deref() != Some(expected) {
+                return Err("Automatic recording is no longer the current session".into());
+            }
+        }
+        // Another stop may already have consumed the manager.
+        if manager.is_none() {
+            return Ok(());
+        }
+        manager.take()
+    };
+    let _stopping_guard = StoppingGuard::new();
     info!(
         "🛑 Starting optimized recording shutdown - ensuring ALL transcript chunks are preserved"
     );
@@ -698,19 +729,6 @@ pub async fn stop_recording<R: Runtime>(
             "progress": 20
         }),
     );
-
-    // Step 1: Stop audio capture immediately (no more new chunks) with proper error handling
-    let manager_for_cleanup = {
-        let mut global_manager = RECORDING_MANAGER.lock().unwrap();
-        global_manager.take()
-    };
-
-    // Mark the stop tail as in progress so a mic-disconnect fallback that was
-    // queued before Stop short-circuits instead of retrying against the taken
-    // manager. IS_RECORDING itself stays true until the tail completes — the
-    // frontend polls it to keep the stop UI up. RAII so a panic in the tail
-    // below can't leave the flag stuck true.
-    let _stopping_guard = StoppingGuard::new();
 
     let stop_result = if let Some(mut manager) = manager_for_cleanup {
         // Use FORCE FLUSH to immediately process all accumulated audio - eliminates 30s delay!

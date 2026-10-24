@@ -43,6 +43,7 @@ pub mod config;
 pub mod console_utils;
 pub mod database;
 pub mod notifications;
+mod meeting_detection;
 pub mod ollama;
 pub mod onboarding;
 pub mod openai;
@@ -635,6 +636,8 @@ pub fn run() {
                 log::error!("Failed to create system tray: {}", e);
             }
 
+            meeting_detection::spawn(_app.handle().clone());
+
             // Initialize notification system with proper defaults
             log::info!("Initializing notification system...");
             let app_for_notif = _app.handle().clone();
@@ -734,6 +737,8 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            meeting_detection::get_call_detection_settings,
+            meeting_detection::set_call_detection_preferences,
             start_recording,
             stop_recording,
             is_recording,
